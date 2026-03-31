@@ -1,0 +1,242 @@
+<?xml version="1.0" encoding="UTF-8"?>	
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cmCalendarManager">
+	<!-- 발주용휴일관리 조회(목록) -->
+	<select id="getMasterList" parameterType="cjfw.wms.cm.dto.CmCalendarManagerReqDto" resultType="cjfw.wms.cm.dto.CmCalendarManagerResDto">
+		SELECT /* [CmCalendarManagerService.sqlx][getMasterList][휴일 기준정보 조회][YeoSeungCheol][20250911] */
+			CM_CALENDAR.SERIALKEY										AS SERIALKEY
+			,CM_CALENDAR.DCCODE											AS DCCODE
+	        ,CM_CALENDAR.CALENDAR_ID                                    AS CALENDAR_ID	/* 1000센터 or 공통(그외), As-Is의 "구분" 필드 */
+	        ,CM_CALENDAR.YY                                             AS YY
+	        ,CM_CALENDAR.MM                                             AS MM
+	        ,CM_CALENDAR.DD                                             AS DD
+	        ,(
+				SELECT CM_CODE.BASEDESCR FROM CM_CODE
+					WHERE CM_CODE.STORERKEY IN ('FW00', 'STD', '1000') 			/* ORA-01427로 인한 쿼리 변형 */
+					  AND CM_CODE.CODELIST  = 'DAY_GB'
+					  AND CM_CODE.BASECODE  = CM_CALENDAR.DAY_GB
+             )                      									AS DAY_GB_NM
+            ,CM_CALENDAR.DAY_GB											AS DAY_GB
+			,CM_CALENDAR.REST_YN                                        AS REST_YN
+         	,(
+				SELECT CM_CODE.BASEDESCR FROM CM_CODE
+					WHERE CM_CODE.STORERKEY IN ('FW00', 'STD', '1000')			/* ORA-01427로 인한 쿼리 변형 */
+					  AND CM_CODE.CODELIST  = 'YN'
+					  AND CM_CODE.BASECODE  = CM_CALENDAR.REST_YN
+              )															AS REST_YN_NM
+	         ,CM_CALENDAR.REST_DESC										AS REST_DESC
+	         ,TO_CHAR(CM_CALENDAR.ADDDATE,  'YYYY-MM-DD HH24:MI:SS')	AS ADDDATE
+	         ,TO_CHAR(CM_CALENDAR.EDITDATE, 'YYYY-MM-DD HH24:MI:SS')	AS EDITDATE
+	         ,NVL(USER1.USER_NM, CM_CALENDAR.ADDWHO)					AS ADDWHO
+	         ,NVL(USER2.USER_NM, CM_CALENDAR.EDITWHO)					AS EDITWHO
+		FROM CM_CALENDAR
+		
+		LEFT JOIN FRAMEONE_USER USER1
+      		ON USER1.USER_ID = CM_CALENDAR.ADDWHO   /* 등록자명 */
+    	LEFT JOIN FRAMEONE_USER USER2
+      		ON USER2.USER_ID = CM_CALENDAR.EDITWHO  /* 수정자명 */
+      		
+      	WHERE 1=1
+		
+	    <if test="calendarId != null and calendarId != ''">
+       		<if test="calendarId == 'STD'">
+	    		AND CM_CALENDAR.CALENDAR_ID = #{calendarId}
+	    		AND CM_CALENDAR.DCCODE      = 'STD'
+	    	</if>
+	    	
+	    	<if test="calendarId == '1000'">
+        		AND CM_CALENDAR.DCCODE      = #{calendarId}
+	            AND CM_CALENDAR.CALENDAR_ID = #{calendarId}	
+        	</if>
+       		
+	    </if>
+	    
+		<if test="yy != null and yy != ''">
+			AND CM_CALENDAR.YY LIKE #{yy}
+		</if>
+		
+		<if test="mm != null and mm != ''">
+			AND CM_CALENDAR.MM LIKE #{mm}
+		</if>
+		
+		<if test="dd != null and dd != ''">
+			AND CM_CALENDAR.DD LIKE #{dd}
+		</if>
+		
+		<if test="dayGb != null and dayGb != ''">
+			AND CM_CALENDAR.DAY_GB LIKE #{dayGb}
+		</if>
+		
+		<if test="restYn != null and restYn != ''">
+			AND CM_CALENDAR.REST_YN LIKE #{restYn}
+		</if>
+		
+		<if test="restDesc != null and restDesc != ''">
+			AND CM_CALENDAR.REST_DESC LIKE #{restDesc}
+		</if>
+		
+		<if test="dateFrom != null and dateFrom != ''">
+    		AND TO_DATE(CM_CALENDAR.YY || LPAD(CM_CALENDAR.MM,2,'0') || LPAD(CM_CALENDAR.DD,2,'0'), 'YYYYMMDD') &gt;= TO_DATE(#{dateFrom}, 'YYYYMMDD')
+		</if>
+		
+	
+		<if test="dateTo != null and dateTo != ''">
+    		AND TO_DATE(CM_CALENDAR.YY || LPAD(CM_CALENDAR.MM,2,'0') || LPAD(CM_CALENDAR.DD,2,'0'), 'YYYYMMDD') &lt;= TO_DATE(#{dateTo}, 'YYYYMMDD')
+		</if>
+		
+		ORDER BY CM_CALENDAR.YY, CM_CALENDAR.MM, CM_CALENDAR.DD
+	</select>
+
+	
+	<!-- 휴일 기준정보 INSERT -->
+    <insert id="insertMasterList">
+        INSERT /* [CmCalendarManagerService.sqlx][CmCalendarService.insertMasterList][휴일 기준정보 INSERT][YeoSeungCheol][20251217] */
+            INTO CM_CALENDAR
+              (DCCODE
+              ,CALENDAR_ID
+              ,YY
+              ,MM
+              ,DD
+              ,DAY_GB
+              ,REST_YN
+              ,REST_DESC
+              ,ADDWHO
+              ,EDITWHO)
+            VALUES
+              (nvl(#{DCCODE},'STD')          /*  */
+              ,nvl(#{CALENDAR_ID},'STD')     /*  */
+              ,#{YY}                         /*  */
+              ,LPAD(#{MM},2,'0')             /*  */
+              ,LPAD(#{DD},2,'0')             /*  */
+              ,#{DAY_GB}                     /*  */
+              ,NVL(#{REST_YN},'N')           /*  */
+              ,#{REST_DESC}                  /*  */
+              ,#{g_userId}                   /* 최초등록자 */
+              ,#{g_userId})                  /* 최종변경자 */
+    </insert>
+	
+	<!-- 휴일 기준정보 UPDATE -->
+    <update id="saveMasterList">
+        UPDATE /* [CmCalendarManagerService.sqlx][cmCalendarService.update][휴일 기준정보 UPDATE][YeoSeungCheol][20251217] */
+            CM_CALENDAR
+        SET REST_YN          = #{restYn}         /*  */
+           ,REST_DESC        = #{restDesc}       /*  */
+           ,EDITDATE         = SYSDATE    	 /* 최종변경시간 */
+           ,EDITWHO          = #{gUserId}        /* 최종변경자 */
+        WHERE SERIALKEY      = #{serialkey}
+    </update>
+	
+	<!-- KX휴일 정보 SRM INSERT -->
+    <insert id="kxifinsert">
+        INSERT /* [CmCalendarManagerService.sqlx][IFcmKXCalendarService.insert][휴일 기준정보 IF INSERT][YeoSeungCheol][20251217] */
+            INTO IF_CM_KXCALENDAR
+              (SERIALKEY
+              ,YY
+              ,MM
+              ,DD
+              ,DAY_GB
+              ,REST_YN
+              ,REST_DESC
+              ,TRAFFICCOP
+              ,ARCHIVECOP
+              ,ADDDATE
+              ,EDITDATE
+              ,ADDWHO
+              ,EDITWHO
+              ,DCCODE
+              ,CALENDAR_ID
+              ,IF_DESTINATION
+              ,IF_FLAG
+              ,IF_CNT
+              ,IF_DATE
+              ,IF_MEMO
+              ,IF_RECEIVE_TYPE
+              ,IF_AUDIT_FILE
+              ,IF_SEND_TYPE
+              ,IF_SEND_FILE
+              ,IF_ID)
+            VALUES
+              (SEQ_CM_KXCALENDAR.NEXTVAL
+              ,#{YY}                         /*  */
+              ,LPAD(#{mm},2,'0')             /*  */
+              ,LPAD(#{dd},2,'0')             /*  */
+              ,#{dayGb}                     /*  */
+              ,NVL(#{restYn},'N')           /*  */
+              ,#{restDesc}                  /*  */
+              ,''
+              ,''
+              ,SYSDATE
+              ,SYSDATE
+              ,#{gUserId}                   /* 최초등록자 */
+              ,#{gUserId}
+              ,nvl(#{dccode},'1000')          /*  */
+              ,nvl(#{calendarId},'1000')     /*  */   
+              ,'SRM'
+              ,'N'
+              ,'0'
+              ,SYSDATE
+              ,''
+              ,''
+              ,''
+              ,''
+              ,''
+              ,'SCM0850')             
+    </insert>
+    
+	<!-- KX휴일 정보 SRM INSERT -->
+    <insert id="kxifupdate">
+       INSERT /* [CmCalendarManagerService.sqlx][IFcmKXCalendarService.insert][휴일 기준정보 IF UPDATE][YeoSeungCheol][20251217] */
+            INTO IF_CM_KXCALENDAR
+              (SERIALKEY
+              ,YY
+              ,MM
+              ,DD
+              ,DAY_GB
+              ,REST_YN
+              ,REST_DESC
+              ,TRAFFICCOP
+              ,ARCHIVECOP
+              ,ADDDATE
+              ,EDITDATE
+              ,ADDWHO
+              ,EDITWHO
+              ,DCCODE
+              ,CALENDAR_ID
+              ,IF_DESTINATION
+              ,IF_FLAG
+              ,IF_CNT
+              ,IF_DATE
+              ,IF_MEMO
+              ,IF_RECEIVE_TYPE
+              ,IF_AUDIT_FILE
+              ,IF_SEND_TYPE
+              ,IF_SEND_FILE
+              ,IF_ID)
+            VALUES
+              (SEQ_CM_KXCALENDAR.NEXTVAL
+              ,#{yy}                         /*  */
+              ,LPAD(#{mm},2,'0')             /*  */
+              ,LPAD(#{dd},2,'0')             /*  */
+              ,#{dayGb}                     /*  */
+              ,NVL(#{restYn},'N')           /*  */
+              ,#{restDesc}                  /*  */
+              ,''
+              ,''
+              ,SYSDATE
+              ,SYSDATE
+              ,#{gUserId}                   /* 최초등록자 */
+              ,#{gUserId}
+              ,nvl(#{dccode},'1000')          /*  */
+              ,nvl(#{calendarId},'1000')     /*  */  
+              ,'SRM'
+              ,'N'
+              ,'0'
+              ,SYSDATE
+              ,''
+              ,''
+              ,''
+              ,''
+              ,''
+              ,'SCM0850')
+    </insert>
+</mapper>

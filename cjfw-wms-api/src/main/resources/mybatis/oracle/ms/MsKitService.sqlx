@@ -1,0 +1,301 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="msKitService">
+    <!-- Kit상품 정보 조회(목록) -->
+    <select id="getMasterList" resultType="MsKitResDto">
+        SELECT  /* [msKitService.sqlx][msKitService.getMasterList][Kit상품 정보 조회(목록)][jangjaehyun][20250702] */ 
+               ''                                      AS CHECK_YN,    /* 체크 여부 */
+               T1.SERIALKEY                            AS SERIAL_KEY,  /* 시리얼키 */
+               DENSE_RANK() OVER (ORDER BY T1.DCCODE, T1.KIT_SKU) AS SEQ,         /* 순서번호 */
+               T1.DCCODE                               AS DC_CODE,     /* DC코드(물류센터 코드) */
+               T1.PRTN_YN                              AS PRTN_YN,     /* 소분 여부 */
+               T1.KIT_SKU                              AS KIT_SKU,     /* KIT상품코드 */
+               NVL(T3.DESCRIPTION, '상품기준정보 오류')     AS KIT_NM,      /* KIT상품명 */
+               T1.SKU                                  AS SKU,         /* 구성상품코드 */
+               NVL(T2.DESCRIPTION, '상품기준정보 오류')     AS DESCRIPTION, /* 구성상품명 */
+               T1.QTY                                  AS QTY,         /* 수량 */  
+               T3.BASEUOM                              AS KIT_UOM,     /* Kit상품 단위 (UOM) */
+               T2.BASEUOM                              AS UOM,         /* 단위 (UOM) */
+               <!-- T2.QTYPERBOX AS UOMQTY, -->
+               T1.UOMQTY                               AS UOM_QTY,     /* 구성단위수량(UOM 수량 (박스당 낱개수)) */
+               T1.FROMDATE                             AS FROM_DATE,   /* 시작일자 */
+               T1.TODATE                               AS TO_DATE,     /* 종료일자 */
+               T1.ADDDATE                              AS ADD_DATE,     /* 등록일자 */ 
+               T1.ADDWHO                               AS ADD_WHO,     /* 등록자 */
+               T1.EDITDATE                             AS EDIT_DATE,   /* 수정일자 */
+               T1.EDITWHO                              AS EDIT_WHO,    /* 수정자 */
+               CASE
+                   WHEN T1.TODATE  <![CDATA[<]]> TO_CHAR(SYSDATE, 'YYYYMMDD') 
+                        THEN 'Y'
+                   ELSE T1.DEL_YN
+               END                                     AS DEL_YN,      /* 삭제여부 */
+               CASE
+                   WHEN T3.DESCRIPTION IS NULL THEN '1'
+                   WHEN T2.DESCRIPTION IS NULL THEN '2'
+                   ELSE 'N'
+               END                                     AS UPLOAD_FLG,   /* 업로드 플래그 (상품기준정보 오류 여부) */
+               USER1.USER_NM                           AS ADDWHO_NM,    /*등록자명*/
+               USER2.USER_NM                           AS EDITWHO_NM     /*수정자명*/
+          FROM   MS_KITSKU T1            /* KIT상품정보 */
+          LEFT OUTER JOIN MS_SKU T2        /* 상품마스터 */
+            ON T2.STORERKEY = T1.STORERKEY
+           AND T2.SKU = T1.SKU
+          LEFT OUTER JOIN MS_SKU T3
+            ON T3.STORERKEY = T1.STORERKEY
+           AND T3.SKU = T1.KIT_SKU
+           LEFT JOIN FRAMEONE_USER USER1 
+            ON USER1.USER_ID = T1.ADDWHO   /*등록자명*/
+           LEFT JOIN FRAMEONE_USER USER2 
+            ON USER2.USER_ID = T1.EDITWHO  /*수정자명*/
+         WHERE T1.STORERKEY = #{gStorerkey}
+        <if test='multiDcCode != null and multiDcCode.length > 0'>
+           AND T1.DCCODE IN
+            <foreach collection="multiDcCode" item="dccodeItem" open="(" separator="," close=")">
+                #{dccodeItem}
+            </foreach>
+        </if>
+        <if test='dcCode != null and dcCode.length > 0'>
+           AND T1.DCCODE = #{dcCode}
+        </if>
+        <if test='kitSku != null and kitSku !=""'>
+          AND T1.KIT_SKU IN
+                            (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                               FROM (SELECT #{kitSku} AS VAL FROM DUAL) A
+                            CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+        </if>
+        <if test="sku != null and sku != ''">
+           AND T1.SKU = #{sku}
+        </if>
+        <if test="delYn != null and delYn != ''">
+           AND
+            <choose>
+                <when test='delYn == "N"'>
+                    (T1.DEL_YN = 'N' AND T1.TODATE <![CDATA[>=]]> TO_CHAR(SYSDATE, 'YYYYMMDD'))
+                </when>
+                <when test='delYn == "Y"'>
+                    (T1.DEL_YN = 'Y' OR T1.TODATE <![CDATA[<=]]> TO_CHAR(SYSDATE, 'YYYYMMDD'))
+                </when>
+            </choose>
+        </if>
+      ORDER BY T1.DCCODE, T1.KIT_SKU ASC, T1.SKU ASC, T1.FROMDATE DESC, T1.TODATE DESC
+    </select>
+    
+    <!-- KIT상품정보 저장 -->
+    <insert id="saveMaster" >        
+        MERGE /* [msKitService.sqlx][msKitService.saveMaster][KIT상품정보 저장][jangjaehyun][20250702] */ INTO MS_KITSKU
+             USING DUAL
+                ON (STORERKEY = #{gStorerkey} AND
+                    DCCODE = #{dcCode} AND
+                    KIT_SKU = #{kitSku} AND
+                    SKU = #{sku})
+        WHEN MATCHED THEN
+             UPDATE SET
+                    FROMDATE = #{fromDate},
+                    TODATE = #{toDate},
+                    DEL_YN = NVL(#{delYn}, 'N'),
+                    EDITDATE = SYSDATE,
+                    EDITWHO = #{gUserId}
+        WHEN NOT MATCHED THEN
+             INSERT (SERIALKEY
+                    ,STORERKEY
+                    ,DCCODE
+                    ,KIT_SKU
+                    ,KIT_NM
+                    ,SKU
+                    ,QTY
+                    ,DEL_YN
+                    ,FROMDATE
+                    ,TODATE
+                    ,UOM
+                    ,UOMQTY
+                    ,PRTN_YN
+                    ,ADDDATE
+                    ,ADDWHO
+                    ,EDITDATE
+                    ,EDITWHO)
+            VALUES  (SEQ_MS_KITSKU.nextval
+                    ,#{gStorerkey}
+                    ,#{dcCode}
+                    ,#{kitSku}
+                    ,#{kitNm}
+                    ,#{sku}
+                    ,#{qty}
+                    ,#{delYn}
+                    ,#{fromDate}
+                    ,#{toDate}
+                    ,#{uom}
+                    ,#{uomQty}
+                    ,#{prtnYn}
+                    ,SYSDATE
+                    ,#{gUserId}
+                    ,SYSDATE
+                    ,#{gUserId})
+    </insert>
+    
+    <insert id="saveKitSkuMasterInfoHis">
+        /* [msKitService.sqlx][msKitService.saveKitSkuMasterInfoHis][KIT상품정보이력 저장][jangjaehyun][20260104] */
+        INSERT INTO MS_KITSKU_HIS
+                  ( SERIALKEY
+                  , STORERKEY
+                  , DCCODE
+                  , KIT_SKU
+                  , KIT_NM
+                  , SKU
+                  , QTY
+                  , DEL_YN
+                  , FROMDATE
+                  , TODATE
+                  , ADDDATE
+                  , ADDWHO
+                  , EDITDATE
+                  , EDITWHO )
+        VALUES    ( SEQ_MS_KITSKU_HIS.NEXTVAL
+                  , #{gStorerkey}
+                  , #{dcCode}
+                  , #{kitSku}
+                  , #{kitNm}
+                  , #{sku}
+                  , #{qty} 
+                  , NVL(#{delYn}, 'N')
+                  , #{fromDate}
+                  , #{toDate}
+                  , SYSDATE
+                  , #{gUserId}
+                  , SYSDATE
+                  , #{gUserId} )
+    </insert>
+    
+    <!-- KIT상품정보 저장 -->
+    <insert id="insertMaster" >
+        INSERT /* [msKitService.sqlx][msKitService.insertMaster][jangjaehyun][20250704] */ INTO MS_KITSKU (SERIALKEY
+                ,STORERKEY
+                ,DCCODE
+                ,KIT_SKU
+                ,KIT_NM
+                ,SKU
+                ,QTY
+                ,FROMDATE
+                ,TODATE
+                ,UOM
+                ,UOMQTY
+                ,ADDDATE
+                ,ADDWHO
+                ,EDITDATE
+                ,EDITWHO)
+        VALUES  (SEQ_MS_KITSKU.nextval
+                ,#{gStorerkey}
+                ,#{dcCode}
+                ,#{kitSku}
+                ,#{kitNm}
+                ,#{sku}
+                ,#{qty}
+                ,#{fromDate}
+                ,#{toDate}
+                ,#{uom}
+                ,#{uomQty}
+                ,SYSDATE
+                ,#{gUserId}
+                ,SYSDATE
+                ,#{gUserId})
+    </insert>
+    
+    <update id="updateMaster">        
+        UPDATE /* [msKitService.sqlx][msKitService.updateMaster][jangjaehyun][20250702][20220704] */ MS_KITSKU
+           SET DEL_YN    = #{delYn}
+             , FROMDATE  = #{fromDate}
+             , TODATE    = #{toDate}
+             , EDITDATE  = SYSDATE
+             , EDITWHO   = #{gUserId}
+         WHERE SERIALKEY = #{serialKey}
+    </update>
+    
+    <!-- KIT상품 목록 조회 -->
+    <select id="getKitSkuList" resultType="MsKitResDto">
+        SELECT    /* [msKitService.sqlx][msKitService.getKitSkuLis][KIT상품 목록 조회][jangjaehyun][20250702] */
+               '0' AS CHECKYN
+                ,T1.KIT_SKU as CODE
+                ,T1.KIT_NM as NAME
+                ,T1.UOM
+                ,'1' AS ORDERQTY
+           FROM MS_KITSKU T1
+          WHERE T1.STORERKEY = #{gStorerkey}
+          <if test="name != null and name != ''">
+              AND T1.KIT_SKU = #{name}
+          </if>
+           <if test="dcCode != null and dcCode != ''">
+            AND T1.DCCODE = #{dcCode}
+           </if>
+           AND T1.DEL_YN = 'N'
+           AND NOT EXISTS (SELECT 'X' FROM MS_KITSKU X1
+                            WHERE X1.STORERKEY = #{gStorerkey}
+                              AND X1.DCCODE   = T1.DCCODE
+                              AND X1.KIT_SKU   = T1.KIT_SKU
+                              AND (X1.FROMDATE <![CDATA[>]]> TO_CHAR(SYSDATE, 'YYYYMMDD') OR X1.TODATE <![CDATA[<]]> TO_CHAR(SYSDATE, 'YYYYMMDD')))/*시작일자 및 중단일자 체크*/
+         GROUP BY T1.KIT_SKU, T1.KIT_NM, T1.UOM               
+    </select>
+    
+    <!-- 엑셀업로드 유효성체크-->
+    <select id="getValidateExcelList" resultType="MsKitResDto"> 
+        SELECT /* [msKitService.sqlx][msKitService.getValidateExcelList][엑셀 업로드 유효성 체크][jangjaehyun][20251202] */
+              #{dcCode}   AS DCCODE
+              , #{sku} AS SKU
+              , #{kitSku} AS kitSku
+              , #{qty}      AS QTY
+              , CHK_KIT_SKU.KIT_NM AS KIT_NM
+              , CHK_SKU.UOM
+              , CHK_SKU.UOMQTY
+              , CASE WHEN NOT REGEXP_LIKE(#{qty}, '^[0-9]+(\.[0-9]{1,3}){0,1}$') THEN 'N'
+                     WHEN CHK_DC.CNT = 0 THEN 'N'
+                     WHEN CHK_SKU.CNT = 0 THEN 'N'
+                     WHEN CHK_KIT_SKU.CNT = 0 THEN 'N'
+                    ELSE 'Y' 
+                END AS PROCESS_YN
+              , CASE WHEN NOT REGEXP_LIKE(#{qty}, '^[0-9]+(\.[0-9]{1,3}){0,1}$') 
+                THEN '수량은 숫자만 입력 가능하며, 소수점 3자리까지만 허용됩니다.'
+                     WHEN CHK_DC.CNT = 0 THEN '올바른 센터코드가 아닙니다.'
+                     WHEN CHK_KIT_SKU.CNT = 0 THEN '올바른 상품코드가 아닙니다.'
+                     WHEN CHK_SKU.CNT = 0 THEN '올바른 구성상품코드가 아닙니다.'
+                    ELSE '정상' -- 둘 다 통과했을 때 메시지 (필요 시 빈값 '' 처리)
+                END AS PROCESS_MSG
+        FROM    (
+                    -- [검증 1] 센터코드 확인용 서브쿼리
+                  SELECT COUNT(1) AS CNT FROM CM_DC WHERE DCCODE = #{dcCode} AND DEL_YN = 'N'
+                ) CHK_DC
+              , (
+                    -- [검증 2] KIT 상품코드 확인용 서브쿼리
+                    SELECT COUNT(1) AS CNT
+                         , MAX(DESCRIPTION) AS KIT_NM
+                      FROM   MS_SKU
+                     WHERE 1=1
+                       AND DEL_YN = 'N'
+                       AND  SKU   = #{kitSku}
+                ) CHK_KIT_SKU
+                , (
+                    -- [검증 3] 상품코드 확인용 서브쿼리
+                    SELECT COUNT(1)       AS CNT
+                         , MAX(BASEUOM)       AS UOM 
+                         , MAX(QTYPERBOX) AS UOMQTY
+                     FROM   MS_SKU
+                    WHERE 1=1
+                      AND DEL_YN = 'N'
+                      AND SKU   = #{sku}
+                ) CHK_SKU
+    </select>
+    
+    <select id="getDuplicateCount" resultType="int">
+        SELECT CASE WHEN EXISTS (
+            SELECT 1 
+            FROM MS_KITSKU 
+            WHERE STORERKEY = #{gStorerkey} 
+              AND DCCODE = #{dcCode} 
+              AND KIT_SKU = #{kitSku}
+              AND SKU = #{sku}
+              AND NOT EXISTS (
+                  SELECT 1 
+                  FROM MS_KITSKU 
+                  WHERE SERIALKEY = #{serialKey}
+              )
+        ) THEN 1 ELSE 0 END AS IS_OVERLAP
+        FROM DUAL
+      </select>
+</mapper>

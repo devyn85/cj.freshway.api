@@ -1,0 +1,2162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="wdDistributePlanNewService">
+	<!-- 미출예정 목록 조회 -->
+	<select id="getMasterListTab1_old" parameterType="cjfw.wms.wd.dto.WdDistributePlanNewReqDto" resultType="cjfw.wms.wd.dto.WdDistributePlanNewResDto">
+		/* [WdDistributePlanService.sqlx][WdDistributePlanNewService.getMasterListTab1][미출예정확인New 미출예정 조회][YeoSeungCheol][2025.11.06] */
+		WITH PO_DC_LST AS (
+		    <if test="poDccode != null and poDccode != ''"> 
+		    SELECT DISTINCT COLUMN_VALUE AS DCCODE 
+		    FROM   TABLE(FN_SPLIT_ARRAY(#{poDccode},','))
+			</if>
+			
+			<if test="poDccode == null or poDccode == ''"> 
+		    	SELECT '' AS DCCODE FROM DUAL
+			</if>
+			
+		)
+		,SO_DC_LST AS (
+		    SELECT DISTINCT COLUMN_VALUE AS DCCODE 
+		    <if test="soDccode != null and soDccode != ''"> 
+		    FROM   TABLE(FN_SPLIT_ARRAY(#{soDccode},','))
+			</if>		    
+			<if test="soDccode == null or soDccode == ''">
+			FROM   TABLE(FN_SPLIT_ARRAY(#{gDccode}, ','))
+			</if>
+		)
+
+		,PO_DP_TB AS (
+		    SELECT STORERKEY, SKU, SUM(ORDERQTY) AS QTY
+		    FROM   DP_PURCHASE
+		    WHERE  1 = 1
+		    AND    STORERKEY = #{gStorerkey}
+		    <if test="poDccode != null or poDccode != ''">
+		    	AND    DCCODE IN (SELECT PO_DC_LST.DCCODE FROM PO_DC_LST)
+		    </if>
+		    AND    REQUESTDT &gt;= #{slipdtFrom}
+			<if test="chkyn == 1">
+			    AND    REQUESTDT &lt;= #{slipdtTo}
+		    </if>
+		    <if test="chkyn == 2">
+			    AND    REQUESTDT &lt;= to_char(to_date(#{slipdtTo},'yyyymmdd')-1 , 'yyyymmdd')
+		    </if>
+		    <if test="chkyn == 4">
+			    AND    1=2
+		    </if>
+		    GROUP BY STORERKEY, SKU
+		    UNION ALL
+		    SELECT  DM_DOCUMENT_D_DP.STORERKEY
+		           ,DM_DOCUMENT_D_DP.SKU
+		           ,NVL(SUM(DM_DOCUMENT_D_DP.ORDERQTY + DM_DOCUMENT_D_DP.OPENADJUSTQTY ),0) AS QTY
+		    FROM   DM_DOCUMENT_D DM_DOCUMENT_D_DP
+		    WHERE  1 = 1
+		    AND    DM_DOCUMENT_D_DP.STORERKEY = #{gStorerkey}
+		    AND    DM_DOCUMENT_D_DP.DCCODE IN (SELECT PO_DC_LST.DCCODE FROM PO_DC_LST)
+		    AND    DELIVERYDATE &gt;= #{slipdtFrom}
+			<if test="chkyn == 1">
+			    AND    DELIVERYDATE &lt;= #{slipdtTo}
+		    </if>
+		    <if test="chkyn == 2">
+			    AND    DELIVERYDATE &lt;= to_char(to_date(#{slipdtTo},'yyyymmdd')-1 , 'yyyymmdd')
+		    </if>
+		    <if test="chkyn == 4">
+			    AND    1=2
+		    </if>
+		    AND DM_DOCUMENT_D_DP.DOCTYPE = 'DP'
+		    AND DM_DOCUMENT_D_DP.CHANNEL = '1'
+		    AND DM_DOCUMENT_D_DP.DEL_YN = 'N'
+		    AND (DM_DOCUMENT_D_DP.WORKPROCESSCODE = 'STO' AND EXISTS
+		           (
+		            SELECT 1
+		             FROM DM_DOCUMENT_H
+		            WHERE 1 = 1
+		              AND DM_DOCUMENT_H.STORERKEY = DM_DOCUMENT_D_DP.STORERKEY
+		              AND DM_DOCUMENT_H.DOCDT = DM_DOCUMENT_D_DP.DOCDT
+		              AND DM_DOCUMENT_H.DOCNO = DM_DOCUMENT_D_DP.DOCNO
+		              AND DM_DOCUMENT_H.DOCTYPE = 'WD'
+		              AND DM_DOCUMENT_H.DCCODE IN ('1000', '2170')
+		              AND DM_DOCUMENT_H.DELIVERYDATE = DM_DOCUMENT_D_DP.DELIVERYDATE
+		           )
+		         )
+		    GROUP BY DM_DOCUMENT_D_DP.STORERKEY,
+		             DM_DOCUMENT_D_DP.SKU
+		)
+		,DP_TB AS (
+		    SELECT DM_DOCUMENT_D_DP.STORERKEY
+		    	  ,DM_DOCUMENT_D_DP.DCCODE
+		    	  ,DM_DOCUMENT_D_DP.ORGANIZE
+		          ,DM_DOCUMENT_D_DP.AREA
+		          ,DM_DOCUMENT_D_DP.SKU
+		          ,NVL(SUM(DM_DOCUMENT_D_DP.ORDERQTY+DM_DOCUMENT_D_DP.OPENADJUSTQTY - DM_DOCUMENT_D_DP.CONFIRMQTY), 0) AS QTY
+		    FROM   DM_DOCUMENT_D DM_DOCUMENT_D_DP 
+		    WHERE  1 = 1
+		    AND    DM_DOCUMENT_D_DP.STORERKEY = #{gStorerkey}
+		    AND    DM_DOCUMENT_D_DP.DCCODE    IN (SELECT PO_DC_LST.DCCODE
+		   								      	  FROM   PO_DC_LST)
+		    AND    DM_DOCUMENT_D_DP.DELIVERYDATE &gt;= #{slipdtFrom}
+	    <if test="chkyn == 1">
+		    AND    DM_DOCUMENT_D_DP.DELIVERYDATE &lt;= #{slipdtTo}
+	    </if>
+	    <if test="chkyn == 2">
+		    AND    DM_DOCUMENT_D_DP.DELIVERYDATE &lt;= to_char(to_date(#{slipdtTo},'yyyymmdd')-1 , 'yyyymmdd')
+	    </if>
+	    <if test="chkyn == 4">
+		    AND    1=2
+	    </if>
+		    AND    DM_DOCUMENT_D_DP.STATUS        &lt; '90'
+		    AND    DM_DOCUMENT_D_DP.DOCTYPE       = 'DP'
+		    AND    DM_DOCUMENT_D_DP.CHANNEL       = '1'
+		    AND    DM_DOCUMENT_D_DP.DEL_YN        = 'N'
+		    AND	   (
+		    		DM_DOCUMENT_D_DP.WORKPROCESSCODE != 'STO' 
+		    		OR 
+		    		(		DM_DOCUMENT_D_DP.WORKPROCESSCODE = 'STO' AND EXISTS 
+		    					(
+		    						SELECT 1 
+		    						FROM   DM_DOCUMENT_H 
+		    						WHERE  1=1 
+                            		AND    DM_DOCUMENT_H.STORERKEY = DM_DOCUMENT_D_DP.STORERKEY
+                            		AND    DM_DOCUMENT_H.DOCDT     = DM_DOCUMENT_D_DP.DOCDT
+                            		AND    DM_DOCUMENT_H.DOCNO     = DM_DOCUMENT_D_DP.DOCNO
+                            		AND    DM_DOCUMENT_H.DOCTYPE   = 'WD'
+                            		AND	   DM_DOCUMENT_H.STATUS    = '90'
+                            		AND	   DM_DOCUMENT_H.DCCODE IN ('1000', '2170')
+                            		AND DM_DOCUMENT_H.DELIVERYDATE = DM_DOCUMENT_D_DP.DELIVERYDATE
+                            	)
+                            )
+		    	    )
+		    AND    DM_DOCUMENT_D_DP.ORDERQTY+DM_DOCUMENT_D_DP.OPENADJUSTQTY &gt; 0
+		    GROUP BY DM_DOCUMENT_D_DP.STORERKEY
+			    	,DM_DOCUMENT_D_DP.DCCODE
+			    	,DM_DOCUMENT_D_DP.ORGANIZE
+		            ,DM_DOCUMENT_D_DP.AREA
+		            ,DM_DOCUMENT_D_DP.SKU
+		)
+		,ST_TB AS (
+		    SELECT ST_STOCK.STORERKEY    AS  STORERKEY
+		          ,ST_STOCK.SKU          AS  SKU
+		          ,SUM(CASE
+			             WHEN ST_STOCK.DCCODE IN (SELECT PO_DC_LST.DCCODE FROM PO_DC_LST) 
+			             THEN ST_STOCK.QTY
+			           END) AS QTY
+		          ,SUM(CASE
+		                 WHEN ST_STOCK.DCCODE IN (SELECT PO_DC_LST.DCCODE FROM PO_DC_LST) THEN
+		                 CASE
+		                    WHEN ST_STOCK.QTYALLOCATED = 0 
+		                    THEN ST_STOCK.QTY - ST_STOCK.QTYPICKED
+		                    ELSE ST_STOCK.QTY - ST_STOCK.QTYALLOCATED
+		                 END
+		               END) AS OPENQTY
+       			  ,SUM(CASE WHEN ST_STOCK.DCCODE = '2600' THEN ST_STOCK.QTY ELSE 0 END) AS QTY_2600
+       			  ,SUM(CASE WHEN ST_STOCK.DCCODE = '2620' THEN ST_STOCK.QTY ELSE 0 END) AS QTY_2620
+       			  ,SUM(CASE WHEN ST_STOCK.DCCODE = '2630' THEN ST_STOCK.QTY ELSE 0 END) AS QTY_2630
+       			  ,SUM(CASE WHEN ST_STOCK.DCCODE = '2650' THEN ST_STOCK.QTY ELSE 0 END) AS QTY_2650
+       			  ,SUM(CASE WHEN ST_STOCK.DCCODE = '2660' THEN ST_STOCK.QTY ELSE 0 END) AS QTY_2660
+       			  ,SUM(CASE WHEN ST_STOCK.DCCODE = '2230' THEN ST_STOCK.QTY ELSE 0 END) AS QTY_2230
+                  ,SUM(CASE WHEN ST_STOCK.DCCODE = '2260' THEN ST_STOCK.QTY ELSE 0 END) AS QTY_2260
+		    FROM  ST_STOCK
+		    JOIN   MS_SKU
+		    ON     MS_SKU.STORERKEY        = ST_STOCK.STORERKEY
+		    AND    MS_SKU.SKU              = ST_STOCK.SKU
+		    JOIN   MS_LOCATION
+		    ON     MS_LOCATION.DCCODE      = ST_STOCK.DCCODE
+		    AND    MS_LOCATION.LOC         = ST_STOCK.LOC
+		    AND    MS_LOCATION.LOCTYPE     IN ('STAGE','PICK','KEEP','CROSS','FIRSTOUT','LONGSTAY','CANCEL')
+		    AND    MS_LOCATION.LOCCATEGORY IN ('RACK','YARD','AUTO')
+		    AND    MS_LOCATION.LOCFLAG     = 'GOOD' 
+		    AND    MS_LOCATION.OUT_YN      = 'Y'    
+		    AND    MS_LOCATION.DEL_YN      = 'N'
+		    AND    MS_LOCATION.STOCKTYPE   = 'GOOD' 
+		    JOIN   CM_LOT
+		    ON     CM_LOT.STORERKEY        = ST_STOCK.STORERKEY
+		    AND    CM_LOT.LOT              = ST_STOCK.LOT
+		    AND    'TRUE' = CASE 
+		                         WHEN CM_LOT.LOTTABLE01   = 'STD' OR  MS_SKU.DURATIONTYPE = 'N'
+		                         THEN 'TRUE'
+		                         WHEN     MS_SKU.DURATIONTYPE = '1' AND FN_ISDATE(CM_LOT.LOTTABLE01) = 1
+		                              AND TO_DATE(CM_LOT.LOTTABLE01,'YYYYMMDD') &lt; TRUNC(SYSDATE)
+		                         THEN 'FALSE'
+		                         WHEN     MS_SKU.DURATIONTYPE IN ('2','3') AND FN_ISDATE(CM_LOT.LOTTABLE01) = 1
+		                              AND TO_DATE(CM_LOT.LOTTABLE01,'YYYYMMDD') + MS_SKU.DURATION - 1 &lt; TRUNC(SYSDATE)
+		                         THEN 'FALSE'
+		                         ELSE 'TRUE'
+		                    END
+		    WHERE ST_STOCK.QTY &gt; 0
+		    AND   ST_STOCK.STORERKEY = #{gStorerkey}
+		    GROUP BY ST_STOCK.STORERKEY
+		             ,ST_STOCK.SKU    
+		)
+		,DD_TB AS (    
+			SELECT DPDCCODE, DPPLANT, SKU, SUM(WDQTY) WDQTY
+		    FROM (SELECT B.DOCNO,
+		                 B.DOCLINE,
+		                 B.SKU,
+		                 MAX(B.WDQTY) AS WDQTY,
+		                 MAX(B.WDDCCODE) AS WDDCCODE,
+		                 MAX(B.DPQTY) AS DPQTY,
+		                 MAX(B.DPDCCODE) AS DPDCCODE,
+		                 MAX(B.DPPLANT) AS DPPLANT,
+		                 MAX(DELIVERYDATE) AS DELIVERYDATE
+		            FROM (SELECT DOCNO,
+		                         DOCLINE,
+		                         SKU,
+		                         CASE
+		                           WHEN DM_DOCUMENT_D.DOCTYPE = 'WD' THEN
+		                            DM_DOCUMENT_D.CONFIRMQTY
+		                           ELSE
+		                            UNISTR('')
+		                         END AS WDQTY,
+		                         CASE
+		                           WHEN DM_DOCUMENT_D.DOCTYPE = 'WD' THEN
+		                            MAX(DM_DOCUMENT_D.DCCODE)
+		                           ELSE
+		                            UNISTR('')
+		                         END AS WDDCCODE,
+		                         CASE
+		                           WHEN DM_DOCUMENT_D.DOCTYPE = 'DP' THEN
+		                            DM_DOCUMENT_D.CONFIRMQTY
+		                           ELSE
+		                            UNISTR('')
+		                         END AS DPQTY,
+		                         CASE
+		                           WHEN DM_DOCUMENT_D.DOCTYPE = 'DP' THEN
+		                            MAX(DM_DOCUMENT_D.DCCODE)
+		                           ELSE
+		                            UNISTR('')
+		                         END AS DPDCCODE,
+		                         CASE
+		                           WHEN DM_DOCUMENT_D.DOCTYPE = 'DP' THEN
+		                            MAX(DM_DOCUMENT_D.PLANT)
+		                           ELSE
+		                            UNISTR('')
+		                         END AS DPPLANT,
+		                         MAX(DELIVERYDATE) AS DELIVERYDATE,
+		                         MAX(EDITWHO) AS EDITWHO
+		                    FROM DM_DOCUMENT_D
+		                   WHERE STORERKEY = #{gStorerkey}
+			                 <if test="stochkyn == 4">  
+			                 	 AND 1 = 2
+			                 </if>
+		                   	 AND DELIVERYDATE BETWEEN #{slipdtFrom} AND #{slipdtTo}
+		                     AND DOCTYPE IN ('DP', 'WD')
+		                     AND DEL_YN = 'N'
+		                     AND WORKPROCESSCODE = 'STO'
+		                   GROUP BY DOCNO, DOCLINE, SKU, DOCTYPE, CONFIRMQTY) B
+		           GROUP BY B.DOCNO, B.DOCLINE, B.SKU) C
+		   	 WHERE 1=1
+		   	 AND C.WDQTY &lt;&gt; C.DPQTY
+		   	 AND C.WDDCCODE NOT IN ('1000', '2170')
+		     AND C.DPDCCODE IN (SELECT SO_DC_LST.DCCODE FROM SO_DC_LST)
+		      <if test="stochkyn == 1"> 
+			     <if test="poDccode != null and poDccode != ''"> 
+			     	AND C.WDDCCODE IN (SELECT PO_DC_LST.DCCODE FROM PO_DC_LST)
+			     </if>
+		     </if>
+		     GROUP BY DPDCCODE, DPPLANT, SKU
+        ) 
+		SELECT  WD.DELIVERYDATE                                                                       AS SLIPDT
+		      , WD.DOCNO
+		      , WD.TO_CUSTKEY
+		      , WD.TO_CUSTNAME
+		      , WD.DOCLINE
+		      , WD.SKU
+		      , MS_SKU.DESCRIPTION                                                                    AS SKUNAME
+		      , '[' || WD.PLANT || ']' || (SELECT FN_DESCR_PLANT(WD.PLANT) FROM DUAL)                 AS PLANT_DESCR
+		      , (SELECT FN_CODEDESCR(WD.STORERKEY ,'PUTAWAYTYPE',WD.CHANNEL) FROM DUAL)               AS CHANNEL
+		      , WD.QTY
+		      , WD.ST_OPENQTY				                                                          AS ST_OPENQTY
+		      , WD.QTY + WD.TOTAL_STO_ST + WD.TOTAL_DP_QTY - TOTAL_ORDERQTY                           AS SHORTAGEQTY2
+		      , WD.TOTAL_ORDERQTY 																	  AS TOTAL_ORDERQTY      
+		      , WD.ORDERQTY
+		      , WD.DP_QTY                                                                		      AS DP_QTY
+		      , WD.TOTAL_DP_QTY                                                                		  AS TOTAL_DP_QTY
+		      , WD.STO_ST																			  AS STO_ST
+		      , WD.TOTAL_STO_ST																		  AS TOTAL_STO_ST
+		      , WD.QTYALLOCATED
+		      , WD.QTYPICKED
+		      , WD.UOM
+		      , CASE WHEN (SELECT COUNT(1)
+		                   FROM  MS_SKUDCSET
+		                   WHERE MS_SKUDCSET.DCCODE        = WD.DCCODE
+		                   AND   MS_SKUDCSET.STORERKEY     = WD.STORERKEY
+		                   AND   MS_SKUDCSET.SKU           = WD.SKU
+		                   AND   MS_SKUDCSET.DEL_YN        = 'N'
+		                   AND   MS_SKUDCSET.CROSSDOCKTYPE = 'CROSS') &gt; 0 THEN
+		                   'CROSS'
+		             ELSE  ''
+		        END AS CROSSDOCKTYPE
+		      , (SELECT FN_CODEDESCR(WD.STORERKEY,'skutype'     ,MS_SKU.skutype)      FROM DUAL) AS skutype
+			  , MS_SKU.reference15
+              , WD.BUYERKEY            															 AS BUYERKEY
+              , FN_DESCR_CODE(WD.STORERKEY, 'BUYERKEY', WD.BUYERKEY) 							 AS BUYERNAME
+              , PO_DP_QTY
+              , WD.QTY_2600
+              , WD.QTY_2620
+              , WD.QTY_2630
+              , WD.QTY_2650
+              , WD.QTY_2660
+              , WD.QTY_2230
+              , WD.QTY_2260
+              , WD.PROCPOSS_YN AS PROCPOSS_YN
+		FROM   (SELECT DM_DOCUMENT_D.DELIVERYDATE
+		              ,DM_DOCUMENT_H.DCCODE         AS DCCODE
+		              ,DM_DOCUMENT_H.DOCNO          AS DOCNO
+		              ,DM_DOCUMENT_H.STORERKEY      AS STORERKEY
+		              ,DM_DOCUMENT_H.TO_CUSTTYPE    AS TO_CUSTTYPE
+		              ,DM_DOCUMENT_H.TO_CUSTKEY     AS TO_CUSTKEY
+		              ,DM_DOCUMENT_H.TO_CUSTNAME    AS TO_CUSTNAME
+		              ,DM_DOCUMENT_D.DOCLINE        AS DOCLINE
+		              ,DM_DOCUMENT_D.SKU            AS SKU
+		              ,DM_DOCUMENT_D.PLANT          AS PLANT
+		              ,DM_DOCUMENT_D.CHANNEL        AS CHANNEL
+		              ,NVL(ST_TB.QTY, 0)            AS QTY
+		              ,NVL(ST_TB.OPENQTY, 0)        AS ST_OPENQTY
+		              ,NVL(DP_TB.QTY, 0)            AS DP_QTY
+		              ,(
+		                 SELECT NVL(SUM(DP_TB.QTY), 0)
+		                 FROM   DP_TB
+		                 WHERE	1=1
+		                 AND	DP_TB.STORERKEY = DM_DOCUMENT_D.STORERKEY
+		                 AND	DP_TB.SKU      = DM_DOCUMENT_D.SKU
+		              ) AS TOTAL_DP_QTY
+		              ,NVL(PO_DP_TB.QTY, 0)         AS PO_DP_QTY	
+		              ,NVL(DD_TB.WDQTY,0)       	AS STO_ST
+		              ,(SELECT NVL(SUM(DD_TB.WDQTY),0)
+		                FROM   DD_TB
+		                WHERE  1=1
+		                  AND  DD_tB.SKU = DM_DOCUMENT_D.SKU
+		               ) AS TOTAL_STO_ST  	              
+		              ,SUM(DM_DOCUMENT_D.ORDERQTY + DM_DOCUMENT_D.ORDERADJUSTQTY - DM_DOCUMENT_D.PROCESSQTY) OVER(PARTITION BY DM_DOCUMENT_D.DCCODE
+		                                                                                                                     , DM_DOCUMENT_D.STORERKEY
+		                                                                                                                     , DM_DOCUMENT_D.ORGANIZE
+		                                                                                                                     , DM_DOCUMENT_D.AREA
+		                                                                                                                     , DM_DOCUMENT_D.SKU) AS WD_QTY
+		              ,SUM(DM_DOCUMENT_D.ORDERQTY + DM_DOCUMENT_D.ORDERADJUSTQTY) OVER(PARTITION BY DM_DOCUMENT_D.STORERKEY                                                                                                                        
+		               																			  , DM_DOCUMENT_D.AREA                                                                                                                        
+		               																			  , DM_DOCUMENT_D.SKU) AS TOTAL_ORDERQTY
+		              ,DM_DOCUMENT_D.PROCESSQTY     AS QTYALLOCATED
+		              ,DM_DOCUMENT_D.WORKQTY        AS QTYPICKED
+		              ,DM_DOCUMENT_D.UOM            AS UOM
+		              ,DM_DOCUMENT_D.ORDERQTY + DM_DOCUMENT_D.ORDERADJUSTQTY AS ORDERQTY
+		              ,DM_DOCUMENT_D.REASONCODE     AS REASONCODE
+		              ,NVL((
+						    SELECT MAX(BUYERKEY) KEEP (DENSE_RANK FIRST ORDER BY (
+																		           CASE 
+																		             WHEN DCCODE = '2600' THEN 1
+																		             WHEN DCCODE = '2650' THEN 2
+																		             WHEN DCCODE = '2660' THEN 3
+																		             WHEN DCCODE = '2620' THEN 4
+																		             WHEN DCCODE = '2630' THEN 5
+																		             WHEN DCCODE = '2690' THEN 6
+																		             WHEN DCCODE = '2260' THEN 7
+																		             WHEN DCCODE = '2250' THEN 8
+																		             WHEN DCCODE = '2230' THEN 9
+																		             ELSE 10
+																		           END
+						         												  )
+						         					   )
+						    FROM MS_PURCHASEMST
+						    WHERE 1=1
+						    AND SKU = DM_DOCUMENT_D.SKU
+						    AND STORERKEY = DM_DOCUMENT_D.STORERKEY
+						    AND EXISTS (
+						    			  SELECT 1
+							              FROM   CM_CODE
+							              WHERE  1=1
+							              AND    CODELIST = 'BUYERKEY'
+							              AND    BASECODE =  MS_PURCHASEMST.BUYERKEY
+							              AND    STORERKEY = 'FW00'
+							              AND    DEL_YN    = 'N'
+							              AND    DATA3     = 'Y'
+						                )
+						  ),'STD')  AS BUYERKEY
+		              ,NVL(ST_TB.QTY_2600,0) AS QTY_2600
+		              ,NVL(ST_TB.QTY_2620,0) AS QTY_2620
+		              ,NVL(ST_TB.QTY_2630,0) AS QTY_2630
+		              ,NVL(ST_TB.QTY_2650,0) AS QTY_2650
+		              ,NVL(ST_TB.QTY_2660,0) AS QTY_2660
+		              ,NVL(ST_TB.QTY_2230,0) AS QTY_2230
+		              ,NVL(ST_TB.QTY_2260,0) AS QTY_2260
+		              ,CASE
+			           	 WHEN DM_DOCUMENT_D.PROCPOSS_YN = 'R' THEN UNISTR('Y')
+			             ELSE UNISTR('')
+			           END AS PROCPOSS_YN
+			          ,DM_DOCUMENT_D.WORKPROCESSCODE AS WORKPROCESSCODE
+		        FROM   DM_DOCUMENT_D
+		        JOIN   DM_DOCUMENT_H ON DM_DOCUMENT_H.DCCODE    = DM_DOCUMENT_D.DCCODE
+		                            AND DM_DOCUMENT_H.STORERKEY = DM_DOCUMENT_D.STORERKEY
+		                            AND DM_DOCUMENT_H.ORGANIZE  = DM_DOCUMENT_D.ORGANIZE
+		                            AND DM_DOCUMENT_H.DOCDT     = DM_DOCUMENT_D.DOCDT
+		                            AND DM_DOCUMENT_H.DOCNO     = DM_DOCUMENT_D.DOCNO
+		                            AND DM_DOCUMENT_H.DOCTYPE   = DM_DOCUMENT_D.DOCTYPE
+		                            AND DM_DOCUMENT_H.STATUS    &lt; '90'
+		                            AND DM_DOCUMENT_H.DEL_YN    = 'N'
+		        LEFT OUTER JOIN ST_TB
+		                   ON   ST_TB.STORERKEY = DM_DOCUMENT_D.STORERKEY
+		                   AND  ST_TB.SKU       = DM_DOCUMENT_D.SKU
+		        LEFT OUTER JOIN PO_DP_TB 
+		                   ON   PO_DP_TB.STORERKEY = DM_DOCUMENT_D.STORERKEY
+		                   AND  PO_DP_TB.SKU       = DM_DOCUMENT_D.SKU
+		        LEFT OUTER JOIN DP_TB 
+		                   ON   DP_TB.STORERKEY = DM_DOCUMENT_D.STORERKEY
+		                   AND  DP_TB.DCCODE    = DM_DOCUMENT_D.DCCODE
+		                   AND	DP_TB.ORGANIZE  = DM_DOCUMENT_D.ORGANIZE
+                           AND  DP_TB.AREA      = DM_DOCUMENT_D.AREA
+		                   AND  DP_TB.SKU       = DM_DOCUMENT_D.SKU
+		        LEFT OUTER JOIN DD_TB                       
+                           ON   DD_TB.DPDCCODE    = DM_DOCUMENT_D.DCCODE                            
+                           AND  DD_TB.DPPLANT     = DM_DOCUMENT_D.PLANT
+                           AND	DD_TB.SKU		  = DM_DOCUMENT_D.SKU 
+		        WHERE  1   = 1 
+			    AND    DM_DOCUMENT_D.DCCODE    IN  (SELECT SO_DC_LST.DCCODE
+		   								      	  	FROM   SO_DC_LST)       
+			    AND    DM_DOCUMENT_D.STORERKEY =  #{gStorerkey} 
+			<!-- 상품 다중선택 -->
+			<if test="multiSku != null and multiSku != ''">AND DM_DOCUMENT_D.SKU IN
+				 <foreach collection="multiSku" item="item" separator="," close=")" open="(">
+			    	#{item}
+			    </foreach>
+			</if>
+	      	<!-- 수급담당 -->
+	        <if test="buyerkey != null and buyerkey.size() > 0 ">
+			    AND DM_DOCUMENT_D.SKU IN (
+					SELECT SKU
+		            FROM   MS_PURCHASEMST
+		            WHERE  1=1
+		            AND    MS_PURCHASEMST.STORERKEY = DM_DOCUMENT_D.STORERKEY
+		            AND    MS_PURCHASEMST.DCCODE 	= DM_DOCUMENT_D.DCCODE
+		            AND    MS_PURCHASEMST.SKU 		= DM_DOCUMENT_D.SKU
+		            AND    MS_PURCHASEMST.BUYERKEY IN 		        
+					<foreach collection="buyerkey" item="item" separator="," close=")" open="(">
+						#{item}	
+					</foreach> 
+                )
+	      	</if>	
+			    AND    DM_DOCUMENT_D.DELIVERYDATE BETWEEN  #{slipdtFrom} AND #{slipdtTo}  
+		        AND    DM_DOCUMENT_D.DOCTYPE      = 'WD'
+		        AND    DM_DOCUMENT_D.CHANNEL      = '1' /* 저장품만 */
+		        AND    DM_DOCUMENT_D.STATUS       &lt; '90'
+		        AND    DM_DOCUMENT_D.ORDERQTY + DM_DOCUMENT_D.ORDERADJUSTQTY &gt; 0
+		        /*AND    DM_DOCUMENT_D.ORDERQTY + DM_DOCUMENT_D.ORDERADJUSTQTY &gt; DM_DOCUMENT_D.PROCESSQTY 분배 오더도 포함(황순영님 요청) */
+		        AND    DM_DOCUMENT_D.DEL_YN       = 'N'
+		        AND    DM_DOCUMENT_D.WORKPROCESSCODE IN ('SO', 'JASO')
+		        ) WD
+		JOIN   MS_SKU ON  MS_SKU.STORERKEY = WD.STORERKEY
+		              AND MS_SKU.SKU       = WD.SKU
+		              AND MS_SKU.DEL_YN    = 'N'
+		WHERE  WD.QTY + WD.TOTAL_STO_ST + WD.TOTAL_DP_QTY &lt; TOTAL_ORDERQTY
+		<!-- 고객 다중선택 -->
+		<if test="custkeyMulti != null and custkeyMulti != ''">
+			AND WD.TO_CUSTKEY IN
+			<foreach collection="custkeyMulti" item="item" separator="," close=")" open="(">
+				#{item}
+			</foreach>
+		</if>
+	    <!-- 문서번호 다중선택 -->
+	    <if test="docnoWdMulti != null and docnoWdMulti != ''">
+	    	AND WD.DOCNO IN
+    		 <foreach collection="docnoWdMulti" item="item" separator="," close=")" open="(">
+                #{item}
+        	</foreach>
+        </if>	             
+		<if test="reason != null and reason != ''">  AND   WD.REASONCODE  =  #{reason} </if>
+		<!-- 배송그룹 공통조회 조건 -->
+		<if test="gMultiCourier != null and gMultiCourier != ''"> AND    WD.COURIERCODE =  #{gMultiCourier} </if>
+		
+		<!-- 상품유형 다중 검색 -->
+		<if test="skutype != null and skutype.size() > 0">
+			AND MS_SKU.skutype IN
+			<foreach collection="skutype" item="item" separator="," close=")" open="(">
+			    #{item}
+			</foreach>
+        </if>
+        
+        <if test="skutype == null or skutype == ''">
+        	and 1=1
+        </if>
+		<if test="reference15 != null and reference15 != ''"> AND MS_SKU.reference15            =  #{reference15}   </if>
+		<if test="quick == 6">
+           	AND nvl(WD.QTY,0) &lt;&gt; 0
+		</if>
+		ORDER BY WD.DELIVERYDATE ASC 
+	</select>
+	
+	<select id="getMasterListTab1" parameterType="cjfw.wms.wd.dto.WdDistributePlanNewReqDto" resultType="cjfw.wms.wd.dto.WdDistributePlanNewResDto">
+		/* [WdDistributePlanService.sqlx][WdDistributePlanNewService.getMasterListTab1][미출예정확인New 미출예정 조회][YeoSeungCheol][2025.11.06] */
+		WITH PO_DP_TB AS (
+            SELECT STORERKEY, SKU, SUM(ORDERQTY) AS QTY
+            FROM   DP_PURCHASE
+            WHERE  1 = 1
+            AND    STORERKEY = 'FW00'
+            <if test='poDccode != null and poDccode.length > 0'>
+		    AND    DCCODE IN
+		    <foreach collection="poDccode" item="dccodeItem" open="(" separator="," close=")">
+	            #{dccodeItem}
+	        </foreach>
+	        </if>
+            AND    REQUESTDT <![CDATA[>=]]> #{slipdtFrom} 
+			<if test="chkyn == 1">
+			    AND    REQUESTDT <![CDATA[<=]]> #{slipdtTo}
+		    </if>
+		    <if test="chkyn == 2">
+			    AND    REQUESTDT <![CDATA[<=]]> to_char(to_date(#{slipdtTo},'yyyymmdd')-1 , 'yyyymmdd')
+		    </if>
+		    <if test="chkyn == 4">
+			    AND    1=2
+		    </if>
+            GROUP BY STORERKEY, SKU
+            
+            UNION ALL
+            
+            SELECT  DM_DOCUMENT_D_DP.STORERKEY
+                   ,DM_DOCUMENT_D_DP.SKU
+                   ,NVL(SUM(DM_DOCUMENT_D_DP.ORDERQTY + DM_DOCUMENT_D_DP.OPENADJUSTQTY), 0) AS QTY
+            FROM   DM_DOCUMENT_D DM_DOCUMENT_D_DP
+            WHERE  1 = 1
+            AND    DM_DOCUMENT_D_DP.STORERKEY = 'FW00'
+            <if test='poDccode != null and poDccode.length > 0'>
+		    AND    DM_DOCUMENT_D_DP.DCCODE IN
+		    <foreach collection="poDccode" item="dccodeItem" open="(" separator="," close=")">
+	            #{dccodeItem}
+	        </foreach>
+	        </if>
+            AND    DELIVERYDATE <![CDATA[>=]]> #{slipdtFrom} 
+			<if test="chkyn == 1">
+			    AND    DELIVERYDATE <![CDATA[<=]]> #{slipdtTo}
+		    </if>
+		    <if test="chkyn == 2">
+			    AND    DELIVERYDATE <![CDATA[<=]]> to_char(to_date(#{slipdtTo},'yyyymmdd')-1 , 'yyyymmdd')
+		    </if>
+		    <if test="chkyn == 4">
+			    AND    1=2
+		    </if>
+            AND    DM_DOCUMENT_D_DP.DOCTYPE = 'DP'
+            AND    DM_DOCUMENT_D_DP.CHANNEL = '1'
+            AND    DM_DOCUMENT_D_DP.DEL_YN = 'N'
+            AND    (DM_DOCUMENT_D_DP.WORKPROCESSCODE = 'STO' AND EXISTS (
+                        SELECT 1
+                        FROM DM_DOCUMENT_H
+                        WHERE 1 = 1
+                          AND DM_DOCUMENT_H.STORERKEY = DM_DOCUMENT_D_DP.STORERKEY
+                          AND DM_DOCUMENT_H.DOCDT = DM_DOCUMENT_D_DP.DOCDT
+                          AND DM_DOCUMENT_H.DOCNO = DM_DOCUMENT_D_DP.DOCNO
+                          AND DM_DOCUMENT_H.DOCTYPE = 'WD'
+                          AND DM_DOCUMENT_H.DCCODE IN ('1000', '2170')
+                          AND DM_DOCUMENT_H.DELIVERYDATE = DM_DOCUMENT_D_DP.DELIVERYDATE
+                   ))
+            GROUP BY DM_DOCUMENT_D_DP.STORERKEY, DM_DOCUMENT_D_DP.SKU
+        )
+        ,DP_TB AS (
+            SELECT DM_DOCUMENT_D_DP.STORERKEY
+                  ,DM_DOCUMENT_D_DP.DCCODE
+                  ,DM_DOCUMENT_D_DP.ORGANIZE
+                  ,DM_DOCUMENT_D_DP.AREA
+                  ,DM_DOCUMENT_D_DP.SKU
+                  ,NVL(SUM(DM_DOCUMENT_D_DP.ORDERQTY + DM_DOCUMENT_D_DP.OPENADJUSTQTY - DM_DOCUMENT_D_DP.CONFIRMQTY), 0) AS QTY
+            FROM   DM_DOCUMENT_D DM_DOCUMENT_D_DP 
+            WHERE  1 = 1
+            AND    DM_DOCUMENT_D_DP.STORERKEY = 'FW00'
+            <if test='poDccode != null and poDccode.length > 0'>
+		    AND    DM_DOCUMENT_D_DP.DCCODE IN
+		    <foreach collection="poDccode" item="dccodeItem" open="(" separator="," close=")">
+	            #{dccodeItem}
+	        </foreach>
+	        </if>
+            AND    DM_DOCUMENT_D_DP.DELIVERYDATE <![CDATA[>=]]> #{slipdtFrom} 
+			<if test="chkyn == 1">
+			    AND    DM_DOCUMENT_D_DP.DELIVERYDATE <![CDATA[<=]]> #{slipdtTo}
+		    </if>
+		    <if test="chkyn == 2">
+			    AND    DM_DOCUMENT_D_DP.DELIVERYDATE <![CDATA[<=]]> to_char(to_date(#{slipdtTo},'yyyymmdd')-1 , 'yyyymmdd')
+		    </if>
+		    <if test="chkyn == 4">
+			    AND    1=2
+		    </if>
+            AND    DM_DOCUMENT_D_DP.STATUS <![CDATA[<]]> '90'
+            AND    DM_DOCUMENT_D_DP.DOCTYPE = 'DP'
+            AND    DM_DOCUMENT_D_DP.CHANNEL = '1'
+            AND    DM_DOCUMENT_D_DP.DEL_YN = 'N'
+            AND    (
+                    DM_DOCUMENT_D_DP.WORKPROCESSCODE != 'STO' 
+                    OR 
+                    (DM_DOCUMENT_D_DP.WORKPROCESSCODE = 'STO' AND EXISTS (
+                        SELECT 1 
+                        FROM   DM_DOCUMENT_H 
+                        WHERE  1=1 
+                          AND  DM_DOCUMENT_H.STORERKEY = DM_DOCUMENT_D_DP.STORERKEY
+                          AND  DM_DOCUMENT_H.DOCDT      = DM_DOCUMENT_D_DP.DOCDT
+                          AND  DM_DOCUMENT_H.DOCNO      = DM_DOCUMENT_D_DP.DOCNO
+                          AND  DM_DOCUMENT_H.DOCTYPE    = 'WD'
+                          AND  DM_DOCUMENT_H.STATUS     = '90'
+                          AND  DM_DOCUMENT_H.DCCODE IN ('1000', '2170')
+                          AND  DM_DOCUMENT_H.DELIVERYDATE = DM_DOCUMENT_D_DP.DELIVERYDATE
+                    ))
+            )
+            AND    DM_DOCUMENT_D_DP.ORDERQTY + DM_DOCUMENT_D_DP.OPENADJUSTQTY <![CDATA[>]]> 0
+            GROUP BY DM_DOCUMENT_D_DP.STORERKEY
+                    ,DM_DOCUMENT_D_DP.DCCODE
+                    ,DM_DOCUMENT_D_DP.ORGANIZE
+                    ,DM_DOCUMENT_D_DP.AREA
+                    ,DM_DOCUMENT_D_DP.SKU
+        )
+        ,ST_TB AS (
+            SELECT /*+ NO_PUSH_PRED */ 
+                   ST_STOCK.STORERKEY    AS  STORERKEY
+                  ,ST_STOCK.SKU          AS  SKU
+                  ,SUM(CASE WHEN 
+                            <choose>
+								<when test='poDccode != null and poDccode.length > 0'>
+									ST_STOCK.DCCODE IN
+									<foreach collection="poDccode" item="dccodeItem" open="(" separator="," close=")">
+									   #{dccodeItem}
+									</foreach> 
+								</when>
+								<otherwise>
+									1 = 1
+								</otherwise>
+							 </choose>
+                            THEN ST_STOCK.QTY END) AS QTY
+                  ,SUM(CASE WHEN 
+							<choose>
+								<when test='poDccode != null and poDccode.length > 0'>
+									ST_STOCK.DCCODE IN
+									<foreach collection="poDccode" item="dccodeItem" open="(" separator="," close=")">
+									   #{dccodeItem}
+									</foreach> 
+								</when>
+								<otherwise>
+									1 = 1
+								</otherwise>
+							</choose>	
+                            THEN
+                                CASE WHEN ST_STOCK.QTYALLOCATED = 0 
+                                     THEN ST_STOCK.QTY - ST_STOCK.QTYPICKED
+                                     ELSE ST_STOCK.QTY - ST_STOCK.QTYALLOCATED
+                                END
+                       END) AS OPENQTY
+                  ,SUM(CASE WHEN ST_STOCK.DCCODE = '2600' THEN ST_STOCK.QTY ELSE 0 END) AS QTY_2600
+                  ,SUM(CASE WHEN ST_STOCK.DCCODE = '2620' THEN ST_STOCK.QTY ELSE 0 END) AS QTY_2620
+                  ,SUM(CASE WHEN ST_STOCK.DCCODE = '2630' THEN ST_STOCK.QTY ELSE 0 END) AS QTY_2630
+                  ,SUM(CASE WHEN ST_STOCK.DCCODE = '2650' THEN ST_STOCK.QTY ELSE 0 END) AS QTY_2650
+                  ,SUM(CASE WHEN ST_STOCK.DCCODE = '2660' THEN ST_STOCK.QTY ELSE 0 END) AS QTY_2660
+                  ,SUM(CASE WHEN ST_STOCK.DCCODE = '2230' THEN ST_STOCK.QTY ELSE 0 END) AS QTY_2230
+                  ,SUM(CASE WHEN ST_STOCK.DCCODE = '2260' THEN ST_STOCK.QTY ELSE 0 END) AS QTY_2260
+            FROM  ST_STOCK
+            JOIN  MS_SKU ON MS_SKU.STORERKEY = ST_STOCK.STORERKEY AND MS_SKU.SKU = ST_STOCK.SKU
+            JOIN  MS_LOCATION ON MS_LOCATION.DCCODE = ST_STOCK.DCCODE AND MS_LOCATION.LOC = ST_STOCK.LOC
+            AND   MS_LOCATION.LOCTYPE IN ('STAGE','PICK','KEEP','CROSS','FIRSTOUT','LONGSTAY','CANCEL')
+            AND   MS_LOCATION.LOCCATEGORY IN ('RACK','YARD','AUTO')
+            AND   MS_LOCATION.LOCFLAG = 'GOOD' 
+            AND   MS_LOCATION.OUT_YN = 'Y'    
+            AND   MS_LOCATION.DEL_YN = 'N'
+            AND   MS_LOCATION.STOCKTYPE = 'GOOD' 
+            JOIN  CM_LOT ON CM_LOT.STORERKEY = ST_STOCK.STORERKEY AND CM_LOT.LOT = ST_STOCK.LOT
+            AND   'TRUE' = CASE 
+                             WHEN CM_LOT.LOTTABLE01 = 'STD' OR MS_SKU.DURATIONTYPE = 'N' THEN 'TRUE'
+                             WHEN MS_SKU.DURATIONTYPE = '1' AND FN_ISDATE(CM_LOT.LOTTABLE01) = 1
+                                  AND TO_DATE(CM_LOT.LOTTABLE01,'YYYYMMDD') <![CDATA[<]]> TRUNC(SYSDATE) THEN 'FALSE'
+                             WHEN MS_SKU.DURATIONTYPE IN ('2','3') AND FN_ISDATE(CM_LOT.LOTTABLE01) = 1
+                                  AND TO_DATE(CM_LOT.LOTTABLE01,'YYYYMMDD') + MS_SKU.DURATION - 1 <![CDATA[<]]> TRUNC(SYSDATE) THEN 'FALSE'
+                             ELSE 'TRUE'
+                           END
+            WHERE ST_STOCK.QTY <![CDATA[>]]> 0
+            AND   ST_STOCK.STORERKEY = 'FW00'
+            GROUP BY ST_STOCK.STORERKEY, ST_STOCK.SKU    
+        )
+        ,DD_TB AS (
+            SELECT DPDCCODE, DPPLANT, SKU, SUM(WDQTY) AS WDQTY
+            FROM (
+                SELECT B.DOCNO, B.DOCLINE, B.SKU,
+                       MAX(B.WDQTY) AS WDQTY,
+                       MAX(B.WDDCCODE) AS WDDCCODE,
+                       MAX(B.DPQTY) AS DPQTY,
+                       MAX(B.DPDCCODE) AS DPDCCODE,
+                       MAX(B.DPPLANT) AS DPPLANT
+                FROM (
+                    SELECT DP.DOCNO, DP.DOCLINE, DP.SKU,
+                           WD.CONFIRMQTY AS WDQTY,
+                           MAX(WD.DCCODE) AS WDDCCODE,
+                           DP.CONFIRMQTY AS DPQTY,
+                           MAX(DP.DCCODE) AS DPDCCODE,
+                           MAX(DP.PLANT)  AS DPPLANT  
+                    FROM DM_DOCUMENT_D DP
+                    LEFT JOIN DM_DOCUMENT_D WD ON WD.DOCTYPE = 'WD'
+                        AND DP.DOCNO = WD.DOCNO
+                        AND DP.DOCLINE = WD.DOCLINE
+                        AND DP.DELIVERYDATE = WD.DELIVERYDATE
+                        AND WD.DCCODE NOT IN ('1000', '2170')
+                    WHERE DP.STORERKEY = 'FW00'                      
+                      AND DP.DELIVERYDATE BETWEEN #{slipdtFrom} AND #{slipdtTo} 
+                      AND DP.DOCTYPE IN ('DP')
+                      AND DP.DEL_YN = 'N'
+                      AND DP.WORKPROCESSCODE = 'STO'
+                      <if test='soDccode != null and soDccode.length > 0'>
+					  AND    DP.DCCODE IN
+					  <foreach collection="soDccode" item="dccodeItem" open="(" separator="," close=")">
+						  #{dccodeItem}
+					  </foreach>
+					  </if>
+                    GROUP BY DP.DOCNO, DP.DOCLINE, DP.SKU, WD.CONFIRMQTY, DP.CONFIRMQTY
+                ) B
+                GROUP BY B.DOCNO, B.DOCLINE, B.SKU
+            ) C
+            WHERE C.WDQTY <![CDATA[<>]]> C.DPQTY
+            <if test="stochkyn == 4">  
+			  AND 1 = 2
+			</if>
+			<!-- if test="stochkyn == 1"> 
+			     <if test="poDccode != null and poDccode.length > 0"> 
+			     	AND C.WDDCCODE IN
+			     	<foreach collection="poDccode" item="dccodeItem" open="(" separator="," close=")">
+						  #{dccodeItem}
+					  </foreach>
+			     </if>
+		    </if -->
+            GROUP BY DPDCCODE, DPPLANT, SKU 
+        ) 
+        SELECT  WD.DELIVERYDATE AS SLIPDT
+               ,WD.DOCNO
+               ,WD.TO_CUSTKEY
+               ,WD.TO_CUSTNAME
+               ,WD.DOCLINE
+               ,WD.SKU
+               ,MS_SKU.DESCRIPTION AS SKUNAME
+               ,'[' || WD.PLANT || ']' || (SELECT FN_DESCR_PLANT(WD.PLANT) FROM DUAL) AS PLANT_DESCR
+               ,(SELECT FN_CODEDESCR(WD.STORERKEY, 'PUTAWAYTYPE', WD.CHANNEL) FROM DUAL) AS CHANNEL
+               ,WD.QTY
+               ,WD.ST_OPENQTY AS ST_OPENQTY
+               ,WD.QTY + WD.TOTAL_STO_ST + WD.TOTAL_DP_QTY - TOTAL_ORDERQTY AS SHORTAGEQTY2
+               ,WD.TOTAL_ORDERQTY AS TOTAL_ORDERQTY      
+               ,WD.ORDERQTY
+               ,WD.DP_QTY AS DP_QTY
+               ,WD.TOTAL_DP_QTY AS TOTAL_DP_QTY
+               ,WD.STO_ST AS STO_ST
+               ,WD.TOTAL_STO_ST AS TOTAL_STO_ST
+               ,WD.QTYALLOCATED
+               ,WD.QTYPICKED
+               ,WD.UOM
+               ,CASE WHEN (SELECT COUNT(1)
+                           FROM MS_SKUDCSET
+                           WHERE MS_SKUDCSET.DCCODE = WD.DCCODE
+                             AND MS_SKUDCSET.STORERKEY = WD.STORERKEY
+                             AND MS_SKUDCSET.SKU = WD.SKU
+                             AND MS_SKUDCSET.DEL_YN = 'N'
+                             AND MS_SKUDCSET.CROSSDOCKTYPE = 'CROSS') <![CDATA[>]]> 0 THEN 'CROSS'
+                     ELSE ''
+                END AS CROSSDOCKTYPE
+               ,(SELECT FN_CODEDESCR(WD.STORERKEY, 'skutype', MS_SKU.SKUTYPE) FROM DUAL) AS SKUTYPE
+               ,MS_SKU.REFERENCE15
+               ,WD.BUYERKEY AS BUYERKEY
+               ,FN_DESCR_CODE(WD.STORERKEY, 'BUYERKEY', WD.BUYERKEY) AS BUYERNAME
+               ,PO_DP_QTY
+               ,WD.QTY_2600
+               ,WD.QTY_2620
+               ,WD.QTY_2630
+               ,WD.QTY_2650
+               ,WD.QTY_2660
+               ,WD.QTY_2230
+               ,WD.QTY_2260
+               ,WD.PROCPOSS_YN AS PROCPOSS_YN
+        FROM (
+            SELECT /*+ NO_PUSH_PRED(PO_DP_TB) */ 
+                   DM_DOCUMENT_D.DELIVERYDATE
+                  ,DM_DOCUMENT_H.DCCODE
+                  ,DM_DOCUMENT_H.DOCNO
+                  ,DM_DOCUMENT_H.STORERKEY
+                  ,DM_DOCUMENT_H.TO_CUSTTYPE
+                  ,DM_DOCUMENT_H.TO_CUSTKEY
+                  ,DM_DOCUMENT_H.TO_CUSTNAME
+                  ,DM_DOCUMENT_D.DOCLINE
+                  ,DM_DOCUMENT_D.SKU
+                  ,DM_DOCUMENT_D.PLANT
+                  ,DM_DOCUMENT_D.CHANNEL
+                  ,NVL(ST_TB.QTY, 0) AS QTY
+                  ,NVL(ST_TB.OPENQTY, 0) AS ST_OPENQTY
+                  ,NVL(DP_TB.QTY, 0) AS DP_QTY
+                  ,(SELECT NVL(SUM(DP_TB.QTY), 0)
+                    FROM   DP_TB
+                    WHERE  DP_TB.STORERKEY = DM_DOCUMENT_D.STORERKEY
+                      AND  DP_TB.SKU = DM_DOCUMENT_D.SKU) AS TOTAL_DP_QTY
+                  ,NVL(PO_DP_TB.QTY, 0) AS PO_DP_QTY    
+                  ,NVL(DD_TB.WDQTY, 0) AS STO_ST
+                  ,(SELECT NVL(SUM(DD_TB.WDQTY), 0)
+                    FROM   DD_TB
+                    WHERE  DD_TB.SKU = DM_DOCUMENT_D.SKU) AS TOTAL_STO_ST                        
+                  ,SUM(DM_DOCUMENT_D.ORDERQTY + DM_DOCUMENT_D.ORDERADJUSTQTY - DM_DOCUMENT_D.PROCESSQTY) 
+                       OVER(PARTITION BY DM_DOCUMENT_D.DCCODE, DM_DOCUMENT_D.STORERKEY, DM_DOCUMENT_D.ORGANIZE, DM_DOCUMENT_D.AREA, DM_DOCUMENT_D.SKU) AS WD_QTY
+                  ,SUM(DM_DOCUMENT_D.ORDERQTY + DM_DOCUMENT_D.ORDERADJUSTQTY) 
+                       OVER(PARTITION BY DM_DOCUMENT_D.STORERKEY, DM_DOCUMENT_D.AREA, DM_DOCUMENT_D.SKU) AS TOTAL_ORDERQTY
+                  ,DM_DOCUMENT_D.PROCESSQTY AS QTYALLOCATED
+                  ,DM_DOCUMENT_D.WORKQTY AS QTYPICKED
+                  ,DM_DOCUMENT_D.UOM AS UOM
+                  ,DM_DOCUMENT_D.ORDERQTY + DM_DOCUMENT_D.ORDERADJUSTQTY AS ORDERQTY
+                  ,DM_DOCUMENT_D.REASONCODE AS REASONCODE
+                  ,NVL((
+                        SELECT MAX(BUYERKEY) KEEP (DENSE_RANK FIRST ORDER BY (
+                               CASE WHEN DCCODE = '2600' THEN 1
+                                    WHEN DCCODE = '2650' THEN 2
+                                    WHEN DCCODE = '2660' THEN 3
+                                    WHEN DCCODE = '2620' THEN 4
+                                    WHEN DCCODE = '2630' THEN 5
+                                    WHEN DCCODE = '2690' THEN 6
+                                    WHEN DCCODE = '2260' THEN 7
+                                    WHEN DCCODE = '2250' THEN 8
+                                    WHEN DCCODE = '2230' THEN 9
+                                    ELSE 10 END))
+                        FROM MS_PURCHASEMST
+                        WHERE SKU = DM_DOCUMENT_D.SKU
+                          AND STORERKEY = DM_DOCUMENT_D.STORERKEY
+                          AND EXISTS (
+                                SELECT 1 FROM CM_CODE
+                                WHERE CODELIST = 'BUYERKEY'
+                                  AND BASECODE = MS_PURCHASEMST.BUYERKEY
+                                  AND STORERKEY = 'FW00'
+                                  AND DEL_YN = 'N'
+                                  AND DATA3 = 'Y'
+                          )
+                  ), 'STD') AS BUYERKEY
+                  ,NVL(ST_TB.QTY_2600, 0) AS QTY_2600
+                  ,NVL(ST_TB.QTY_2620, 0) AS QTY_2620
+                  ,NVL(ST_TB.QTY_2630, 0) AS QTY_2630
+                  ,NVL(ST_TB.QTY_2650, 0) AS QTY_2650
+                  ,NVL(ST_TB.QTY_2660, 0) AS QTY_2660
+                  ,NVL(ST_TB.QTY_2230, 0) AS QTY_2230
+                  ,NVL(ST_TB.QTY_2260, 0) AS QTY_2260
+                  ,CASE WHEN DM_DOCUMENT_D.PROCPOSS_YN = 'R' THEN 'Y' ELSE '' END AS PROCPOSS_YN
+                  ,DM_DOCUMENT_D.WORKPROCESSCODE AS WORKPROCESSCODE
+            FROM  DM_DOCUMENT_D
+            JOIN  DM_DOCUMENT_H ON DM_DOCUMENT_H.DCCODE = DM_DOCUMENT_D.DCCODE
+                AND DM_DOCUMENT_H.STORERKEY = DM_DOCUMENT_D.STORERKEY
+                AND DM_DOCUMENT_H.ORGANIZE = DM_DOCUMENT_D.ORGANIZE
+                AND DM_DOCUMENT_H.DOCDT = DM_DOCUMENT_D.DOCDT
+                AND DM_DOCUMENT_H.DOCNO = DM_DOCUMENT_D.DOCNO
+                AND DM_DOCUMENT_H.DOCTYPE = DM_DOCUMENT_D.DOCTYPE
+                AND DM_DOCUMENT_H.STATUS <![CDATA[<]]> '90'
+                AND DM_DOCUMENT_H.DEL_YN = 'N'
+                AND DM_DOCUMENT_H.DELIVERYDATE = DM_DOCUMENT_D.DELIVERYDATE
+            LEFT OUTER JOIN ST_TB ON ST_TB.STORERKEY = DM_DOCUMENT_D.STORERKEY AND ST_TB.SKU = DM_DOCUMENT_D.SKU
+            LEFT OUTER JOIN PO_DP_TB ON PO_DP_TB.STORERKEY = DM_DOCUMENT_D.STORERKEY AND PO_DP_TB.SKU = DM_DOCUMENT_D.SKU
+            LEFT OUTER JOIN DP_TB ON DP_TB.STORERKEY = DM_DOCUMENT_D.STORERKEY
+                AND DP_TB.DCCODE = DM_DOCUMENT_D.DCCODE
+                AND DP_TB.ORGANIZE = DM_DOCUMENT_D.ORGANIZE
+                AND DP_TB.AREA = DM_DOCUMENT_D.AREA
+                AND DP_TB.SKU = DM_DOCUMENT_D.SKU
+            LEFT OUTER JOIN DD_TB ON DD_TB.DPDCCODE = DM_DOCUMENT_D.DCCODE 
+                AND DD_TB.DPPLANT = DM_DOCUMENT_D.PLANT
+                AND DD_TB.SKU = DM_DOCUMENT_D.SKU 
+            WHERE 1 = 1 
+              <if test='soDccode != null and soDccode.length > 0'>
+			  AND    DM_DOCUMENT_D.DCCODE IN
+			  <foreach collection="soDccode" item="dccodeItem" open="(" separator="," close=")">
+				#{dccodeItem}
+			  </foreach>
+			  </if>
+              AND DM_DOCUMENT_D.STORERKEY = 'FW00'
+              <!-- if test="gOrganize != null and gOrganize != '' and gOrganize != '%'">
+				AND DM_DOCUMENT_D.ORGANIZE = #{gOrganize}
+			  </if -->
+			  <!-- 상품 다중선택 -->
+			  <if test="multiSku != null and multiSku.length > 0">
+				AND DM_DOCUMENT_D.SKU IN
+				 <foreach collection="multiSku" item="item" separator="," close=")" open="(">
+			    	#{item}
+			    </foreach>
+			  </if>
+	      	  <!-- 수급담당 -->
+	          <if test="buyerkey != null and buyerkey.size() > 0 ">
+			    AND DM_DOCUMENT_D.SKU IN (
+					SELECT SKU
+		            FROM   MS_PURCHASEMST
+		            WHERE  1=1
+		            AND    MS_PURCHASEMST.STORERKEY = DM_DOCUMENT_D.STORERKEY
+		            AND    MS_PURCHASEMST.DCCODE 	= DM_DOCUMENT_D.DCCODE
+		            AND    MS_PURCHASEMST.SKU 		= DM_DOCUMENT_D.SKU
+		            AND    MS_PURCHASEMST.BUYERKEY IN 		        
+					<foreach collection="buyerkey" item="item" separator="," close=")" open="(">
+						#{item}	
+					</foreach> 
+                )
+	      	  </if>	
+              AND DM_DOCUMENT_D.DELIVERYDATE BETWEEN  #{slipdtFrom} AND #{slipdtTo}
+              AND DM_DOCUMENT_D.DOCTYPE = 'WD'
+              AND DM_DOCUMENT_D.CHANNEL = '1'
+              AND DM_DOCUMENT_D.STATUS <![CDATA[<]]> '90'
+              AND DM_DOCUMENT_D.ORDERQTY + DM_DOCUMENT_D.ORDERADJUSTQTY <![CDATA[>]]> 0
+              AND DM_DOCUMENT_D.DEL_YN = 'N'
+              AND DM_DOCUMENT_D.WORKPROCESSCODE IN ('SO', 'JASO')
+        ) WD
+        JOIN  MS_SKU ON MS_SKU.STORERKEY = WD.STORERKEY AND MS_SKU.SKU = WD.SKU AND MS_SKU.DEL_YN = 'N'
+        WHERE WD.QTY + WD.TOTAL_STO_ST + WD.TOTAL_DP_QTY <![CDATA[<]]> TOTAL_ORDERQTY
+		<!-- 고객 다중선택 -->
+		<if test="custkeyMulti != null and custkeyMulti != ''">
+			AND WD.TO_CUSTKEY IN
+			<foreach collection="custkeyMulti" item="item" separator="," close=")" open="(">
+				#{item}
+			</foreach>
+		</if>
+	    <!-- 문서번호 다중선택 -->
+	    <if test="docnoWdMulti != null and docnoWdMulti != ''">
+	    	AND WD.DOCNO IN
+    		 <foreach collection="docnoWdMulti" item="item" separator="," close=")" open="(">
+                #{item}
+        	</foreach>
+        </if>	             
+		<if test="reason != null and reason != ''">
+		  AND   WD.REASONCODE  =  #{reason} 
+		</if>
+		<!-- 배송그룹 공통조회 조건 -->
+		<if test="gMultiCourier != null and gMultiCourier != ''"> 
+		  AND    WD.COURIERCODE =  #{gMultiCourier} 
+		</if>		
+		<!-- 상품유형 다중 검색 -->
+		<if test="skutype != null and skutype.size() > 0">
+			AND MS_SKU.SKUTYPE IN
+			<foreach collection="skutype" item="item" separator="," close=")" open="(">
+			    #{item}
+			</foreach>
+        </if>
+		<if test="reference15 != null and reference15 != ''"> 
+		  AND MS_SKU.reference15            =  #{reference15}
+		</if>
+		<if test="quick == 6">
+           	AND nvl(WD.QTY,0) <![CDATA[<>]]> 0
+		</if>
+        ORDER BY WD.DELIVERYDATE ASC
+	</select>
+	
+	<select id="getMasterListTab2" parameterType="cjfw.wms.wd.dto.WdDistributePlanNewReqDto" resultType="cjfw.wms.wd.dto.WdDistributePlanNewResDto">
+		/* [WdDistributePlanService.sqlx][WdDistributePlanNewService.getMasterListTab2][미출예정확인New 상품별 조회][YeoSeungCheol][2025.11.06] */
+		WITH PO_DP_TB AS (
+            SELECT STORERKEY, SKU, SUM(ORDERQTY) AS QTY
+            FROM   DP_PURCHASE
+            WHERE  1 = 1
+            AND    STORERKEY = 'FW00'
+            <if test='poDccode != null and poDccode.length > 0'>
+		    AND    DCCODE IN
+		    <foreach collection="poDccode" item="dccodeItem" open="(" separator="," close=")">
+	            #{dccodeItem}
+	        </foreach>
+	        </if>
+            AND    REQUESTDT <![CDATA[>=]]> #{slipdtFrom} 
+            AND    REQUESTDT <![CDATA[<=]]> #{slipdtTo} 
+            GROUP BY STORERKEY, SKU
+            
+            UNION ALL
+            
+            SELECT  DM_DOCUMENT_D_DP.STORERKEY
+                   ,DM_DOCUMENT_D_DP.SKU
+                   ,NVL(SUM(DM_DOCUMENT_D_DP.ORDERQTY + DM_DOCUMENT_D_DP.OPENADJUSTQTY), 0) AS QTY
+            FROM   DM_DOCUMENT_D DM_DOCUMENT_D_DP
+            WHERE  1 = 1
+            AND    DM_DOCUMENT_D_DP.STORERKEY = 'FW00'
+            <if test='poDccode != null and poDccode.length > 0'>
+		    AND    DM_DOCUMENT_D_DP.DCCODE IN
+		    <foreach collection="poDccode" item="dccodeItem" open="(" separator="," close=")">
+	            #{dccodeItem}
+	        </foreach>
+	        </if>
+            AND    DELIVERYDATE <![CDATA[>=]]> #{slipdtFrom} 
+            AND    DELIVERYDATE <![CDATA[<=]]> #{slipdtTo} 
+            AND    DM_DOCUMENT_D_DP.DOCTYPE = 'DP'
+            AND    DM_DOCUMENT_D_DP.CHANNEL = '1'
+            AND    DM_DOCUMENT_D_DP.DEL_YN = 'N'
+            AND    (DM_DOCUMENT_D_DP.WORKPROCESSCODE = 'STO' AND EXISTS (
+                        SELECT 1
+                        FROM DM_DOCUMENT_H
+                        WHERE 1 = 1
+                          AND DM_DOCUMENT_H.STORERKEY = DM_DOCUMENT_D_DP.STORERKEY
+                          AND DM_DOCUMENT_H.DOCDT = DM_DOCUMENT_D_DP.DOCDT
+                          AND DM_DOCUMENT_H.DOCNO = DM_DOCUMENT_D_DP.DOCNO
+                          AND DM_DOCUMENT_H.DOCTYPE = 'WD'
+                          AND DM_DOCUMENT_H.DCCODE IN ('1000', '2170')
+                          AND DM_DOCUMENT_H.DELIVERYDATE = DM_DOCUMENT_D_DP.DELIVERYDATE
+                   ))
+            GROUP BY DM_DOCUMENT_D_DP.STORERKEY, DM_DOCUMENT_D_DP.SKU
+        )
+        ,DP_TB AS (
+            SELECT DM_DOCUMENT_D_DP.STORERKEY
+                  ,DM_DOCUMENT_D_DP.DCCODE
+                  ,DM_DOCUMENT_D_DP.ORGANIZE
+                  ,DM_DOCUMENT_D_DP.AREA
+                  ,DM_DOCUMENT_D_DP.SKU
+                  ,NVL(SUM(DM_DOCUMENT_D_DP.ORDERQTY + DM_DOCUMENT_D_DP.OPENADJUSTQTY - DM_DOCUMENT_D_DP.CONFIRMQTY), 0) AS QTY
+            FROM   DM_DOCUMENT_D DM_DOCUMENT_D_DP 
+            WHERE  1 = 1
+            AND    DM_DOCUMENT_D_DP.STORERKEY = 'FW00'
+            <if test='poDccode != null and poDccode.length > 0'>
+		    AND    DM_DOCUMENT_D_DP.DCCODE IN
+		    <foreach collection="poDccode" item="dccodeItem" open="(" separator="," close=")">
+	            #{dccodeItem}
+	        </foreach>
+	        </if>
+            AND    DM_DOCUMENT_D_DP.DELIVERYDATE <![CDATA[>=]]> #{slipdtFrom} 
+            AND    DM_DOCUMENT_D_DP.DELIVERYDATE <![CDATA[<=]]> #{slipdtTo} 
+            AND    DM_DOCUMENT_D_DP.STATUS <![CDATA[<]]> '90'
+            AND    DM_DOCUMENT_D_DP.DOCTYPE = 'DP'
+            AND    DM_DOCUMENT_D_DP.CHANNEL = '1'
+            AND    DM_DOCUMENT_D_DP.DEL_YN = 'N'
+            AND    (
+                    DM_DOCUMENT_D_DP.WORKPROCESSCODE != 'STO' 
+                    OR 
+                    (DM_DOCUMENT_D_DP.WORKPROCESSCODE = 'STO' AND EXISTS (
+                        SELECT 1 
+                        FROM   DM_DOCUMENT_H 
+                        WHERE  1=1 
+                          AND  DM_DOCUMENT_H.STORERKEY = DM_DOCUMENT_D_DP.STORERKEY
+                          AND  DM_DOCUMENT_H.DOCDT      = DM_DOCUMENT_D_DP.DOCDT
+                          AND  DM_DOCUMENT_H.DOCNO      = DM_DOCUMENT_D_DP.DOCNO
+                          AND  DM_DOCUMENT_H.DOCTYPE    = 'WD'
+                          AND  DM_DOCUMENT_H.STATUS     = '90'
+                          AND  DM_DOCUMENT_H.DCCODE IN ('1000', '2170')
+                          AND  DM_DOCUMENT_H.DELIVERYDATE = DM_DOCUMENT_D_DP.DELIVERYDATE
+                    ))
+            )
+            AND    DM_DOCUMENT_D_DP.ORDERQTY + DM_DOCUMENT_D_DP.OPENADJUSTQTY <![CDATA[>]]> 0
+            GROUP BY DM_DOCUMENT_D_DP.STORERKEY
+                    ,DM_DOCUMENT_D_DP.DCCODE
+                    ,DM_DOCUMENT_D_DP.ORGANIZE
+                    ,DM_DOCUMENT_D_DP.AREA
+                    ,DM_DOCUMENT_D_DP.SKU
+        )
+        ,ST_TB AS (
+            SELECT /*+ NO_PUSH_PRED */ 
+                   ST_STOCK.STORERKEY    AS  STORERKEY
+                  ,ST_STOCK.SKU          AS  SKU
+                  ,SUM(CASE WHEN
+                            <choose>
+								<when test='poDccode != null and poDccode.length > 0'>
+									ST_STOCK.DCCODE IN
+									<foreach collection="poDccode" item="dccodeItem" open="(" separator="," close=")">
+									   #{dccodeItem}
+									</foreach> 
+								</when>
+								<otherwise>
+									1 = 1
+								</otherwise>
+							</choose>
+                            THEN ST_STOCK.QTY END) AS QTY
+                  ,SUM(CASE WHEN 
+                  			<choose>
+								<when test='poDccode != null and poDccode.length > 0'>
+									ST_STOCK.DCCODE IN
+									<foreach collection="poDccode" item="dccodeItem" open="(" separator="," close=")">
+									   #{dccodeItem}
+									</foreach> 
+								</when>
+								<otherwise>
+									1 = 1
+								</otherwise>
+							</choose>
+                            THEN
+                                CASE WHEN ST_STOCK.QTYALLOCATED = 0 
+                                     THEN ST_STOCK.QTY - ST_STOCK.QTYPICKED
+                                     ELSE ST_STOCK.QTY - ST_STOCK.QTYALLOCATED
+                                END
+                       END) AS OPENQTY
+                  ,SUM(CASE WHEN ST_STOCK.DCCODE = '2600' THEN ST_STOCK.QTY ELSE 0 END) AS QTY_2600
+                  ,SUM(CASE WHEN ST_STOCK.DCCODE = '2620' THEN ST_STOCK.QTY ELSE 0 END) AS QTY_2620
+                  ,SUM(CASE WHEN ST_STOCK.DCCODE = '2630' THEN ST_STOCK.QTY ELSE 0 END) AS QTY_2630
+                  ,SUM(CASE WHEN ST_STOCK.DCCODE = '2650' THEN ST_STOCK.QTY ELSE 0 END) AS QTY_2650
+                  ,SUM(CASE WHEN ST_STOCK.DCCODE = '2660' THEN ST_STOCK.QTY ELSE 0 END) AS QTY_2660
+                  ,SUM(CASE WHEN ST_STOCK.DCCODE = '2230' THEN ST_STOCK.QTY ELSE 0 END) AS QTY_2230
+                  ,SUM(CASE WHEN ST_STOCK.DCCODE = '2260' THEN ST_STOCK.QTY ELSE 0 END) AS QTY_2260
+            FROM  ST_STOCK
+            JOIN  MS_SKU ON MS_SKU.STORERKEY = ST_STOCK.STORERKEY AND MS_SKU.SKU = ST_STOCK.SKU
+            JOIN  MS_LOCATION ON MS_LOCATION.DCCODE = ST_STOCK.DCCODE AND MS_LOCATION.LOC = ST_STOCK.LOC
+            AND   MS_LOCATION.LOCTYPE IN ('STAGE','PICK','KEEP','CROSS','FIRSTOUT','LONGSTAY','CANCEL')
+            AND   MS_LOCATION.LOCCATEGORY IN ('RACK','YARD','AUTO')
+            AND   MS_LOCATION.LOCFLAG = 'GOOD' 
+            AND   MS_LOCATION.OUT_YN = 'Y'    
+            AND   MS_LOCATION.DEL_YN = 'N'
+            AND   MS_LOCATION.STOCKTYPE = 'GOOD' 
+            JOIN  CM_LOT ON CM_LOT.STORERKEY = ST_STOCK.STORERKEY AND CM_LOT.LOT = ST_STOCK.LOT
+            AND   'TRUE' = CASE 
+                             WHEN CM_LOT.LOTTABLE01 = 'STD' OR MS_SKU.DURATIONTYPE = 'N' THEN 'TRUE'
+                             WHEN MS_SKU.DURATIONTYPE = '1' AND FN_ISDATE(CM_LOT.LOTTABLE01) = 1
+                                  AND TO_DATE(CM_LOT.LOTTABLE01,'YYYYMMDD') <![CDATA[<]]> TRUNC(SYSDATE) THEN 'FALSE'
+                             WHEN MS_SKU.DURATIONTYPE IN ('2','3') AND FN_ISDATE(CM_LOT.LOTTABLE01) = 1
+                                  AND TO_DATE(CM_LOT.LOTTABLE01,'YYYYMMDD') + MS_SKU.DURATION - 1 <![CDATA[<]]> TRUNC(SYSDATE) THEN 'FALSE'
+                             ELSE 'TRUE'
+                           END
+            WHERE ST_STOCK.QTY <![CDATA[>]]> 0
+            AND   ST_STOCK.STORERKEY = 'FW00'
+            GROUP BY ST_STOCK.STORERKEY, ST_STOCK.SKU    
+        )
+        ,DD_TB AS (
+            SELECT DPDCCODE, DPPLANT, SKU, SUM(WDQTY) AS WDQTY
+            FROM (
+                SELECT B.DOCNO, B.DOCLINE, B.SKU,
+                       MAX(B.WDQTY) AS WDQTY,
+                       MAX(B.WDDCCODE) AS WDDCCODE,
+                       MAX(B.DPQTY) AS DPQTY,
+                       MAX(B.DPDCCODE) AS DPDCCODE,
+                       MAX(B.DPPLANT) AS DPPLANT
+                FROM (
+                    SELECT DP.DOCNO, DP.DOCLINE, DP.SKU,
+                           WD.CONFIRMQTY AS WDQTY,
+                           MAX(WD.DCCODE) AS WDDCCODE,
+                           DP.CONFIRMQTY AS DPQTY,
+                           MAX(DP.DCCODE) AS DPDCCODE,
+                           MAX(DP.PLANT)  AS DPPLANT  
+                    FROM DM_DOCUMENT_D DP
+                    LEFT JOIN DM_DOCUMENT_D WD ON WD.DOCTYPE = 'WD'
+                        AND DP.DOCNO = WD.DOCNO
+                        AND DP.DOCLINE = WD.DOCLINE
+                        AND DP.DELIVERYDATE = WD.DELIVERYDATE
+                        AND WD.DCCODE NOT IN ('1000', '2170')
+                    WHERE DP.STORERKEY = 'FW00'
+                      AND DP.DELIVERYDATE BETWEEN #{slipdtFrom} AND #{slipdtTo} 
+                      AND DP.DOCTYPE IN ('DP')
+                      AND DP.DEL_YN = 'N'
+                      AND DP.WORKPROCESSCODE = 'STO'
+                      <if test='soDccode != null and soDccode.length > 0'>
+				      AND    DP.DCCODE IN
+				      <foreach collection="soDccode" item="dccodeItem" open="(" separator="," close=")">
+			            #{dccodeItem}
+			          </foreach>
+			          </if>
+                    GROUP BY DP.DOCNO, DP.DOCLINE, DP.SKU, WD.CONFIRMQTY, DP.CONFIRMQTY
+                ) B
+                GROUP BY B.DOCNO, B.DOCLINE, B.SKU
+            ) C
+            WHERE C.WDQTY <![CDATA[<>]]> C.DPQTY 
+            GROUP BY DPDCCODE, DPPLANT, SKU 
+        ) 
+        SELECT  WD.DELIVERYDATE AS SLIPDT
+               ,WD.DOCNO
+               ,WD.TO_CUSTKEY
+               ,WD.TO_CUSTNAME
+               ,WD.DOCLINE
+               ,WD.SKU
+               ,MS_SKU.DESCRIPTION AS SKUNAME
+               ,'[' || WD.PLANT || ']' || (SELECT FN_DESCR_PLANT(WD.PLANT) FROM DUAL) AS PLANT_DESCR
+               ,(SELECT FN_CODEDESCR(WD.STORERKEY, 'PUTAWAYTYPE', WD.CHANNEL) FROM DUAL) AS CHANNEL
+               ,WD.QTY
+               ,WD.ST_OPENQTY AS ST_OPENQTY
+               ,WD.QTY + WD.TOTAL_STO_ST + WD.TOTAL_DP_QTY - TOTAL_ORDERQTY AS SHORTAGEQTY2
+               ,WD.TOTAL_ORDERQTY AS TOTAL_ORDERQTY      
+               ,WD.ORDERQTY
+               ,WD.DP_QTY AS DP_QTY
+               ,WD.TOTAL_DP_QTY AS TOTAL_DP_QTY
+               ,WD.STO_ST AS STO_ST
+               ,WD.TOTAL_STO_ST AS TOTAL_STO_ST
+               ,WD.QTYALLOCATED
+               ,WD.QTYPICKED
+               ,WD.UOM
+               ,CASE WHEN (SELECT COUNT(1)
+                           FROM MS_SKUDCSET
+                           WHERE MS_SKUDCSET.DCCODE = WD.DCCODE
+                             AND MS_SKUDCSET.STORERKEY = WD.STORERKEY
+                             AND MS_SKUDCSET.SKU = WD.SKU
+                             AND MS_SKUDCSET.DEL_YN = 'N'
+                             AND MS_SKUDCSET.CROSSDOCKTYPE = 'CROSS') <![CDATA[>]]> 0 THEN 'CROSS'
+                     ELSE ''
+                END AS CROSSDOCKTYPE
+               ,(SELECT FN_CODEDESCR(WD.STORERKEY, 'skutype', MS_SKU.SKUTYPE) FROM DUAL) AS SKUTYPE
+               ,MS_SKU.REFERENCE15
+               ,WD.BUYERKEY AS BUYERKEY
+               ,FN_DESCR_CODE(WD.STORERKEY, 'BUYERKEY', WD.BUYERKEY) AS BUYERNAME
+               ,PO_DP_QTY
+               ,WD.QTY_2600
+               ,WD.QTY_2620
+               ,WD.QTY_2630
+               ,WD.QTY_2650
+               ,WD.QTY_2660
+               ,WD.QTY_2230
+               ,WD.QTY_2260
+               ,WD.PROCPOSS_YN AS PROCPOSS_YN
+        FROM (
+            SELECT /*+ NO_PUSH_PRED(PO_DP_TB) */ 
+                   DM_DOCUMENT_D.DELIVERYDATE
+                  ,DM_DOCUMENT_H.DCCODE
+                  ,DM_DOCUMENT_H.DOCNO
+                  ,DM_DOCUMENT_H.STORERKEY
+                  ,DM_DOCUMENT_H.TO_CUSTTYPE
+                  ,DM_DOCUMENT_H.TO_CUSTKEY
+                  ,DM_DOCUMENT_H.TO_CUSTNAME
+                  ,DM_DOCUMENT_D.DOCLINE
+                  ,DM_DOCUMENT_D.SKU
+                  ,DM_DOCUMENT_D.PLANT
+                  ,DM_DOCUMENT_D.CHANNEL
+                  ,NVL(ST_TB.QTY, 0) AS QTY
+                  ,NVL(ST_TB.OPENQTY, 0) AS ST_OPENQTY
+                  ,NVL(DP_TB.QTY, 0) AS DP_QTY
+                  ,(SELECT NVL(SUM(DP_TB.QTY), 0)
+                    FROM   DP_TB
+                    WHERE  DP_TB.STORERKEY = DM_DOCUMENT_D.STORERKEY
+                      AND  DP_TB.SKU = DM_DOCUMENT_D.SKU) AS TOTAL_DP_QTY
+                  ,NVL(PO_DP_TB.QTY, 0) AS PO_DP_QTY    
+                  ,NVL(DD_TB.WDQTY, 0) AS STO_ST
+                  ,(SELECT NVL(SUM(DD_TB.WDQTY), 0)
+                    FROM   DD_TB
+                    WHERE  DD_TB.SKU = DM_DOCUMENT_D.SKU) AS TOTAL_STO_ST                        
+                  ,SUM(DM_DOCUMENT_D.ORDERQTY + DM_DOCUMENT_D.ORDERADJUSTQTY - DM_DOCUMENT_D.PROCESSQTY) 
+                       OVER(PARTITION BY DM_DOCUMENT_D.DCCODE, DM_DOCUMENT_D.STORERKEY, DM_DOCUMENT_D.ORGANIZE, DM_DOCUMENT_D.AREA, DM_DOCUMENT_D.SKU) AS WD_QTY
+                  ,SUM(DM_DOCUMENT_D.ORDERQTY + DM_DOCUMENT_D.ORDERADJUSTQTY) 
+                       OVER(PARTITION BY DM_DOCUMENT_D.STORERKEY, DM_DOCUMENT_D.AREA, DM_DOCUMENT_D.SKU) AS TOTAL_ORDERQTY
+                  ,DM_DOCUMENT_D.PROCESSQTY AS QTYALLOCATED
+                  ,DM_DOCUMENT_D.WORKQTY AS QTYPICKED
+                  ,DM_DOCUMENT_D.UOM AS UOM
+                  ,DM_DOCUMENT_D.ORDERQTY + DM_DOCUMENT_D.ORDERADJUSTQTY AS ORDERQTY
+                  ,DM_DOCUMENT_D.REASONCODE AS REASONCODE
+                  ,NVL((
+                        SELECT MAX(BUYERKEY) KEEP (DENSE_RANK FIRST ORDER BY (
+                               CASE WHEN DCCODE = '2600' THEN 1
+                                    WHEN DCCODE = '2650' THEN 2
+                                    WHEN DCCODE = '2660' THEN 3
+                                    WHEN DCCODE = '2620' THEN 4
+                                    WHEN DCCODE = '2630' THEN 5
+                                    WHEN DCCODE = '2690' THEN 6
+                                    WHEN DCCODE = '2260' THEN 7
+                                    WHEN DCCODE = '2250' THEN 8
+                                    WHEN DCCODE = '2230' THEN 9
+                                    ELSE 10 END))
+                        FROM MS_PURCHASEMST
+                        WHERE SKU = DM_DOCUMENT_D.SKU
+                          AND STORERKEY = DM_DOCUMENT_D.STORERKEY
+                          AND EXISTS (
+                                SELECT 1 FROM CM_CODE
+                                WHERE CODELIST = 'BUYERKEY'
+                                  AND BASECODE = MS_PURCHASEMST.BUYERKEY
+                                  AND STORERKEY = 'FW00'
+                                  AND DEL_YN = 'N'
+                                  AND DATA3 = 'Y'
+                          )
+                  ), 'STD') AS BUYERKEY
+                  ,NVL(ST_TB.QTY_2600, 0) AS QTY_2600
+                  ,NVL(ST_TB.QTY_2620, 0) AS QTY_2620
+                  ,NVL(ST_TB.QTY_2630, 0) AS QTY_2630
+                  ,NVL(ST_TB.QTY_2650, 0) AS QTY_2650
+                  ,NVL(ST_TB.QTY_2660, 0) AS QTY_2660
+                  ,NVL(ST_TB.QTY_2230, 0) AS QTY_2230
+                  ,NVL(ST_TB.QTY_2260, 0) AS QTY_2260
+                  ,CASE WHEN DM_DOCUMENT_D.PROCPOSS_YN = 'R' THEN 'Y' ELSE '' END AS PROCPOSS_YN
+                  ,DM_DOCUMENT_D.WORKPROCESSCODE AS WORKPROCESSCODE
+            FROM  DM_DOCUMENT_D
+            JOIN  DM_DOCUMENT_H ON DM_DOCUMENT_H.DCCODE = DM_DOCUMENT_D.DCCODE
+                AND DM_DOCUMENT_H.STORERKEY = DM_DOCUMENT_D.STORERKEY
+                AND DM_DOCUMENT_H.ORGANIZE = DM_DOCUMENT_D.ORGANIZE
+                AND DM_DOCUMENT_H.DOCDT = DM_DOCUMENT_D.DOCDT
+                AND DM_DOCUMENT_H.DOCNO = DM_DOCUMENT_D.DOCNO
+                AND DM_DOCUMENT_H.DOCTYPE = DM_DOCUMENT_D.DOCTYPE
+                AND DM_DOCUMENT_H.DELIVERYDATE = DM_DOCUMENT_D.DELIVERYDATE
+                AND DM_DOCUMENT_H.STATUS <![CDATA[<]]> '90'
+                AND DM_DOCUMENT_H.DEL_YN = 'N'
+            LEFT OUTER JOIN ST_TB ON ST_TB.STORERKEY = DM_DOCUMENT_D.STORERKEY AND ST_TB.SKU = DM_DOCUMENT_D.SKU
+            LEFT OUTER JOIN PO_DP_TB ON PO_DP_TB.STORERKEY = DM_DOCUMENT_D.STORERKEY AND PO_DP_TB.SKU = DM_DOCUMENT_D.SKU
+            LEFT OUTER JOIN DP_TB ON DP_TB.STORERKEY = DM_DOCUMENT_D.STORERKEY
+                AND DP_TB.DCCODE = DM_DOCUMENT_D.DCCODE
+                AND DP_TB.ORGANIZE = DM_DOCUMENT_D.ORGANIZE
+                AND DP_TB.AREA = DM_DOCUMENT_D.AREA
+                AND DP_TB.SKU = DM_DOCUMENT_D.SKU
+            LEFT OUTER JOIN DD_TB ON DD_TB.DPDCCODE = DM_DOCUMENT_D.DCCODE 
+                AND DD_TB.DPPLANT = DM_DOCUMENT_D.PLANT
+                AND DD_TB.SKU = DM_DOCUMENT_D.SKU 
+            WHERE 1 = 1 
+              <if test='soDccode != null and soDccode.length > 0'>
+		      AND    DM_DOCUMENT_D.DCCODE IN
+		      <foreach collection="soDccode" item="dccodeItem" open="(" separator="," close=")">
+	            #{dccodeItem}
+	          </foreach>
+	          </if>
+              AND DM_DOCUMENT_D.STORERKEY = 'FW00'
+              AND DM_DOCUMENT_D.DELIVERYDATE BETWEEN #{slipdtFrom} AND #{slipdtTo} 
+              AND DM_DOCUMENT_D.DOCTYPE = 'WD'
+              AND DM_DOCUMENT_D.CHANNEL = '1'
+              AND DM_DOCUMENT_D.STATUS <![CDATA[<]]> '90'
+              AND DM_DOCUMENT_D.ORDERQTY + DM_DOCUMENT_D.ORDERADJUSTQTY <![CDATA[>]]> 0
+              AND DM_DOCUMENT_D.DEL_YN = 'N'
+              AND DM_DOCUMENT_D.WORKPROCESSCODE IN ('SO', 'JASO')
+        ) WD
+        JOIN  MS_SKU ON MS_SKU.STORERKEY = WD.STORERKEY AND MS_SKU.SKU = WD.SKU AND MS_SKU.DEL_YN = 'N'
+        WHERE 1 = 1
+        <!-- 고객 다중선택 -->
+		<if test="custkeyMulti != null and custkeyMulti != ''">
+			AND WD.TO_CUSTKEY IN
+			 <foreach collection="custkeyMulti" item="item" separator="," close=")" open="(">
+				#{item}
+			</foreach>
+		</if>
+	    <!-- 문서번호 다중선택 -->
+	    <if test="docnoWdMulti != null and docnoWdMulti != ''">
+	    	AND WD.DOCNO IN
+    		 <foreach collection="docnoWdMulti" item="item" separator="," close=")" open="(">
+                #{item}
+        	</foreach>
+        </if>          
+		<if test="reason != null and reason != ''">  AND   WD.REASONCODE  =  #{reason} </if>
+		<!-- 배송그룹 공통조회 조건 -->
+		<if test="gMultiCourier != null and gMultiCourier != ''"> AND    WD.COURIERCODE =  #{gMultiCourier} </if>
+		<!-- 상품유형 다중 검색 -->
+		<if test="skutype != null and skutype.size() > 0">
+			AND MS_SKU.skutype IN
+			<foreach collection="skutype" item="item" separator="," close=")" open="(">
+			    #{item}
+			</foreach>
+        </if>
+        <if test="skutype == null or skutype == ''">
+            and 1=1
+        </if>
+		<if test="reference15 != null and reference15 != ''"> AND MS_SKU.reference15            =  #{reference15}   </if>
+		<if test="quick == 6">
+           	AND CASE WHEN WD.PLANT = '1000' AND MS_SKU.skutype IN('20','30') THEN 'Y'
+                               ELSE 'N' END = 'N' 
+		</if>
+        ORDER BY WD.DELIVERYDATE ASC
+	</select>
+
+	<select id="getMasterListTab2_old" parameterType="cjfw.wms.wd.dto.WdDistributePlanNewReqDto" resultType="cjfw.wms.wd.dto.WdDistributePlanNewResDto">
+		/* [WdDistributePlanService.sqlx][WdDistributePlanNewService.getMasterListTab2][미출예정확인New 상품별 조회][YeoSeungCheol][2025.11.06] */
+		WITH PO_DC_LST AS (
+		    SELECT DISTINCT COLUMN_VALUE AS DCCODE 
+		    <if test="poDccode != null and poDccode != ''"> 
+		    FROM   TABLE(FN_SPLIT_ARRAY(#{poDccode},','))
+			</if>		    
+			<if test="poDccode == null or poDccode == ''">
+			FROM   TABLE(FN_SPLIT_ARRAY(#{gDccode}, ','))
+			</if>
+		)
+		,SO_DC_LST AS (
+		    SELECT DISTINCT COLUMN_VALUE AS DCCODE 
+		    <if test="soDccode != null and soDccode != ''"> 
+		    FROM   TABLE(FN_SPLIT_ARRAY(#{soDccode},','))
+			</if>		    
+			<if test="soDccode == null or soDccode == ''">
+			FROM   TABLE(FN_SPLIT_ARRAY(#{gDccode}, ','))
+			</if>
+		)
+		,PO_DP_TB AS (
+		    SELECT STORERKEY, SKU, SUM(ORDERQTY) AS QTY
+		    FROM   DP_PURCHASE
+		    WHERE  1 = 1
+		    AND    STORERKEY = 'FW00'
+		    AND    DCCODE IN (SELECT PO_DC_LST.DCCODE FROM PO_DC_LST)
+		    AND    REQUESTDT &gt;= #{slipdtFrom}
+			<if test="chkyn == 1">
+			    AND    REQUESTDT &lt;= #{slipdtTo}
+		    </if>
+		    <if test="chkyn == 2">
+			    AND    REQUESTDT &lt;= to_char(to_date(#{slipdtTo},'yyyymmdd')-1 , 'yyyymmdd')
+		    </if>
+		    <if test="chkyn == 4">
+			    AND    1=2
+		    </if>
+		    GROUP BY STORERKEY, SKU
+		    UNION ALL
+		    SELECT  DM_DOCUMENT_D_DP.STORERKEY
+		           ,DM_DOCUMENT_D_DP.SKU
+		           ,NVL(SUM(DM_DOCUMENT_D_DP.ORDERQTY + DM_DOCUMENT_D_DP.OPENADJUSTQTY ),0) AS QTY
+		    FROM   DM_DOCUMENT_D DM_DOCUMENT_D_DP
+		    WHERE  1 = 1
+		    AND    DM_DOCUMENT_D_DP.STORERKEY = 'FW00'
+		    AND    DM_DOCUMENT_D_DP.DCCODE IN (SELECT PO_DC_LST.DCCODE FROM PO_DC_LST)
+		    AND    DELIVERYDATE &gt;= #{slipdtFrom}
+			<if test="chkyn == 1">
+			    AND    DELIVERYDATE &lt;= #{slipdtTo}
+		    </if>
+		    <if test="chkyn == 2">
+			    AND    DELIVERYDATE &lt;= to_char(to_date(#{slipdtTo},'yyyymmdd')-1 , 'yyyymmdd')
+		    </if>
+		    <if test="chkyn == 4">
+			    AND    1=2
+		    </if>
+		    AND DM_DOCUMENT_D_DP.DOCTYPE = 'DP'
+		    AND DM_DOCUMENT_D_DP.CHANNEL = '1'
+		    AND DM_DOCUMENT_D_DP.DEL_YN = 'N'
+		    AND (DM_DOCUMENT_D_DP.WORKPROCESSCODE = 'STO' AND EXISTS
+		           (
+		            SELECT 1
+		             FROM DM_DOCUMENT_H
+		            WHERE 1 = 1
+		              AND DM_DOCUMENT_H.STORERKEY = DM_DOCUMENT_D_DP.STORERKEY
+		              AND DM_DOCUMENT_H.DOCDT = DM_DOCUMENT_D_DP.DOCDT
+		              AND DM_DOCUMENT_H.DOCNO = DM_DOCUMENT_D_DP.DOCNO
+		              AND DM_DOCUMENT_H.DOCTYPE = 'WD'
+		              AND DM_DOCUMENT_H.DCCODE IN ('1000', '2170')
+		           )
+		         )
+		    GROUP BY DM_DOCUMENT_D_DP.STORERKEY,
+		             DM_DOCUMENT_D_DP.SKU
+		)
+		,DP_TB AS (
+		    SELECT DM_DOCUMENT_D_DP.STORERKEY
+		    	  ,DM_DOCUMENT_D_DP.DCCODE
+		    	  ,DM_DOCUMENT_D_DP.ORGANIZE
+		          ,DM_DOCUMENT_D_DP.AREA
+		          ,DM_DOCUMENT_D_DP.SKU
+		          ,NVL(SUM(DM_DOCUMENT_D_DP.ORDERQTY+DM_DOCUMENT_D_DP.OPENADJUSTQTY - DM_DOCUMENT_D_DP.CONFIRMQTY), 0) AS QTY
+		    FROM   DM_DOCUMENT_D DM_DOCUMENT_D_DP 
+		    WHERE  1 = 1
+		    AND    DM_DOCUMENT_D_DP.STORERKEY = 'FW00'
+		    AND    DM_DOCUMENT_D_DP.DCCODE    IN (SELECT PO_DC_LST.DCCODE
+		   								      	  FROM   PO_DC_LST)
+		    AND    DM_DOCUMENT_D_DP.DELIVERYDATE &gt;= #{slipdtFrom}
+	    <if test="chkyn == 1">
+		    AND    DM_DOCUMENT_D_DP.DELIVERYDATE &lt;= #{slipdtTo}
+	    </if>
+	    <if test="chkyn == 2">
+		    AND    DM_DOCUMENT_D_DP.DELIVERYDATE &lt;= to_char(to_date(#{slipdtTo},'yyyymmdd')-1 , 'yyyymmdd')
+	    </if>
+	    <if test="chkyn == 4">
+		    AND    1=2
+	    </if>
+		    AND    DM_DOCUMENT_D_DP.STATUS        &lt; '90'
+		    AND    DM_DOCUMENT_D_DP.DOCTYPE       = 'DP'
+		    AND    DM_DOCUMENT_D_DP.CHANNEL       = '1'
+		    AND    DM_DOCUMENT_D_DP.DEL_YN        = 'N'
+		    AND	   (
+		    		DM_DOCUMENT_D_DP.WORKPROCESSCODE != 'STO' 
+		    		OR 
+		    		(		DM_DOCUMENT_D_DP.WORKPROCESSCODE = 'STO' AND EXISTS 
+		    					(
+		    						SELECT 1 
+		    						FROM   DM_DOCUMENT_H 
+		    						WHERE  1=1 
+                            		AND    DM_DOCUMENT_H.STORERKEY = DM_DOCUMENT_D_DP.STORERKEY
+                            		AND    DM_DOCUMENT_H.DOCDT     = DM_DOCUMENT_D_DP.DOCDT
+                            		AND    DM_DOCUMENT_H.DOCNO     = DM_DOCUMENT_D_DP.DOCNO
+                            		AND    DM_DOCUMENT_H.DOCTYPE   = 'WD'
+                            		AND	   DM_DOCUMENT_H.STATUS    = '90'
+                            		AND	   DM_DOCUMENT_H.DCCODE IN ('1000', '2170')
+                            	)
+                            )
+		    	    )
+		    AND    DM_DOCUMENT_D_DP.ORDERQTY+DM_DOCUMENT_D_DP.OPENADJUSTQTY &gt; 0
+		    GROUP BY DM_DOCUMENT_D_DP.STORERKEY
+			    	,DM_DOCUMENT_D_DP.DCCODE
+			    	,DM_DOCUMENT_D_DP.ORGANIZE
+		            ,DM_DOCUMENT_D_DP.AREA
+		            ,DM_DOCUMENT_D_DP.SKU
+		)
+		,ST_TB AS (
+		    SELECT ST_STOCK.STORERKEY    AS  STORERKEY
+		          ,ST_STOCK.SKU          AS  SKU
+		          ,SUM(CASE
+			             WHEN ST_STOCK.DCCODE IN (SELECT PO_DC_LST.DCCODE FROM PO_DC_LST) 
+			             THEN ST_STOCK.QTY
+			           END) AS QTY
+		          ,SUM(CASE
+		                 WHEN ST_STOCK.DCCODE IN (SELECT PO_DC_LST.DCCODE FROM PO_DC_LST) THEN
+		                 CASE
+		                    WHEN ST_STOCK.QTYALLOCATED = 0 
+		                    THEN ST_STOCK.QTY - ST_STOCK.QTYPICKED
+		                    ELSE ST_STOCK.QTY - ST_STOCK.QTYALLOCATED
+		                 END
+		               END) AS OPENQTY
+       			  ,SUM(CASE WHEN ST_STOCK.DCCODE = '2600' THEN ST_STOCK.QTY ELSE 0 END) AS QTY_2600
+       			  ,SUM(CASE WHEN ST_STOCK.DCCODE = '2620' THEN ST_STOCK.QTY ELSE 0 END) AS QTY_2620
+       			  ,SUM(CASE WHEN ST_STOCK.DCCODE = '2630' THEN ST_STOCK.QTY ELSE 0 END) AS QTY_2630
+       			  ,SUM(CASE WHEN ST_STOCK.DCCODE = '2650' THEN ST_STOCK.QTY ELSE 0 END) AS QTY_2650
+       			  ,SUM(CASE WHEN ST_STOCK.DCCODE = '2660' THEN ST_STOCK.QTY ELSE 0 END) AS QTY_2660
+       			  ,SUM(CASE WHEN ST_STOCK.DCCODE = '2230' THEN ST_STOCK.QTY ELSE 0 END) AS QTY_2230
+                  ,SUM(CASE WHEN ST_STOCK.DCCODE = '2260' THEN ST_STOCK.QTY ELSE 0 END) AS QTY_2260
+		    FROM  ST_STOCK
+		    JOIN   MS_SKU
+		    ON     MS_SKU.STORERKEY        = ST_STOCK.STORERKEY
+		    AND    MS_SKU.SKU              = ST_STOCK.SKU
+		    JOIN   MS_LOCATION
+		    ON     MS_LOCATION.DCCODE      = ST_STOCK.DCCODE
+		    AND    MS_LOCATION.LOC         = ST_STOCK.LOC
+		    AND    MS_LOCATION.LOCTYPE     IN ('STAGE','PICK','KEEP','CROSS','FIRSTOUT','LONGSTAY','CANCEL')
+		    AND    MS_LOCATION.LOCCATEGORY IN ('RACK','YARD','AUTO')
+		    AND    MS_LOCATION.LOCFLAG     = 'GOOD' 
+		    AND    MS_LOCATION.OUT_YN      = 'Y'    
+		    AND    MS_LOCATION.DEL_YN      = 'N'
+		    AND    MS_LOCATION.STOCKTYPE   = 'GOOD' 
+		    JOIN   CM_LOT
+		    ON     CM_LOT.STORERKEY        = ST_STOCK.STORERKEY
+		    AND    CM_LOT.LOT              = ST_STOCK.LOT
+		    AND    'TRUE' = CASE 
+		                         WHEN CM_LOT.LOTTABLE01   = 'STD' OR  MS_SKU.DURATIONTYPE = 'N'
+		                         THEN 'TRUE'
+		                         WHEN     MS_SKU.DURATIONTYPE = '1' AND FN_ISDATE(CM_LOT.LOTTABLE01) = 1
+		                              AND TO_DATE(CM_LOT.LOTTABLE01,'YYYYMMDD') &lt; TRUNC(SYSDATE)
+		                         THEN 'FALSE'
+		                         WHEN     MS_SKU.DURATIONTYPE IN ('2','3') AND FN_ISDATE(CM_LOT.LOTTABLE01) = 1
+		                              AND TO_DATE(CM_LOT.LOTTABLE01,'YYYYMMDD') + MS_SKU.DURATION - 1 &lt; TRUNC(SYSDATE)
+		                         THEN 'FALSE'
+		                         ELSE 'TRUE'
+		                    END
+		    WHERE ST_STOCK.QTY &gt; 0
+		    AND   ST_STOCK.STORERKEY = 'FW00'
+		    GROUP BY ST_STOCK.STORERKEY
+		             ,ST_STOCK.SKU    
+		)
+		,DD_TB AS (    
+			SELECT DPDCCODE, DPPLANT, SKU, SUM(WDQTY) WDQTY
+		    FROM (SELECT B.DOCNO,
+		                 B.DOCLINE,
+		                 B.SKU,
+		                 MAX(B.WDQTY) AS WDQTY,
+		                 MAX(B.WDDCCODE) AS WDDCCODE,
+		                 MAX(B.DPQTY) AS DPQTY,
+		                 MAX(B.DPDCCODE) AS DPDCCODE,
+		                 MAX(B.DPPLANT) AS DPPLANT,
+		                 MAX(DELIVERYDATE) AS DELIVERYDATE
+		            FROM (SELECT DOCNO,
+		                         DOCLINE,
+		                         SKU,
+		                         CASE
+		                           WHEN DM_DOCUMENT_D.DOCTYPE = 'WD' THEN
+		                            DM_DOCUMENT_D.CONFIRMQTY
+		                           ELSE
+		                            UNISTR('')
+		                         END AS WDQTY,
+		                         CASE
+		                           WHEN DM_DOCUMENT_D.DOCTYPE = 'WD' THEN
+		                            MAX(DM_DOCUMENT_D.DCCODE)
+		                           ELSE
+		                            UNISTR('')
+		                         END AS WDDCCODE,
+		                         CASE
+		                           WHEN DM_DOCUMENT_D.DOCTYPE = 'DP' THEN
+		                            DM_DOCUMENT_D.CONFIRMQTY
+		                           ELSE
+		                            UNISTR('')
+		                         END AS DPQTY,
+		                         CASE
+		                           WHEN DM_DOCUMENT_D.DOCTYPE = 'DP' THEN
+		                            MAX(DM_DOCUMENT_D.DCCODE)
+		                           ELSE
+		                            UNISTR('')
+		                         END AS DPDCCODE,
+		                         CASE
+		                           WHEN DM_DOCUMENT_D.DOCTYPE = 'DP' THEN
+		                            MAX(DM_DOCUMENT_D.PLANT)
+		                           ELSE
+		                            UNISTR('')
+		                         END AS DPPLANT,
+		                         MAX(DELIVERYDATE) AS DELIVERYDATE,
+		                         MAX(EDITWHO) AS EDITWHO
+		                    FROM DM_DOCUMENT_D
+		                   WHERE STORERKEY = 'FW00'
+			                 <if test="stochkyn == 4">  
+			                 	 AND 1 = 2
+			                 </if>
+		                   	 AND DELIVERYDATE BETWEEN #{slipdtFrom} AND #{slipdtTo}
+		                     AND DOCTYPE IN ('DP', 'WD')
+		                     AND DEL_YN = 'N'
+		                     AND WORKPROCESSCODE = 'STO'
+		                   GROUP BY DOCNO, DOCLINE, SKU, DOCTYPE, CONFIRMQTY) B
+		           GROUP BY B.DOCNO, B.DOCLINE, B.SKU) C
+		   	 WHERE 1=1
+		   	 AND C.WDQTY &lt;&gt; C.DPQTY
+		   	 AND C.WDDCCODE NOT IN ('1000', '2170')
+		     AND C.DPDCCODE IN (SELECT SO_DC_LST.DCCODE FROM SO_DC_LST)
+		      <if test="stochkyn == 1">
+			     <if test="poDccode != null and poDccode != ''"> 
+			     	AND C.WDDCCODE IN (SELECT PO_DC_LST.DCCODE FROM PO_DC_LST)
+			     </if>
+		     </if>
+		     GROUP BY DPDCCODE, DPPLANT, SKU
+        ) 
+		SELECT  WD.DELIVERYDATE                                                                       AS SLIPDT
+		      , WD.DOCNO
+		      , WD.TO_CUSTKEY
+		      , WD.TO_CUSTNAME
+		      , WD.DOCLINE
+		      , WD.SKU
+		      , MS_SKU.DESCRIPTION                                                                    AS SKUNAME
+		      , '[' || WD.PLANT || ']' || (SELECT FN_DESCR_PLANT(WD.PLANT) FROM DUAL)                 AS PLANT_DESCR
+		      , (SELECT FN_CODEDESCR(WD.STORERKEY ,'PUTAWAYTYPE',WD.CHANNEL) FROM DUAL)               AS CHANNEL
+		      , WD.QTY
+		      , WD.ST_OPENQTY				                                                          AS ST_OPENQTY
+		      , WD.QTY + WD.TOTAL_STO_ST + WD.TOTAL_DP_QTY - TOTAL_ORDERQTY                           AS SHORTAGEQTY2
+		      , WD.TOTAL_ORDERQTY 																	  AS TOTAL_ORDERQTY      
+		      , WD.ORDERQTY
+		      , WD.DP_QTY                                                                			  AS DP_QTY
+		      , WD.TOTAL_DP_QTY                                                          			  AS TOTAL_DP_QTY
+		      , WD.STO_ST																			  AS STO_ST
+		      , WD.TOTAL_STO_ST																		  AS TOTAL_STO_ST
+		      , WD.QTYALLOCATED
+		      , WD.QTYPICKED
+		      , WD.UOM
+		      , CASE WHEN (SELECT COUNT(1)
+		                   FROM  MS_SKUDCSET
+		                   WHERE MS_SKUDCSET.DCCODE        = WD.DCCODE
+		                   AND   MS_SKUDCSET.STORERKEY     = WD.STORERKEY
+		                   AND   MS_SKUDCSET.SKU           = WD.SKU
+		                   AND   MS_SKUDCSET.DEL_YN        = 'N'
+		                   AND   MS_SKUDCSET.CROSSDOCKTYPE = 'CROSS') &gt; 0 THEN
+		                   'CROSS'
+		             ELSE  ''
+		        END AS CROSSDOCKTYPE
+		      , (SELECT FN_CODEDESCR(WD.STORERKEY,'skutype'     ,MS_SKU.skutype)      FROM DUAL) AS skutype
+			  , MS_SKU.reference15
+              , WD.BUYERKEY            															 AS BUYERKEY
+              , FN_DESCR_CODE(WD.STORERKEY, 'BUYERKEY', WD.BUYERKEY) 							 AS BUYERNAME
+              , PO_DP_QTY
+              , WD.QTY_2600
+              , WD.QTY_2620
+              , WD.QTY_2630
+              , WD.QTY_2650
+              , WD.QTY_2660
+              , WD.QTY_2230
+              , WD.QTY_2260
+              , WD.PROCPOSS_YN AS PROCPOSS_YN
+		FROM   (SELECT DM_DOCUMENT_D.DELIVERYDATE
+		              ,DM_DOCUMENT_H.DCCODE         AS DCCODE
+		              ,DM_DOCUMENT_H.DOCNO          AS DOCNO
+		              ,DM_DOCUMENT_H.STORERKEY      AS STORERKEY
+		              ,DM_DOCUMENT_H.TO_CUSTTYPE    AS TO_CUSTTYPE
+		              ,DM_DOCUMENT_H.TO_CUSTKEY     AS TO_CUSTKEY
+		              ,DM_DOCUMENT_H.TO_CUSTNAME    AS TO_CUSTNAME
+		              ,DM_DOCUMENT_D.DOCLINE        AS DOCLINE
+		              ,DM_DOCUMENT_D.SKU            AS SKU
+		              ,DM_DOCUMENT_D.PLANT          AS PLANT
+		              ,DM_DOCUMENT_D.CHANNEL        AS CHANNEL
+		              ,NVL(ST_TB.QTY, 0)            AS QTY
+		              ,NVL(ST_TB.OPENQTY, 0)        AS ST_OPENQTY
+		              ,NVL(DP_TB.QTY, 0)            AS DP_QTY
+		              ,(
+		                 SELECT NVL(SUM(DP_TB.QTY), 0)
+		                 FROM   DP_TB
+		                 WHERE	1=1
+		                 AND	DP_TB.STORERKEY = DM_DOCUMENT_D.STORERKEY
+		                 AND	DP_TB.SKU      = DM_DOCUMENT_D.SKU
+		              ) AS TOTAL_DP_QTY
+		              ,NVL(PO_DP_TB.QTY, 0)         AS PO_DP_QTY	
+		              ,NVL(DD_TB.WDQTY,0)       	AS STO_ST
+		              ,(SELECT NVL(SUM(DD_TB.WDQTY),0)
+		                FROM   DD_TB
+		                WHERE  1=1
+		                  AND  DD_tB.SKU = DM_dOCUMENT_D.SKU
+		               ) AS TOTAL_STO_ST
+		              ,SUM(DM_DOCUMENT_D.ORDERQTY + DM_DOCUMENT_D.ORDERADJUSTQTY - DM_DOCUMENT_D.PROCESSQTY) OVER(PARTITION BY DM_DOCUMENT_D.DCCODE
+		                                                                                                                     , DM_DOCUMENT_D.STORERKEY
+		                                                                                                                     , DM_DOCUMENT_D.ORGANIZE
+		                                                                                                                     , DM_DOCUMENT_D.AREA
+		                                                                                                                     , DM_DOCUMENT_D.SKU) AS WD_QTY
+		              ,SUM(DM_DOCUMENT_D.ORDERQTY + DM_DOCUMENT_D.ORDERADJUSTQTY) OVER(PARTITION BY DM_DOCUMENT_D.STORERKEY                                                                                                                        
+		               																			  , DM_DOCUMENT_D.AREA                                                                                                                        
+		               																			  , DM_DOCUMENT_D.SKU) AS TOTAL_ORDERQTY
+		              ,DM_DOCUMENT_D.PROCESSQTY     AS QTYALLOCATED
+		              ,DM_DOCUMENT_D.WORKQTY        AS QTYPICKED
+		              ,DM_DOCUMENT_D.UOM            AS UOM
+		              ,DM_DOCUMENT_D.ORDERQTY + DM_DOCUMENT_D.ORDERADJUSTQTY AS ORDERQTY
+		              ,DM_DOCUMENT_D.REASONCODE     AS REASONCODE
+		              ,NVL((
+						    SELECT MAX(BUYERKEY) KEEP (DENSE_RANK FIRST ORDER BY (
+																		           CASE 
+																		             WHEN DCCODE = '2600' THEN 1
+																		             WHEN DCCODE = '2650' THEN 2
+																		             WHEN DCCODE = '2660' THEN 3
+																		             WHEN DCCODE = '2620' THEN 4
+																		             WHEN DCCODE = '2630' THEN 5
+																		             WHEN DCCODE = '2690' THEN 6
+																		             WHEN DCCODE = '2260' THEN 7
+																		             WHEN DCCODE = '2250' THEN 8
+																		             WHEN DCCODE = '2230' THEN 9
+																		             ELSE 10
+																		           END
+						         												  )
+						         					   )
+						    FROM MS_PURCHASEMST
+						    WHERE 1=1
+						    AND SKU = DM_DOCUMENT_D.SKU
+						    AND STORERKEY = DM_DOCUMENT_D.STORERKEY
+						    AND EXISTS (
+						    			  SELECT 1
+							              FROM   CM_CODE
+							              WHERE  1=1
+							              AND    CODELIST = 'BUYERKEY'
+							              AND    BASECODE =  MS_PURCHASEMST.BUYERKEY
+							              AND    STORERKEY = 'FW00'
+							              AND    DEL_YN    = 'N'
+							              AND    DATA3     = 'Y'
+						                )
+						  ),'STD')  AS BUYERKEY
+		              ,NVL(ST_TB.QTY_2600,0) AS QTY_2600
+		              ,NVL(ST_TB.QTY_2620,0) AS QTY_2620
+		              ,NVL(ST_TB.QTY_2630,0) AS QTY_2630
+		              ,NVL(ST_TB.QTY_2650,0) AS QTY_2650
+		              ,NVL(ST_TB.QTY_2660,0) AS QTY_2660
+		              ,NVL(ST_TB.QTY_2230,0) AS QTY_2230
+		              ,NVL(ST_TB.QTY_2260,0) AS QTY_2260
+		              ,CASE
+			           	 WHEN DM_DOCUMENT_D.PROCPOSS_YN = 'R' THEN UNISTR('Y')
+			             ELSE UNISTR('')
+			           END AS PROCPOSS_YN
+			          ,DM_DOCUMENT_D.WORKPROCESSCODE AS WORKPROCESSCODE
+		        FROM   DM_DOCUMENT_D
+		        JOIN   DM_DOCUMENT_H ON DM_DOCUMENT_H.DCCODE    = DM_DOCUMENT_D.DCCODE
+		                            AND DM_DOCUMENT_H.STORERKEY = DM_DOCUMENT_D.STORERKEY
+		                            AND DM_DOCUMENT_H.ORGANIZE  = DM_DOCUMENT_D.ORGANIZE
+		                            AND DM_DOCUMENT_H.DOCDT     = DM_DOCUMENT_D.DOCDT
+		                            AND DM_DOCUMENT_H.DOCNO     = DM_DOCUMENT_D.DOCNO
+		                            AND DM_DOCUMENT_H.DOCTYPE   = DM_DOCUMENT_D.DOCTYPE
+		                            AND DM_DOCUMENT_H.STATUS    &lt; '90'
+		                            AND DM_DOCUMENT_H.DEL_YN    = 'N'
+		        LEFT OUTER JOIN ST_TB
+		                   ON   ST_TB.STORERKEY = DM_DOCUMENT_D.STORERKEY
+		                   AND  ST_TB.SKU       = DM_DOCUMENT_D.SKU
+		        LEFT OUTER JOIN PO_DP_TB 
+		                   ON   PO_DP_TB.STORERKEY = DM_DOCUMENT_D.STORERKEY
+		                   AND  PO_DP_TB.SKU       = DM_DOCUMENT_D.SKU
+		        LEFT OUTER JOIN DP_TB 
+		                   ON   DP_TB.STORERKEY = DM_DOCUMENT_D.STORERKEY
+		                   AND	DP_TB.DCCODE    = DM_DOCUMENT_D.DCCODE
+		                   AND  DP_TB.ORGANIZE	= DM_DOCUMENT_D.ORGANIZE
+                           AND  DP_TB.AREA      = DM_DOCUMENT_D.AREA
+		                   AND  DP_TB.SKU       = DM_DOCUMENT_D.SKU
+		        LEFT OUTER JOIN DD_TB                       
+                           ON   DD_TB.DPDCCODE    = DM_DOCUMENT_D.DCCODE                            
+                           AND  DD_TB.DPPLANT     = DM_DOCUMENT_D.PLANT
+                           AND	DD_TB.SKU		  = DM_DOCUMENT_D.SKU 
+		        WHERE  1   = 1 
+			    AND    DM_DOCUMENT_D.DCCODE    IN  (SELECT SO_DC_LST.DCCODE
+		   								      	  	FROM   SO_DC_LST)       
+			    AND    DM_DOCUMENT_D.STORERKEY =  'FW00' 
+			<!-- 상품 다중선택 -->
+			<if test="multiSku != null and multiSku != ''">AND DM_DOCUMENT_D.SKU IN
+				 <foreach collection="multiSku" item="item" separator="," close=")" open="(">
+			    	#{item}
+			    </foreach>
+			</if>
+	      	<!-- 수급담당 -->
+	        <if test="buyerkey != null and buyerkey.size() > 0 ">
+			    AND DM_DOCUMENT_D.SKU IN (
+		                                      SELECT SKU
+		                                      FROM   MS_PURCHASEMST
+		                                      WHERE  1=1
+		                                      AND    MS_PURCHASEMST.STORERKEY = DM_DOCUMENT_D.STORERKEY
+		                                      AND    MS_PURCHASEMST.DCCODE = DM_DOCUMENT_D.DCCODE
+		                                      AND    MS_PURCHASEMST.SKU = DM_DOCUMENT_D.SKU
+		                                      AND    MS_PURCHASEMST.BUYERKEY IN 		        
+		                                      								 <foreach collection="buyerkey" item="item" separator="," close=")" open="(">
+																	              #{item}	
+																	        </foreach> 
+                                    	 )
+	      	</if>	
+			    AND    DM_DOCUMENT_D.DELIVERYDATE BETWEEN  #{slipdtFrom} AND #{slipdtTo}
+		        AND    DM_DOCUMENT_D.DOCTYPE      = 'WD'
+		        AND    DM_DOCUMENT_D.CHANNEL      = '1' /* 저장품만 */
+		        AND    DM_DOCUMENT_D.STATUS       &lt; '90'
+		        AND    DM_DOCUMENT_D.ORDERQTY + DM_DOCUMENT_D.ORDERADJUSTQTY &gt; 0
+		        /*AND    DM_DOCUMENT_D.ORDERQTY + DM_DOCUMENT_D.ORDERADJUSTQTY &gt; DM_DOCUMENT_D.PROCESSQTY 분배 오더도 포함(황순영님 요청) */
+		        AND    DM_DOCUMENT_D.DEL_YN       = 'N'
+		        AND    DM_DOCUMENT_D.WORKPROCESSCODE IN ('SO', 'JASO')
+		        ) WD
+		JOIN   MS_SKU ON  MS_SKU.STORERKEY = WD.STORERKEY
+		              AND MS_SKU.SKU       = WD.SKU
+		              AND MS_SKU.DEL_YN    = 'N'
+		WHERE  1=1
+		<!-- 고객 다중선택 -->
+		<if test="custkeyMulti != null and custkeyMulti != ''">
+			AND WD.TO_CUSTKEY IN
+			 <foreach collection="custkeyMulti" item="item" separator="," close=")" open="(">
+				#{item}
+			</foreach>
+		</if>
+	    <!-- 문서번호 다중선택 -->
+	    <if test="docnoWdMulti != null and docnoWdMulti != ''">
+	    	AND WD.DOCNO IN
+    		 <foreach collection="docnoWdMulti" item="item" separator="," close=")" open="(">
+                #{item}
+        	</foreach>
+        </if>          
+		<if test="reason != null and reason != ''">  AND   WD.REASONCODE  =  #{reason} </if>
+		<!-- 배송그룹 공통조회 조건 -->
+		<if test="gMultiCourier != null and gMultiCourier != ''"> AND    WD.COURIERCODE =  #{gMultiCourier} </if>
+		<!-- 상품유형 다중 검색 -->
+		<if test="skutype != null and skutype.size() > 0">
+			AND MS_SKU.skutype IN
+			<foreach collection="skutype" item="item" separator="," close=")" open="(">
+			    #{item}
+			</foreach>
+        </if>
+        <if test="skutype == null or skutype == ''">
+            and 1=1
+        </if>
+		<if test="reference15 != null and reference15 != ''"> AND MS_SKU.reference15            =  #{reference15}   </if>
+		<if test="quick == 6">
+           	AND CASE WHEN WD.PLANT = '1000' AND MS_SKU.skutype IN('20','30') THEN 'Y'
+                               ELSE 'N' END = 'N' 
+		</if>
+		ORDER BY WD.DELIVERYDATE ASC
+	</select>
+
+	<!--  -->
+	<select id="getMasterListTab1WithCondition" parameterType="cjfw.wms.wd.dto.WdDistributePlanNewReqDto" resultType="cjfw.wms.wd.dto.WdDistributePlanNewResDto">
+		/* [WdDistributePlanService.sqlx][WdDistributePlanNewService.getMasterListTab1WithCondition][미출예정확인New 미출예정(양산, 수도권, 장성, 제주)][YeoSeungCheol][2025.11.06]  */
+		WITH PO_DC_LST AS (
+		    SELECT DISTINCT COLUMN_VALUE AS DCCODE 
+		    <if test="poDccode != null and poDccode != ''"> 
+		    FROM   TABLE(FN_SPLIT_ARRAY(#{poDccode},','))
+			</if>		    
+			<if test="poDccode == null or poDccode == ''">
+			FROM   TABLE(FN_SPLIT_ARRAY(#{gDccode}, ','))
+			</if>
+		)
+		,SO_DC_LST AS (
+		    SELECT DISTINCT COLUMN_VALUE AS DCCODE 
+		    <if test="soDccode != null and soDccode != ''"> 
+		    FROM   TABLE(FN_SPLIT_ARRAY(#{soDccode},','))
+			</if>		    
+			<if test="soDccode == null or soDccode == ''">
+			FROM   TABLE(FN_SPLIT_ARRAY(#{gDccode}, ','))
+			</if>
+		)
+		,PO_DP_TB AS (
+		    SELECT STORERKEY, SKU, SUM(ORDERQTY) AS QTY
+		    FROM   DP_PURCHASE
+		    WHERE  1 = 1
+		    AND    STORERKEY = 'FW00'
+		    AND    DCCODE IN (SELECT PO_DC_LST.DCCODE FROM PO_DC_LST)
+		    AND    REQUESTDT &gt;= #{slipdtFrom}
+			<if test="chkyn == 1">
+			    AND    REQUESTDT &lt;= #{slipdtTo}
+		    </if>
+		    <if test="chkyn == 2">
+			    AND    REQUESTDT &lt;= to_char(to_date(#{slipdtTo},'yyyymmdd')-1 , 'yyyymmdd')
+		    </if>
+		    <if test="chkyn == 4">
+			    AND    1=2
+		    </if>
+		    GROUP BY STORERKEY, SKU
+		    UNION ALL
+		    SELECT  DM_DOCUMENT_D_DP.STORERKEY
+		           ,DM_DOCUMENT_D_DP.SKU
+		           ,NVL(SUM(DM_DOCUMENT_D_DP.ORDERQTY + DM_DOCUMENT_D_DP.OPENADJUSTQTY ),0) AS QTY
+		    FROM   DM_DOCUMENT_D DM_DOCUMENT_D_DP
+		    WHERE  1 = 1
+		    AND    DM_DOCUMENT_D_DP.STORERKEY = 'FW00'
+		    AND    DM_DOCUMENT_D_DP.DCCODE IN (SELECT PO_DC_LST.DCCODE FROM PO_DC_LST)
+		    AND    DELIVERYDATE &gt;= #{slipdtFrom}
+			<if test="chkyn == 1">
+			    AND    DELIVERYDATE &lt;= #{slipdtTo}
+		    </if>
+		    <if test="chkyn == 2">
+			    AND    DELIVERYDATE &lt;= to_char(to_date(#{slipdtTo},'yyyymmdd')-1 , 'yyyymmdd')
+		    </if>
+		    <if test="chkyn == 4">
+			    AND    1=2
+		    </if>
+		    AND DM_DOCUMENT_D_DP.DOCTYPE = 'DP'
+		    AND DM_DOCUMENT_D_DP.CHANNEL = '1'
+		    AND DM_DOCUMENT_D_DP.DEL_YN = 'N'
+		    AND (DM_DOCUMENT_D_DP.WORKPROCESSCODE = 'STO' AND EXISTS
+		           (
+		            SELECT 1
+		             FROM DM_DOCUMENT_H
+		            WHERE 1 = 1
+		              AND DM_DOCUMENT_H.STORERKEY = DM_DOCUMENT_D_DP.STORERKEY
+		              AND DM_DOCUMENT_H.DOCDT = DM_DOCUMENT_D_DP.DOCDT
+		              AND DM_DOCUMENT_H.DOCNO = DM_DOCUMENT_D_DP.DOCNO
+		              AND DM_DOCUMENT_H.DOCTYPE = 'WD'
+		              AND DM_DOCUMENT_H.DCCODE IN ('1000', '2170')
+		           )
+		         )
+		    GROUP BY DM_DOCUMENT_D_DP.STORERKEY,
+		             DM_DOCUMENT_D_DP.SKU
+		)
+		,DP_TB AS (
+		    SELECT DM_DOCUMENT_D_DP.STORERKEY
+		    	  ,DM_DOCUMENT_D_DP.DCCODE
+		    	  ,DM_DOCUMENT_D_DP.ORGANIZE
+		          ,DM_DOCUMENT_D_DP.AREA
+		          ,DM_DOCUMENT_D_DP.SKU
+		          ,NVL(SUM(DM_DOCUMENT_D_DP.ORDERQTY+DM_DOCUMENT_D_DP.OPENADJUSTQTY - DM_DOCUMENT_D_DP.CONFIRMQTY), 0) AS QTY
+		    FROM   DM_DOCUMENT_D DM_DOCUMENT_D_DP 
+		    WHERE  1 = 1
+		    AND    DM_DOCUMENT_D_DP.STORERKEY = 'FW00'
+		    AND    DM_DOCUMENT_D_DP.DCCODE    IN (SELECT PO_DC_LST.DCCODE
+		   								      	  FROM   PO_DC_LST)
+		    AND    DM_DOCUMENT_D_DP.DELIVERYDATE &gt;= #{slipdtFrom}
+	    <if test="chkyn == 1">
+		    AND    DM_DOCUMENT_D_DP.DELIVERYDATE &lt;= #{slipdtTo}
+	    </if>
+	    <if test="chkyn == 2">
+		    AND    DM_DOCUMENT_D_DP.DELIVERYDATE &lt;= to_char(to_date(#{slipdtTo},'yyyymmdd')-1 , 'yyyymmdd')
+	    </if>
+	    <if test="chkyn == 4">
+		    AND    1=2
+	    </if>
+		    AND    DM_DOCUMENT_D_DP.STATUS        &lt; '90'
+		    AND    DM_DOCUMENT_D_DP.DOCTYPE       = 'DP'
+		    AND    DM_DOCUMENT_D_DP.CHANNEL       = '1'
+		    AND    DM_DOCUMENT_D_DP.DEL_YN        = 'N'
+		    AND	   (
+		    		DM_DOCUMENT_D_DP.WORKPROCESSCODE != 'STO' 
+		    		OR 
+		    		(		DM_DOCUMENT_D_DP.WORKPROCESSCODE = 'STO' AND EXISTS 
+		    					(
+		    						SELECT 1 
+		    						FROM   DM_DOCUMENT_H 
+		    						WHERE  1=1 
+                            		AND    DM_DOCUMENT_H.STORERKEY = DM_DOCUMENT_D_DP.STORERKEY
+                            		AND    DM_DOCUMENT_H.DOCDT     = DM_DOCUMENT_D_DP.DOCDT
+                            		AND    DM_DOCUMENT_H.DOCNO     = DM_DOCUMENT_D_DP.DOCNO
+                            		AND    DM_DOCUMENT_H.DOCTYPE   = 'WD'
+                            		AND	   DM_DOCUMENT_H.STATUS    = '90'
+                            		AND	   DM_DOCUMENT_H.DCCODE IN ('1000', '2170')
+                            	)
+                            )
+		    	    )
+		    AND    DM_DOCUMENT_D_DP.ORDERQTY+DM_DOCUMENT_D_DP.OPENADJUSTQTY &gt; 0
+		    GROUP BY DM_DOCUMENT_D_DP.STORERKEY
+			    	,DM_DOCUMENT_D_DP.DCCODE
+			    	,DM_DOCUMENT_D_DP.ORGANIZE
+		            ,DM_DOCUMENT_D_DP.AREA
+		            ,DM_DOCUMENT_D_DP.SKU
+		)
+		,ST_TB AS (
+		    SELECT ST_STOCK.STORERKEY    AS  STORERKEY
+		          ,ST_STOCK.SKU          AS  SKU
+		          ,SUM(CASE
+			             WHEN ST_STOCK.DCCODE IN (SELECT PO_DC_LST.DCCODE FROM PO_DC_LST) 
+			             THEN ST_STOCK.QTY
+			           END) AS QTY
+		          ,SUM(CASE
+		                 WHEN ST_STOCK.DCCODE IN (SELECT PO_DC_LST.DCCODE FROM PO_DC_LST) THEN
+		                 CASE
+		                    WHEN ST_STOCK.QTYALLOCATED = 0 
+		                    THEN ST_STOCK.QTY - ST_STOCK.QTYPICKED
+		                    ELSE ST_STOCK.QTY - ST_STOCK.QTYALLOCATED
+		                 END
+		               END) AS OPENQTY
+       			  ,SUM(CASE WHEN ST_STOCK.DCCODE = '2600' THEN ST_STOCK.QTY ELSE 0 END) AS QTY_2600
+       			  ,SUM(CASE WHEN ST_STOCK.DCCODE = '2620' THEN ST_STOCK.QTY ELSE 0 END) AS QTY_2620
+       			  ,SUM(CASE WHEN ST_STOCK.DCCODE = '2630' THEN ST_STOCK.QTY ELSE 0 END) AS QTY_2630
+       			  ,SUM(CASE WHEN ST_STOCK.DCCODE = '2650' THEN ST_STOCK.QTY ELSE 0 END) AS QTY_2650
+       			  ,SUM(CASE WHEN ST_STOCK.DCCODE = '2660' THEN ST_STOCK.QTY ELSE 0 END) AS QTY_2660
+       			  ,SUM(CASE WHEN ST_STOCK.DCCODE = '2230' THEN ST_STOCK.QTY ELSE 0 END) AS QTY_2230
+                  ,SUM(CASE WHEN ST_STOCK.DCCODE = '2260' THEN ST_STOCK.QTY ELSE 0 END) AS QTY_2260
+		    FROM  ST_STOCK
+		    JOIN   MS_SKU
+		    ON     MS_SKU.STORERKEY        = ST_STOCK.STORERKEY
+		    AND    MS_SKU.SKU              = ST_STOCK.SKU
+		    JOIN   MS_LOCATION
+		    ON     MS_LOCATION.DCCODE      = ST_STOCK.DCCODE
+		    AND    MS_LOCATION.LOC         = ST_STOCK.LOC
+		    AND    MS_LOCATION.LOCTYPE     IN ('STAGE','PICK','KEEP','CROSS','FIRSTOUT','LONGSTAY','CANCEL')
+		    AND    MS_LOCATION.LOCCATEGORY IN ('RACK','YARD','AUTO')
+		    AND    MS_LOCATION.LOCFLAG     = 'GOOD' 
+		    AND    MS_LOCATION.OUT_YN      = 'Y'    
+		    AND    MS_LOCATION.DEL_YN      = 'N'
+		    AND    MS_LOCATION.STOCKTYPE   = 'GOOD' 
+		    JOIN   CM_LOT
+		    ON     CM_LOT.STORERKEY        = ST_STOCK.STORERKEY
+		    AND    CM_LOT.LOT              = ST_STOCK.LOT
+		    AND    'TRUE' = CASE 
+		                         WHEN CM_LOT.LOTTABLE01   = 'STD' OR  MS_SKU.DURATIONTYPE = 'N'
+		                         THEN 'TRUE'
+		                         WHEN     MS_SKU.DURATIONTYPE = '1' AND FN_ISDATE(CM_LOT.LOTTABLE01) = 1
+		                              AND TO_DATE(CM_LOT.LOTTABLE01,'YYYYMMDD') &lt; TRUNC(SYSDATE)
+		                         THEN 'FALSE'
+		                         WHEN     MS_SKU.DURATIONTYPE IN ('2','3') AND FN_ISDATE(CM_LOT.LOTTABLE01) = 1
+		                              AND TO_DATE(CM_LOT.LOTTABLE01,'YYYYMMDD') + MS_SKU.DURATION - 1 &lt; TRUNC(SYSDATE)
+		                         THEN 'FALSE'
+		                         ELSE 'TRUE'
+		                    END
+		    WHERE ST_STOCK.QTY &gt; 0
+		    AND   ST_STOCK.STORERKEY = 'FW00'
+		    GROUP BY ST_STOCK.STORERKEY
+		             ,ST_STOCK.SKU    
+		)
+		,DD_TB AS (    
+			SELECT DPDCCODE, DPPLANT, SKU, SUM(WDQTY) WDQTY
+		    FROM (SELECT B.DOCNO,
+		                 B.DOCLINE,
+		                 B.SKU,
+		                 MAX(B.WDQTY) AS WDQTY,
+		                 MAX(B.WDDCCODE) AS WDDCCODE,
+		                 MAX(B.DPQTY) AS DPQTY,
+		                 MAX(B.DPDCCODE) AS DPDCCODE,
+		                 MAX(B.DPPLANT) AS DPPLANT,
+		                 MAX(DELIVERYDATE) AS DELIVERYDATE
+		            FROM (SELECT DOCNO,
+		                         DOCLINE,
+		                         SKU,
+		                         CASE
+		                           WHEN DM_DOCUMENT_D.DOCTYPE = 'WD' THEN
+		                            DM_DOCUMENT_D.CONFIRMQTY
+		                           ELSE
+		                            UNISTR('')
+		                         END AS WDQTY,
+		                         CASE
+		                           WHEN DM_DOCUMENT_D.DOCTYPE = 'WD' THEN
+		                            MAX(DM_DOCUMENT_D.DCCODE)
+		                           ELSE
+		                            UNISTR('')
+		                         END AS WDDCCODE,
+		                         CASE
+		                           WHEN DM_DOCUMENT_D.DOCTYPE = 'DP' THEN
+		                            DM_DOCUMENT_D.CONFIRMQTY
+		                           ELSE
+		                            UNISTR('')
+		                         END AS DPQTY,
+		                         CASE
+		                           WHEN DM_DOCUMENT_D.DOCTYPE = 'DP' THEN
+		                            MAX(DM_DOCUMENT_D.DCCODE)
+		                           ELSE
+		                            UNISTR('')
+		                         END AS DPDCCODE,
+		                         CASE
+		                           WHEN DM_DOCUMENT_D.DOCTYPE = 'DP' THEN
+		                            MAX(DM_DOCUMENT_D.PLANT)
+		                           ELSE
+		                            UNISTR('')
+		                         END AS DPPLANT,
+		                         MAX(DELIVERYDATE) AS DELIVERYDATE,
+		                         MAX(EDITWHO) AS EDITWHO
+		                    FROM DM_DOCUMENT_D
+		                   WHERE STORERKEY = 'FW00'
+			                 <if test="stochkyn == 4">  
+			                 	 AND 1 = 2
+			                 </if>
+		                   	 AND DELIVERYDATE BETWEEN #{slipdtFrom} AND #{slipdtTo}
+		                     AND DOCTYPE IN ('DP', 'WD')
+		                     AND DEL_YN = 'N'
+		                     AND WORKPROCESSCODE = 'STO'
+		                   GROUP BY DOCNO, DOCLINE, SKU, DOCTYPE, CONFIRMQTY) B
+		           GROUP BY B.DOCNO, B.DOCLINE, B.SKU) C
+		   	 WHERE 1=1
+		   	 AND C.WDQTY &lt;&gt; C.DPQTY
+		   	 AND C.WDDCCODE NOT IN ('1000', '2170')
+		     AND C.DPDCCODE IN (SELECT SO_DC_LST.DCCODE FROM SO_DC_LST)
+		      <if test="stochkyn == 1"> 
+			     <if test="poDccode != null and poDccode != ''"> 
+			     	AND C.WDDCCODE IN (SELECT PO_DC_LST.DCCODE FROM PO_DC_LST)
+			     </if>
+		     </if>
+		     GROUP BY DPDCCODE, DPPLANT, SKU
+        ) 
+		SELECT DISTINCT WD.SKU 
+		FROM   (SELECT DM_DOCUMENT_D.DELIVERYDATE
+		              ,DM_DOCUMENT_H.DCCODE         AS DCCODE
+		              ,DM_DOCUMENT_H.DOCNO          AS DOCNO
+		              ,DM_DOCUMENT_H.STORERKEY      AS STORERKEY
+		              ,DM_DOCUMENT_H.TO_CUSTTYPE    AS TO_CUSTTYPE
+		              ,DM_DOCUMENT_H.TO_CUSTKEY     AS TO_CUSTKEY
+		              ,DM_DOCUMENT_H.TO_CUSTNAME    AS TO_CUSTNAME
+		              ,DM_DOCUMENT_D.DOCLINE        AS DOCLINE
+		              ,DM_DOCUMENT_D.SKU            AS SKU
+		              ,DM_DOCUMENT_D.PLANT          AS PLANT
+		              ,DM_DOCUMENT_D.CHANNEL        AS CHANNEL
+		              ,NVL(ST_TB.QTY, 0)            AS QTY
+		              ,NVL(ST_TB.OPENQTY, 0)        AS ST_OPENQTY
+		              ,NVL(DP_TB.QTY, 0)            AS DP_QTY
+		              ,(
+		                 SELECT NVL(SUM(DP_TB.QTY), 0)
+		                 FROM   DP_TB
+		                 WHERE	1=1
+		                 AND	DP_TB.STORERKEY = DM_DOCUMENT_D.STORERKEY
+		                 AND	DP_TB.SKU      = DM_DOCUMENT_D.SKU
+		              ) AS TOTAL_DP_QTY
+		              ,NVL(PO_DP_TB.QTY, 0)         AS PO_DP_QTY	
+		              ,NVL(DD_TB.WDQTY,0)       	AS STO_ST
+		              ,(SELECT NVL(SUM(DD_TB.WDQTY),0)
+		                FROM   DD_TB
+		                WHERE  1=1
+		                  AND  DD_tB.SKU = DM_dOCUMENT_D.SKU
+		               ) AS TOTAL_STO_ST  	              
+		              ,SUM(DM_DOCUMENT_D.ORDERQTY + DM_DOCUMENT_D.ORDERADJUSTQTY - DM_DOCUMENT_D.PROCESSQTY) OVER(PARTITION BY DM_DOCUMENT_D.DCCODE
+		                                                                                                                     , DM_DOCUMENT_D.STORERKEY
+		                                                                                                                     , DM_DOCUMENT_D.ORGANIZE
+		                                                                                                                     , DM_DOCUMENT_D.AREA
+		                                                                                                                     , DM_DOCUMENT_D.SKU) AS WD_QTY
+		              ,SUM(DM_DOCUMENT_D.ORDERQTY + DM_DOCUMENT_D.ORDERADJUSTQTY) OVER(PARTITION BY DM_DOCUMENT_D.STORERKEY                                                                                                                        
+		               																			  , DM_DOCUMENT_D.AREA                                                                                                                        
+		               																			  , DM_DOCUMENT_D.SKU) AS TOTAL_ORDERQTY
+		              ,DM_DOCUMENT_D.PROCESSQTY     AS QTYALLOCATED
+		              ,DM_DOCUMENT_D.WORKQTY        AS QTYPICKED
+		              ,DM_DOCUMENT_D.UOM            AS UOM
+		              ,DM_DOCUMENT_D.ORDERQTY + DM_DOCUMENT_D.ORDERADJUSTQTY AS ORDERQTY
+		              ,DM_DOCUMENT_D.REASONCODE     AS REASONCODE
+		              ,NVL((
+						    SELECT MAX(BUYERKEY) KEEP (DENSE_RANK FIRST ORDER BY (
+																		           CASE 
+																		             WHEN DCCODE = '2600' THEN 1
+																		             WHEN DCCODE = '2650' THEN 2
+																		             WHEN DCCODE = '2660' THEN 3
+																		             WHEN DCCODE = '2620' THEN 4
+																		             WHEN DCCODE = '2630' THEN 5
+																		             WHEN DCCODE = '2690' THEN 6
+																		             WHEN DCCODE = '2260' THEN 7
+																		             WHEN DCCODE = '2250' THEN 8
+																		             WHEN DCCODE = '2230' THEN 9
+																		             ELSE 10
+																		           END
+						         												  )
+						         					   )
+						    FROM MS_PURCHASEMST
+						    WHERE 1=1
+						    AND SKU = DM_DOCUMENT_D.SKU
+						    AND STORERKEY = DM_DOCUMENT_D.STORERKEY
+						    AND EXISTS (
+						    			  SELECT 1
+							              FROM   CM_CODE
+							              WHERE  1=1
+							              AND    CODELIST = 'BUYERKEY'
+							              AND    BASECODE =  MS_PURCHASEMST.BUYERKEY
+							              AND    STORERKEY = 'FW00'
+							              AND    DEL_YN    = 'N'
+							              AND    DATA3     = 'Y'
+						                )
+						  ),'STD')  AS BUYERKEY
+		              ,NVL(ST_TB.QTY_2600,0) AS QTY_2600
+		              ,NVL(ST_TB.QTY_2620,0) AS QTY_2620
+		              ,NVL(ST_TB.QTY_2630,0) AS QTY_2630
+		              ,NVL(ST_TB.QTY_2650,0) AS QTY_2650
+		              ,NVL(ST_TB.QTY_2660,0) AS QTY_2660
+		              ,NVL(ST_TB.QTY_2230,0) AS QTY_2230
+		              ,NVL(ST_TB.QTY_2260,0) AS QTY_2260
+		              ,CASE
+			           	 WHEN DM_DOCUMENT_D.PROCPOSS_YN = 'R' THEN UNISTR('Y')
+			             ELSE UNISTR('')
+			           END AS PROCPOSS_YN
+			          ,DM_DOCUMENT_D.WORKPROCESSCODE AS WORKPROCESSCODE
+		        FROM   DM_DOCUMENT_D
+		        JOIN   DM_DOCUMENT_H ON DM_DOCUMENT_H.DCCODE    = DM_DOCUMENT_D.DCCODE
+		                            AND DM_DOCUMENT_H.STORERKEY = DM_DOCUMENT_D.STORERKEY
+		                            AND DM_DOCUMENT_H.ORGANIZE  = DM_DOCUMENT_D.ORGANIZE
+		                            AND DM_DOCUMENT_H.DOCDT     = DM_DOCUMENT_D.DOCDT
+		                            AND DM_DOCUMENT_H.DOCNO     = DM_DOCUMENT_D.DOCNO
+		                            AND DM_DOCUMENT_H.DOCTYPE   = DM_DOCUMENT_D.DOCTYPE
+		                            AND DM_DOCUMENT_H.STATUS    &lt; '90'
+		                            AND DM_DOCUMENT_H.DEL_YN    = 'N'
+		        LEFT OUTER JOIN ST_TB
+		                   ON   ST_TB.STORERKEY = DM_DOCUMENT_D.STORERKEY
+		                   AND  ST_TB.SKU       = DM_DOCUMENT_D.SKU
+		        LEFT OUTER JOIN PO_DP_TB 
+		                   ON   PO_DP_TB.STORERKEY = DM_DOCUMENT_D.STORERKEY
+		                   AND  PO_DP_TB.SKU       = DM_DOCUMENT_D.SKU
+		        LEFT OUTER JOIN DP_TB 
+		                   ON   DP_TB.STORERKEY = DM_DOCUMENT_D.STORERKEY
+		                   AND  DP_TB.DCCODE    = DM_DOCUMENT_D.DCCODE
+		                   AND	DP_TB.ORGANIZE  = DM_DOCUMENT_D.ORGANIZE
+                           AND  DP_TB.AREA      = DM_DOCUMENT_D.AREA
+		                   AND  DP_TB.SKU       = DM_DOCUMENT_D.SKU
+		        LEFT OUTER JOIN DD_TB                       
+                           ON   DD_TB.DPDCCODE    = DM_DOCUMENT_D.DCCODE                            
+                           AND  DD_TB.DPPLANT     = DM_DOCUMENT_D.PLANT
+                           AND	DD_TB.SKU		  = DM_DOCUMENT_D.SKU 
+		        WHERE  1   = 1 
+			    AND    DM_DOCUMENT_D.DCCODE    IN  (SELECT SO_DC_LST.DCCODE
+		   								      	  	FROM   SO_DC_LST)       
+			    AND    DM_DOCUMENT_D.STORERKEY =  'FW00' 
+			
+			    AND    DM_DOCUMENT_D.DELIVERYDATE BETWEEN  #{slipdtFrom} AND #{slipdtTo}  
+		        AND    DM_DOCUMENT_D.DOCTYPE      = 'WD'
+		        AND    DM_DOCUMENT_D.CHANNEL      = '1' /* 저장품만 */
+		        AND    DM_DOCUMENT_D.STATUS       &lt; '90'
+		        AND    DM_DOCUMENT_D.ORDERQTY + DM_DOCUMENT_D.ORDERADJUSTQTY &gt; 0
+		        /*AND    DM_DOCUMENT_D.ORDERQTY + DM_DOCUMENT_D.ORDERADJUSTQTY &gt; DM_DOCUMENT_D.PROCESSQTY 분배 오더도 포함(황순영님 요청) */
+		        AND    DM_DOCUMENT_D.DEL_YN       = 'N'
+		        AND    DM_DOCUMENT_D.WORKPROCESSCODE IN ('SO', 'JASO')
+		        ) WD
+		JOIN   MS_SKU ON  MS_SKU.STORERKEY = WD.STORERKEY
+		              AND MS_SKU.SKU       = WD.SKU
+		              AND MS_SKU.DEL_YN    = 'N'
+		WHERE  WD.QTY + WD.TOTAL_STO_ST + WD.TOTAL_DP_QTY &lt; TOTAL_ORDERQTY
+		<!--if test="MULTI_PLANT != null and MULTI_PLANT != ''">AND   WD.PLANT IN
+			 <foreach collection="MULTI_PLANT" item="item" separator="," close=")" open="(">
+		    	#{item}
+		    </foreach>
+		</if-->
+		<!-- 배송그룹 공통조회 조건 -->
+		<if test="gMultiCourier != null and gMultiCourier != ''"> AND    WD.COURIERCODE =  #{gMultiCourier} </if>
+	</select>
+	
+</mapper>

@@ -1,0 +1,360 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="tmDeliveryStatusByCustomerService">
+
+    <update id="processArrival" parameterType="TmDeliveryStatusByCustomerProcessArrivalReqDto">
+        /* [TmDeliveryStatusByCustomerService.sqlx][processArrival][배송현황(거래처별) 도착처리][System] */
+        MERGE INTO TM_WORKLOG TGT
+        USING (
+            SELECT
+                #{deliverydt} AS DELIVERYDT,
+                #{carno} AS CARNO,
+                #{custkey} AS CUSTKEY,
+                #{priority} AS PRIORITY,
+                NVL(CM_CAR.DRIVER1, 'SYSTEM') AS DRIVERID
+            FROM DUAL
+            LEFT JOIN CM_CAR
+                ON CM_CAR.CARNO = #{carno}
+               AND CM_CAR.DEL_YN = 'N'
+        ) SRC
+        ON (
+            TGT.DELIVERYDT = SRC.DELIVERYDT
+            AND TGT.CARNO = SRC.CARNO
+            AND TGT.CUSTKEY = SRC.CUSTKEY
+            AND TGT.PRIORITY = SRC.PRIORITY
+            AND TGT.WORKLOGTYPE = 'DELIVERYSTART'
+            AND TGT.DEL_YN = 'N'
+        )
+        WHEN MATCHED THEN
+            UPDATE SET
+                TGT.REG_TYPE = 'W',
+                TGT.DRIVERID = SRC.DRIVERID,
+                TGT.WORKDATEDATA1 = TO_DATE(TO_CHAR(SYSDATE, 'YYYYMMDD') || #{departuretime}, 'YYYYMMDDHH24MI'),
+                TGT.EDITDATE = SYSDATE,
+                TGT.EDITWHO = NVL(#{userId}, 'SYSTEM')
+        WHEN NOT MATCHED THEN
+            INSERT (
+                SERIALKEY,
+                DELIVERYDT,
+                DRIVERID,
+                WORKLOGTYPE,
+                CARNO,
+                CUSTKEY,
+                PRIORITY,
+                WORKDATEDATA1,
+                REG_TYPE,
+                STATUS,
+                DEL_YN,
+                ADDDATE,
+                EDITDATE,
+                ADDWHO,
+                EDITWHO
+            ) VALUES (
+                LOGISONESVC.SEQ_TM_WORKLOG.NEXTVAL,
+                SRC.DELIVERYDT,
+                SRC.DRIVERID,
+                'DELIVERYSTART',
+                SRC.CARNO,
+                SRC.CUSTKEY,
+                SRC.PRIORITY,
+                TO_DATE(TO_CHAR(SYSDATE, 'YYYYMMDD') || #{departuretime}, 'YYYYMMDDHH24MI'),
+                'W',
+                '00',
+                'N',
+                SYSDATE,
+                SYSDATE,
+                NVL(#{userId}, 'SYSTEM'),
+                NVL(#{userId}, 'SYSTEM')
+            )
+    </update>
+
+    <update id="processDeparture" parameterType="TmDeliveryStatusByCustomerProcessArrivalReqDto">
+        /* [TmDeliveryStatusByCustomerService.sqlx][processDeparture][배송현황(거래처별) 출발처리][System] */
+        MERGE INTO TM_WORKLOG TGT
+        USING (
+            SELECT
+                #{deliverydt} AS DELIVERYDT,
+                #{carno} AS CARNO,
+                #{custkey} AS CUSTKEY,
+                #{priority} AS PRIORITY,
+                NVL(CM_CAR.DRIVER1, 'SYSTEM') AS DRIVERID
+            FROM DUAL
+            LEFT JOIN CM_CAR
+                ON CM_CAR.CARNO = #{carno}
+               AND CM_CAR.DEL_YN = 'N'
+        ) SRC
+        ON (
+            TGT.DELIVERYDT = SRC.DELIVERYDT
+            AND TGT.CARNO = SRC.CARNO
+            AND TGT.CUSTKEY = SRC.CUSTKEY
+            AND TGT.PRIORITY = SRC.PRIORITY
+            AND TGT.WORKLOGTYPE = 'DELIVERYEND'
+            AND TGT.DEL_YN = 'N'
+        )
+        WHEN MATCHED THEN
+            UPDATE SET
+                TGT.REG_TYPE = 'W',
+                TGT.DRIVERID = SRC.DRIVERID,
+                TGT.WORKDATEDATA1 = TO_DATE(TO_CHAR(SYSDATE, 'YYYYMMDD') || #{arrivedtime}, 'YYYYMMDDHH24MI'),
+                TGT.EDITDATE = SYSDATE,
+                TGT.EDITWHO = NVL(#{userId}, 'SYSTEM')
+        WHEN NOT MATCHED THEN
+            INSERT (
+                SERIALKEY,
+                DELIVERYDT,
+                DRIVERID,
+                WORKLOGTYPE,
+                CARNO,
+                CUSTKEY,
+                PRIORITY,
+                WORKDATEDATA1,
+                REG_TYPE,
+                STATUS,
+                DEL_YN,
+                ADDDATE,
+                EDITDATE,
+                ADDWHO,
+                EDITWHO
+            ) VALUES (
+                LOGISONESVC.SEQ_TM_WORKLOG.NEXTVAL,
+                SRC.DELIVERYDT,
+                SRC.DRIVERID,
+                'DELIVERYEND',
+                SRC.CARNO,
+                SRC.CUSTKEY,
+                SRC.PRIORITY,
+                TO_DATE(TO_CHAR(SYSDATE, 'YYYYMMDD') || #{arrivedtime}, 'YYYYMMDDHH24MI'),
+                'W',
+                '90',
+                'N',
+                SYSDATE,
+                SYSDATE,
+                NVL(#{userId}, 'SYSTEM'),
+                NVL(#{userId}, 'SYSTEM')
+            )
+    </update>
+
+    <update id="updateInplanArrivalDeparture" parameterType="TmDeliveryStatusByCustomerProcessArrivalReqDto">
+        BEGIN
+            UPDATE /* [TmDeliveryStatusByCustomerService.sqlx][updateInplanArrivalDeparture][배송현황(거래처별) TM_INPLAN 출도착시간 업데이트][System] */
+                   TM_INPLAN
+            SET CUSTARRIVALDT   = TO_DATE(TO_CHAR(SYSDATE, 'YYYYMMDD') || #{arrivedtime}  , 'YYYYMMDDHH24MI')
+              , CUSTDEPARTUREDT = TO_DATE(TO_CHAR(SYSDATE, 'YYYYMMDD') || #{departuretime}, 'YYYYMMDDHH24MI')
+              , DELIVERYSTATUS  = '90'
+              , EDITDATE        = SYSDATE
+              , EDITWHO         = #{userId}
+            WHERE DCCODE       = #{dccode}
+              AND DELIVERYDT   = #{deliverydt}
+              AND CARNO        = #{carno}
+              AND PRIORITY     = #{priority}
+              AND TRUTHCUSTKEY = #{custkey}
+              AND DEL_YN       = 'N'
+            ;
+
+            -- 다른 실착지의 상태 확인 후 변경 처리
+            UPDATE TM_INPLAN
+            SET DELIVERYSTATUS   = '90'
+            WHERE DELIVERYSTATUS = '60'
+              AND DCCODE       = #{dccode}
+              AND DELIVERYDT   = #{deliverydt}
+              AND CARNO        = #{carno}
+              AND PRIORITY     = #{priority}
+            ;
+        END;
+    </update>
+
+    <update id="updateInplanSplitArrivalDeparture" parameterType="TmDeliveryStatusByCustomerProcessArrivalReqDto">
+            BEGIN
+                UPDATE /* [TmDeliveryStatusByCustomerService.sqlx][updateInplanSplitArrivalDeparture][배송현황(거래처별) TM_INPLAN_SPLIT 출도착시간 업데이트][System] */
+                       TM_INPLAN_SPLIT
+                SET CUSTARRIVALDT   = TO_DATE(TO_CHAR(SYSDATE, 'YYYYMMDD') || #{arrivedtime}  , 'YYYYMMDDHH24MI')
+                  , CUSTDEPARTUREDT = TO_DATE(TO_CHAR(SYSDATE, 'YYYYMMDD') || #{departuretime}, 'YYYYMMDDHH24MI')
+                  , DELIVERYSTATUS  = '90'
+                  , EDITDATE        = SYSDATE
+                  , EDITWHO         = #{userId}
+                WHERE DCCODE       = #{dccode}
+                  AND DELIVERYDT   = #{deliverydt}
+                  AND CARNO        = #{carno}
+                  AND PRIORITY     = #{priority}
+                  AND TRUTHCUSTKEY = #{custkey}
+                  AND DEL_YN       = 'N'
+                ;
+
+                -- 다른 실착지의 상태 확인 후 변경 처리
+                UPDATE TM_INPLAN_SPLIT
+                SET DELIVERYSTATUS   = '90'
+                WHERE DELIVERYSTATUS = '60'
+                  AND DCCODE       = #{dccode}
+                  AND DELIVERYDT   = #{deliverydt}
+                  AND CARNO        = #{carno}
+                  AND PRIORITY     = #{priority}
+                ;
+            END;
+        </update>
+
+    <select id="getDeliveryStatusByCustomer" resultType="TmDeliveryStatusByCustomerResDto" parameterType="TmDeliveryStatusByCustomerReqDto">
+        SELECT /* [TmDeliveryStatusByCustomerService.sqlx][getDeliveryStatusByCustomer][배송현황(거래처별) 조회][System] */
+        	  TM_LIST.STORERKEY
+        	, TM_LIST.DCCODE
+        	, FN_DESCR_DC(TM_LIST.DCCODE) AS DCNAME
+        	, TM_LIST.DELIVERYDT
+        	, MS_DLV_DISTRICTGROUP.DLVGROUP_ID
+        	, MS_DLV_DISTRICTGROUP.DLVGROUP_NM
+        	, MS_DLV_DISTRICT.DLVDISTRICT_ID
+        	, MS_DLV_DISTRICT.DLVDISTRICT_NM
+        	, TM_LIST.POPNO
+        	, TM_LIST.CARNO
+        	, TM_LIST.CONTRACTTYPE
+        	, FN_CODEDESCR('FW00', 'CONTRACTTYPE', TM_LIST.CONTRACTTYPE) AS CONTRACTNAME
+        	, TM_LIST.PRIORITY
+        	, TM_LIST.DELIVERYPRIORITY
+        	, TM_LIST.CUSTTYPE
+        	, TM_LIST.TRUTHCUSTKEY
+        	, FN_DESCR_CUST(TM_LIST.STORERKEY, TM_LIST.TRUTHCUSTKEY) AS TRUTHCUSTNAME
+        	, CASE WHEN MS_CUSTDLVINFO.ADDRESS1 IS NOT NULL
+        		   THEN MS_CUSTDLVINFO.ADDRESS1 || ' ' || MS_CUSTDLVINFO.ADDRESS2
+        		   ELSE MS_CUSTDLVINFO.ADDRESS3 || ' ' || MS_CUSTDLVINFO.ADDRESS4
+        		   END AS TRUTHADDRESS
+        	, TO_CHAR(TM_LIST.OTD_FROM, 'HH24:MI') AS OTD_FROM
+        	, TO_CHAR(TM_LIST.OTD_TO, 'HH24:MI') AS OTD_TO
+        	, MS_CUSTDLVINFO.DELIVERYNOTIYN
+        	, ( SELECT FRAMEONE_USER.USER_NM
+        		FROM FRAMEONE_USER
+        		WHERE FRAMEONE_USER.USER_ID = NVL(CUST_AVG.DELIVERYSTART_EDITWHO, TM_LIST.DELIVERY_EDITWHO)
+        	) AS REG_WHO_NM
+        	, CASE WHEN 'W' IN (CUST_AVG.DELIVERYSTART_REG_TYPE, CUST_AVG.DELIVERYEND_REG_TYPE) THEN CUST_AVG.DELIVERYSTART_EDITWHO
+        		   ELSE COALESCE(CUST_AVG.DELIVERYSTART_ADDWHO, CUST_AVG.DELIVERYSTART_EDITWHO, TM_LIST.DELIVERY_EDITWHO) END AS REG_WHO
+        	, CUST_AVG.DELIVERYSTART_REG_TYPE
+        	, CUST_AVG.DELIVERYEND_REG_TYPE
+        	, CUST_AVG.DELIVERYSTART_EDITDATE
+        	, CUST_AVG.DELIVERYEND_EDITDATE
+        	, TO_CHAR(TM_LIST.DELIVERYPLANDT, 'HH24:MI') AS DELIVERYPLANDT
+        	, TO_CHAR(TM_LIST.CUSTARRIVALDT, 'HH24:MI') AS CUSTARRIVALDT
+        	, TO_CHAR(TM_LIST.CUSTDEPARTUREDT, 'HH24:MI') AS CUSTDEPARTUREDT
+        	, CUST_AVG.AVG_ARRIVALDT
+        	, MS_CUSTDLVINFO.AVG_WORK_TIME
+        	, TM_LIST.WEIGHT
+        	, TM_LIST.CUBE
+        	, CASE WHEN EXISTS (
+        		SELECT 1
+        		FROM TM_ISSUE
+        		INNER JOIN TM_ISSUE_FILE
+        			ON  TM_ISSUE_FILE.ISSUENO = TM_ISSUE.ISSUENO
+        		WHERE TM_ISSUE.DCCODE     = TM_LIST.DCCODE
+        		  AND TM_ISSUE.CUSTKEY    = TM_LIST.TRUTHCUSTKEY
+        		  AND TM_ISSUE.DELIVERYDT = TM_LIST.DELIVERYDT
+        		  AND TM_ISSUE.DEL_YN     = 'N'
+        		  AND TM_ISSUE_FILE.FILE_NAME IS NOT NULL
+        	) THEN 'Y' ELSE 'N' END AS PHOTO_YN
+        FROM (
+        	SELECT
+        		  TM_INPLAN.STORERKEY
+        		, TM_INPLAN.DCCODE
+        		, TM_INPLAN.DELIVERYDT
+        		, TM_INPLAN.DISTRICTGROUP
+        		, TM_INPLAN.DISTRICTCODE
+        		, TM_INPLAN.DELIVERYGROUP AS POPNO
+        		, TM_INPLAN.CARNO
+        		, TM_INPLAN.CONTRACTTYPE
+        		, TM_INPLAN.PRIORITY
+        		, TM_INPLAN.DELIVERYPRIORITY
+        		, TM_INPLAN.CUSTTYPE
+        		, TM_INPLAN.TRUTHCUSTKEY
+        		, MIN(TM_INPLAN.FROM_DELIVERYREQDT) AS OTD_FROM
+        		, MAX(TM_INPLAN.DELIVERYREQDT) AS OTD_TO
+        		, TM_INPLAN.DELIVERYPLANDT
+        		, MAX(TM_INPLAN.CUSTARRIVALDT) AS CUSTARRIVALDT
+        		, MAX(TM_INPLAN.CUSTDEPARTUREDT) AS CUSTDEPARTUREDT
+        		, SUM(CASE WHEN TM_INPLAN.DOCTYPE = 'RT' THEN 0 ELSE TM_INPLAN.WEIGHT END) AS WEIGHT
+        		, SUM(CASE WHEN TM_INPLAN.DOCTYPE = 'RT' THEN 0 ELSE TM_INPLAN.CUBE   END) AS CUBE
+        		, MAX(CASE WHEN TM_INPLAN.CUSTARRIVALDT IS NOT NULL AND TM_INPLAN.CUSTDEPARTUREDT IS NOT NULL THEN TM_INPLAN.EDITWHO ELSE NULL END) KEEP(
+        		      DENSE_RANK LAST
+        		      ORDER BY TM_INPLAN.EDITDATE
+        		  ) AS DELIVERY_EDITWHO
+        	FROM (
+        		SELECT DCCODE, DELIVERYDT, SLIPDT, DISTRICTGROUP, DISTRICTCODE, DELIVERYGROUP, CARNO, CONTRACTTYPE, PRIORITY, DELIVERYPRIORITY, TRUTHCUSTKEY, STORERKEY, CUSTTYPE, DELIVERYPLANDT, CUSTARRIVALDT, CUSTDEPARTUREDT, WEIGHT, CUBE, DOCTYPE, STATUS, TM_DELIVERYTYPE, FROM_DELIVERYREQDT, DELIVERYREQDT, EDITWHO, EDITDATE
+                FROM TM_INPLAN
+        		WHERE DEL_YN = 'N'
+        		  AND SPLIT_DELIVERY_YN = 'N'
+        		UNION ALL
+        		SELECT DCCODE, DELIVERYDT, SLIPDT, DISTRICTGROUP, DISTRICTCODE, DELIVERYGROUP, CARNO, CONTRACTTYPE, PRIORITY, DELIVERYPRIORITY, TRUTHCUSTKEY, STORERKEY, CUSTTYPE, DELIVERYPLANDT, CUSTARRIVALDT, CUSTDEPARTUREDT, WEIGHT, CUBE, DOCTYPE, STATUS, TM_DELIVERYTYPE, FROM_DELIVERYREQDT, DELIVERYREQDT, EDITWHO, EDITDATE
+                FROM TM_INPLAN_SPLIT
+        		WHERE DEL_YN = 'N'
+        	) TM_INPLAN
+        	WHERE TM_INPLAN.DCCODE = #{dccode}
+        	  AND TM_INPLAN.DELIVERYDT = #{deliverydt}
+        	  AND TM_INPLAN.SLIPDT BETWEEN TO_CHAR(TRUNC(ADD_MONTHS(TO_DATE(#{deliverydt}, 'YYYYMMDD'), -1), 'MM'), 'YYYYMMDD')
+        							   AND #{deliverydt}
+        	  AND TM_INPLAN.STATUS = '90'
+        	  AND TM_INPLAN.TM_DELIVERYTYPE IN ('1','2')
+              AND TM_INPLAN.CONTRACTTYPE != 'SELF'
+        	  <if test="contracttype != null and contracttype != ''">
+        		AND TM_INPLAN.CONTRACTTYPE = #{contracttype}
+        	  </if>
+        	  <if test="popnoList != null and popnoList.size() > 0">
+        		  AND TM_INPLAN.DELIVERYGROUP IN
+        		  <foreach collection="popnoList" item="popno" open="(" separator="," close=")">
+        			#{popno}
+        		  </foreach>
+        	  </if>
+        	  <if test="carnoList != null and carnoList.size() > 0">
+        		  AND TM_INPLAN.CARNO IN
+        		  <foreach collection="carnoList" item="carno" open="(" separator="," close=")">
+        			#{carno}
+        		  </foreach>
+        	  </if>
+        	GROUP BY
+        		  TM_INPLAN.STORERKEY
+        		, TM_INPLAN.DCCODE
+        		, TM_INPLAN.DELIVERYDT
+        		, TM_INPLAN.DISTRICTGROUP
+        		, TM_INPLAN.DISTRICTCODE
+        		, TM_INPLAN.DELIVERYGROUP
+        		, TM_INPLAN.CARNO
+        		, TM_INPLAN.CONTRACTTYPE
+        		, TM_INPLAN.PRIORITY
+        		, TM_INPLAN.DELIVERYPRIORITY
+        		, TM_INPLAN.CUSTTYPE
+        		, TM_INPLAN.TRUTHCUSTKEY
+        		, TM_INPLAN.DELIVERYPLANDT
+        ) TM_LIST
+        LEFT JOIN MS_DLV_DISTRICTGROUP
+        	ON  TM_LIST.DCCODE        = MS_DLV_DISTRICTGROUP.DCCODE
+        	AND TM_LIST.DISTRICTGROUP = MS_DLV_DISTRICTGROUP.DLVGROUP_ID
+        	AND TM_LIST.DELIVERYDT    BETWEEN MS_DLV_DISTRICTGROUP.FROMDATE AND MS_DLV_DISTRICTGROUP.TODATE
+        LEFT JOIN MS_DLV_DISTRICT
+        	ON  TM_LIST.DCCODE       = MS_DLV_DISTRICT.DCCODE
+        	AND TM_LIST.DISTRICTCODE = MS_DLV_DISTRICT.DLVDISTRICT_ID
+        	AND TM_LIST.DELIVERYDT   BETWEEN MS_DLV_DISTRICT.FROMDATE AND MS_DLV_DISTRICT.TODATE
+        LEFT JOIN MS_CUSTDLVINFO
+        	ON  MS_CUSTDLVINFO.STORERKEY  = TM_LIST.STORERKEY
+        	AND MS_CUSTDLVINFO.CUSTTYPE   = TM_LIST.CUSTTYPE
+        	AND MS_CUSTDLVINFO.DLVCUSTKEY = TM_LIST.TRUTHCUSTKEY
+        OUTER APPLY (
+        	SELECT
+        		  MAX(CASE WHEN TM_WORKLOG.DELIVERYDT = TM_LIST.DELIVERYDT AND TM_WORKLOG.WORKLOGTYPE = 'DELIVERYSTART' THEN TM_WORKLOG.REG_TYPE ELSE NULL END) AS DELIVERYSTART_REG_TYPE
+        		, MAX(CASE WHEN TM_WORKLOG.DELIVERYDT = TM_LIST.DELIVERYDT AND TM_WORKLOG.WORKLOGTYPE = 'DELIVERYSTART' THEN TM_WORKLOG.ADDWHO   ELSE NULL END) AS DELIVERYSTART_ADDWHO
+        		, MAX(CASE WHEN TM_WORKLOG.DELIVERYDT = TM_LIST.DELIVERYDT AND TM_WORKLOG.WORKLOGTYPE = 'DELIVERYSTART' THEN TM_WORKLOG.EDITWHO  ELSE NULL END) AS DELIVERYSTART_EDITWHO
+        		, MAX(CASE WHEN TM_WORKLOG.DELIVERYDT = TM_LIST.DELIVERYDT AND TM_WORKLOG.WORKLOGTYPE = 'DELIVERYSTART' THEN TM_WORKLOG.EDITDATE  ELSE NULL END) AS DELIVERYSTART_EDITDATE
+        		, MAX(CASE WHEN TM_WORKLOG.DELIVERYDT = TM_LIST.DELIVERYDT AND TM_WORKLOG.WORKLOGTYPE = 'DELIVERYEND'   THEN TM_WORKLOG.REG_TYPE ELSE NULL END) AS DELIVERYEND_REG_TYPE
+        		, MAX(CASE WHEN TM_WORKLOG.DELIVERYDT = TM_LIST.DELIVERYDT AND TM_WORKLOG.WORKLOGTYPE = 'DELIVERYEND'   THEN TM_WORKLOG.ADDWHO   ELSE NULL END) AS DELIVERYEND_ADDWHO
+        		, MAX(CASE WHEN TM_WORKLOG.DELIVERYDT = TM_LIST.DELIVERYDT AND TM_WORKLOG.WORKLOGTYPE = 'DELIVERYEND'   THEN TM_WORKLOG.EDITWHO  ELSE NULL END) AS DELIVERYEND_EDITWHO
+        		, MAX(CASE WHEN TM_WORKLOG.DELIVERYDT = TM_LIST.DELIVERYDT AND TM_WORKLOG.WORKLOGTYPE = 'DELIVERYEND'   THEN TM_WORKLOG.EDITDATE  ELSE NULL END) AS DELIVERYEND_EDITDATE
+        		, TO_CHAR(TRUNC(SYSDATE) + NUMTODSINTERVAL(AVG(TO_NUMBER(TO_CHAR(CASE WHEN TM_WORKLOG.WORKLOGTYPE = 'DELIVERYSTART' THEN TM_WORKLOG.WORKDATEDATA1 ELSE NULL END, 'HH24')) * 60
+        													 + TO_NUMBER(TO_CHAR(CASE WHEN TM_WORKLOG.WORKLOGTYPE = 'DELIVERYSTART' THEN TM_WORKLOG.WORKDATEDATA1 ELSE NULL END, 'MI'))), 'MINUTE'), 'HH24:MI') AS AVG_ARRIVALDT
+        	FROM TM_WORKLOG
+        	WHERE TM_WORKLOG.CARNO       = TM_LIST.CARNO
+        	  AND TM_WORKLOG.CUSTKEY     = TM_LIST.TRUTHCUSTKEY
+        	  AND TM_WORKLOG.DELIVERYDT BETWEEN TO_CHAR(TO_DATE(TM_LIST.DELIVERYDT, 'YYYYMMDD') - 5, 'YYYYMMDD')
+        									AND TM_LIST.DELIVERYDT
+        	  AND TM_WORKLOG.WORKLOGTYPE IN ('DELIVERYSTART', 'DELIVERYEND')
+        	  AND TM_WORKLOG.WORKDATEDATA1 IS NOT NULL
+        ) CUST_AVG
+        ORDER BY
+              TM_LIST.CARNO
+            , TM_LIST.PRIORITY
+            , TM_LIST.DELIVERYPLANDT
+    </select>
+
+</mapper>
+

@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+ * Copyright 2025. CJ OliveNetworks Co. all rights reserved.
+ *
+ * @author      : KimDongHan (liop0123@cj.net)
+ * @date        : 2025.09.01
+ * @description : 지표 > 센터 운영 > 배송조별 출자 평균시간 현황 SQL
+ * @issues      :
+-->
+<mapper namespace="kpCenterDayTMDlvStateService">
+	  
+    <select id="getMasterList" resultType="cjfw.wms.kp.dto.KpCenterDayTMDlvStateResDto">
+		SELECT /* [KpCenterDayTMDlvStateService.sqlx][KpCenterDayTMDlvStateService.getMasterList][지표 > 센터 운영 > 배송조별 출자 평균시간 현황 조회][KimDongHan][2025-08-21] */
+		       T_TMDLV.DCCODE                                                                           AS DCCODE             /* 물류센터코드 */
+		     , CM_DC.DCNAME                                                                             AS DCNAME             /* 물류센터명 */
+		     , FN_CODEDESCR(#{gStorerkey},'CARGROUP',T_TMDLV.CARGROUP)                                  AS CARGROUP           /* 구분 */
+		     , T_TMDLV.DLVTYPE                                                                          AS DLVTYPE            /* 지표 */
+		     , T_TMDLV.UOM                                                                              AS UOM                /* 단위 */
+		     , TO_CHAR(TO_DATE(MOD(AVG_PREMONTH_CNT + AVG_PREMONTH,24*60)*60,'SSSSS'),'HH24:MI')        AS AVG_PREMONTH       /* 전월 일평균 */
+		     , TO_CHAR(TO_DATE(MOD(AVG_MONTH_CNT    + AVG_MONTH   ,24*60)*60,'SSSSS'),'HH24:MI')        AS AVG_MONTH          /* 당월 일평균 */
+		     , CASE WHEN SUM_PREMONTH_CNT = 0 OR SUM_MONTH_CNT = 0 THEN NULL
+		            ELSE (CASE WHEN AVG_MONTH <![CDATA[ < ]]> AVG_PREMONTH THEN '-' ELSE '' END)
+		                 ||LPAD(TRUNC(ABS(AVG_MONTH - AVG_PREMONTH)/60 ),2,'0')
+						 ||':'||LPAD(TRUNC(MOD(ABS(AVG_MONTH - AVG_PREMONTH),60)),2,'0') END            AS DIFF_MONTH         /* 증감량 */
+		     , TO_CHAR(TO_DATE(MOD(AVG_PREDAY_CNT   + AVG_PREDAY  ,24*60)*60,'SSSSS'),'HH24:MI')        AS AVG_PREDAY         /* 전일 */
+		     , TO_CHAR(TO_DATE(MOD(AVG_DAY_CNT      + AVG_DAY     ,24*60)*60,'SSSSS'),'HH24:MI')        AS AVG_DAY            /* 당일 */
+		     , CASE WHEN SUM_PREDAY_CNT = 0   OR SUM_DAY_CNT = 0 THEN NULL
+			        ELSE (CASE WHEN AVG_DAY <![CDATA[ < ]]> AVG_PREDAY THEN '-' ELSE '' END)
+		                 ||LPAD(TRUNC(ABS(AVG_DAY - AVG_PREDAY)/60 ),2,'0')
+		                 ||':'||LPAD(TRUNC(MOD(ABS(AVG_DAY - AVG_PREDAY),60)),2,'0') END                AS DIFF_DAY           /* 전일 증감량 */ 
+		     , CASE WHEN SUM_PREMONTH_CNT = 0 OR SUM_DAY_CNT = 0 THEN NULL
+		            ELSE (CASE WHEN AVG_DAY <![CDATA[ < ]]> AVG_PREMONTH THEN '-' ELSE '' END)
+		                 ||LPAD(TRUNC(ABS(AVG_DAY - AVG_PREMONTH)/60 ),2,'0')
+		                 ||':'||LPAD(TRUNC(MOD(ABS(AVG_DAY - AVG_PREMONTH),60)),2,'0') END              AS DIFF_MONTHDAY      /* 전월 증감량 */
+		  FROM ( SELECT DCCODE                                                                              AS DCCODE
+		              , CARGROUP                                                                            AS CARGROUP
+		              , DLVTYPE                                                                             AS DLVTYPE
+		              , ''                                                                                  AS UOM
+		              , DECODE(SUM_PREMONTH_CNT,0,0,ABS(FLOOR (SUM_PREMONTH_TIME/SUM_PREMONTH_CNT)*24*60))  AS AVG_PREMONTH_CNT
+		              , DECODE(SUM_PREMONTH_CNT,0,0,    ROUND((SUM_PREMONTH_TIME/SUM_PREMONTH_CNT)*24*60))  AS AVG_PREMONTH
+		              , DECODE(SUM_MONTH_CNT   ,0,0,ABS(FLOOR (SUM_MONTH_TIME   /SUM_MONTH_CNT   )*24*60))  AS AVG_MONTH_CNT
+		              , DECODE(SUM_MONTH_CNT   ,0,0,    ROUND((SUM_MONTH_TIME   /SUM_MONTH_CNT   )*24*60))  AS AVG_MONTH
+		              , DECODE(SUM_PREDAY_CNT  ,0,0,ABS(FLOOR (SUM_PREDAY_TIME  /SUM_PREDAY_CNT  )*24*60))  AS AVG_PREDAY_CNT
+		              , DECODE(SUM_PREDAY_CNT  ,0,0,    ROUND((SUM_PREDAY_TIME  /SUM_PREDAY_CNT  )*24*60))  AS AVG_PREDAY
+		              , DECODE(SUM_DAY_CNT     ,0,0,ABS(FLOOR (SUM_DAY_TIME     /SUM_DAY_CNT     )*24*60))  AS AVG_DAY_CNT
+		              , DECODE(SUM_DAY_CNT     ,0,0,    ROUND((SUM_DAY_TIME     /SUM_DAY_CNT     )*24*60))  AS AVG_DAY
+		              , SUM_PREMONTH_CNT
+		              , SUM_MONTH_CNT
+		              , SUM_PREDAY_CNT
+		              , SUM_DAY_CNT
+		          FROM ( SELECT DCCODE                                                                                                        
+		                      , CARGROUP                                                                                                      
+		                      , DLVTYPE                                                                                                       
+		                      , UNISTR('시/분')                                                                                                AS UOM
+		                      , SUM(CASE WHEN DELIVERYMONTH <![CDATA[ <> ]]> LEFT(#{deliverydt},6)                 THEN WORKDATE ELSE 0 END)  AS SUM_PREMONTH_TIME
+		                      , SUM(CASE WHEN DELIVERYMONTH <![CDATA[ <> ]]> LEFT(#{deliverydt},6)                 THEN AVG_CNT  ELSE 0 END)  AS SUM_PREMONTH_CNT
+		                      , SUM(CASE WHEN DELIVERYMONTH =  LEFT(#{deliverydt},6)                               THEN WORKDATE ELSE 0 END)  AS SUM_MONTH_TIME
+		                      , SUM(CASE WHEN DELIVERYMONTH =  LEFT(#{deliverydt},6)                               THEN AVG_CNT  ELSE 0 END)  AS SUM_MONTH_CNT
+		                      , SUM(CASE WHEN DELIVERYDT = TO_CHAR(TO_DATE(#{deliverydt},'YYYYMMDD')-1,'YYYYMMDD') THEN WORKDATE ELSE 0 END)  AS SUM_PREDAY_TIME
+		                      , SUM(CASE WHEN DELIVERYDT = TO_CHAR(TO_DATE(#{deliverydt},'YYYYMMDD')-1,'YYYYMMDD') THEN AVG_CNT  ELSE 0 END)  AS SUM_PREDAY_CNT
+		                      , SUM(CASE WHEN DELIVERYDT = TO_CHAR(TO_DATE(#{deliverydt},'YYYYMMDD')  ,'YYYYMMDD') THEN WORKDATE ELSE 0 END)  AS SUM_DAY_TIME
+		                      , SUM(CASE WHEN DELIVERYDT = TO_CHAR(TO_DATE(#{deliverydt},'YYYYMMDD')  ,'YYYYMMDD') THEN AVG_CNT  ELSE 0 END)  AS SUM_DAY_CNT
+		                   FROM ( SELECT TM_WORKLOG.CUSTKEY                                                        AS DCCODE
+		                               , NVL(CM_CAR.CARGROUP,'10')                                                 AS CARGROUP
+		                               , UNISTR('START')                                                           AS DLVTYPE
+		                               , TM_WORKLOG.DELIVERYDT                                                     AS DELIVERYDT
+		                               , LEFT(TM_WORKLOG.DELIVERYDT,6)                                             AS DELIVERYMONTH
+		                               , MIN(TM_WORKLOG.WORKDATEDATA1) - TO_DATE(TM_WORKLOG.DELIVERYDT,'YYYYMMDD') AS WORKDATE                             
+		                               , 1                                                                         AS AVG_CNT                                  
+		                            FROM TM_WORKLOG
+		                            JOIN CM_CAR ON CM_CAR.CARNO = TM_WORKLOG.CARNO
+		                           WHERE TM_WORKLOG.WORKLOGTYPE IN ('DCSTART')
+								<if test="dccode != null and dccode != ''">    
+								     AND TM_WORKLOG.CUSTKEY     = #{dccode}  
+								</if>
+		                             AND ( TM_WORKLOG.DELIVERYDT LIKE TO_CHAR(ADD_MONTHS(TO_DATE(#{deliverydt},'YYYYMMDD'),-1),'YYYYMM')||'%'
+		                              OR   TM_WORKLOG.DELIVERYDT LIKE TO_CHAR(ADD_MONTHS(TO_DATE(#{deliverydt},'YYYYMMDD'),0 ),'YYYYMM')||'%' )
+		                           GROUP BY TM_WORKLOG.CUSTKEY
+		                                  , TM_WORKLOG.DELIVERYDT
+		                                  , CM_CAR.CARGROUP
+		                           UNION ALL
+		                          SELECT TM_WORKLOG.CUSTKEY                                                        AS DCCODE
+		                               , NVL(CM_CAR.CARGROUP,'10')                                                 AS CARGROUP
+		                               , UNISTR('END')                                                             AS DLVTYPE
+		                               , TM_WORKLOG.DELIVERYDT                                                     AS DELIVERYDT
+		                               , LEFT(TM_WORKLOG.DELIVERYDT,6)                                             AS DELIVERYMONTH
+		                               , MAX(TM_WORKLOG.WORKDATEDATA1) - TO_DATE(TM_WORKLOG.DELIVERYDT,'YYYYMMDD') AS WORKDATE
+		                               , 1                                                                         AS AVG_CNT                                  
+		                            FROM TM_WORKLOG
+		                            JOIN CM_CAR ON CM_CAR.CARNO = TM_WORKLOG.CARNO
+		                           WHERE TM_WORKLOG.WORKLOGTYPE IN ('DCSTART')
+								<if test="dccode != null and dccode != ''">    
+								     AND TM_WORKLOG.CUSTKEY     = #{dccode}  
+								</if>
+		                             AND ( TM_WORKLOG.DELIVERYDT LIKE TO_CHAR(ADD_MONTHS(TO_DATE(#{deliverydt},'YYYYMMDD'),-1),'YYYYMM')||'%'
+		                              OR   TM_WORKLOG.DELIVERYDT LIKE TO_CHAR(ADD_MONTHS(TO_DATE(#{deliverydt},'YYYYMMDD'),0),'YYYYMM')||'%' )
+		                           GROUP BY TM_WORKLOG.CUSTKEY
+		                                  , TM_WORKLOG.DELIVERYDT
+		                                  , CM_CAR.CARGROUP
+		                           UNION ALL
+		                          SELECT TM_WORKLOG.CUSTKEY                                                        AS DCCODE
+		                               , NVL(CM_CAR.CARGROUP,'10')                                                 AS CARGROUP
+		                               , UNISTR('AVG')                                                             AS DLVTYPE
+		                               , TM_WORKLOG.DELIVERYDT                                                     AS DELIVERYDT
+		                               , LEFT(TM_WORKLOG.DELIVERYDT,6)                                             AS DELIVERYMONTH
+		                               , SUM(TM_WORKLOG.WORKDATEDATA1 - TO_DATE(TM_WORKLOG.DELIVERYDT,'YYYYMMDD')) AS WORKDATE
+		                               , COUNT(1)                                                                  AS AVG_CNT                                  
+		                            FROM TM_WORKLOG
+		                            JOIN CM_CAR ON CM_CAR.CARNO = TM_WORKLOG.CARNO
+		                           WHERE TM_WORKLOG.WORKLOGTYPE IN ('DCSTART')
+								<if test="dccode != null and dccode != ''">    
+		                             AND TM_WORKLOG.CUSTKEY     = #{dccode}  
+								</if>
+		                             AND ( TM_WORKLOG.DELIVERYDT LIKE TO_CHAR(ADD_MONTHS(TO_DATE(#{deliverydt},'YYYYMMDD'),-1),'YYYYMM')||'%'
+		                              OR   TM_WORKLOG.DELIVERYDT LIKE TO_CHAR(ADD_MONTHS(TO_DATE(#{deliverydt},'YYYYMMDD'),0),'YYYYMM')||'%' )
+		                           GROUP BY TM_WORKLOG.CUSTKEY
+		                                  , TM_WORKLOG.DELIVERYDT
+		                                  , CM_CAR.CARGROUP )
+		                  GROUP BY DCCODE
+		                         , CARGROUP
+		                         , DLVTYPE )
+		       ) T_TMDLV
+		  JOIN CM_DC ON CM_DC.DCCODE = T_TMDLV.DCCODE
+		 ORDER BY DCCODE
+		        , CARGROUP
+		        , DLVTYPE   
+    </select>
+    
+    
+</mapper>

@@ -1,0 +1,214 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="msSkuDcLocChangeService">
+	<!-- 기본LOC 정보 조회(목록) -->
+    <select id="getMasterList" resultType="MsSkuDcLocChangeResDto">
+    	SELECT /* [msSkuDcLocChangeService.sqlx][msSkuDcLocChangeService.getMasterList][기본LOC 정보 조회(목록)][jangjaehyun][20250715] */
+               '0'                 AS CHECKYN,
+               MS_SKUDCSET.STORERKEY AS STORERKEY,
+               MS_SKUDCSET.DCCODE    AS DCCODE,
+               MS_LOCATION.ZONE      AS ZONE,
+               MS_SKUDCSET.LOC       AS LOC,
+               MS_SKUDCSET.SKU       AS SKU,
+               MS_SKU.DESCRIPTION    AS SKUNAME,
+               MS_SKUDCSET.ADDDATE   AS ADDDATE,
+			   MS_SKUDCSET.EDITDATE  AS EDITDATE,
+			   MS_SKUDCSET.ADDWHO    AS ADDWHO,
+			   MS_SKUDCSET.EDITWHO   AS EDITWHO,
+			   USER1.USER_NM AS ADDWHO_NM,  /*등록자명*/
+			   USER2.USER_NM AS EDITWHO_NM,  /*수정자명*/
+			   MS_SKUDCSET.DEL_YN   AS DEL_YN,
+			   DECODE(MS_PURCHASEMST.EXHAUSTION_STOP_YN, '0', 'N', '1', 'Y', MS_PURCHASEMST.EXHAUSTION_STOP_YN) AS EXHAUSTION_STOP_YN,
+			   NVL(SUM(ST_STOCK.QTY), 0) AS QTY
+          FROM MS_SKUDCSET
+          JOIN CM_USER_AUTHORITY_DCXSTORER
+            ON CM_USER_AUTHORITY_DCXSTORER.USERID = #{gUserId}
+        <if test="dcCode != null and dcCode != ''">
+           AND CM_USER_AUTHORITY_DCXSTORER.DCCODE = #{dcCode}
+        </if>
+        <if test='gStorerkey != "%"'>
+           AND CM_USER_AUTHORITY_DCXSTORER.STORERKEY = #{gStorerkey}
+        </if>
+           AND CM_USER_AUTHORITY_DCXSTORER.DCCODE = MS_SKUDCSET.DCCODE
+           AND CM_USER_AUTHORITY_DCXSTORER.STORERKEY = MS_SKUDCSET.STORERKEY
+          LEFT OUTER JOIN MS_SKU
+            ON MS_SKUDCSET.SKU = MS_SKU.SKU
+           AND MS_SKUDCSET.STORERKEY = MS_SKU.STORERKEY
+          LEFT OUTER JOIN MS_LOCATION
+            ON MS_LOCATION.DCCODE = MS_SKUDCSET.DCCODE
+           AND MS_LOCATION.LOC = MS_SKUDCSET.LOC
+          LEFT OUTER JOIN MS_PURCHASEMST
+		    ON MS_PURCHASEMST.STORERKEY = MS_SKUDCSET.STORERKEY
+		    AND MS_PURCHASEMST.DCCODE = MS_SKUDCSET.DCCODE
+		    AND MS_PURCHASEMST.SKU = MS_SKUDCSET.SKU
+		    AND MS_PURCHASEMST.CUSTTYPE = 'P'  -- 20260326추가 
+		  LEFT OUTER JOIN VW_ST_STOCK ST_STOCK
+            ON  MS_SKUDCSET.STORERKEY = ST_STOCK.STORERKEY
+           AND  MS_SKUDCSET.SKU = ST_STOCK.SKU
+           AND MS_SKUDCSET.LOC = ST_STOCK.LOC       -- 추가
+           AND MS_SKUDCSET.DCCODE = ST_STOCK.DCCODE -- 추가
+           AND ST_STOCK.STOCKGRADE = 'STD'          -- 추가
+           AND ST_STOCK.STOCKTYPE = 'GOOD'          -- 추가
+          LEFT JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = MS_SKUDCSET.ADDWHO  /*등록자명*/
+          LEFT JOIN FRAMEONE_USER USER2 ON USER2.USER_ID = MS_SKUDCSET.EDITWHO  /*수정자명*/
+         WHERE 1=1
+        <if test="dcCode != null and dcCode != ''">
+           AND MS_SKUDCSET.DCCODE LIKE #{dcCode}
+        </if>
+        <if test="fromLoc != null and fromLoc != ''">
+           AND MS_SKUDCSET.LOC <![CDATA[>=]]> #{fromLoc}
+        </if>
+        <if test="toLoc != null and toLoc != ''">
+           AND MS_SKUDCSET.LOC <![CDATA[<=]]> #{toLoc}
+        </if>
+        <if test="zone != null and zone != ''">
+           AND MS_LOCATION.ZONE = #{zone}
+        </if>
+        <if test="sku != null and sku != ''">
+            AND MS_SKUDCSET.SKU IN
+            (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                        FROM (SELECT #{sku} AS VAL FROM DUAL) A
+                     CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+        </if>
+        <if test="delYn != null and delYn != ''">
+           AND MS_SKU.DEL_YN = #{delYn}
+           AND MS_SKUDCSET.DEL_YN = #{delYn}
+        </if>
+        GROUP BY MS_SKUDCSET.STORERKEY, MS_SKUDCSET.DCCODE, MS_LOCATION.ZONE, MS_SKUDCSET.LOC, MS_SKUDCSET.SKU, MS_SKU.DESCRIPTION, MS_SKUDCSET.ADDDATE, MS_SKUDCSET.EDITDATE
+         , MS_SKUDCSET.ADDWHO, MS_SKUDCSET.EDITWHO, USER1.USER_NM, USER2.USER_NM, MS_SKUDCSET.DEL_YN, MS_PURCHASEMST.EXHAUSTION_STOP_YN
+         ORDER BY MS_SKUDCSET.DCCODE,
+                  MS_LOCATION.ZONE,
+                  MS_SKUDCSET.LOC,
+                  MS_SKUDCSET.SKU
+    </select>
+    
+    <update id="deleteTempTable">
+        DELETE /* [msSkuDcLocChangeService.sqlx][deleteTempTable][임시 Tabele 삭제][jangjaehyun][20250715] */ SY_PROCESSTEMP_DP
+		WHERE 1 = 1
+			AND PROCESSCREATOR	= #{gUserId}
+			AND PROCESSTYPE		= #{processtype}
+			AND SPID			= #{gSpid}
+    </update>
+    
+    <insert id="insertTempTable">
+		INSERT INTO /* [msSkuDcLocChangeService.sqlx][insertTempTable][임시 Tabele 등록][jangjaehyun][20250715] */ SY_PROCESSTEMP_DP 
+			(
+				PROCESSTYPE
+			    ,PROCESSCREATOR
+			    ,SPID
+			    ,ADDWHO
+			    ,EDITWHO
+			    ,STORERKEY
+			    ,DCCODE
+			    ,ZONE
+			    ,LOC
+			    ,SKU
+            )
+        VALUES
+            (
+                #{processtype}
+			    ,#{gUserId}
+			    ,#{gSpid}
+			    ,#{gUserId}
+			    ,#{gUserId}				    
+			    ,#{gStorerkey}
+			    ,#{dcCode}
+			    ,#{zone}
+			    ,#{loc}
+			    ,#{sku}
+			)
+    </insert>
+    
+    <!-- 기본LOC 일괄등록 결과 조회 -->
+    <select id="getDataResultlist" resultType="MsSkuDcLocChangeResultResDto">
+        SELECT /* [msSkuDcLocChangeService.sqlx][msSkuDcLocChangeService.getDataResultlist][처리결과조회][jangjaehyun][20250715] */
+               '0'                         AS CHECKYN,
+               SY_PROCESSTEMP_DP.DCCODE    AS DCCODE,
+               SY_PROCESSTEMP_DP.STORERKEY AS STORERKEY,
+               MS_LOCATION.ZONE            AS ZONE,
+               SY_PROCESSTEMP_DP.LOC       AS LOC,
+               SY_PROCESSTEMP_DP.SKU       AS SKU,
+               MS_SKU.DESCRIPTION          AS SKUNAME,
+               SY_PROCESSTEMP_DP.PROCESSFLAG AS PROCESSFLAG,
+               SY_PROCESSTEMP_DP.PROCESSMSG  AS PROCESSMSG
+          FROM SY_PROCESSTEMP_DP
+          LEFT OUTER JOIN MS_SKU
+            ON MS_SKU.STORERKEY = SY_PROCESSTEMP_DP.STORERKEY
+           AND MS_SKU.SKU = SY_PROCESSTEMP_DP.SKU
+           AND MS_SKU.DEL_YN = 'N'
+          LEFT OUTER JOIN MS_LOCATION
+            ON MS_LOCATION.DCCODE = SY_PROCESSTEMP_DP.DCCODE
+           AND MS_LOCATION.LOC = SY_PROCESSTEMP_DP.LOC
+           AND 'N' = MS_LOCATION.DEL_YN
+         WHERE SY_PROCESSTEMP_DP.PROCESSTYPE = 'MS_SKUDCLOCCHANGE'
+           AND SY_PROCESSTEMP_DP.PROCESSCREATOR = #{gUserId}
+           AND SY_PROCESSTEMP_DP.SPID = #{gSpid}
+         ORDER BY SY_PROCESSTEMP_DP.DCCODE,
+                  SY_PROCESSTEMP_DP.ZONE,
+                  SY_PROCESSTEMP_DP.LOC,
+                  SY_PROCESSTEMP_DP.SKU
+    </select>
+    
+    <!-- 엑셀 업로드 유효성체크 -->
+    <select id="getValidateExcelList" resultType="MsSkuDcLocChangeResultResDto">
+        SELECT 
+               #{dcCode}   AS dcCode
+             , #{zone}     AS zone
+             , #{loc}      AS loc
+             , #{sku}      AS sku
+             , CASE 
+                  WHEN (SELECT CASE WHEN COUNT(1) > 0 THEN 'Y' ELSE 'N' END FROM CM_DC C WHERE C.DEL_YN='N' AND C.DCCODE=#{dcCode}) = 'N' THEN 'N'
+                  WHEN (SELECT CASE WHEN COUNT(1) > 0 THEN 'Y' ELSE 'N' END FROM MS_ZONE D WHERE D.DEL_YN='N' AND D.DCCODE=#{dcCode} AND D.ZONE=#{zone}) = 'N' THEN 'N'
+                  WHEN (SELECT CASE WHEN COUNT(1) > 0 THEN 'Y' ELSE 'N' END FROM MS_LOCATION E WHERE E.DEL_YN='N' AND E.DCCODE=#{dcCode} AND E.LOC=#{loc}) = 'N' THEN 'N'
+                  WHEN (SELECT CASE WHEN COUNT(1) > 0 THEN 'Y' ELSE 'N' END FROM MS_SKU F WHERE F.STORERKEY='FW00' AND F.DEL_YN='N' AND F.SKU=#{sku}) = 'N' THEN 'N'		        
+                  ELSE 'Y'
+               END AS processYn
+              ,
+              -- 메시지 우선순위
+              CASE 
+                  WHEN (SELECT CASE WHEN COUNT(1) > 0 THEN 'Y' ELSE 'N' END FROM CM_DC C WHERE C.DEL_YN='N' AND C.DCCODE=#{dcCode}) = 'N' THEN '유효하지 않은 물류센터입니다.'
+                  WHEN (SELECT CASE WHEN COUNT(1) > 0 THEN 'Y' ELSE 'N' END FROM MS_ZONE D WHERE D.DEL_YN='N' AND D.DCCODE=#{dcCode} AND D.ZONE=#{zone}) = 'N' THEN '유효하지 않은 존정보입니다.'
+                  WHEN (SELECT CASE WHEN COUNT(1) > 0 THEN 'Y' ELSE 'N' END FROM MS_LOCATION E WHERE E.DEL_YN='N' AND E.DCCODE=#{dcCode} AND E.LOC=#{loc}) = 'N' THEN '유효하지 않은 로케이션정보입니다.'
+                  WHEN (SELECT CASE WHEN COUNT(1) > 0 THEN 'Y' ELSE 'N' END FROM MS_SKU F WHERE F.STORERKEY='FW00' AND F.DEL_YN='N' AND F.SKU=#{sku}) = 'N' THEN '유효하지 않은 상품정보입니다.'
+                  ELSE '정상'
+              END AS processMsg
+          FROM DUAL
+    </select>
+   
+    <select id="getExcelUploadList" resultType="MsSkuDcLocChangeResultResDto">
+        SELECT /* [msSkuDcLocChangeService.sqlx][msSkuDcLocChangeService.getExcelUploadList][처리결과조회][jangjaehyun][20250715] */
+               '0'                               AS CHECKYN 
+              ,SY_PROCESSTEMP_DP.DCCODE          AS DCCODE
+              ,SY_PROCESSTEMP_DP.STORERKEY       AS STORERKEY
+              ,MS_LOCATION.ZONE                  AS ZONE
+              ,SY_PROCESSTEMP_DP.LOC             AS LOC
+              ,SY_PROCESSTEMP_DP.SKU             AS SKU
+              ,MS_SKU.DESCRIPTION                AS SKUNAME
+              ,SY_PROCESSTEMP_DP.PROCESSFLAG     AS PROCESSYN
+              ,SY_PROCESSTEMP_DP.PROCESSMSG      AS PROCESSMSG
+        FROM   SY_PROCESSTEMP_DP 
+        LEFT OUTER JOIN   MS_SKU
+        ON     MS_SKU.STORERKEY         = SY_PROCESSTEMP_DP.STORERKEY
+        AND    MS_SKU.SKU               = SY_PROCESSTEMP_DP.SKU
+        AND    MS_SKU.DEL_YN            = 'N'
+        LEFT OUTER JOIN MS_LOCATION
+        ON     MS_LOCATION.DCCODE = SY_PROCESSTEMP_DP.DCCODE
+        AND    MS_LOCATION.LOC =SY_PROCESSTEMP_DP.LOC
+        AND    'N'            = MS_LOCATION.DEL_YN
+        WHERE  SY_PROCESSTEMP_DP.PROCESSTYPE = 'MS_SKUDCLOCCHANGE'
+        AND    SY_PROCESSTEMP_DP.PROCESSCREATOR = #{gUserId}
+        AND    SY_PROCESSTEMP_DP.SPID	        = #{gSpid}
+        ORDER BY SY_PROCESSTEMP_DP.DCCODE
+               , SY_PROCESSTEMP_DP.ZONE
+               , SY_PROCESSTEMP_DP.LOC
+               , SY_PROCESSTEMP_DP.SKU
+	</select>
+	
+	<select id="getZoneList" resultType="String"> 
+        SELECT NVL(MAX(ZONE),'STD') AS ZONE 
+          FROM MS_LOCATION
+         WHERE 1=1 
+         AND DCCODE =  #{dcCode}
+         AND LOC = #{loc}
+	</select>
+</mapper>

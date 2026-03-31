@@ -1,0 +1,181 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="tmCalendarService">
+	
+	<select id="getDataHeaderlist"  resultType="TmCalendarListResDto">
+		<![CDATA[
+		SELECT /* [cmCalendarService.sqlx][getDataRead][휴일 기준정보 조회 (목록)][ParkJinWoo][20250822] */
+		               CM_CALENDAR.SERIALKEY                                         AS SERIALKEY      /* 일련번호 */
+		            ,  CM_CALENDAR.DCCODE                                            AS DCCODE         /* 센터코드 */
+		            ,  CM_CALENDAR.CALENDAR_ID                                       AS CALENDAR_ID    /* 달력ID */
+		            ,  CM_CALENDAR.YY                                                AS YY             /* 연도 */
+		            ,  CM_CALENDAR.MM                                                AS MM             /* 월 */
+		             , LPAD(CM_CALENDAR.DD,2,'0')                                               AS DD             /* 일 */
+		            ,  NVL(CD_DAYGB.BASEDESCR, CM_CALENDAR.DAY_GB)                   AS DAY_GB         /* 일구분(코드명) */
+		            ,  CM_CALENDAR.REST_YN                     AS REST_YN        /* 휴일여부(코드명) */
+		            , CASE 
+					    WHEN CM_CALENDAR.WORK_YN IS NULL 
+					      THEN CASE 
+					             WHEN UPPER(CM_CALENDAR.REST_YN) IN ('Y','YES') THEN 'N' 
+					             ELSE 'Y' 
+					           END
+					    ELSE CM_CALENDAR.WORK_YN 
+ 						 END AS WORK_YN  /* 근무여부(Y:근무, N:휴무) */
+		            ,  CM_CALENDAR.REST_DESC                                         AS REST_DESC      /* 휴일설명 */
+		            ,  TO_CHAR(CM_CALENDAR.ADDDATE,  'YYYY-MM-DD HH24:MI:SS')        AS ADDDATE        /* 최초등록시간 */
+		            ,  TO_CHAR(CM_CALENDAR.EDITDATE, 'YYYY-MM-DD HH24:MI:SS')        AS EDITDATE       /* 최종변경시간 */
+		            ,  CM_CALENDAR.ADDWHO                                            AS ADDWHO         /* 최초등록자 */
+		            ,  CM_CALENDAR.EDITWHO                                           AS EDITWHO        /* 최종변경자 */
+		            ,  USER1.USER_NM                                                 AS ADDWHONAME     /* 등록자명 */
+		            ,  USER2.USER_NM                                                 AS EDITWHONAME    /* 수정자명 */
+		  FROM         CM_CALENDAR
+		  /* ── FN_CODEDESCR 대체 조인 ─────────────────────────────────────────── */
+		  LEFT JOIN    CM_CODE_STORER CD_DAYGB
+		               ON CD_DAYGB.STORERKEY = #{gStorerkey}                         /* 코드 스토어키 */
+		              AND CD_DAYGB.CODELIST  = 'DAY_GB'                              /* 코드리스트 */
+		              AND CD_DAYGB.BASECODE  = CM_CALENDAR.DAY_GB                    /* 기준코드 */
+		  LEFT JOIN    CM_CODE_STORER CD_YN
+		               ON CD_YN.STORERKEY = #{gStorerkey}                            /* 코드 스토어키 */
+		              AND CD_YN.CODELIST  = 'YN'                                     /* 코드리스트 */
+		              AND CD_YN.BASECODE  = CM_CALENDAR.REST_YN                      /* 기준코드 */
+		  /* ── 등록/수정자명 기본 조인 규칙 ───────────────────────────────────── */
+		  LEFT JOIN    FRAMEONE_USER USER1
+		               ON USER1.USER_ID = CM_CALENDAR.ADDWHO                         /* 등록자명 */
+		  LEFT JOIN    FRAMEONE_USER USER2
+		               ON USER2.USER_ID = CM_CALENDAR.EDITWHO                        /* 수정자명 */
+		 WHERE  1 = 1
+		   AND CALENDAR_ID = 'TRSP'
+		]]>
+		  <if test="dcCode != null and dcCode != ''">
+		    <![CDATA[   AND CM_CALENDAR.DCCODE LIKE #{dcCode} ]]>
+		  </if>
+		  <if test="calendarId != null and calendarId != ''">
+		    <![CDATA[   AND CM_CALENDAR.CALENDAR_ID LIKE #{calendarId} ]]>
+		  </if>
+
+		  <if test="dayGb != null and dayGb != ''">
+		    <![CDATA[   AND CM_CALENDAR.DAY_GB LIKE #{dayGb} ]]>
+		  </if>
+		  <if test="restYn != null and restYn != ''">
+		    <![CDATA[   AND CM_CALENDAR.REST_YN LIKE #{restYn} ]]>
+		  </if>
+		  <if test="restDesc != null and restDesc != ''">
+		    <![CDATA[   AND CM_CALENDAR.REST_DESC LIKE #{restDesc} ]]>
+		  </if>
+		  <if test="date != null and date != ''">
+		    <![CDATA[   AND CM_CALENDAR.YY||LPAD(CM_CALENDAR.MM,2,'0') >= #{date} ]]>
+		  </if>
+		  <if test="dateTo != null and dateTo != ''">
+		    <![CDATA[   AND CM_CALENDAR.YY||LPAD(CM_CALENDAR.MM,2,'0')<= #{dateTo} ]]>
+		  </if>
+		   <if test="workYn != null and workYn != ''">
+		    <![CDATA[    AND NVL(
+				        CM_CALENDAR.WORK_YN,
+				        CASE WHEN UPPER(CM_CALENDAR.REST_YN) IN ('Y','YES') THEN 'N' ELSE 'Y' END
+				      ) = #{workYn} 
+			    ]]>
+		  </if>
+		<![CDATA[
+		 ORDER BY YY, MM, LPAD(CM_CALENDAR.DD,2,'0')
+		]]>
+ 	 </select>
+  
+	  <!-- 휴일 기준정보 INSERT -->
+	<insert id="calanderInsert">
+		<![CDATA[
+		    INSERT /* [cmCalendarService.sqlx][휴일 기준정보 추가][ParkJinWoo][20250822] */
+		      INTO CM_CALENDAR
+		           ( DCCODE
+		           , CALENDAR_ID
+		           , YY
+		           , MM
+		           , DD
+		           , DAY_GB
+		           , REST_YN
+		           , REST_DESC
+		           , ADDWHO
+		           , EDITWHO
+		           , CALENDAR_ID )
+		     VALUES ( NVL(#{dcCode}, 'STD')               /* 센터코드 */
+		           , NVL(#{calendarId}, 'STD')           /* 달력ID */
+		           , #{yy}                                /* 연도 */
+		           , LPAD(#{mm}, 2, '0')                  /* 월 */
+		           , LPAD(#{dd}, 2, '0')                  /* 일 */
+		           , #{dayGb}                             /* 일구분 */
+		           , NVL(#{restYn}, 'N')                  /* 휴일여부 */
+		           , #{restDesc}                          /* 휴일설명 */
+		           , #{gUserId}                           /* 최초등록자 */
+		           , #{gUserId} 
+		           , 'TRSP')                         /* 최종변경자 */
+		]]>
+		</insert>
+		
+		<update id="calanderUpdate">
+		<![CDATA[
+		    UPDATE /* [cmCalendarService.sqlx][휴일 기준정보 수정][ParkJinWoo][20250822] */
+		           CM_CALENDAR
+		       SET REST_YN    = #{restYn}                 /* 휴일여부 */
+		         , REST_DESC  = #{restDesc}               /* 휴일설명 */
+		         , WORK_YN	  = #{workYn}
+		         , EDITDATE   = SYSDATE                   /* 최종변경시간 */
+		         , EDITWHO    = #{gUserId}                /* 최종변경자 */
+		     WHERE SERIALKEY  = #{serialKey}              /* 일련번호 */
+		       AND CALENDAR_ID = 'TRSP'
+		]]>
+		</update>
+		
+		  <!-- 달력 INSERT -->
+    <insert id="centerCalanderInsert" parameterType="java.util.List">
+        INSERT INTO CM_CALENDAR 
+        (
+           DCCODE
+         , CALENDAR_ID
+         , YY
+         , MM
+         , DD
+         , DAY_GB
+         , REST_YN
+         , REST_DESC
+         , WORK_YN
+         , ADDWHO
+         , EDITWHO
+        )
+        SELECT
+               S.DCCODE
+             , S.CALENDAR_ID
+             , S.YY
+             , S.MM
+             , S.DD
+             , S.DAY_GB
+             , S.REST_YN
+             , S.REST_DESC
+             , S.WORK_YN
+             , S.ADDWHO
+             , S.EDITWHO
+          FROM (
+               <foreach collection="list" item="item" separator=" UNION ALL ">
+                 SELECT
+                        #{item.dcCode}      AS DCCODE,
+                        #{item.calendarId}  AS CALENDAR_ID,
+                        #{item.yy}          AS YY,
+                        #{item.mm}          AS MM,
+                        #{item.dd}          AS DD,
+                        #{item.dayGb}       AS DAY_GB,
+                        #{item.restYn}      AS REST_YN,
+                        #{item.restDesc}    AS REST_DESC,
+                        #{item.workYn}      AS WORK_YN,
+                        #{item.addWho}      AS ADDWHO,
+                        #{item.editWho}     AS EDITWHO
+                   FROM DUAL
+               </foreach>
+               ) S
+            LEFT JOIN CM_CALENDAR T 
+              ON (
+                 T.DCCODE      = S.DCCODE AND
+                 T.CALENDAR_ID = S.CALENDAR_ID AND
+                 T.YY          = S.YY AND
+                 T.MM          = S.MM AND
+                 T.DD          = S.DD)
+            WHERE T.DCCODE IS NULL
+    </insert>
+</mapper>

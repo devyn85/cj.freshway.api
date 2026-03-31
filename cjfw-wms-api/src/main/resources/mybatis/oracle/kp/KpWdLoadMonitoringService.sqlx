@@ -1,0 +1,353 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+ * Copyright 2025. CJ OliveNetworks Co. all rights reserved.
+ *
+ * @author      : KimDongHan (liop0123@cj.net) 2025.12.12 ParkYosep (dytpq362@cj.net) 생성
+ * @date        : 2025.08.21
+ * @description : 지표/모니터링 > 마감지표 > 마감진행 현황 SQL
+ * @issues      :
+-->
+
+<mapper namespace="kpWdLoadMonitoringService">
+
+	<select id="getMasterList" resultType="KpWdLoadMonitoringResDto">
+    WITH T_RESULT AS (
+        SELECT /* leading(CM_USER_AUTHORITY) */
+               /* [kpWdLoadMonitoringService.sqlx][kpWdLoadMonitoringService.getMasterList][상차검수현황 Header정보] */
+               TM_INPLAN.STORERKEY                                                              AS STORERKEY
+              ,TM_INPLAN.DCCODE                                                                 AS DCCODE
+              ,TM_INPLAN.DOCTYPE                                                                AS DOCTYPE
+              ,TM_INPLAN.DELIVERYDT                                                             AS DELIVERYDT
+              ,TM_INPLAN.SLIPDT                                                                 AS SLIPDT
+              ,TM_INPLAN.CARNO                                                                  AS CARNO
+              ,MAX(CM_CAR.CONTRACTTYPE)                                                         AS CONTRACTTYPE
+              ,MAX(CM_DRIVER.DRIVERNAME)                                                        AS DRIVERNAME   
+              ,TO_CHAR(MAX(TM_INPLAN.DCDEPARTUREDT), 'MM/DD HH24:MI')                           AS DCDEPARTUREDT
+              ,TM_INPLAN.PRIORITY                                                               AS PRIORITY
+              ,TM_INPLAN.DELIVERYGROUP                                                          AS DELIVERYGROUP
+              ,MIN(TM_INPLAN.LOADSTATUS)                                                        AS LOADSTATUS
+              ,MAX(TM_INPLAN.COURIER)                                                           AS COURIER
+              ,SUM(WD_INPLAN.ORDERQTY) 
+               + SUM(DECODE(DM_DOCUMENT_D.ORDERTYPE,'ZUB',0,WD_INPLAN.CANCELQTY))               AS LOADPLANQTY
+              ,SUM(WD_INPLAN.INSPECTQTY)                                                        AS LOADCMPQTY
+              ,SUM(WD_INPLAN.ORDERQTY)                                                          AS ORDERQTY
+              ,SUM(WD_INPLAN.INSPECTQTY)                                                        AS INSPECTQTY
+              ,SUM(DECODE(DM_DOCUMENT_D.ORDERTYPE,'ZUB',0,WD_INPLAN.CANCELQTY))                 AS CANCELQTY
+              ,SUM(T_WD_INSPECT.INSPECTQTY )                                                    AS FORCECMPQTY
+              ,SUM(WD_INPLAN.CONFIRMQTY)                                                        AS CONFIRMQTY
+        FROM   TM_INPLAN
+        
+        JOIN   WD_INPLAN
+          ON   WD_INPLAN.DCCODE             = TM_INPLAN.DCCODE
+         AND   WD_INPLAN.STORERKEY          = TM_INPLAN.STORERKEY
+         AND   WD_INPLAN.DOCTYPE            = TM_INPLAN.DOCTYPE
+         AND   WD_INPLAN.SLIPDT             = TM_INPLAN.SLIPDT
+         AND   WD_INPLAN.SLIPNO             = TM_INPLAN.SLIPNO   
+         AND   WD_INPLAN.DEL_YN         =  'N'         
+         
+         <if test="fromDate != null and fromDate != ''">
+             AND WD_INPLAN.SLIPDT <![CDATA[>=]]> #{fromDate}
+         </if>
+         <if test="toDate != null and toDate != ''">
+             AND WD_INPLAN.SLIPDT <![CDATA[<=]]> #{toDate}
+         </if>
+         
+         <if test="toCustkeyMulti != null and toCustkeyMulti.size > 0">
+             AND WD_INPLAN.CUSTKEY IN
+             <foreach collection="toCustkeyMulti" item="item" open="(" close=")" separator=",">
+                 #{item}
+             </foreach>
+         </if>
+         
+         <if test="skuMulti != null and skuMulti.size > 0">
+             AND WD_INPLAN.SKU IN
+             <foreach collection="skuMulti" item="item" open="(" close=")" separator=",">
+                 #{item}
+             </foreach>
+         </if>
+            
+        JOIN   CM_USER_AUTHORITY           
+          ON   1=1            
+         <if test='gDccode != "%"'>      AND CM_USER_AUTHORITY.DCCODE    = #{gDccode}     </if>
+         <if test='gStorerkey != "%"'>   AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey}  </if>
+         <if test='gOrganize != "%"'>    AND CM_USER_AUTHORITY.ORGANIZE  = #{gOrganize}   </if>
+         <if test='gArea != "%"'>        AND CM_USER_AUTHORITY.AREA      = #{gArea}       </if>  
+    
+
+         AND   CM_USER_AUTHORITY.USERID     = #{gUserId}    
+         AND   CM_USER_AUTHORITY.DCCODE     =  WD_INPLAN.DCCODE             
+         AND   CM_USER_AUTHORITY.STORERKEY  =  WD_INPLAN.STORERKEY          
+         AND   CM_USER_AUTHORITY.ORGANIZE   =  WD_INPLAN.ORGANIZE           
+         AND   CM_USER_AUTHORITY.AREA       =  WD_INPLAN.AREA 
+         
+        LEFT OUTER JOIN  (
+             SELECT WD_INSPECT.DCCODE            
+                   ,WD_INSPECT.STORERKEY         
+                   ,WD_INSPECT.DOCTYPE           
+                   ,WD_INSPECT.SLIPDT            
+                   ,WD_INSPECT.SLIPNO            
+                   ,WD_INSPECT.SLIPLINE   
+                   ,SUM(INSPECTQTY)  INSPECTQTY
+                   ,WD_INSPECT.INVOICETYPE
+             FROM   WD_INSPECT
+             WHERE  WD_INSPECT.INVOICETYPE       = 'FORCEINSPECT'   
+              AND WD_INSPECT.DCCODE =  #{gDccode}
+             <if test="fromDate != null and fromDate != ''">
+             AND WD_INSPECT.SLIPDT <![CDATA[>=]]> #{fromDate}
+             </if>
+             <if test="toDate != null and toDate != ''">
+             AND WD_INSPECT.SLIPDT <![CDATA[<=]]> #{toDate}
+             </if>
+             GROUP BY WD_INSPECT.DCCODE            
+                     ,WD_INSPECT.STORERKEY         
+                     ,WD_INSPECT.DOCTYPE           
+                     ,WD_INSPECT.SLIPDT            
+                     ,WD_INSPECT.SLIPNO            
+                     ,WD_INSPECT.SLIPLINE  
+                     ,WD_INSPECT.INVOICETYPE       
+        ) T_WD_INSPECT
+        ON     T_WD_INSPECT.DCCODE            = WD_INPLAN.DCCODE
+        AND    T_WD_INSPECT.STORERKEY         = WD_INPLAN.STORERKEY
+        AND    T_WD_INSPECT.DOCTYPE           = WD_INPLAN.DOCTYPE
+        AND    T_WD_INSPECT.SLIPDT            = WD_INPLAN.SLIPDT
+        AND    T_WD_INSPECT.SLIPNO            = WD_INPLAN.SLIPNO        
+        AND    T_WD_INSPECT.SLIPLINE          = WD_INPLAN.SLIPLINE
+        
+        JOIN   DM_DOCUMENT_D           
+        ON     DM_DOCUMENT_D.DCCODE         =  WD_INPLAN.DCCODE         
+        AND    DM_DOCUMENT_D.STORERKEY      =  WD_INPLAN.STORERKEY               
+        AND    DM_DOCUMENT_D.DOCTYPE        =  WD_INPLAN.DOCTYPE         
+        AND    DM_DOCUMENT_D.DOCDT          =  WD_INPLAN.DOCDT         
+        AND    DM_DOCUMENT_D.DOCNO          =  WD_INPLAN.DOCNO         
+        AND    DM_DOCUMENT_D.DOCLINE        =  WD_INPLAN.DOCLINE            
+        AND    DM_DOCUMENT_D.DEL_YN         =  'N'     
+               
+        JOIN   DM_DOCUMENT_H         
+        ON     DM_DOCUMENT_H.DCCODE         =  DM_DOCUMENT_D.DCCODE         
+        AND    DM_DOCUMENT_H.STORERKEY      =  DM_DOCUMENT_D.STORERKEY               
+        AND    DM_DOCUMENT_H.DOCDT          =  DM_DOCUMENT_D.DOCDT         
+        AND    DM_DOCUMENT_H.DOCNO          =  DM_DOCUMENT_D.DOCNO         
+        AND    DM_DOCUMENT_H.DOCTYPE        =  DM_DOCUMENT_D.DOCTYPE                  
+        AND    DM_DOCUMENT_H.DEL_YN         =  'N'
+        
+        LEFT OUTER JOIN CM_CAR   
+        ON     CM_CAR.CARNO                 = TM_INPLAN.CARNO   
+        AND    CM_CAR.DEL_YN                = 'N'
+        
+        LEFT OUTER JOIN 
+               CM_DRIVER
+        ON     CM_DRIVER.DRIVERID           = CM_CAR.DRIVER1
+        AND    CM_DRIVER.DEL_YN             = 'N'
+         
+        JOIN   MS_SKU       
+        ON     MS_SKU.STORERKEY             =  WD_INPLAN.STORERKEY             
+        AND    MS_SKU.SKU                   =  WD_INPLAN.SKU
+        AND    MS_SKU.DEL_YN                =  'N'
+        
+        WHERE  1 = 1
+          AND NVL(TM_INPLAN.TM_DELIVERYTYPE, ' ') != '7'
+        <if test="carnoMulti != null and carnoMulti.size > 0">
+          AND TM_INPLAN.CARNO IN
+            <foreach collection="carnoMulti" item="item" open="(" close=")" separator=",">
+                #{item}
+            </foreach>
+        </if>
+        <if test='gDccode != "%"'>
+            AND TM_INPLAN.DCCODE = #{gDccode}
+        </if>
+        <if test="fromDate != null and fromDate != ''">
+            AND TM_INPLAN.DELIVERYDT <![CDATA[>=]]> #{fromDate}
+        </if>
+        <if test="toDate != null and toDate != ''">
+            AND TM_INPLAN.DELIVERYDT <![CDATA[<=]]> #{toDate}
+        </if>
+        <if test="contractType != null and contractType != ''">
+            AND CM_CAR.CONTRACTTYPE = #{contractType}
+        </if>
+        <if test="inspectstatus != null and inspectstatus != ''">
+            AND CASE WHEN WD_INPLAN.INSPECTQTY = 0 THEN '50'
+                     WHEN WD_INPLAN.INSPECTQTY > 0 AND WD_INPLAN.ORDERQTY - WD_INPLAN.CANCELQTY - WD_INPLAN.INSPECTQTY > 0 THEN '55'
+                     WHEN WD_INPLAN.ORDERQTY - WD_INPLAN.CANCELQTY <![CDATA[<=]]> WD_INPLAN.INSPECTQTY AND T_WD_INSPECT.INVOICETYPE = 'FORCEINSPECT'  THEN '80' 
+                     WHEN WD_INPLAN.ORDERQTY - WD_INPLAN.CANCELQTY <![CDATA[<=]]> WD_INPLAN.INSPECTQTY THEN '60'
+                END = #{inspectstatus}
+        </if>
+        
+        GROUP BY TM_INPLAN.STORERKEY          
+                ,TM_INPLAN.DCCODE             
+                ,TM_INPLAN.DOCTYPE            
+                ,TM_INPLAN.DELIVERYDT         
+                ,TM_INPLAN.SLIPDT         
+                ,TM_INPLAN.CARNO              
+                ,TM_INPLAN.PRIORITY           
+                ,TM_INPLAN.DELIVERYGROUP   
+    )        
+    SELECT '0'                                                                                AS CHECKYN
+          ,STORERKEY                                                                          AS STORERKEY
+          ,DCCODE                                                                             AS DCCODE
+          ,FN_GETDCNAME(DCCODE)                                                               AS DCNAME
+          ,DOCTYPE                                                                            AS DOCTYPE
+          ,DELIVERYDT                                                                         AS DELIVERYDT
+          ,SLIPDT                                                                             AS SLIPDT
+          ,CARNO                                                                              AS CARNO
+          ,CONTRACTTYPE                                                                       AS CONTRACTTYPE
+          ,DRIVERNAME                                                                         AS DRIVERNAME
+          ,DCDEPARTUREDT                                                                      AS DCDEPARTUREDT   
+          ,PRIORITY                                                                           AS PRIORITY
+          ,DELIVERYGROUP                                                                      AS DELIVERYGROUP
+          ,LOADSTATUS                                                                         AS LOADSTATUS
+          ,FN_CODEDESCR(STORERKEY,'COURIER'       , COURIER)                                  AS COURIER
+          ,LOADPLANQTY                                                                        AS LOADPLANQTY
+          ,LOADCMPQTY                                                                         AS LOADCMPQTY
+          ,CASE WHEN (LOADPLANQTY) > 0 THEN TRUNC((CASE WHEN NVL(LOADCMPQTY,0) / (LOADPLANQTY) > 1 THEN 1
+                                                        ELSE NVL(LOADCMPQTY,0) / (LOADPLANQTY)
+                                                   END) * 100, 2)  
+                ELSE 0 END                                                                    AS LOADRATE
+          ,CANCELQTY                                                                          AS SHORTAGEQTY
+          ,CASE WHEN CANCELQTY + ORDERQTY > 0 THEN TRUNC( CANCELQTY 
+                                                        / (ORDERQTY + CANCELQTY) * 100, 2) 
+                ELSE 0 END                                                                    AS SHORTAGERATE
+          ,FORCECMPQTY                                                                        AS FORCECMPQTY
+          ,CASE WHEN INSPECTQTY > 0 THEN TRUNC( NVL(FORCECMPQTY,0)
+                                              / INSPECTQTY * 100, 2) 
+                ELSE 0 END                                                                    AS FORCECMPRATE
+          ,ORDERQTY + CANCELQTY                                                               AS ORDERQTY
+          ,ORDERQTY - CONFIRMQTY                                                              AS UNCONFIRMQTY
+          ,CONFIRMQTY                                                                         AS CONFIRMQTY
+          ,CASE WHEN (ORDERQTY + CANCELQTY) > 0 THEN TRUNC( NVL(CONFIRMQTY + CANCELQTY,0) 
+                                                          / (ORDERQTY + CANCELQTY) * 100, 2) 
+                ELSE 0 END                                                                    AS CONFIRMRATE
+          ,CASE WHEN ORDERQTY = INSPECTQTY THEN 'Y' ELSE 'N' END                              AS FORCECMPYN
+       FROM T_RESULT  
+      ORDER BY STORERKEY          
+              ,DCCODE             
+              ,DOCTYPE            
+              ,DELIVERYDT         
+              ,SLIPDT         
+              ,CARNO              
+              ,PRIORITY           
+              ,DELIVERYGROUP  
+</select>
+    
+    <select id="getDetailList" resultType="KpWdLoadMonitoringDetailResDto">
+	    
+	    SELECT /* [kpWdLoadMonitoringService.sqlx][kpWdLoadMonitoringService.getDataDetailList][상차검수현황 Detail정보(구매)][김경은][20141013] */
+		       WD_INPLAN.DCCODE                                                              AS DCCODE          
+		      ,CM_DC.DCNAME                                                                  AS DCNAME 
+		      ,WD_INPLAN.SLIPDT                                                              AS SLIPDT
+		      ,TM_INPLAN.COURIER                                                             AS COURIER
+		      ,NVL(FN_CODEDESCR(TM_INPLAN.STORERKEY,'COURIER', TM_INPLAN.COURIER), '미정의') AS COURIERNAME
+		      ,''                                                                            AS ASSORTPICKCUST
+		      ,TM_INPLAN.CARNO                                                               AS CARNO
+		      ,TM_INPLAN.DELIVERYGROUP                                                       AS DELIVERYGROUP
+		      ,WD_INPLAN.SKU                                                                 AS SKU
+		      ,MS_SKU.DESCRIPTION                                                            AS SKUNAME
+		      ,WD_INPLAN.ORDERQTY +WD_INPLAN.CANCELQTY				                         AS ORDERQTY
+		      ,WD_INPLAN.INSPECTQTY              		                                     AS SCANQTY
+			  ,WD_INPLAN.CANCELQTY						  		                             AS SHORTAGEQTY
+		      ,WD_INPLAN.UOM                                                                 AS UOM 
+		      ,DM_DOCUMENT_H.TO_CUSTKEY                                                      AS TO_CUSTKEY
+		      ,DM_DOCUMENT_H.TO_CUSTNAME                                                     AS TO_CUSTNAME 
+		      ,DM_DOCUMENT_H.FROM_CUSTNAME                                                   AS FROM_CUSTNAME 
+		      ,FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY,'PUTAWAYTYPE', DM_DOCUMENT_D.CHANNEL)    AS CHANNEL   
+		      ,FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY,'STATUS_WD', DM_DOCUMENT_D.STATUS)       AS STATUS      
+		      ,FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY,'INSPECTSTATUS_WD',
+		       CASE WHEN WD_INPLAN.INSPECTQTY = 0 THEN '50'
+		            WHEN WD_INPLAN.INSPECTQTY > 0 AND WD_INPLAN.ORDERQTY - WD_INPLAN.CANCELQTY - WD_INPLAN.INSPECTQTY > 0 THEN '55'
+		            WHEN WD_INPLAN.ORDERQTY - WD_INPLAN.CANCELQTY <![CDATA[<=]]> WD_INPLAN.INSPECTQTY AND WD_INSPECT.INVOICETYPE = 'FORCEINSPECT'  THEN '80' 
+		            WHEN WD_INPLAN.ORDERQTY - WD_INPLAN.CANCELQTY <![CDATA[<=]]> WD_INPLAN.INSPECTQTY THEN '60'
+		       END)																			 AS INSPECTSTATUS  
+		FROM   WD_INPLAN                     
+		
+		JOIN   DM_DOCUMENT_H              
+		ON     DM_DOCUMENT_H.DCCODE            = WD_INPLAN.DCCODE              
+		AND    DM_DOCUMENT_H.STORERKEY         = WD_INPLAN.STORERKEY              
+		AND    DM_DOCUMENT_H.ORGANIZE          = WD_INPLAN.ORGANIZE              
+		AND    DM_DOCUMENT_H.DOCTYPE           = WD_INPLAN.DOCTYPE              
+		AND    DM_DOCUMENT_H.DOCDT             = WD_INPLAN.DOCDT              
+		AND    DM_DOCUMENT_H.DOCNO             = WD_INPLAN.DOCNO              
+		AND    DM_DOCUMENT_H.DEL_YN            = 'N'                                                                                       
+		
+		JOIN   DM_DOCUMENT_D              
+		ON     DM_DOCUMENT_D.DCCODE            = WD_INPLAN.DCCODE              
+		AND    DM_DOCUMENT_D.STORERKEY         = WD_INPLAN.STORERKEY              
+		AND    DM_DOCUMENT_D.ORGANIZE          = WD_INPLAN.ORGANIZE              
+		AND    DM_DOCUMENT_D.AREA              = WD_INPLAN.AREA              
+		AND    DM_DOCUMENT_D.DOCTYPE           = WD_INPLAN.DOCTYPE              
+		AND    DM_DOCUMENT_D.DOCDT             = WD_INPLAN.DOCDT              
+		AND    DM_DOCUMENT_D.DOCNO             = WD_INPLAN.DOCNO              
+		AND    DM_DOCUMENT_D.DOCLINE           = WD_INPLAN.DOCLINE       
+		AND    DM_DOCUMENT_D.DEL_YN            = 'N'              
+		                     
+		JOIN   CM_DC 
+		ON     CM_DC.DCCODE                    = DM_DOCUMENT_H.DCCODE              
+		AND    CM_DC.DEL_YN                    = 'N'                                            
+		               
+		JOIN   MS_SKU              
+		ON     MS_SKU.STORERKEY                = WD_INPLAN.STORERKEY              
+		AND    MS_SKU.SKU                      = WD_INPLAN.SKU              
+		AND    MS_SKU.DEL_YN                   = 'N'                                                               
+		             
+		JOIN TM_INPLAN   
+		ON     TM_INPLAN.DCCODE                = WD_INPLAN.DCCODE   
+		AND    TM_INPLAN.STORERKEY             = WD_INPLAN.STORERKEY   
+		AND    TM_INPLAN.DOCTYPE               = WD_INPLAN.DOCTYPE   
+		AND    TM_INPLAN.DOCDT                 = WD_INPLAN.DOCDT     
+		AND    TM_INPLAN.DOCNO                 = WD_INPLAN.DOCNO     
+		AND    TM_INPLAN.SLIPDT                = WD_INPLAN.SLIPDT     
+		AND    TM_INPLAN.SLIPNO                = WD_INPLAN.SLIPNO
+		             
+		LEFT OUTER JOIN 
+				    (SELECT   WD_INSPECT.DCCODE
+				            , WD_INSPECT.STORERKEY
+				            , WD_INSPECT.DOCDT
+				            , WD_INSPECT.DOCNO 
+				            , WD_INSPECT.SLIPDT
+				            , WD_INSPECT.SLIPNO 
+				            , WD_INSPECT.SLIPLINE
+		            		, MAX(INVOICETYPE) AS INVOICETYPE
+		        	 FROM     WD_INSPECT
+		         	 WHERE    WD_INSPECT.STORERKEY = #{gStorerkey}
+		             AND 	  WD_INSPECT.DCCODE = #{dccode}
+		             AND 	  WD_INSPECT.SLIPDT = #{slipdt}
+		             AND	  WD_INSPECT.INVOICETYPE = 'FORCEINSPECT'
+		        	 GROUP BY WD_INSPECT.DCCODE
+		                    , WD_INSPECT.STORERKEY
+		                    , WD_INSPECT.DOCDT
+		                    , WD_INSPECT.DOCNO 
+		                    , WD_INSPECT.SLIPDT
+		                    , WD_INSPECT.SLIPNO 
+		                    , WD_INSPECT.SLIPLINE
+		    )  WD_INSPECT
+		ON     WD_INSPECT.DCCODE               = WD_INPLAN.DCCODE
+		AND    WD_INSPECT.STORERKEY            = WD_INPLAN.STORERKEY
+		AND    WD_INSPECT.SLIPDT               = WD_INPLAN.SLIPDT
+		AND    WD_INSPECT.SLIPNO               = WD_INPLAN.SLIPNO      
+		AND    WD_INSPECT.SLIPLINE             = WD_INPLAN.SLIPLINE
+		AND	   WD_INSPECT.INVOICETYPE		   = 'FORCEINSPECT'
+		                     
+		WHERE  1=1                    
+		AND    WD_INPLAN.DCCODE   = #{dccode}
+		AND    WD_INPLAN.SLIPDT   = #{slipdt}                          
+		AND    TM_INPLAN.CARNO    = #{carno}
+		AND    NVL(TM_INPLAN.TM_DELIVERYTYPE, ' ') != '7'
+		AND    WD_INPLAN.DEL_YN   = 'N'   
+		<if test="inspectstatus != null and inspectstatus != ''">
+            AND CASE WHEN WD_INPLAN.INSPECTQTY = 0 THEN '50'
+                     WHEN WD_INPLAN.INSPECTQTY > 0 AND WD_INPLAN.ORDERQTY - WD_INPLAN.CANCELQTY - WD_INPLAN.INSPECTQTY > 0 THEN '55'
+                     WHEN WD_INPLAN.ORDERQTY - WD_INPLAN.CANCELQTY <![CDATA[<=]]> WD_INPLAN.INSPECTQTY AND WD_INSPECT.INVOICETYPE = 'FORCEINSPECT'  THEN '80' 
+                     WHEN WD_INPLAN.ORDERQTY - WD_INPLAN.CANCELQTY <![CDATA[<=]]> WD_INPLAN.INSPECTQTY THEN '60'
+                END = #{inspectstatus}
+        </if>
+
+		ORDER BY WD_INPLAN.DCCODE
+		        ,WD_INPLAN.SLIPDT
+		        ,TM_INPLAN.CARNO                                                      
+		        ,TM_INPLAN.DELIVERYGROUP 
+		        ,DM_DOCUMENT_H.TO_CUSTKEY
+		        ,WD_INPLAN.SKU
+	    
+    </select> 
+	
+
+</mapper>

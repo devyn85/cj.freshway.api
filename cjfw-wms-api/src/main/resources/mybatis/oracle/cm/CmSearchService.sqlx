@@ -1,0 +1,578 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cmSearchService">
+	<select id="getCustList" resultType="CmSearchCustResDto">
+		<choose>
+			<when test="expandedColumns != null and expandedColumns == 'Y'.toString()">
+      			SELECT /* [CmSearchService.sqlx][getCustList][YeoSeungCheol] */
+             	/* 센터 */
+             	d.dlv_dccode AS DLV_DCCODE
+
+				/* 본점 */
+           		,CASE
+               		WHEN p.CUSTKEY IS NOT NULL THEN p.CUSTKEY
+					WHEN c.CUSTKEY IS NOT NULL THEN c.PARENTCUSTKEY
+					ELSE NVL(d.PARENTCUSTKEY,d.CUSTKEY)
+				END AS HQ_CUSTKEY
+           		,NVL(p.DESCRIPTION,d.DESCRIPTION) AS HQ_NAME
+             	/* 판매처 */
+           		,c.CUSTKEY 		AS SALE_CUSTKEY
+           		,c.DESCRIPTION 	AS SALE_NAME
+
+             	/* 관리처 */
+           		,CASE
+	            WHEN (d.BILLTOCUSTKEY IS NULL AND d.CUSTGROUP &lt;&gt; 'C01') THEN d.CUSTKEY
+	            WHEN (d.CUSTGROUP IN ('C01','C02'))                    THEN ''
+	            ELSE d.CUSTKEY
+             	END AS MNG_CUSTKEY
+
+           		,CASE
+               	WHEN (d.BILLTOCUSTKEY IS NULL AND d.CUSTGROUP NOT IN ('C01','C10')) THEN NVL(p.DESCRIPTION,d.DESCRIPTION)
+               	WHEN (d.BILLTOCUSTKEY IS NULL AND d.CUSTGROUP IN ('C10'))          THEN d.DESCRIPTION
+               	WHEN (d.CUSTGROUP IN ('C01','C02'))                                 THEN ''
+               	ELSE p.DESCRIPTION
+             	END AS MNG_NAME
+
+             /* 기존 ALIAS 유지 */
+           , d.CUSTKEY     AS CODE
+           , d.DESCRIPTION AS NAME
+           , d.ADDRESS1    AS ADDRESS1
+           , d.CUSTKEY     AS DLVCUSTKEY
+           , d.DESCRIPTION AS DLVDESCRIPTION
+           , d.ADDRESS1    AS DLVADDRESS1
+           , FN_CODEDESCR(d.STORERKEY,'CUSTTYPE',d.CUSTTYPE) AS CUSTTYPE
+           , d.ADDRESS1 || ' ' || d.ADDRESS2 AS ADDRESS
+      FROM MS_CUST d
+      LEFT JOIN MS_CUST c
+             ON d.BILLTOCUSTKEY = c.CUSTKEY
+      LEFT JOIN MS_CUST p
+             ON ( (c.PARENTCUSTKEY IS NOT NULL AND p.CUSTKEY = c.PARENTCUSTKEY)
+               OR (c.CUSTKEY IS NULL AND d.PARENTCUSTKEY IS NOT NULL AND p.CUSTKEY = d.PARENTCUSTKEY) )
+      JOIN MS_CUSTDLVINFO i
+             ON d.STORERKEY = i.STORERKEY
+            AND d.CUSTKEY   = i.CUSTKEY
+      WHERE 1=1
+        AND d.STORERKEY LIKE #{gStorerkey}
+
+        <!-- 공통 검색 -->
+        <if test="name != null and name != ''">
+          AND (
+          	d.CUSTKEY 		LIKE '%' || #{name} || '%'
+         OR d.DESCRIPTION 	LIKE '%' || #{name} || '%'
+         )
+
+        </if>
+
+        <if test='multiSelect != null and multiSelect != ""'>
+			AND d.CUSTKEY IN (
+				SELECT TRIM(
+					REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)
+				) AS VAL
+
+				FROM (SELECT #{multiSelect} AS VAL FROM DUAL) A
+
+				CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0
+			)
+        </if>
+
+        <if test="codeGroups != null and codeGroups.size() &gt; 0">
+          AND (
+            <trim prefixOverrides="OR">
+              <foreach collection="codeGroups" item="grp">
+                OR d.CUSTKEY IN
+                <foreach collection="grp" item="code" open="(" close=")" separator=",">
+                  #{code}
+                </foreach>
+              </foreach>
+            </trim>
+          )
+        </if>
+        <!-- 확장 전용 추가 조건 -->
+        AND d.CUSTKEY  = i.DLVCUSTKEY
+        AND d.CUSTTYPE = i.CUSTTYPE
+        AND d.DEL_YN   = 'N'
+        <if test="dcCode != null and dcCode != ''">
+          AND i.dlv_dccode = #{dcCode}
+        </if>
+        <if test="custType != null and custType != ''">
+          AND d.CUSTTYPE = #{custType}
+        </if>
+      ORDER BY HQ_CUSTKEY, SALE_CUSTKEY, MNG_CUSTKEY
+    </when>
+
+    <otherwise>
+      SELECT /* [CmSearchService.sqlx][getCustList][거래처 목록 조회][JangGwangSeok][2025.05.08] */
+             MS_CUST.CUSTKEY AS CODE /* 거래처코드 */
+           , MS_CUST.DESCRIPTION AS NAME /* 거래처명 */
+           , MS_CUST.ADDRESS1 AS ADDRESS1 /* 기본주소 */
+           , MS_CUST.CUSTKEY AS DLVCUSTKEY /* 거래처코드 */
+           , MS_CUST.DESCRIPTION AS DLVDESCRIPTION /* 거래처명 */
+           , MS_CUST.ADDRESS1 AS DLVADDRESS1 /* 기본주소 */
+           , FN_CODEDESCR (MS_CUST.STORERKEY,'CUSTTYPE',MS_CUST.CUSTTYPE) AS CUSTTYPE /* 거래처 유형 */
+      FROM MS_CUST
+      WHERE MS_CUST.STORERKEY LIKE #{gStorerkey}
+        <if test='name != null and name != ""'>
+          AND (
+                MS_CUST.CUSTKEY      LIKE '%' || #{name} || '%'
+             OR MS_CUST.DESCRIPTION  LIKE '%' || #{name} || '%'
+          )
+        </if>
+
+        <if test='multiSelect != null and multiSelect != ""'>
+			AND MS_CUST.CUSTKEY IN (
+				SELECT TRIM(
+					REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)
+				) AS VAL
+
+				FROM (SELECT #{multiSelect} AS VAL FROM DUAL) A
+
+				CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0
+			)
+        </if>
+
+        <!-- 멀티선택: 999 청크 OR-IN (원문 그대로) -->
+        <if test="codeGroups != null and codeGroups.size() &gt; 0">
+          <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+            <foreach collection="codeGroups" item="grp">
+              OR MS_CUST.CUSTKEY IN
+              <foreach collection="grp" item="code" open="(" close=")" separator=",">
+                #{code}
+              </foreach>
+            </foreach>
+          </trim>
+        </if>
+      ORDER BY MS_CUST.CUSTKEY
+    </otherwise>
+  </choose>
+</select>
+
+    <!-- 상품 정보 조회 -->
+    <select id="getSkuInfoPopup" resultType="CmSkuInfoPopupResDto">
+        WITH MAMD AS (
+            SELECT WRAP.*
+            FROM (SELECT  'MD' AS GUBUN , A.SOMDCODE, B.DATA4 AS EMP_NO ,A.SOMDNAME ,C.MAIL_ID, FU.USER_ID
+                FROM MS_SKU A
+                JOIN CM_CODE B
+                    ON A.SOMDCODE = B.BASECODE
+                JOIN FRAMEONE_EMP C
+                    ON B.DATA4= C.EMP_NO
+                JOIN FRAMEONE_USER FU
+                    ON FU.EMP_NO = C.EMP_NO
+                   AND FU.COM_CD = C.COM_CD
+                WHERE A.SKU = #{sku}
+                    AND B.CODELIST ='PURCHASEGROUP'
+                UNION
+                SELECT 'MA' AS GUBUN,'' SOMDCODE, B.EMP_NO, A.MANAME AS SOMDNAME, B.MAIL_ID, FU.USER_ID
+                FROM MS_CUST A
+                JOIN FRAMEONE_EMP B
+                    ON A.MA = B.EMP_NO
+                JOIN FRAMEONE_USER FU
+                    ON FU.EMP_NO = B.EMP_NO
+                   AND FU.COM_CD = B.COM_CD
+                WHERE A.CUSTKEY = (SELECT  CUSTKEY
+                                    FROM MS_SKUCHAIN_CUST
+                                    WHERE SKU =#{sku}
+                                    ORDER BY SERIALKEY DESC
+                                    FETCH FIRST 1 ROW ONLY)
+            ) WRAP
+        ),
+        BUYERINFO AS (
+            SELECT BASECODE AS BUYERKEY
+                ,BASEDESCR AS BUYERNAME
+            FROM CM_CODE
+            WHERE STORERKEY  IN ('%','STD','',#{gStorerkey})
+            AND CODELIST  = 'BUYERKEY'
+            AND BASECODE  = (SELECT BUYERKEY
+                            FROM (
+                                SELECT BUYERKEY,
+                                       ROW_NUMBER() OVER (
+                                         PARTITION BY DCCODE, SKU, STORERKEY
+                                         ORDER BY YYYYMMDD DESC
+                                       ) RN
+                                FROM MS_PURCHASEDC_DAILY
+                                WHERE YYYYMMDD LIKE TO_CHAR(SYSDATE, 'YYYYMM') || '%'
+                                  AND SKU = #{sku}
+                                  AND DCCODE = '2600'
+                            )
+                            WHERE RN = 1)
+        )
+        SELECT /* [CmSearchService.sqlx][CmSearchService.getSkuInfoPopup][상품 정보 팝업조회][Yangchanghwan][20250526] */
+            MS_SKU.STORERKEY								   					                                        AS STORERKEY			/* 고객사코드   	 */
+            ,MS_SKU.SKU                                      					                                        AS SKU                  /* 상품코드          */
+            ,MS_SKU.DESCRIPTION                              					                                        AS DESCRIPTION          /* 기본 제품명       */
+            ,MS_SKU.STYLECODE                                					                                        AS STYLECODE            /* 스타일코드        */
+            ,MS_SKU.STYLEDESCR                               					                                        AS STYLEDESCR           /* 스타일명          */
+            ,MS_SKU.COLORCODE                                					                                        AS COLORCODE            /* 컬러코드          */
+            ,MS_SKU.COLORDESCR                               					                                        AS COLORDESCR           /* 컬러명            */
+            ,MS_SKU.SIZECODE                                 					                                        AS SIZECODE             /* 사이즈코드        */
+            ,MS_SKU.SIZEDESCR                                					                                        AS SIZEDESCR            /* 사이즈명          */
+            ,MS_SKU.BRANDCODE                                					                                        AS BRANDCODE            /* 제픔 브랜드       */
+            ,MS_SKU.BRANDDESCR                               					                                        AS BRANDDESCR           /* 브랜드명          */
+            ,MS_SKU.SKUGROUP                                 					                                        AS SKUGROUP             /* 상품그룹          */
+            ,MS_SKU.SKUTYPE                                  					                                        AS SKUTYPE              /* 상품유형     	*/
+            ,MS_SKU.SERIALYN                                 					                                        AS SERIALYN             /* 시리얼관리여부    */
+            ,MS_SKU.BARCODE1                                  				                                            AS BARCODE1
+            ,MS_SKU.BARCODE2                                					                                        AS BARCODE2
+            ,MS_SKU.BARCODE3                                					                                        AS BARCODE3
+            ,FN_CODEDESCR(MS_SKU.STORERKEY,'SKUGROUP',MS_SKU.SKUGROUP)    	    AS SKUGROUPDESCR
+            ,FN_CODEDESCR(MS_SKU.STORERKEY,'SKUTYPE',MS_SKU.SKUTYPE)      	    AS SKUTYPEDESCR
+            ,MS_SKU.DURATION                                              	                                            AS DURATION
+            ,FN_CODEDESCR(MS_SKU.STORERKEY,'SERIALYN',MS_SKU.SERIALYN)    	    AS SERIALYNDESCR
+            ,MS_SKU.LABELTYPE 												                                            AS LABELTYPE
+            ,MS_EDMS_SKU.EDMSFILEID 											                                        AS FILE_ID
+            ,MS_SKU.STORAGETYPE                                                                                         AS STORAGETYPE
+            ,FN_CODEDESCR(MS_SKU.STORERKEY,'STORAGETYPE', MS_SKU.STORAGETYPE)  AS STORAGETYPENM
+            ,MS_SKU.NETWEIGHT                                                                                           AS NETWEIGHT
+            ,MS_SKU.GROSSWEIGHT                                                                                         AS GROSSWEIGHT
+            ,MS_SKU.BOXPERPLT                                                                                           AS BOXPERPLT
+            ,MS_SKU.SERIALTYPE                                                                                          AS SERIALTYPE
+            ,FN_DESCR_CODE(#{gStorerkey}, 'PRODUCT-DRTYN', MS_SKU.SERIALTYPE)         AS SERIALTYPENM
+            ,MS_SKU.LINE01                                                                                              AS LINE01
+            ,MS_SKU.LINE02                                                                                              AS LINE02
+            ,BUYERINFO.BUYERKEY                                                                                         AS BUYERKEY
+            ,BUYERINFO.BUYERNAME                                                                                        AS BUYERNAME
+            ,MAMD.USER_ID                                                                                               AS USERID
+            ,MAMD.SOMDNAME                                                                                              AS USERNM
+          FROM MS_SKU
+          LEFT JOIN MS_EDMS_SKU
+          	ON MS_SKU.SKU = MS_EDMS_SKU.SKU
+          	AND MS_EDMS_SKU.IMAGE_TYPE = '1'
+          JOIN CM_USER_AUTHORITY_STORER
+	        ON CM_USER_AUTHORITY_STORER.STORERKEY = MS_SKU.STORERKEY
+	       AND CM_USER_AUTHORITY_STORER.USERID = #{gUserId}
+          LEFT JOIN BUYERINFO
+            ON 1=1
+          LEFT JOIN MAMD
+            ON MAMD.GUBUN = CASE WHEN MS_SKU.REFERENCE15 != '15' THEN 'MD' ELSE 'MA' END
+         WHERE MS_SKU.STORERKEY = #{gStorerkey}
+           AND MS_SKU.SKU       = #{sku}
+	</select>
+
+    <!-- 거래처 정보 조회 -->
+    <select id="getCustInfoPopupBefore" resultType="CmCustInfoPopupResDto" parameterType="CmCustInfoPopupReqDto">
+        SELECT /* [CmSearchService.sqlx][CmSearchService.getCustInfoPopup][거래처 정보 팝업조회][KwonJungyun][20250623] */
+	    	   MS_CUST.STORERKEY                        	AS STORERKEY    /* 고객사코드 */
+              ,MS_CUST.CUSTKEY                          	AS CUSTKEY      /* 거래처코드 */
+              ,MS_CUST.DESCRIPTION                      	AS DESCRIPTION  /* 거래처명 */
+	    	  ,MS_CUST.OWNER								AS OWNER		/* 사업주명 */
+              ,DAMO.DEC(MS_CUST.PHONE1)                     AS PHONE1       /* 전화번호1 */
+  			  ,MS_CUST.ZIPCODE						    	AS ZIPCODE      /* 우편번호 */
+              ,MS_CUST.EMPNAME1                         	AS EMPNAME1     /* 관리 사원명1 */
+              ,MS_CUST.EMPPHONE1                        	AS EMPPHONE1 	/* 관리 사원 전화번호1 */
+              ,MS_CUST.EMPNAME2                         	AS EMPNAME2     /* 관리 사원명2 */
+              ,MS_CUST.EMPPHONE2                        	AS EMPPHONE2 	/* 관리 사원 전화번호2 */
+              ,MS_CUST.MA                               	AS MA           /* MA */
+              ,MS_CUST.MANAME                            	AS MANAME    	/* MA명 */
+              ,MS_CUST.CUSTTYPE								AS CUSTTYPE		/* 거래처 타입 */
+              ,MS_CUST.ADDRESS1                             AS ADDRESS1     /* 주소 1*/
+              ,MS_CUST.ADDRESS2                             AS ADDRESS2     /* 주소 2*/
+              ,MS_CUST.VATTYPE								AS VATTYPE
+              ,MS_CUST.VATCATEGORY							AS VATCATEGORY
+              ,MS_CUST.VATNO   								AS VATNO
+              ,MS_CUST.MEMO                                 AS MEMO
+        FROM   MS_CUST
+        WHERE  MS_CUST.STORERKEY    = #{gStorerkey}
+		AND    MS_CUST.CUSTKEY      = #{custkey}
+		AND    MS_CUST.CUSTTYPE 	= NVL(#{custtype},'C') 					/*C:거래처,P:협력사*/
+    </select>
+
+    <!-- 거래처 정보 조회 -->
+    <select id="getCustInfoPopup" resultType="CmCustInfoPopupResDto" parameterType="CmCustInfoPopupReqDto">
+        SELECT /* [msCustDeliveryInfoService.sqlx][msCustDeliveryInfoService.getMaster][고객배송조건 조회(단건)][JeongHyeongCheol][2025.08.20] */
+               MS_CUSTDLVINFO.CUSTKEY                                                                   AS CUSTKEY               /*고객사코드*/
+             , FN_DESCR_CUST(MS_CUSTDLVINFO.STORERKEY, MS_CUSTDLVINFO.CUSTKEY)                          AS CUSTNAME              /*고객사명*/
+             , MS_CUSTDLVINFO.ADDRESS1                                                                  AS ADDRESS1              /*본 주소*/
+             , MS_CUSTDLVINFO.ADDRESS2                                                                  AS ADDRESS2              /*상세주소*/
+             , CASE WHEN MS_CUSTDLVINFO.ADDRESS1 IS NOT NULL
+                    THEN MS_CUSTDLVINFO.ADDRESS1 || NVL2(MS_CUSTDLVINFO.ADDRESS2, ' ' || MS_CUSTDLVINFO.ADDRESS2, '')
+                    ELSE ''
+                END                                                                                     AS ADDRESS               /*주소*/
+             , MS_CUST.CUSTGROUP                                                                        AS CUSTGROUP             /*거래처등급*/
+             , CASE WHEN MS_CUST.CUSTGROUP = 'C01'
+                    THEN '본점'
+                    WHEN MS_CUST.CUSTGROUP IN ('C02', 'C05', 'C10')
+                    THEN '판매처'
+
+                    WHEN MS_CUST.CUSTGROUP NOT IN ('C01', 'C02', 'C05', 'C10')
+                    THEN '관리처'
+                    ELSE ''
+                END                                                                                     AS CUSTGROUPNAME         /*고객유형*/
+             , FN_CODEDESCR(MS_CUSTDLVINFO.STORERKEY, 'CUSTORDERCLOSETYPE', MS_CUST.CUSTSTRATEGY4)      AS CUSTSTRATEGY4         /* 거래처 마감유형 */
+             , MS_CUSTDLVINFO.ADDRESSMATCHYN                                                            AS ADDRESSMATCHYN        /*주소매칭여부*/
+             , MS_CUSTDLVINFO.FACEINSPECT                                                               AS FACEINSPECT           /*대면검수여부*/
+             , MS_CUSTDLVINFO.REQDLVTIME2_FROM                                                          AS REQDLVTIME2_FROM      /*OTD 시작시간*/
+             , MS_CUSTDLVINFO.REQDLVTIME2_TO                                                            AS REQDLVTIME2_TO        /*OTD 종료시간*/
+             , CASE WHEN MS_CUSTDLVINFO.REQDLVTIME2_FROM IS NOT NULL AND MS_CUSTDLVINFO.REQDLVTIME2_TO IS NOT NULL
+                    THEN TO_CHAR(TO_DATE(MS_CUSTDLVINFO.REQDLVTIME2_FROM, 'HH24:MI'), 'HH24:MI') || ' ~ ' || TO_CHAR(TO_DATE(MS_CUSTDLVINFO.REQDLVTIME2_TO, 'HH24:MI'), 'HH24:MI')
+                    ELSE ''
+                END                                                                                     AS REQDLVTIME2           /*OTD(배송요구시간)*/
+             , TO_CHAR(TO_DATE(MS_CUSTDLVINFO.DELIVERYAVAILABLETIME, 'HH24:MI'), 'HH24:MI')             AS DELIVERYAVAILABLETIME /*납품가능시간*/
+             , TO_CHAR(TO_DATE(MS_CUSTDLVINFO.BUILDINGOPENTIME, 'HH24:MI'), 'HH24:MI')                  AS BUILDINGOPENTIME      /*건물개방시간*/
+             /* ---------------------------- 특수조건 5종 ----------------------------  (5가지 중에 Y가 있는것만  표출) EX) 격오지/납품대기/키즈/장거리/하차난디도(상) */
+             , MS_CUSTDLVINFO.DISTANT_YN                                                                AS DISTANT_YN            /*격오지여부*/
+             , MS_CUSTDLVINFO.DLV_WAIT_YN                                                               AS DLV_WAIT_YN           /*납품대기여부*/
+             , MS_CUSTDLVINFO.KIDS_CL_YN                                                                AS KIDS_CL_YN            /*키즈분류여부*/
+             , MS_CUSTDLVINFO.LNG_DISTANT_YN                                                            AS LNG_DISTANT_YN        /*장거리여부*/
+             , MS_CUSTDLVINFO.UNLOAD_LVL_CD                                                             AS UNLOAD_LVL_CD         /*하차난이도코드*/
+             /* 특수조건 통합 표기 (존재 항목만 '/'로 연결) */
+             , RTRIM( CASE WHEN MS_CUSTDLVINFO.DISTANT_YN = 'Y' THEN '격오지/' ELSE '' END ||
+                      CASE WHEN MS_CUSTDLVINFO.DLV_WAIT_YN = 'Y' THEN '납품대기/' ELSE '' END ||
+                      CASE WHEN MS_CUSTDLVINFO.KIDS_CL_YN = 'Y' THEN '키즈/' ELSE '' END ||
+                      CASE WHEN MS_CUSTDLVINFO.LNG_DISTANT_YN = 'Y' THEN '장거리/' ELSE '' END ||
+                      CASE WHEN MS_CUSTDLVINFO.UNLOAD_LVL_CD IS NOT NULL THEN '하차난이도(' || MS_CUSTDLVINFO.UNLOAD_LVL_CD || ')/' ELSE '' END
+                      , '/')                                                                            AS SPECIAL_CONDITIONS    /*특수조건 통합표기*/
+             /* ---------------------------- 기타 정보 ---------------------------- */
+             , MS_CUSTDLVINFO.TEMPERTYPE                                                                AS TEMPERTYPE            /*온도기록지 제출대상*/
+             , FN_CODEDESCR(MS_CUSTDLVINFO.STORERKEY, 'CUSTOMER-TEMPTARGET', MS_CUSTDLVINFO.TEMPERTYPE) AS TEMPERTYPENAME        /*온도기록지 제출대상*/
+             , MS_CUSTDLVINFO.KEYTYPE                                                                   AS KEYTYPE               /*출입KEY정보*/
+             , MS_CUSTDLVINFO.KEYDETAIL                                                                 AS KEYDETAIL             /*출입KEY세부정보*/
+             , DAMO.DEC(MS_CUSTDLVINFO.PHONE1)                                                          AS PHONE1                /*고객사 연락처*/
+             , MS_CUSTDLVINFO.DELIVERYNOTIYN                                                            AS DELIVERYNOTIYN        /*배송도착 알림 수신 여부*/
+             --, MS_CUSTDLVINFO.TRUTHEMPNAME                                                              AS TRUTHEMPNAME          /*담당MA명*/
+             --, DAMO.DEC(MS_CUSTDLVINFO.TRUTHPHONE)                                                      AS TRUTHPHONE            /*담당MA연락처*/
+             , MS_CUST.MA                                                                               AS MA                    /*MA코드*/
+             , NVL(MS_CUST.MANAME, MS_CUST.MA)                                                          AS TRUTHEMPNAME          /*MA명*/
+             , DAMO.DEC(MS_CUST.EMPPHONE1)                                                              AS TRUTHPHONE            /*MA연락처*/
+             , MS_CUSTDLVINFO.MEMO                                                                      AS MEMO                  /*메모*/
+             /* ---------------------------- 등록/수정자 정보 ---------------------------- */
+             , USER1.USER_NM                                                                            AS ADDWHONM              /*등록자명*/
+             , USER2.USER_NM                                                                            AS EDITWHONM             /*수정자명*/
+             , MS_CUSTDLVINFO.ADDDATE                                                                   AS ADDDATE               /*등록일시*/
+             , MS_CUSTDLVINFO.EDITDATE                                                                  AS EDITDATE              /*수정일시*/
+          FROM MS_CUSTDLVINFO
+          JOIN MS_CUST ON MS_CUST.STORERKEY = MS_CUSTDLVINFO.STORERKEY
+                      AND MS_CUST.CUSTKEY   = MS_CUSTDLVINFO.CUSTKEY
+                      AND MS_CUST.CUSTTYPE  = MS_CUSTDLVINFO.CUSTTYPE
+          LEFT JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = MS_CUSTDLVINFO.ADDWHO
+          LEFT JOIN FRAMEONE_USER USER2 ON USER2.USER_ID = MS_CUSTDLVINFO.EDITWHO
+         WHERE 1=1
+           AND MS_CUSTDLVINFO.STORERKEY  = #{gStorerkey}
+           AND MS_CUSTDLVINFO.CUSTKEY    = #{custkey}
+           AND MS_CUSTDLVINFO.CUSTTYPE   = NVL(#{custtype},'C') /*C:거래처,P:협력사*/
+           AND MS_CUSTDLVINFO.DLVCUSTKEY = #{custkey}
+    </select>
+    
+	<!-- 협력사 정보 조회 -->
+	 <select id="getPartnerInfoPopup" resultType="CmPartnerInfoPopupResDto" parameterType="CmPartnerInfoPopupReqDto">
+       SELECT MST_A.CUSTKEY                                             AS CUSTKEY       -- 협력사코드              
+            , MST_A.ADDRESS1 || ' ' || MST_A.ADDRESS2                   AS ADDR                 -- 주소              
+            , MST_B.VATNO                                               AS VATNO                -- 사업자등록번호              
+            , MST_B.VATTYPE                                             AS VATTYPE              -- 사업자등록업체              
+            , TPL_USE_YN                                                AS PL3_USEYN            -- PL3사용유무              
+            , MST_C.NAME                                                AS PL3_MNGEMPNM         -- PL3담당자명              
+            , MST_A.PROC_LOGI_YN                                        AS DELIVERY_YN          -- 조달여부              
+                        , CASE WHEN MST_A.LOADCONDITION1 IS NULL THEN ''
+                   ELSE SUBSTR(MST_A.LOADCONDITION1, 1, 2) || ':' || SUBSTR(MST_A.LOADCONDITION1, 3, 2)
+              END || CASE WHEN MST_A.LOADCONDITION1 IS NOT NULL THEN ' ~ ' ELSE '' END ||
+--              ' ~ ' ||
+              CASE WHEN MST_A.LOADCONDITION2 IS NULL THEN ''
+                   ELSE SUBSTR(MST_A.LOADCONDITION2, 1, 2) || ':' || SUBSTR(MST_A.LOADCONDITION2, 3, 2)
+              END                                                       AS DELIVERY_INTIME      -- 조달입차시간
+            , MST_B.DESCRIPTION                                         AS CUSTNAME             -- 협력사명
+            , DAMO.DEC(MST_B.PHONE1)                                    AS RPST_PHONE           -- 대표전화번호
+            , MST_B.VATCATEGORY                                         AS VATCATEGORY          -- 사업자등록종복
+            , MST_C.CUSTNAME                                            AS PL3_NM               -- PL3사명
+            , DAMO.DEC(MST_C.PHONE)                                     AS PL3_PHONE            -- PL3담당자전화번호
+    -- 26.3.9 제거        , '▶UnKown◀'                 AS DELIVERY_SAVE_YN     -- 조달상품저장유무
+            , CASE WHEN MST_A.PROC_LOGI_START_DT   IS NULL THEN ''
+                   ELSE SUBSTR(MST_A.PROC_LOGI_START_DT, 1, 4) || '/' || SUBSTR(MST_A.PROC_LOGI_START_DT, 5, 2) || '/' || SUBSTR(MST_A.PROC_LOGI_START_DT, 7, 2)
+              END || CASE WHEN PROC_LOGI_START_DT IS NOT NULL THEN ' ~ ' ELSE '' END ||
+--              ' ~ ' ||
+              CASE WHEN MST_A.PROC_LOGI_END_DT   IS NULL THEN ''
+                 ELSE SUBSTR(MST_A.PROC_LOGI_END_DT, 1, 4) || '/' || SUBSTR(MST_A.PROC_LOGI_END_DT, 5, 2) || '/' || SUBSTR(MST_A.PROC_LOGI_END_DT, 7, 2)
+              END                                                         AS DELIVERY_CTRT_TERM   -- 조달계약기간
+         FROM LOGISONE.MS_CUSTDLVINFO MST_A               
+         LEFT JOIN LOGISONE.MS_CUST MST_B                
+          ON MST_B.STORERKEY = MST_A.STORERKEY                
+         AND MST_B.CUSTKEY  = MST_A.DLVCUSTKEY                
+         AND MST_B.CUSTTYPE = MST_A.CUSTTYPE               
+        LEFT JOIN ( SELECT A.CUSTKEY   AS CUSTKEY                            
+                         , A.STORERKEY AS STORERKEY                            
+                         , A.CUSTNAME  AS CUSTNAME                            
+                         , A.NAME      AS NAME                            
+                         , A.PHONE     AS PHONE                            
+                         , A.EMAIL     AS EMAIL                            
+                         , A.SMS_YN    AS SMS_YN                            
+                         , A.MAIL_YN   AS MAIL_YN                            
+                         , A.ETC       AS ETC                       
+                      FROM ( SELECT ROW_NUMBER() OVER(PARTITION BY STORERKEY, CUSTKEY ORDER BY ADDDATE, NAME) AS IDX                          
+                                  , A.STORERKEY                          
+                                  , A.CUSTKEY                          
+                                  , A.CUSTNAME                          
+                                  , A.NAME                          
+                                  , A.PHONE                          
+                                  , A.EMAIL                          
+                                  , A.SMS_YN                          
+                                  , A.MAIL_YN                          
+                                  , A.ETC                          
+                               FROM LOGISONE.MS_CUSTRCVINFO A                          
+                              WHERE 1=1                         
+                                AND STORERKEY    = #{gStorerkey}        -- [PARAMETER]                          
+                                AND CUSTKEY      = #{custkey}                          
+                                AND DEL_YN       = 'N'          -- 고정                         
+                                AND GUBUN        = '2002'        -- 고정                       
+                            ) A                    
+                     WHERE IDX = 1) MST_C                 
+              ON 1 = 1                 
+             AND MST_C.STORERKEY = MST_A.STORERKEY                 
+             AND MST_C.CUSTKEY   = MST_A.CUSTKEY     
+           WHERE MST_A.CUSTTYPE   = 'P'           -- 고정       
+             AND MST_A.STORERKEY  =  #{gStorerkey}        -- [PARAMETER]       
+             AND MST_A.DLVCUSTKEY = #{custkey}     -- [PARAMETER] 
+    </select>
+	        <!-- 차량 정보 조회 -->
+	    <select id="getCarInfoPopup" resultType="CmCarInfoPopupResDto" parameterType="CmCarInfoPopupReqDto">
+	        SELECT /* [CmSearchService.sqlx][CmSearchService.getCarInfoPopup][차량 정보 팝업(단건)조회][KwonJungyun][20250623] */
+				   CM_CAR.SERIALKEY							AS SERIALKEY		/* 데이터번호 */
+			      ,CM_CAR.CARNO                             AS CARNO            /* 차량번호 전체 */
+			      ,CM_CAR.CARGROUP                          AS CARGROUP        /* 차량그룹 */
+			      ,CM_CAR.CARTYPE                           AS CARTYPE         /* 차량종류 */
+			      ,CM_CAR.CARCATEGORY                       AS CARCATEGORY     /* 차량형태 */
+			      ,CM_CAR.CARCAPACITY                       AS CARCAPACITY     /* 차량용적 */
+			      ,CM_CAR.CARCUBEDESCR                      AS CARCUBEDESCR    /* 차량체적(장폭고) */
+			      ,CM_CAR.BRANDNAME                         AS  BRANDNAME       /* 차량브랜드 */
+				  ,CM_CAR.DRIVER1                           AS DRIVER1         /* 운전자 1 이름 */
+			      ,CM_CAR.DRIVER2                           AS DRIVER2         /* 운전자 2 이름 */
+			      ,CM_CAR.PHONE1                            AS PHONE1          /* 운전자 1 전화번호 */
+			      ,CM_CAR.PHONE2                            AS PHONE2          /* 운전자 2 전화번호 */
+			      ,CM_CAR.OWNER                             AS OWNER           /* 차량 소유주명 */
+			      ,CM_CAR.CONTRACTTYPE                      AS CONTRACTTYPE    /* 계약유형 ( 지입, 임시용차 등) */
+			      ,CM_CAR.CONTRACTDATE                      AS CONTRACTDATE    /* 계약일자 */
+			      ,CM_CAR.EXPIREDATE                        AS EXPIREDATE      /* 계약일자 */
+			      ,CM_CAR.CARAGENTKEY                       AS CARAGENTKEY     /* 차량 소유 업체 */
+			      ,CM_CAR.INSURANCE                         AS INSURANCE       /* 보험회사 */
+			      ,CM_CAR.INSUCONTDATE                      AS INSUCONTDATE    /* 보험계약일 */
+			      ,CM_CAR.INSUEXPIDATE                      AS INSUEXPIDATE    /* 보험만료일 */
+			      ,CM_CAR.MINCUBE                           AS  MINCUBE         /* 최소체적 */
+				  ,CM_CAR.MAXCUBE                           AS  MAXCUBE         /* 최대체적 */
+				  ,CM_CAR.MINWEIGHT                         AS  MINWEIGHT       /* 최소중량 */
+				  ,CM_CAR.MAXWEIGHT                         AS  MAXWEIGHT       /* 최대중량 */
+				  ,CM_CAR.STATUS                            AS STATUS          /* 상태 */
+			      ,CM_CAR.DEL_YN                            AS DEL_YN          /* 삭제여부 */
+	              ,TO_CHAR(CM_CAR.ADDDATE, 'yyyymmddhh24miss') AS ADDDATE	   /* 최초등록시간 */
+	              ,TO_CHAR(CM_CAR.EDITDATE, 'yyyymmddhh24miss') AS EDITDATE    /* 최종변경시간 */
+			      ,CM_CAR.ADDWHO                            AS ADDWHO          /* 최초등록자 */
+			      ,CM_CAR.EDITWHO	                        AS EDITWHO	       /* 최종변경자 */
+		    FROM   CM_CAR
+			<where>
+				<if test="serialkey != null and serialkey != ''">
+					AND CM_CAR.SERIALKEY = #{serialkey}
+				</if>
+				<if test="carno != null and carno != ''">
+					AND CM_CAR.CARNO = #{carno}
+				</if>
+			</where>
+	</select>
+    
+	<!-- BOX 목록 조회 -->
+	<select id="getBoxList" resultType="cjfw.wms.cm.dto.CmPopupResDto">
+        SELECT /* [CmSearchService.sqlx][CmSearchService.getBoxList][BOX 목록 조회][sss][2025.12.26]*/
+	           MS_PARCEL_BOX.BOXNO AS CODE
+	          ,MS_PARCEL_BOX.BOXNM AS NAME
+	      FROM MS_PARCEL_BOX
+	     WHERE MS_PARCEL_BOX.USE_YN = 'Y'
+    <choose>
+        <when test="isEnter == 'Y'.toString()">
+            <!-- 엔터검색.input/돋보기 =검색(성능) -->
+            AND (MS_PARCEL_BOX.BOXNO = #{name} OR MS_PARCEL_BOX.BOXNM = #{name})
+        </when>
+        <otherwise>
+            <if test="name != null and name != ''">
+                <choose>
+                    <when test="fixedSearchYn == null or fixedSearchYn == ''">
+                        <!-- FIX검색.%1개일 때(3/4) -->
+                        AND (MS_PARCEL_BOX.BOXNO LIKE '%' || #{name} || '%' 
+                             OR MS_PARCEL_BOX.BOXNM LIKE '%' || #{name} || '%')
+                    </when>
+                    <when test="fixedSearchYn == 'Y'.toString()">
+                        <!-- FIX검색.%1개일 때(3/4) -->
+                        AND (MS_PARCEL_BOX.BOXNO LIKE #{name} OR MS_PARCEL_BOX.BOXNM LIKE #{name})
+                    </when>
+                    <otherwise>
+                        <!-- 2.단일검색,5.%다중검색 -->
+                        AND (MS_PARCEL_BOX.BOXNO LIKE '%' || #{name} || '%' OR MS_PARCEL_BOX.BOXNM LIKE '%' || #{name} || '%')
+                    </otherwise>
+                </choose>
+
+                <!-- START.검색요건 -->
+                <if test="name.indexOf(' ') gt 0">
+                    OR REGEXP_LIKE(UPPER(MS_PARCEL_BOX.BOXNM), REGEXP_REPLACE(UPPER(#{keywordRegexp}), '[ ]+', '|'))
+                </if>
+                <!-- END.검색요건 -->
+
+            </if>
+        </otherwise>
+    </choose>
+
+    <!-- START.검색요건 -->
+    <choose>
+        <when test="name != null and name.indexOf(' ') gt 0">
+            ORDER BY
+                REGEXP_COUNT(UPPER(MS_PARCEL_BOX.BOXNM), REGEXP_REPLACE(UPPER(#{keywordRegexp}), '[ ]+', '|')) DESC,
+                UTL_MATCH.JARO_WINKLER_SIMILARITY(MS_PARCEL_BOX.BOXNM, #{name}) DESC
+        </when>
+        <otherwise>
+            ORDER BY MS_PARCEL_BOX.BOXNM
+        </otherwise>
+    </choose>
+    <!-- END.검색요건 -->
+
+    </select>
+    
+    <!-- 원거리유형 목록 조회 -->
+    <select id="getDistanceTypeList" resultType="cjfw.wms.cm.dto.CmPopupResDto">
+        SELECT /* [CmSearchService.sqlx][CmSearchService.getDistanceTypeList][원거리유형 목록 조회][sss][2025.12.26]*/
+               CM_CODE.BASECODE  AS CODE,
+               CM_CODE.BASEDESCR AS NAME     
+          FROM CM_CODE
+         WHERE CM_CODE.CODELIST = 'DISTANCETYPE' 
+           AND CM_CODE.STORERKEY = #{gStorerkey}
+    <choose>
+        <when test="isEnter == 'Y'.toString()">
+            <!-- 엔터검색.input/돋보기 =검색(성능) -->
+            AND (CM_CODE.BASECODE = #{name} OR CM_CODE.BOXNM = #{name})
+        </when>
+        <otherwise>
+            <if test="name != null and name != ''">
+                <choose>
+                    <when test="fixedSearchYn == null or fixedSearchYn == ''">
+                        <!-- FIX검색.%1개일 때(3/4) -->
+                        AND (CM_CODE.BASECODE LIKE '%' || #{name} || '%' 
+                             OR CM_CODE.BASEDESCR LIKE '%' || #{name} || '%')
+                    </when>
+                    <when test="fixedSearchYn == 'Y'.toString()">
+                        <!-- FIX검색.%1개일 때(3/4) -->
+                        AND (CM_CODE.BASECODE LIKE #{name} OR CM_CODE.BASEDESCR LIKE #{name})
+                    </when>
+                    <otherwise>
+                        <!-- 2.단일검색,5.%다중검색 -->
+                        AND (CM_CODE.BASECODE LIKE '%' || #{name} || '%' OR CM_CODE.BASEDESCR LIKE '%' || #{name} || '%')
+                    </otherwise>
+                </choose>
+
+                <!-- START.검색요건 -->
+                <if test="name.indexOf(' ') gt 0">
+                    OR REGEXP_LIKE(UPPER(CM_CODE.BASEDESCR), REGEXP_REPLACE(UPPER(#{keywordRegexp}), '[ ]+', '|'))
+                </if>
+                <!-- END.검색요건 -->
+
+            </if>
+        </otherwise>
+    </choose>
+
+    <!-- START.검색요건 -->
+    <choose>
+        <when test="name != null and name.indexOf(' ') gt 0">
+            ORDER BY
+                REGEXP_COUNT(UPPER(CM_CODE.BASEDESCR), REGEXP_REPLACE(UPPER(#{keywordRegexp}), '[ ]+', '|')) DESC,
+                UTL_MATCH.JARO_WINKLER_SIMILARITY(CM_CODE.BASEDESCR, #{name}) DESC
+        </when>
+        <otherwise>
+            ORDER BY CM_CODE.BASECODE
+        </otherwise>
+    </choose>
+    <!-- END.검색요건 -->
+
+    </select>
+
+</mapper>

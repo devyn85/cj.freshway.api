@@ -1,0 +1,823 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+    "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="stKitPlanService">
+
+     <select id="getMasterList01" resultType="cjfw.wms.st.dto.StKitPlanResT1Dto">
+        WITH CONFIRMQTY_SUM AS (
+                SELECT 
+                    SKU AS KIT_SKU
+                  , SUM(
+                        CASE
+                            WHEN SUBSTR(PLAN_DT, 1, 6) = #{month}
+                            THEN CONFIRMQTY
+                            ELSE 0
+                        END
+                    ) AS TOTAL_CONFIRMQTY
+                  , SUM(
+                        CASE
+                            WHEN SUBSTR(PLAN_DT, 1, 6) = TO_CHAR(ADD_MONTHS(TO_DATE(#{month}, 'YYYYMM'), -12), 'YYYYMM')
+                            THEN CONFIRMQTY
+                            ELSE 0
+                        END
+                    ) AS TOTAL_CONFIRMQTY_LAST_YEAR
+                FROM ST_KIT_PLAN
+                WHERE STORERKEY = #{gStorerkey}
+                  AND DCCODE    = #{fixdccode}
+              <if test="kitSku != null and kitSku != ''">
+                  AND SKU       IN (
+				SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS SKU
+				FROM (SELECT #{kitSku} AS VAL FROM DUAL)
+				CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) > 0
+			)
+              </if>
+                GROUP BY SKU
+        )
+        
+        , ST_KIT_PLAN_AGG AS (
+                SELECT 
+                    STORERKEY
+                  , DCCODE
+                  , SKU
+                  , SUM(ORDERQTY)   AS ORDERQTY
+                  , SUM(OPENQTY)    AS OPENQTY
+                  , SUM(CONFIRMQTY) AS CONFIRMQTY
+                  , SUM(DP_QTY)     AS DP_QTY
+                FROM ST_KIT_PLAN
+                WHERE PLAN_DT LIKE #{month}||'%'
+                  AND SUBSTR(PLAN_DT, 7, 2) = '00'
+                  AND STORERKEY = #{gStorerkey}
+                  AND DCCODE    = #{fixdccode}
+              <if test="kitSku != null and kitSku != ''">
+                  AND SKU       IN (
+				SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS SKU
+				FROM (SELECT #{kitSku} AS VAL FROM DUAL)
+				CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) > 0
+			)
+              </if>
+                GROUP BY STORERKEY, DCCODE, SKU
+        )
+        , ST_KIT_PLAN_DETAIL AS (
+                SELECT 
+                    STORERKEY
+                  , DCCODE
+                  , SKU
+                  , ORDERQTY
+                  , OPENQTY
+                  , CONFIRMQTY
+                  , CASE 
+                        WHEN SUBSTR(PLAN_DT, 7, 2) = '00' THEN '00'
+                        ELSE TO_CHAR(TO_DATE(PLAN_DT, 'YYYYMMDD'), 'DD')
+                    END AS DAY
+                FROM ST_KIT_PLAN
+                WHERE PLAN_DT LIKE #{month}||'%'
+                  AND SUBSTR(PLAN_DT, 7, 2) != '00'
+                  AND STORERKEY = #{gStorerkey}
+                  AND DCCODE    = #{fixdccode}
+              <if test="kitSku != null and kitSku != ''">
+                  AND SKU       IN (
+				SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS SKU
+				FROM (SELECT #{kitSku} AS VAL FROM DUAL)
+				CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) > 0
+			)
+              </if>
+        )
+        , ST_STOCK1 AS (
+                SELECT 
+                    SKU
+                  , SUM(QTY) AS CENTER_QTY1
+                FROM ST_STOCK
+                WHERE STORERKEY = #{gStorerkey}
+                  AND DCCODE    = #{fixdccode}
+              <if test="kitSku != null and kitSku != ''">
+                  AND SKU       IN (
+				SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS SKU
+				FROM (SELECT #{kitSku} AS VAL FROM DUAL)
+				CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) > 0
+			)
+              </if>
+                  AND STOCKTYPE     = 'GOOD'    /*재고위치-정상*/
+                  AND STOCKGRADE    =  'STD'    /*재고속성-가용*/  
+                GROUP BY SKU
+        )
+        , ST_STOCK2 AS (
+                SELECT 
+                    SKU
+                  , SUM(QTY) AS CENTER_QTY2
+                FROM ST_STOCK
+                WHERE STORERKEY = #{gStorerkey}
+                  AND DCCODE NOT IN (#{fixdccode})
+              <if test="kitSku != null and kitSku != ''">
+                  AND SKU       IN (
+				SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS SKU
+				FROM (SELECT #{kitSku} AS VAL FROM DUAL)
+				CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) > 0
+			)
+              </if>
+                  AND STOCKTYPE     = 'GOOD'    /*재고위치-정상*/
+                  AND STOCKGRADE    =  'STD'    /*재고속성-가용*/  
+                GROUP BY SKU
+        )
+        , ORDER_SUMMARY_ALL AS (
+                SELECT 
+                    DM_DOCUMENT_D.SKU
+                  , SUM(
+                        CASE 
+                        /*당월: 오늘까지 주문 (당일전 주문)*/
+                            WHEN DELIVERYDATE BETWEEN #{month} || '01' AND #{month} || TO_CHAR(SYSDATE,'DD')
+                            THEN ORDERQTY 
+                            ELSE 0 
+                        END
+                    ) AS QTY_ORDER_BEFORE
+                  , SUM(
+                        CASE 
+                        /*당월: 내일부터 말일까지 주문 (당일후 주문)*/
+                            WHEN DELIVERYDATE BETWEEN #{month} || TO_CHAR(SYSDATE + 1,'DD')
+                                                       AND TO_CHAR(LAST_DAY(TO_DATE(#{month} || '01','YYYYMMDD')),'YYYYMMDD')
+                            THEN ORDERQTY 
+                            ELSE 0 
+                        END
+                    ) AS QTY_ORDER_AFTER
+                  , SUM(
+                        CASE 
+                        /*총 주문수량 (조회 월 전체)*/
+                            WHEN SUBSTR(DELIVERYDATE,1,6) = #{month}
+                            THEN ORDERQTY 
+                            ELSE 0 
+                        END
+                    ) AS TOTAL_ORDERQTY
+                  , SUM(
+                        CASE 
+                        /*기주문량 (오늘~7일 후까지)*/
+                            WHEN DELIVERYDATE BETWEEN #{month} || TO_CHAR(SYSDATE,'DD')
+                                                AND #{month} || TO_CHAR(SYSDATE+7,'DD')
+                            THEN ORDERQTY 
+                            ELSE 0 
+                        END
+                    ) AS QUANTITY_ORDER
+                  , SUM(
+                        CASE 
+                        /* D-1월 */
+                            WHEN SUBSTR(DELIVERYDATE,1,6) = TO_CHAR(ADD_MONTHS(TO_DATE(#{month},'YYYYMM'), -1), 'YYYYMM')
+                            THEN ORDERQTY 
+                            ELSE 0 
+                        END
+                    ) AS CONFIRMQTY_M1
+                  , SUM(
+                        CASE 
+                        /* D-2월 */
+                            WHEN SUBSTR(DELIVERYDATE,1,6) = TO_CHAR(ADD_MONTHS(TO_DATE(#{month},'YYYYMM'), -2), 'YYYYMM')
+                            THEN ORDERQTY 
+                            ELSE 0 
+                        END
+                    ) AS CONFIRMQTY_M2
+                  , SUM(
+                        CASE 
+                        /* D-3월 */
+                            WHEN SUBSTR(DELIVERYDATE,1,6) = TO_CHAR(ADD_MONTHS(TO_DATE(#{month},'YYYYMM'), -3), 'YYYYMM')
+                            THEN ORDERQTY 
+                            ELSE 0 
+                        END
+                    ) AS CONFIRMQTY_M3
+                FROM DM_DOCUMENT_D
+                JOIN (SELECT DISTINCT KIT_SKU
+                        FROM MS_KITSKU
+                       WHERE STORERKEY          = #{gStorerkey} ) KITSKU
+                ON    DM_DOCUMENT_D.SKU       = KITSKU.KIT_SKU
+                WHERE DM_DOCUMENT_D.DOCTYPE            = 'WD'
+                  AND DM_DOCUMENT_D.STORERKEY          = #{gStorerkey}            
+                  AND DM_DOCUMENT_D.DEL_YN             = 'N'
+              <if test="kitSku != null and kitSku != ''">
+                  AND DM_DOCUMENT_D.SKU IN (
+										SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS SKU
+										FROM (SELECT #{kitSku} AS VAL FROM DUAL)
+										CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) > 0
+									   )
+              </if>
+                  AND DELIVERYDATE BETWEEN TO_CHAR(ADD_MONTHS(TO_DATE(#{month} || '01','YYYYMMDD'), -3),'YYYYMM') || '01'
+                                      AND TO_CHAR(LAST_DAY(TO_DATE(#{month} || '01','YYYYMMDD')),'YYYYMMDD')
+                GROUP BY DM_DOCUMENT_D.SKU
+        )
+        , CENTER_MNG AS (
+                SELECT 
+                    STORERKEY
+                  , BASECODE   
+                  , BASEDESCR
+                  , ROW_NUMBER() OVER (ORDER BY BASECODE DESC) AS RN
+                FROM CM_CODE
+                WHERE STORERKEY = #{gStorerkey}             
+                  AND CODELIST  = 'KITPLAN_CHARGE'
+                  AND DEL_YN    = 'N'
+        )        
+        , PURCHASE_SUM AS (
+        
+                    SELECT MAX(MS_PURCHASESTATS.STORERKEY)    AS STORERKEY
+                         , MS_PURCHASESTATS.SKU               AS SKU
+                         , MAX(MS_PURCHASESTATS.MAXSTOCK)     AS MAXSTOCK
+                         , MAX(MS_PURCHASESTATS.STOCKAVGDAY)  AS STOCKAVGDAY
+                         , MAX(MS_PURCHASESTATS.STDDEVIATION) AS STDDEVIATION
+                      FROM MS_PURCHASESTATS /*구매마스터통계정보*/
+                      JOIN MS_KITSKU
+                        ON MS_PURCHASESTATS.STORERKEY = MS_KITSKU.STORERKEY
+                       AND MS_PURCHASESTATS.SKU       = MS_KITSKU.KIT_SKU
+                     WHERE MS_PURCHASESTATS.STATSDT   = TO_CHAR(SYSDATE, 'YYYYMMDD') 
+                       --AND MS_KITSKU.DCCODE           = 'XXXX' /*요건.전센터에서 최고 출고수량임*/ 
+                       AND MS_PURCHASESTATS.STORERKEY   = #{gStorerkey}    
+                      <if test="kitSku != null and kitSku != ''">
+                          AND MS_PURCHASESTATS.SKU IN (
+			  	      						SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS SKU
+			  	      						FROM (SELECT #{kitSku} AS VAL FROM DUAL)
+			  	      						CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) > 0
+			  	      					   )
+                      </if>   
+                     GROUP BY MS_PURCHASESTATS.SKU 
+        )
+        SELECT /* [stKitPlanService.xml][getMasterList01][KIT상품 목록 조회][고혜미][20251021] */
+            DCCODE                 /*물류센터*/
+          , KIT_SKU                /*상품코드*/
+          , KIT_NM                 /*상품명*/
+          , STORAGETYPE            /*저장조건*/
+          , GROSSWEIGHT            /*단위중량*/
+          , QTYPERBOX              /*박스입수*/
+          , BOXPERPLT              /*PLT입수*/
+          , BUYERKEY               /*수급담당*/
+          , BUYERKEYNM             /*수급담당명*/
+          , CENTER_MANAGER         /*센터담당*/
+          , TOTAL_CONFIRMQTY_LAST_YEAR  /*전년동월 제작수량*/
+          , CENTER_QTY1            /*센터보유량(조회센터)*/
+          , CENTER_QTY2            /*센터보유량(조회센터 제외)*/
+          , NVL(CENTER_QTY1 + CENTER_QTY2,0) AS SUM_CENTER_QTY /*센터보유량(합계)*/
+          , STOCKSAFETY            /*안전재고*/
+          , REORDERPOINT           /*재발주점*/
+          , MAXSTOCK               /*MAX*/
+          , QUANTITY_ORDER         /*D+7 기주문량*/
+          , REFLECTED_QTY          /*반영수량*/
+          , TOTAL_ORDERQTY         /*총 주문*/
+          , QTY_ORDER_BEFORE       /*당일 전 주문량*/
+          , QTY_ORDER_AFTER        /*당일 후 주문량*/
+          , DP_RATE                /*DP대비*/
+          , CONFIRMQTY_M1          /*출고수량 D-1월*/
+          , CONFIRMQTY_M2          /*출고수량 D-2월*/
+          , CONFIRMQTY_M3          /*출고수량 D-3월*/
+          , DP_QTY                 /*DP*/
+          , TOTAL_CONFIRMQTY       /*기 작업수량*/
+          , WORK_REMAINING_AMT     /*작업잔량*/
+          , WORK_RATE              /*작업율*/
+
+          , D01_REQ  AS D01_REQ    /*01일 요청수량*/
+          , D01_PLAN AS D01_PLAN   /*01일 계획수량*/
+          , D01_PROD AS D01_PROD   /*01일 생산수량*/
+
+          , D02_REQ  AS D02_REQ    /*02일 요청수량*/
+          , D02_PLAN AS D02_PLAN   /*02일 계획수량*/
+          , D02_PROD AS D02_PROD   /*02일 생산수량*/
+
+          , D03_REQ  AS D03_REQ    /*03일 요청수량*/
+          , D03_PLAN AS D03_PLAN   /*03일 계획수량*/
+          , D03_PROD AS D03_PROD   /*03일 생산수량*/
+
+          , D04_REQ  AS D04_REQ    /*04일 요청수량*/
+          , D04_PLAN AS D04_PLAN   /*04일 계획수량*/
+          , D04_PROD AS D04_PROD   /*04일 생산수량*/
+
+          , D05_REQ  AS D05_REQ    /*05일 요청수량*/
+          , D05_PLAN AS D05_PLAN   /*05일 계획수량*/
+          , D05_PROD AS D05_PROD   /*05일 생산수량*/
+
+          , D06_REQ  AS D06_REQ    /*06일 요청수량*/
+          , D06_PLAN AS D06_PLAN   /*06일 계획수량*/
+          , D06_PROD AS D06_PROD   /*06일 생산수량*/
+
+          , D07_REQ  AS D07_REQ    /*07일 요청수량*/
+          , D07_PLAN AS D07_PLAN   /*07일 계획수량*/
+          , D07_PROD AS D07_PROD   /*07일 생산수량*/
+
+          , D08_REQ  AS D08_REQ    /*08일 요청수량*/
+          , D08_PLAN AS D08_PLAN   /*08일 계획수량*/
+          , D08_PROD AS D08_PROD   /*08일 생산수량*/
+
+          , D09_REQ  AS D09_REQ    /*09일 요청수량*/
+          , D09_PLAN AS D09_PLAN   /*09일 계획수량*/
+          , D09_PROD AS D09_PROD   /*09일 생산수량*/
+
+          , D10_REQ  AS D10_REQ    /*10일 요청수량*/
+          , D10_PLAN AS D10_PLAN   /*10일 계획수량*/
+          , D10_PROD AS D10_PROD   /*10일 생산수량*/
+
+          , D11_REQ  AS D11_REQ    /*11일 요청수량*/
+          , D11_PLAN AS D11_PLAN   /*11일 계획수량*/
+          , D11_PROD AS D11_PROD   /*11일 생산수량*/
+
+          , D12_REQ  AS D12_REQ    /*12일 요청수량*/
+          , D12_PLAN AS D12_PLAN   /*12일 계획수량*/
+          , D12_PROD AS D12_PROD   /*12일 생산수량*/
+
+          , D13_REQ  AS D13_REQ    /*13일 요청수량*/
+          , D13_PLAN AS D13_PLAN   /*13일 계획수량*/
+          , D13_PROD AS D13_PROD   /*13일 생산수량*/
+
+          , D14_REQ  AS D14_REQ    /*14일 요청수량*/
+          , D14_PLAN AS D14_PLAN   /*14일 계획수량*/
+          , D14_PROD AS D14_PROD   /*14일 생산수량*/
+
+          , D15_REQ  AS D15_REQ    /*15일 요청수량*/
+          , D15_PLAN AS D15_PLAN   /*15일 계획수량*/
+          , D15_PROD AS D15_PROD   /*15일 생산수량*/
+
+          , D16_REQ  AS D16_REQ    /*16일 요청수량*/
+          , D16_PLAN AS D16_PLAN   /*16일 계획수량*/
+          , D16_PROD AS D16_PROD   /*16일 생산수량*/
+
+          , D17_REQ  AS D17_REQ    /*17일 요청수량*/
+          , D17_PLAN AS D17_PLAN   /*17일 계획수량*/
+          , D17_PROD AS D17_PROD   /*17일 생산수량*/
+
+          , D18_REQ  AS D18_REQ    /*18일 요청수량*/
+          , D18_PLAN AS D18_PLAN   /*18일 계획수량*/
+          , D18_PROD AS D18_PROD   /*18일 생산수량*/
+
+          , D19_REQ  AS D19_REQ    /*19일 요청수량*/
+          , D19_PLAN AS D19_PLAN   /*19일 계획수량*/
+          , D19_PROD AS D19_PROD   /*19일 생산수량*/
+
+          , D20_REQ  AS D20_REQ    /*20일 요청수량*/
+          , D20_PLAN AS D20_PLAN   /*20일 계획수량*/
+          , D20_PROD AS D20_PROD   /*20일 생산수량*/
+
+          , D21_REQ  AS D21_REQ    /*21일 요청수량*/
+          , D21_PLAN AS D21_PLAN   /*21일 계획수량*/
+          , D21_PROD AS D21_PROD   /*21일 생산수량*/
+
+          , D22_REQ  AS D22_REQ    /*22일 요청수량*/
+          , D22_PLAN AS D22_PLAN   /*22일 계획수량*/
+          , D22_PROD AS D22_PROD   /*22일 생산수량*/
+
+          , D23_REQ  AS D23_REQ    /*23일 요청수량*/
+          , D23_PLAN AS D23_PLAN   /*23일 계획수량*/
+          , D23_PROD AS D23_PROD   /*23일 생산수량*/
+
+          , D24_REQ  AS D24_REQ    /*24일 요청수량*/
+          , D24_PLAN AS D24_PLAN   /*24일 계획수량*/
+          , D24_PROD AS D24_PROD   /*24일 생산수량*/
+
+          , D25_REQ  AS D25_REQ    /*25일 요청수량*/
+          , D25_PLAN AS D25_PLAN   /*25일 계획수량*/
+          , D25_PROD AS D25_PROD   /*25일 생산수량*/
+
+          , D26_REQ  AS D26_REQ    /*26일 요청수량*/
+          , D26_PLAN AS D26_PLAN   /*26일 계획수량*/
+          , D26_PROD AS D26_PROD   /*26일 생산수량*/
+
+          , D27_REQ  AS D27_REQ    /*27일 요청수량*/
+          , D27_PLAN AS D27_PLAN   /*27일 계획수량*/
+          , D27_PROD AS D27_PROD   /*27일 생산수량*/
+
+          , D28_REQ  AS D28_REQ    /*28일 요청수량*/
+          , D28_PLAN AS D28_PLAN   /*28일 계획수량*/
+          , D28_PROD AS D28_PROD   /*28일 생산수량*/
+
+          , D29_REQ  AS D29_REQ    /*29일 요청수량*/
+          , D29_PLAN AS D29_PLAN   /*29일 계획수량*/
+          , D29_PROD AS D29_PROD   /*29일 생산수량*/
+
+          , D30_REQ  AS D30_REQ    /*30일 요청수량*/
+          , D30_PLAN AS D30_PLAN   /*30일 계획수량*/
+          , D30_PROD AS D30_PROD   /*30일 생산수량*/
+
+          , D31_REQ  AS D31_REQ    /*31일 요청수량*/
+          , D31_PLAN AS D31_PLAN   /*31일 계획수량*/
+          , D31_PROD AS D31_PROD   /*31일 생산수량*/
+        FROM (
+            SELECT  
+                  MS_KITSKU.DCCODE
+                , MS_KITSKU.KIT_SKU
+                , MS_KITSKU.KIT_NM
+                , FN_CODEDESCR(MS_SKU.STORERKEY, 'STORAGETYPE', MS_SKU.STORAGETYPE) AS STORAGETYPE
+                , MS_SKU.QTYPERBOX
+                , MS_SKU.GROSSWEIGHT
+                , MS_SKUCHAIN.BOXPERPLT
+                , MS_PURCHASECUST.BUYERKEY
+                , NVL(CD1.BASEDESCR,CD1.BASECODE)                             AS BUYERKEYNM 
+                , CENTER.BASECODE                                             AS CENTER_MANAGER
+                , NVL(CONFIRMQTY_SUM.TOTAL_CONFIRMQTY_LAST_YEAR,0)            AS TOTAL_CONFIRMQTY_LAST_YEAR
+                , NVL(ST_STOCK1.CENTER_QTY1,0)                                AS CENTER_QTY1
+                , NVL(ST_STOCK2.CENTER_QTY2,0)                                AS CENTER_QTY2
+                , NVL(ROUND((PURCHASE_SUM.MAXSTOCK - PURCHASE_SUM.STOCKAVGDAY) * NVL(MS_PURCHASEMST.LEADTIME, 1)), 0) AS STOCKSAFETY
+                , NVL(ROUND((PURCHASE_SUM.STOCKAVGDAY * NVL(MS_PURCHASEMST.LEADTIME, 1)) +
+	                             (PURCHASE_SUM.STDDEVIATION * (NVL(MS_PURCHASEMST.COEFFICIENTSAFETY, 0)) * POWER(NVL(MS_PURCHASEMST.LEADTIME, 1), 1 / 2))), 0) AS REORDERPOINT
+                , PURCHASE_SUM.MAXSTOCK
+                , NVL(ORDER_SUMMARY_ALL.QUANTITY_ORDER ,0)                     AS QUANTITY_ORDER
+                , ST_STOCK2.CENTER_QTY2 - ORDER_SUMMARY_ALL.QUANTITY_ORDER     AS REFLECTED_QTY
+                , NVL(ORDER_SUMMARY_ALL.TOTAL_ORDERQTY,0)                      AS TOTAL_ORDERQTY
+                , NVL(ORDER_SUMMARY_ALL.QTY_ORDER_BEFORE,0)                    AS QTY_ORDER_BEFORE  
+                , NVL(ORDER_SUMMARY_ALL.QTY_ORDER_AFTER,0)                     AS QTY_ORDER_AFTER   
+                , CASE WHEN ST_KIT_PLAN_AGG.DP_QTY IS NULL OR ST_KIT_PLAN_AGG.DP_QTY = 0 OR ORDER_SUMMARY_ALL.TOTAL_ORDERQTY IS NULL THEN ''
+                       ELSE TO_CHAR(ROUND((ORDER_SUMMARY_ALL.TOTAL_ORDERQTY / ST_KIT_PLAN_AGG.DP_QTY) * 100, 1)) || '%'
+                  END                                                          AS DP_RATE
+                , NVL(ORDER_SUMMARY_ALL.CONFIRMQTY_M1, 0)                      AS CONFIRMQTY_M1
+                , NVL(ORDER_SUMMARY_ALL.CONFIRMQTY_M2, 0)                      AS CONFIRMQTY_M2
+                , NVL(ORDER_SUMMARY_ALL.CONFIRMQTY_M3, 0)                      AS CONFIRMQTY_M3
+                , NVL(ST_KIT_PLAN_AGG.DP_QTY,0)                                AS DP_QTY       
+                , NVL(CONFIRMQTY_SUM.TOTAL_CONFIRMQTY,0)                       AS TOTAL_CONFIRMQTY
+                , NVL(ST_KIT_PLAN_AGG.DP_QTY - CONFIRMQTY_SUM.TOTAL_CONFIRMQTY ,0) AS WORK_REMAINING_AMT
+                , CASE WHEN ST_KIT_PLAN_AGG.DP_QTY IS NULL OR ST_KIT_PLAN_AGG.DP_QTY = 0 OR CONFIRMQTY_SUM.TOTAL_CONFIRMQTY IS NULL THEN ''
+                       ELSE TO_CHAR(ROUND((CONFIRMQTY_SUM.TOTAL_CONFIRMQTY/ ST_KIT_PLAN_AGG.DP_QTY) * 100, 1)) || '%'
+                  END                                                          AS WORK_RATE
+                , ST_KIT_PLAN_DETAIL.DAY
+                , ST_KIT_PLAN_DETAIL.ORDERQTY
+                , ST_KIT_PLAN_DETAIL.OPENQTY
+                , ST_KIT_PLAN_DETAIL.CONFIRMQTY
+            FROM MS_KITSKU  /*KIT상품정보*/
+            LEFT JOIN MS_SKU /*상품마스터*/
+                   ON MS_SKU.STORERKEY = MS_KITSKU.STORERKEY
+                  AND MS_SKU.SKU       = MS_KITSKU.KIT_SKU
+            LEFT JOIN MS_SKUCHAIN   
+                   ON MS_SKU.SKU       = MS_SKUCHAIN.SKU   
+                  AND MS_SKU.STORERKEY = MS_SKUCHAIN.STORERKEY         
+            LEFT JOIN ST_KIT_PLAN_AGG
+                   ON ST_KIT_PLAN_AGG.STORERKEY = MS_KITSKU.STORERKEY
+                  AND ST_KIT_PLAN_AGG.SKU       = MS_KITSKU.KIT_SKU
+                  AND ST_KIT_PLAN_AGG.DCCODE    = MS_KITSKU.DCCODE
+            LEFT JOIN ST_KIT_PLAN_DETAIL
+                   ON ST_KIT_PLAN_DETAIL.STORERKEY = MS_KITSKU.STORERKEY
+                  AND ST_KIT_PLAN_DETAIL.SKU       = MS_KITSKU.KIT_SKU
+                  AND ST_KIT_PLAN_DETAIL.DCCODE    = MS_KITSKU.DCCODE
+            LEFT JOIN MS_PURCHASECUST /*구매마스터거래처정보*/
+                   ON MS_PURCHASECUST.STORERKEY = MS_KITSKU.STORERKEY
+                  AND MS_PURCHASECUST.SKU       = MS_KITSKU.KIT_SKU
+                  AND MS_PURCHASECUST.DCCODE    = MS_KITSKU.DCCODE
+                  AND TO_CHAR(SYSDATE,'YYYYMMDD') BETWEEN MS_PURCHASECUST.FROMDATE  AND MS_PURCHASECUST.TODATE
+            LEFT JOIN CM_CODE_STORER CD1 
+                   ON CD1.STORERKEY = MS_PURCHASECUST.STORERKEY 
+                  AND CD1.CODELIST = 'BUYERKEY'	
+                  AND CD1.BASECODE = MS_PURCHASECUST.BUYERKEY
+            LEFT JOIN PURCHASE_SUM /*구매마스터통계정보*/
+                   ON PURCHASE_SUM.STORERKEY = MS_KITSKU.STORERKEY
+                  AND PURCHASE_SUM.SKU       = MS_KITSKU.KIT_SKU
+                 -- AND MS_PURCHASESTATS.DCCODE    = MS_KITSKU.DCCODE
+	        LEFT JOIN MS_PURCHASEMST /*구매마스터거래처 입력정보*/
+	                ON MS_PURCHASEMST.STORERKEY = MS_PURCHASECUST.STORERKEY
+	               AND MS_PURCHASEMST.DCCODE    = MS_PURCHASECUST.DCCODE
+	               AND MS_PURCHASEMST.CUSTTYPE  = MS_PURCHASECUST.CUSTTYPE
+	               AND MS_PURCHASEMST.SKU       = MS_PURCHASECUST.SKU
+	        LEFT JOIN CONFIRMQTY_SUM
+	               ON CONFIRMQTY_SUM.KIT_SKU = MS_KITSKU.KIT_SKU
+	        LEFT JOIN ST_STOCK1
+	               ON ST_STOCK1.SKU = MS_KITSKU.KIT_SKU
+	        LEFT JOIN ST_STOCK2
+	               ON ST_STOCK2.SKU = MS_KITSKU.KIT_SKU
+            LEFT JOIN ORDER_SUMMARY_ALL
+                   ON ORDER_SUMMARY_ALL.SKU = MS_KITSKU.KIT_SKU
+            LEFT JOIN CENTER_MNG CENTER
+                   ON CENTER.STORERKEY = MS_KITSKU.STORERKEY
+                 AND CENTER.RN         = '1'
+            WHERE MS_KITSKU.PRTN_YN    = 'N'  /*소분여부*/
+              AND MS_KITSKU.TODATE    <![CDATA[>]]>  TO_CHAR(SYSDATE, 'YYYYMMDD') /*중단여부*/
+              AND MS_KITSKU.DEL_YN     = 'N'
+              AND MS_KITSKU.STORERKEY  = #{gStorerkey}
+              AND MS_KITSKU.DCCODE     = #{fixdccode}
+          <!-- 상품 다중선택 -->
+          <if test="kitSku != null and kitSku != '' ">
+                <if test="kitSkuMulti != null and kitSkuMulti.size() > 0">
+                    <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                        <foreach collection="kitSkuMulti" item="item">
+                            OR MS_KITSKU.KIT_SKU IN
+                            <foreach collection="item" item="code" open="(" close=")" separator=",">
+                                #{code}      
+                            </foreach>
+                        </foreach>
+                    </trim>                                             
+                </if>
+            </if>
+        )
+        PIVOT (
+            MAX(ORDERQTY) AS REQ
+          , MAX(OPENQTY) AS PLAN
+          , MAX(CONFIRMQTY) AS PROD
+            FOR DAY IN (
+                '01' AS D01, '02' AS D02, '03' AS D03, '04' AS D04, '05' AS D05, '06' AS D06, '07' AS D07
+              , '08' AS D08, '09' AS D09, '10' AS D10, '11' AS D11, '12' AS D12, '13' AS D13, '14' AS D14
+              , '15' AS D15, '16' AS D16, '17' AS D17, '18' AS D18, '19' AS D19, '20' AS D20, '21' AS D21
+              , '22' AS D22, '23' AS D23, '24' AS D24, '25' AS D25, '26' AS D26, '27' AS D27, '28' AS D28
+              , '29' AS D29, '30' AS D30, '31' AS D31
+            )
+        )
+        ORDER BY KIT_SKU
+    </select>
+
+
+    <!-- KIT상품계획 저장 -->
+    <insert id="saveMasterList" >        
+        MERGE /* [stKitPlanService.sqlx][stKitPlanService.saveMasterList][KIT상품계획 저장][고혜미][20251021] */ 
+        INTO ST_KIT_PLAN
+             USING DUAL
+                ON (DCCODE          = #{dccode}         /*물류센터*/
+                AND STORERKEY       = #{gStorerkey}     /*고객사코드*/
+                AND PLAN_DT         = #{planDt}         /*계획일*/
+                AND SKU             = #{kitSku}         /*상품코드*/
+                )
+        WHEN MATCHED THEN
+             UPDATE SET
+                    DP_QTY          = #{dpQty}          /*DP(영업요청수량)*/
+                  , ORDERQTY        = #{orderqty}       /*요청수량*/
+                  , OPENQTY         = #{openqty}        /*계획수량*/
+                  , CONFIRMQTY      = #{confirmqty}     /*생산수량*/
+                  , EDITDATE        = SYSDATE
+                  , EDITWHO         = #{gUserId}
+        WHEN NOT MATCHED THEN
+             INSERT (DCCODE           /*1 .센터코드*/
+                   , STORERKEY        /*2 .고객사코드*/
+                   , PLAN_DT          /*3 .계획일*/
+                   , SKU              /*4 .상품코드*/
+                   , DP_QTY           /*5 .DP(영업요청수량)*/
+                   , ORDERQTY         /*6 .요청수량*/
+                   , OPENQTY          /*7 .계획수량*/
+                   , CONFIRMQTY       /*8 .생산수량*/
+                   , ADDDATE          /*09.최초등록시간*/
+                   , EDITDATE         /*10.최종변경시간*/
+                   , ADDWHO           /*11.최초등록자*/ 
+                   , EDITWHO          /*12.최종변경자*/
+                 )
+            VALUES  (#{dccode}               /*1 .센터코드*/
+                   , #{gStorerkey}           /*2 .고객사코드*/
+                   , #{planDt}               /*3 .계획일*/
+                   , #{kitSku}               /*4 .상품코드*/
+                   , #{dpQty}                /*5 .DP(영업요청수량)*/
+                   , #{orderqty}             /*6 .요청수량*/                
+                   , #{openqty}              /*7 .계획수량*/
+                   , #{confirmqty}           /*8 .생산수량*/
+                   , SYSDATE                 /*9 .최초등록시간*/
+                   , SYSDATE                 /*10.최종변경시간*/
+                   , #{gUserId}              /*11.최초등록자*/ 
+                   , #{gUserId}              /*12.최종변경자*/
+                 )
+    </insert>    
+    
+	<select id="getMasterList02" resultType="cjfw.wms.st.dto.StKitPlanResT2Dto">
+	    WITH STOCK AS (
+          SELECT 
+                 ST_STOCK.DCCODE
+                , ST_STOCK.STORERKEY
+                , ST_STOCK.SKU
+                , SUM(ST_STOCK.QTY)  QTY
+                , SUM(ST_STOCK.QTY) - SUM(ST_STOCK.QTYALLOCATED) - SUM(ST_STOCK.QTYPICKED)  - SUM(ST_STOCK.QTYRESERVE)  USEQTY
+          FROM ST_STOCK
+          WHERE ST_STOCK.DCCODE     = #{dccode} 
+            AND ST_STOCK.STORERKEY  = #{gStorerkey}
+            AND ST_STOCK.STOCKGRADE = 'STD'
+            AND ST_STOCK.QTY - ST_STOCK.QTYALLOCATED - ST_STOCK.QTYPICKED - ST_STOCK.QTYRESERVE > 0
+          GROUP BY ST_STOCK.DCCODE, ST_STOCK.STORERKEY, ST_STOCK.SKU
+          )
+		SELECT /* [stKitPlanService.sqlx][stKitPlanService.getMasterList02][KIT상품계획등록 > KIT구성조회][고혜미][20251029] */
+		       T1.DCCODE                                       AS DCCODE                    /*센터코드*/
+		     , T1.KIT_SKU                                      AS KIT_SKU                   /*KIT상품코드*/
+             , MAX(T2.DESCRIPTION)                             AS KIT_NM                    /*KIT상품명*/
+             , T1.SKU                                          AS SKU                       /*상품코드*/
+             , MAX(T3.DESCRIPTION)                             AS SKU_NM                    /*상품명*/
+             , NVL(MAX(T1.QTY),0)                              AS QTY                       /*수량*/
+             , NVL(MAX(T4.QTY),0)                              AS CURRENT_QTY               /*현재고*/
+             , MAX(TO_CHAR(SYSDATE + T6.LEADTIME, 'YYYYMMDD')) AS RECEIVING_SCHEDULED_DATE  /*입고예정일*/
+             , NVL(SUM(T8.OPENQTY),0)                          AS OPENQTY                   /*입고예정*/ 
+             , NVL(MAX(T1.QTY) * MAX(T7.DP_QTY),0)             AS PRODUCTION_REQUIRED_QTY   /*제작필요수량*/
+             , ( NVL(MAX(T4.QTY), 0) - 
+               ( NVL(SUM(CASE WHEN TO_DATE(T9.PLAN_DT, 'YYYYMMDD') BETWEEN TRUNC(SYSDATE + 1)  AND TRUNC(SYSDATE + 7)  THEN T9.CONFIRMQTY * T1.QTY ELSE 0 END), 0)
+               + NVL(SUM(CASE WHEN TO_DATE(T9.PLAN_DT, 'YYYYMMDD') BETWEEN TRUNC(SYSDATE + 8)  AND TRUNC(SYSDATE + 14) THEN T9.CONFIRMQTY * T1.QTY ELSE 0 END), 0)
+               + NVL(SUM(CASE WHEN TO_DATE(T9.PLAN_DT, 'YYYYMMDD') BETWEEN TRUNC(SYSDATE + 15) AND TRUNC(SYSDATE + 21) THEN T9.CONFIRMQTY * T1.QTY ELSE 0 END), 0)
+               )
+               )                                               AS STOCK                     /*생산수량차감현재고*/
+             , ( NVL(SUM(CASE WHEN TO_DATE(T9.PLAN_DT, 'YYYYMMDD') BETWEEN TRUNC(SYSDATE + 1)  AND TRUNC(SYSDATE + 7)  THEN T9.CONFIRMQTY * T1.QTY ELSE 0 END), 0)
+               + NVL(SUM(CASE WHEN TO_DATE(T9.PLAN_DT, 'YYYYMMDD') BETWEEN TRUNC(SYSDATE + 8)  AND TRUNC(SYSDATE + 14) THEN T9.CONFIRMQTY * T1.QTY ELSE 0 END), 0)
+               + NVL(SUM(CASE WHEN TO_DATE(T9.PLAN_DT, 'YYYYMMDD') BETWEEN TRUNC(SYSDATE + 15) AND TRUNC(SYSDATE + 21) THEN T9.CONFIRMQTY * T1.QTY ELSE 0 END), 0)
+                )                                              AS TOTAL_CONFIRMQTY          /*계*/
+             , NVL(SUM(CASE WHEN TO_DATE(T9.PLAN_DT, 'YYYYMMDD') BETWEEN TRUNC(SYSDATE + 1) AND TRUNC(SYSDATE + 7) THEN T9.CONFIRMQTY * T1.QTY
+                            ELSE 0 
+                       END
+                   ),0)                                        AS CONFIRMQTY_SUM_7DAYS      /*D+7*/
+             , NVL(SUM(CASE WHEN TO_DATE(T9.PLAN_DT, 'YYYYMMDD') BETWEEN TRUNC(SYSDATE + 8) AND TRUNC(SYSDATE + 14) THEN T9.CONFIRMQTY * T1.QTY
+                            ELSE 0 
+                       END
+                   ),0)                                        AS CONFIRMQTY_SUM_14DAYS     /*D+14*/
+             , NVL(SUM(CASE WHEN TO_DATE(T9.PLAN_DT, 'YYYYMMDD') BETWEEN TRUNC(SYSDATE + 15) AND TRUNC(SYSDATE + 21) THEN T9.CONFIRMQTY * T1.QTY
+                            ELSE 0 
+                       END
+                   ),0)                                        AS CONFIRMQTY_SUM_21DAYS     /*D+21*/
+             , NVL(SUM( CASE WHEN SUBSTR(T9.PLAN_DT, 1, 6) = TO_CHAR(ADD_MONTHS(TO_DATE(#{month}||'01'), -1), 'YYYYMM') THEN T9.CONFIRMQTY * T1.QTY
+                             ELSE 0
+                        END
+                  ), 0)                                        AS PRE_MONTH_USAGE1          /*D-1월*/
+             , NVL(SUM( CASE WHEN SUBSTR(T9.PLAN_DT, 1, 6) = TO_CHAR(ADD_MONTHS(TO_DATE(#{month}||'01'), -2), 'YYYYMM') THEN T9.CONFIRMQTY * T1.QTY
+                             ELSE 0
+                        END
+                  ), 0)                                        AS PRE_MONTH_USAGE2          /*D-2월*/
+             , NVL(SUM( CASE WHEN SUBSTR(T9.PLAN_DT, 1, 6) = TO_CHAR(ADD_MONTHS(TO_DATE(#{month}||'01'), -3), 'YYYYMM') THEN T9.CONFIRMQTY * T1.QTY
+                             ELSE 0
+                        END
+                  ), 0)                                        AS PRE_MONTH_USAGE3          /*D-3월*/
+	    FROM MS_KITSKU   T1 /*KIT상품정보*/
+	    LEFT JOIN MS_SKU T2 /*상품마스터*/
+	      ON T2.STORERKEY = T1.STORERKEY
+	     AND T2.SKU       = T1.KIT_SKU
+        LEFT JOIN MS_SKU T3 /*상품마스터*/
+	      ON T3.STORERKEY = T1.STORERKEY
+	     AND T3.SKU       = T1.SKU
+	    LEFT JOIN STOCK T4 /*재고*/
+	      ON T4.STORERKEY = T1.STORERKEY
+	     AND T4.DCCODE    = T1.DCCODE
+	     AND T4.SKU       = T1.SKU
+	    LEFT JOIN MS_PURCHASECUST T5/*구매마스터거래처정보*/
+          ON T5.STORERKEY = T1.STORERKEY
+         AND T5.SKU       = T1.SKU
+         AND T5.DCCODE    = T1.DCCODE
+         AND TO_CHAR(SYSDATE,'YYYYMMDD') BETWEEN T5.FROMDATE  AND T5.TODATE
+        LEFT JOIN MS_PURCHASEMST  T6/*구매마스터거래처 입력정보*/
+	      ON T6.STORERKEY = T5.STORERKEY
+	     AND T6.DCCODE    = T5.DCCODE
+	     AND T6.CUSTTYPE  = T5.CUSTTYPE
+	     AND T6.SKU       = T5.SKU
+	    LEFT JOIN ST_KIT_PLAN T7 /*KIT 생산 계획*/
+	      ON T7.STORERKEY = T1.STORERKEY
+	     AND T7.SKU       = T1.KIT_SKU
+	     AND T7.DCCODE    = T1.DCCODE
+	     AND T7.PLAN_DT   = #{month}||'00'
+	    LEFT JOIN DM_DOCUMENT_D T8 /*문서정보상세*/
+	      ON T8.STORERKEY = T1.STORERKEY
+	     AND T8.SKU       = T1.SKU
+	     AND T8.DCCODE    = T1.DCCODE
+	     AND T8.DOCTYPE   = 'DP'
+	     AND T8.DELIVERYDATE >= TO_CHAR(SYSDATE,'YYYYMMDD')
+	    LEFT JOIN ST_KIT_PLAN T9 /*KIT 생산 계획*/
+	      ON T9.STORERKEY              = T1.STORERKEY
+	     AND T9.SKU                    = T1.KIT_SKU
+	     AND T9.DCCODE                 = T1.DCCODE
+	     AND LENGTH(T9.PLAN_DT)        = 8
+         AND SUBSTR(T9.PLAN_DT, 7, 2) != '00'
+	    WHERE 1=1 
+	      AND T1.DCCODE    = #{dccode} 
+	      AND T1.STORERKEY = #{gStorerkey}
+	      AND T1.KIT_SKU   = #{kitSku}
+	      AND T1.PRTN_YN   = 'N'  /*소분여부*/
+	      AND T1.TODATE    <![CDATA[>]]>  TO_CHAR(SYSDATE, 'YYYYMMDD') /*중단여부*/
+	      AND T1.DEL_YN    = 'N'   /*중단여부*/
+	    GROUP BY 
+           T1.DCCODE
+         , T1.KIT_SKU
+         , T1.SKU
+	</select>
+	
+	<select id="getMasterList03" resultType="cjfw.wms.st.dto.StKitPlanResT3Dto">
+		SELECT /* [stKitPlanService.sqlx][stKitPlanService.getMasterList03][KIT상품계획등록 > KIT구성조회][고혜미][20251029] */
+	           TBL.DCCODE            AS DCCODE,        /* 센터코드 */
+               TBL.SKU               AS SKU,           /* 상품코드 */
+               TBL.SKUNAME           AS SKU_NM,       /* 상품명 */
+               TBL.SLIPDT            AS DELIVERYDATE,        /* 입고예정일 */
+               TBL.OPENQTY           AS ORDERQTY,       /* PO */
+               TBL.PREQTY            AS VENDORCONFIRMQTY,        /* 업체확정수량 */
+               TBL.CONFIRMQTY        AS CONFIRMQTY    /* 입고확정 */    
+          FROM (
+            SELECT DP_PURCHASE.DCCODE                                       AS DCCODE,
+                   DP_PURCHASE.SKU                                          AS SKU,
+                   MS_SKU.DESCRIPTION                                       AS SKUNAME,
+                   DP_PURCHASE.UOM                                          AS UOM,
+                   NULL                                                     AS WORKPROCESSCODE,
+                   NVL(DP_PURCHASE.ORDERQTY, 0)                              AS OPENQTY,
+                   NVL(DP_PURCHASE.ORDERQTY, 0)                             AS PURCHASE_QTY,
+                   NVL(DP_PURCHASE.CONFIRMQTY, 0)                           AS PREQTY,
+                   0                                                        AS CONFIRMQTY,
+                   DP_PURCHASE.REQUESTDT                                    AS SLIPDT,
+                   NULL                                                     AS DOCNO,
+                   NULL                                                     AS DOCLINE,
+                   NULL                                                     AS SLIPNO,
+                   NULL                                                     AS SLIPLINE,
+                   DM_DOCUMENT_H.FROM_CUSTKEY                               AS FROM_CUSTKEY,
+                   DM_DOCUMENT_H.FROM_CUSTNAME                              AS FROM_CUSTNAME,
+                   DP_PURCHASE.ORGANIZE                                     AS ORGANIZE,
+                   CM_DCXORGANIZE.DESCRIPTION                               AS ORGANIZENAME,
+                   DP_PURCHASE.ADDDATE                                      AS ADDDATE,
+                   DP_PURCHASE.REQUESTNO,
+                   DP_PURCHASE.REQUESTLINE,
+                   DP_PURCHASE.CUSTKEY,
+                   DP_PURCHASE.CUSTTYPE,
+                   'Y' AS STATUS_YN
+              FROM DP_PURCHASE
+              LEFT OUTER JOIN MS_PURCHASEMST  
+                ON MS_PURCHASEMST.STORERKEY = DP_PURCHASE.STORERKEY
+               AND MS_PURCHASEMST.DCCODE = DP_PURCHASE.DCCODE
+               AND MS_PURCHASEMST.CUSTTYPE = DP_PURCHASE.CUSTTYPE
+               AND MS_PURCHASEMST.SKU = DP_PURCHASE.SKU
+              LEFT OUTER JOIN DM_DOCUMENT_D
+                ON DM_DOCUMENT_D.STORERKEY = DP_PURCHASE.STORERKEY
+               AND DM_DOCUMENT_D.DCCODE = DP_PURCHASE.DCCODE
+               AND DM_DOCUMENT_D.SKU = DP_PURCHASE.SKU
+               AND DM_DOCUMENT_D.POKEY = DP_PURCHASE.POKEY
+               AND DM_DOCUMENT_D.POLINE = DP_PURCHASE.POLINE
+              LEFT OUTER JOIN DM_DOCUMENT_H
+                ON DM_DOCUMENT_H.STORERKEY = DM_DOCUMENT_D.STORERKEY
+               AND DM_DOCUMENT_H.DOCTYPE = DM_DOCUMENT_D.DOCTYPE
+               AND DM_DOCUMENT_H.DOCNO = DM_DOCUMENT_D.DOCNO
+               AND DM_DOCUMENT_H.DCCODE = DM_DOCUMENT_D.DCCODE
+              LEFT OUTER JOIN CM_DCXORGANIZE
+                ON CM_DCXORGANIZE.DCCODE = DP_PURCHASE.DCCODE
+               AND CM_DCXORGANIZE.ORGANIZE = DP_PURCHASE.ORGANIZE
+              LEFT OUTER JOIN MS_SKU
+                ON DP_PURCHASE.STORERKEY = MS_SKU.STORERKEY
+               AND DP_PURCHASE.SKU = MS_SKU.SKU
+             WHERE 1=1
+               AND DP_PURCHASE.STORERKEY = #{gStorerkey}
+               AND DP_PURCHASE.REQUESTDT <![CDATA[>=]]> TO_CHAR(SYSDATE, 'YYYYMMDD')
+               AND DP_PURCHASE.DCCODE = #{dccode}
+               AND DP_PURCHASE.SKU = #{sku}
+               AND DP_PURCHASE.DEL_YN = 'N'
+               AND DP_PURCHASE.CHANNEL = '1'
+               AND DM_DOCUMENT_H.DOCNO IS NULL
+    
+            UNION ALL
+    
+            SELECT DP_INPLAN.DCCODE,
+                   DP_INPLAN.SKU,
+                   MS_SKU.DESCRIPTION AS SKUNAME,
+                   DP_INPLAN.UOM,
+                   CASE WHEN DM_DOCUMENT_D.IF_SEND_TYPE = 'STOFS' THEN 'STO' ELSE DM_DOCUMENT_D.WORKPROCESSCODE END AS WORKPROCESSCODE,
+                   CASE WHEN WD_DM_D.DCCODE = '2170' OR DM_DOCUMENT_D.WORKPROCESSCODE = 'STO' OR DM_DOCUMENT_D.IF_SEND_TYPE = 'STOFS' THEN
+                      NVL((SELECT SUM(C.OPENQTY) FROM DP_INPLAN C WHERE C.DOCNO = DM_DOCUMENT_D.DOCNO AND C.DOCLINE = DM_DOCUMENT_D.DOCLINE), 0)
+                   ELSE
+                      NVL((SELECT SUM(C.ORDERQTY) FROM DP_PURCHASE C WHERE C.POKEY = DM_DOCUMENT_D.POKEY AND C.POLINE = DM_DOCUMENT_D.POLINE AND C.DEL_YN = 'N'), 0)
+                   END AS OPENQTY,
+                   NVL((SELECT SUM(C.ORDERQTY)
+                          FROM DP_PURCHASE C
+                         WHERE C.POKEY = DM_DOCUMENT_D.POKEY
+                           AND C.POLINE = DM_DOCUMENT_D.POLINE
+                           AND C.DEL_YN = 'N'), 0) AS PURCHASE_QTY,
+                   CASE
+                       WHEN DM_DOCUMENT_D.WORKPROCESSCODE = 'STO' THEN
+                           NVL((SELECT FROMSTO.STORERCONFIRMQTY
+                                  FROM DM_DOCUMENT_D FROMSTO
+                                 WHERE FROMSTO.WORKPROCESSCODE = 'STO'
+                                   AND FROMSTO.DCCODE = CASE WHEN SUBSTR(DM_DOCUMENT_H.FROM_CUSTKEY, 0, 4) IN ('2170', '1000') THEN SUBSTR(DM_DOCUMENT_H.FROM_CUSTKEY, 0, 4) ELSE DM_DOCUMENT_H.FROM_CUSTKEY END
+                                   AND FROMSTO.STORERKEY = DP_INPLAN.STORERKEY
+                                   AND FROMSTO.DOCTYPE = 'WD'
+                                   AND FROMSTO.DOCDT = DP_INPLAN.DOCDT
+                                   AND FROMSTO.DOCLINE = DP_INPLAN.DOCLINE
+                                   AND FROMSTO.DOCNO = DP_INPLAN.DOCNO), 0)
+                       ELSE NVL(DP_INPLAN.OPENQTY, 0)
+                   END AS PREQTY,
+                   CASE
+                       WHEN DM_DOCUMENT_D.WORKPROCESSCODE = 'STO' THEN NVL(DM_DOCUMENT_D.STORERCONFIRMQTY, 0)
+                       ELSE NVL(DP_INPLAN.CONFIRMQTY, 0)
+                   END AS CONFIRMQTY,
+                   DP_INPLAN.SLIPDT,
+                   DP_INPLAN.DOCNO,
+                   DP_INPLAN.DOCLINE,
+                   DP_INPLAN.SLIPNO,
+                   DP_INPLAN.SLIPLINE,
+                   DM_DOCUMENT_H.FROM_CUSTKEY,
+                   DM_DOCUMENT_H.FROM_CUSTNAME,
+                   DM_DOCUMENT_H.ORGANIZE,
+                   CM_DCXORGANIZE.DESCRIPTION AS ORGANIZENAME,
+                   DP_INPLAN.ADDDATE,
+                   NULL AS REQUESTNO,
+                   NULL AS REQUESTLINE,
+                   NULL AS CUSTKEY,
+                   NULL AS CUSTTYPE,
+                   CASE 
+                       WHEN DM_DOCUMENT_D.STATUS = '30' AND WD_DM_D.STATUS = '30' AND DM_DOCUMENT_D.WORKPROCESSCODE <![CDATA[<>]]> 'PO' THEN 'Y'
+                       ELSE 'N'
+                   END AS STATUS_YN
+              FROM DP_INPLAN
+              JOIN DM_DOCUMENT_H
+                ON DM_DOCUMENT_H.STORERKEY = DP_INPLAN.STORERKEY
+               AND DM_DOCUMENT_H.DCCODE = DP_INPLAN.DCCODE
+               AND DM_DOCUMENT_H.ORGANIZE = DP_INPLAN.ORGANIZE
+               AND DM_DOCUMENT_H.DOCDT = DP_INPLAN.DOCDT
+               AND DM_DOCUMENT_H.DOCNO = DP_INPLAN.DOCNO
+               AND DM_DOCUMENT_H.DOCTYPE = DP_INPLAN.DOCTYPE
+              JOIN DM_DOCUMENT_D
+                ON DM_DOCUMENT_D.DOCTYPE = DM_DOCUMENT_H.DOCTYPE
+               AND DM_DOCUMENT_D.DOCNO = DM_DOCUMENT_H.DOCNO
+               AND DM_DOCUMENT_D.DCCODE = DM_DOCUMENT_H.DCCODE
+               AND DM_DOCUMENT_D.DOCNO = DP_INPLAN.DOCNO
+               AND DM_DOCUMENT_D.DOCLINE = DP_INPLAN.DOCLINE
+              LEFT OUTER JOIN DM_DOCUMENT_D WD_DM_D  
+                ON WD_DM_D.DOCDT   = DM_DOCUMENT_D.DOCDT                                   
+               AND WD_DM_D.DOCTYPE = 'WD'                        
+               AND WD_DM_D.DOCNO   = DM_DOCUMENT_D.DOCNO                       
+               AND WD_DM_D.DOCLINE = DM_DOCUMENT_D.DOCLINE
+              LEFT OUTER JOIN CM_DCXORGANIZE
+                ON CM_DCXORGANIZE.DCCODE = DP_INPLAN.DCCODE
+               AND CM_DCXORGANIZE.ORGANIZE = DP_INPLAN.ORGANIZE
+              JOIN MS_SKU
+                ON DP_INPLAN.STORERKEY = MS_SKU.STORERKEY
+               AND DP_INPLAN.SKU = MS_SKU.SKU
+             WHERE 1=1
+               AND DP_INPLAN.STORERKEY = #{gStorerkey}
+               AND DP_INPLAN.SLIPDT <![CDATA[>=]]> TO_CHAR(SYSDATE, 'YYYYMMDD')
+               AND DP_INPLAN.DOCTYPE = 'DP'
+               AND DP_INPLAN.DCCODE = #{dccode}
+               AND DP_INPLAN.SKU = #{sku}
+               AND DP_INPLAN.DEL_YN = 'N'
+               AND DM_DOCUMENT_D.CHANNEL = '1'
+          ) TBL
+         ORDER BY TBL.SLIPDT ASC   
+	      
+	</select>
+  
+</mapper>

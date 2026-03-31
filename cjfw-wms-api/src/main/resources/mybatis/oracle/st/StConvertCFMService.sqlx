@@ -1,0 +1,1134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="stConvertCFMService">
+
+    <select id="getDataHeaderList" resultType="StConvertCFMResDto">
+        SELECT  /* [stConvertCFMService.sqlx][getDataHeaderList][중계영업확정처리 목록 조회][sunho.kim][2025.07.11] */      
+             M.DCCODE                                                                                                     AS DCCODE  
+            ,M.MAPKEY_NO                                                                                                  AS MAPKEY_NO
+            ,M.POKEY                                                                                                      AS POKEY
+            ,M.DP_SOURCEKEY                                                                                               AS DP_SOURCEKEY
+            ,M.DELIVERYDATE                                                                                               AS DELIVERYDATE
+            ,M.DOCDT                                                                                                      AS DOCDT
+            ,M.FROM_CUSTKEY                                                                                               AS FROM_CUSTKEY
+            ,M.FROM_CUSTNAME                                                                                              AS FROM_CUSTNAME
+            ,M.ORGANIZE                                                                                                   AS ORGANIZE
+            ,M.ORGANIZENAME                                                                                               AS ORGANIZENAME
+            ,M.ORDERTYPE                                                                                                  AS ORDERTYPE
+            ,NVL(M.SERIALINFO_CFM_YN,'40')                                                                                AS SERIALINFO_CFM_YN
+            ,M.ADD_YN                                                                                                     AS ADD_YN
+            ,M.ADDWHO                                                                                                     AS CREATEWHO
+            ,USER1.USER_NM                                                                                                AS CREATEWHO_NM 
+            ,M.EDITWHO                                                                                                    AS REGWHO
+            ,USER3.USER_NM                                                                                                AS REGWHO_NM   
+            ,TO_CHAR(M.REGDATE,'YYYY-MM-DD HH24:MI')                                                                      AS REGDATE
+            ,M.LASTWHO                                                                                                    AS LASTWHO     
+            ,USER2.USER_NM                                                                                                AS LASTWHO_NM            
+            ,M.LASTDATE                                                                                                   AS LASTDATE           
+            ,CASE
+                 WHEN M.TMP_SO_DEL_YN = 'Y' THEN
+                  'red'
+                 ELSE
+                  'black'
+             END                                                                                                        AS FONTCOLOR
+            ,CASE
+                 WHEN M.SERIALINFO_CFM_YN = '20' THEN
+                  'gray'
+                 WHEN NVL(M.SERIALINFO_CFM_YN, '') = '' OR M.SERIALINFO_CFM_YN = '40' THEN /*예정*/
+                  CASE
+                      WHEN TO_CHAR(M.REGDATE, 'YYYYMMDD') <![CDATA[<]]> TO_CHAR(SYSDATE, 'YYYYMMDD') THEN
+                       'pink'
+                      ELSE
+                       ''
+                  END
+                 ELSE
+                  ''
+             END                                                                                                        AS BGCOLOR         
+                    
+        FROM (    
+       
+           SELECT  
+                   MAX(DM_DOCUMENT_D.DCCODE)                                                                            AS DCCODE           /* 물류센터 */
+                  ,MAX(DM_DOCUMENT_D.MAPKEY_NO)                                                                         AS MAPKEY_NO        /* 승인번호 */
+                  ,CASE WHEN MAX(DM_EXDC_AUTOORD_CHECK.ADD_YN)='Y' THEN MAX(DM_EXDC_AUTOORD_CHECK.DP_SOURCEKEY) 
+                        ELSE DM_EXDC_AUTOORD_CHECK.POKEY END                                                            AS POKEY            /* 정상주문번호 */
+                  ,CASE WHEN MAX(DM_EXDC_AUTOORD_CHECK.EXDC_ORDERTYPE) = '2' THEN MAX(DM_EXDC_AUTOORD_CHECK.DP_SOURCEKEY)
+                        WHEN MAX(DM_EXDC_AUTOORD_CHECK.ADD_YN) = 'Y' THEN MAX(DM_EXDC_AUTOORD_CHECK.POKEY)
+                        ELSE ''  END                                                                                    AS DP_SOURCEKEY     /*조정구매번호*/ 
+                  ,MAX(DM_DOCUMENT_D.DELIVERYDATE)                                                                      AS DELIVERYDATE     /* 입고일자 */
+                  ,MAX(DM_DOCUMENT_D.DOCDT)                                                                             AS DOCDT            /* 생성일자 */    
+                  ,MAX(DM_DOCUMENT_H.FROM_CUSTKEY)                                                                      AS FROM_CUSTKEY
+                  ,MAX(DM_DOCUMENT_H.FROM_CUSTNAME)                                                                     AS FROM_CUSTNAME
+                  ,MAX(DM_DOCUMENT_H.ORGANIZE)                                                                          AS ORGANIZE         /*창고코드*/
+                  ,MAX(FN_DESCR_ORGANIZE(DM_DOCUMENT_H.DCCODE,DM_DOCUMENT_H.ORGANIZE))                                  AS ORGANIZENAME
+                  ,MAX(DECODE(DM_EXDC_AUTOORD_CHECK.ADD_YN,'Y','10',NVL(DM_EXDC_AUTOORD_CHECK.SERIALINFO_CFM_YN,'40'))) AS SERIALINFO_CFM_YN
+                  ,MAX(DM_EXDC_AUTOORD_CHECK.TMP_DP_DEL_YN)                                                             AS TMP_SO_DEL_YN
+                  ,MAX(DM_EXDC_AUTOORD_CHECK.ADD_YN)                                                                    AS ADD_YN   
+                  ,MAX(DM_EXDC_AUTOORD_CHECK.ADDWHO)                                                                    AS ADDWHO
+                  ,MAX(EXDC_AUTO_SERIALINFO.ADDWHO)                                                                     AS EDITWHO
+                  ,MAX(EXDC_AUTO_SERIALINFO.ADDDATE)                                                                    AS REGDATE 
+                  ,MAX(DM_EXDC_AUTOORD_CHECK.EXDC_ORDERTYPE)                                                            AS ORDERTYPE  
+                  ,MAX(NVL((SELECT USER_ID FROM FRAMEONE_USER 
+                        WHERE USER_ID = EXDC_AUTO_SERIALINFO.EDITWHO OR USER_NO = DM_DOCUMENT_D.EDITWHO),
+                        DM_DOCUMENT_D.EDITWHO))                                                                         AS LASTWHO        /* 최종 수정자 : 오더에 최종 수정자 */
+                  ,MAX(TO_CHAR(DM_DOCUMENT_D.EDITDATE,'YYYY-MM-DD HH24:MI'))                                            AS LASTDATE
+                                                                  
+            FROM  DP_INPLAN
+            JOIN  CM_USER_AUTHORITY                        
+                    ON     CM_USER_AUTHORITY.USERID         = #{gUserId}                      
+                    AND    CM_USER_AUTHORITY.DCCODE         = DP_INPLAN.DCCODE                            
+                    AND    CM_USER_AUTHORITY.STORERKEY      = DP_INPLAN.STORERKEY                         
+                    AND    CM_USER_AUTHORITY.ORGANIZE       = DP_INPLAN.ORGANIZE                          
+                    AND    CM_USER_AUTHORITY.AREA           = DP_INPLAN.AREA             
+                    AND    CM_USER_AUTHORITY.DCCODE         = #{fixdccode}     
+                  <if test="gStorerkey != null and gStorerkey !=''">
+                    AND    CM_USER_AUTHORITY.STORERKEY      = #{gStorerkey}  
+                  </if>
+                  <if test="area != null and area !=''">    
+                    AND    CM_USER_AUTHORITY.AREA           = #{area}       
+                  </if> 
+                  <if test="organizeMulti != null and organizeMulti != ''">
+                    AND    CM_USER_AUTHORITY.ORGANIZE      IN
+                    <foreach collection="organizeMulti" item="item" open="(" separator="," close=")">
+                        #{item}
+                    </foreach> 
+                  </if>
+            JOIN  DM_DOCUMENT_D
+                    ON     DM_DOCUMENT_D.DCCODE             = DP_INPLAN.DCCODE 
+                    AND    DM_DOCUMENT_D.DELIVERYDATE       = DP_INPLAN.SLIPDT
+                    AND    DM_DOCUMENT_D.DOCTYPE            = DP_INPLAN.DOCTYPE
+                    AND    DM_DOCUMENT_D.DOCNO              = DP_INPLAN.DOCNO
+                    AND    DM_DOCUMENT_D.DOCLINE            = DP_INPLAN.DOCLINE
+                    AND    DM_DOCUMENT_D.DOCTYPE            = 'DP'
+                    AND    DM_DOCUMENT_D.DEL_YN             = 'N'
+                    AND    DM_DOCUMENT_D.CHANNEL            IN ('1','2','3')
+            JOIN  MS_SKU
+                    ON     MS_SKU.STORERKEY                 = DP_INPLAN.STORERKEY
+                    AND    MS_SKU.SKU                       = DP_INPLAN.SKU         
+                    AND    MS_SKU.DEL_YN                    = 'N'
+            JOIN  DM_DOCUMENT_H
+                    ON     DM_DOCUMENT_H.DCCODE             = DM_DOCUMENT_D.DCCODE                        
+                    AND    DM_DOCUMENT_H.DELIVERYDATE       = DM_DOCUMENT_D.DELIVERYDATE            
+                    AND    DM_DOCUMENT_H.DOCTYPE            = DM_DOCUMENT_D.DOCTYPE                  
+                    AND    DM_DOCUMENT_H.DOCNO              = DM_DOCUMENT_D.DOCNO           
+                    AND    DM_DOCUMENT_H.DOCTYPE            = 'DP'            
+                    AND    DM_DOCUMENT_H.DEL_YN             = 'N'       
+            JOIN  DM_EXDC_AUTOORD_CHECK
+                    ON    1=1
+                    AND    DM_EXDC_AUTOORD_CHECK.MAPKEY_NO   = DM_DOCUMENT_D.MAPKEY_NO
+                    AND    DM_EXDC_AUTOORD_CHECK.MAPKEY_LINE = DM_DOCUMENT_D.MAPKEY_LINE                 
+                    AND    DM_EXDC_AUTOORD_CHECK.ISSUE_NO    = DM_DOCUMENT_D.ISSUE_NO        
+            LEFT OUTER JOIN
+                DP_INVOICE_SN    
+                    ON    DP_INVOICE_SN.DCCODE               = DP_INPLAN.DCCODE                       
+                    AND   DP_INVOICE_SN.STORERKEY            = DP_INPLAN.STORERKEY            
+                    AND   DP_INVOICE_SN.DOCTYPE              = DP_INPLAN.DOCTYPE    
+                    AND   DP_INVOICE_SN.SLIPNO               = DP_INPLAN.SLIPNO                                  
+                    AND   DP_INVOICE_SN.SLIPDT               = DP_INPLAN.SLIPDT                       
+                    AND   DP_INVOICE_SN.SLIPLINE             = DP_INPLAN.SLIPLINE                       
+                    AND   DP_INVOICE_SN.SKU                  = DP_INPLAN.SKU
+            LEFT OUTER JOIN
+                ST_SNINFO                                      
+                    ON    ST_SNINFO.STORERKEY                = DP_INVOICE_SN.STORERKEY               
+                    AND   ST_SNINFO.SKU                      = DP_INVOICE_SN.SKU                     
+                    AND   ST_SNINFO.SERIALNO                 = DP_INVOICE_SN.SERIALNO                
+                    AND   ST_SNINFO.STOCKID                  = DP_INVOICE_SN.STOCKID
+                    
+            LEFT OUTER JOIN 
+                EXDC_AUTO_SERIALINFO
+                    ON DM_EXDC_AUTOORD_CHECK.MAPKEY_NO = EXDC_AUTO_SERIALINFO.MAPKEY_NO
+                    AND DM_EXDC_AUTOORD_CHECK.MAPKEY_LINE = EXDC_AUTO_SERIALINFO.MAPKEY_LINE      
+                                    
+            WHERE   DP_INPLAN.DCCODE            = #{fixdccode}
+                AND DP_INPLAN.STORERKEY         = #{gStorerkey}   
+                AND (DM_EXDC_AUTOORD_CHECK.REAL_YN = 'T' OR (DM_EXDC_AUTOORD_CHECK.REAL_YN = 'R' AND DM_EXDC_AUTOORD_CHECK.ADD_YN = 'Y'))   
+            <if test="slipdtFrom != null and slipdtFrom != ''">
+                AND DM_DOCUMENT_D.DELIVERYDATE <![CDATA[>=]]> #{slipdtFrom} 
+            </if>
+            <if test="slipdtTo != null and slipdtTo != ''"> 
+                AND DM_DOCUMENT_D.DELIVERYDATE <![CDATA[<=]]> #{slipdtTo}  
+            </if>      
+            <if test="organizeMulti != null and organizeMulti != ''">
+                AND DM_DOCUMENT_H.ORGANIZE      IN
+                <foreach collection="organizeMulti" item="item" open="(" separator="," close=")">
+                    #{item}
+                </foreach> 
+            </if>
+            <if test="fromCustkeyMulti != null and fromCustkeyMulti != ''">
+                AND DM_DOCUMENT_H.FROM_CUSTKEY      IN
+                <foreach collection="fromCustkeyMulti" item="item" open="(" separator="," close=")">
+                    #{item}
+                </foreach> 
+            </if>
+            <if test="sku != null and sku != '' ">
+                <if test="skuMulti != null and skuMulti.size() > 0">
+                    <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                        <foreach collection="skuMulti" item="item">
+                        OR MS_SKU.SKU IN
+                            <foreach collection="item" item="code" open="(" close=")" separator=",">
+                            #{code}      
+                            </foreach>
+                        </foreach>
+                    </trim>                                             
+                </if>
+            </if>
+            <if test="pokeyMulti != null and pokeyMulti != ''">
+                AND DM_EXDC_AUTOORD_CHECK.POKEY      IN
+                <foreach collection="pokeyMulti" item="item" open="(" separator="," close=")">
+                    #{item}
+                </foreach> 
+            </if>
+            <if test="mapkeyNoMulti != null and mapkeyNoMulti != ''">
+                AND DM_EXDC_AUTOORD_CHECK.MAPKEY_NO      IN
+                <foreach collection="mapkeyNoMulti" item="item" open="(" separator="," close=")">
+                    #{item}
+                </foreach> 
+            </if>
+            <if test="stockidMulti != null and stockidMulti != ''">
+                AND ST_SNINFO.STOCKID      IN
+                <foreach collection="stockidMulti" item="item" open="(" separator="," close=")">
+                    #{item}
+                </foreach> 
+            </if>
+            <if test="blnoMulti != null and blnoMulti != ''">
+                AND ST_SNINFO.CONVSERIALNO      IN
+                <foreach collection="blnoMulti" item="item" open="(" separator="," close=")">
+                    #{item}
+                </foreach> 
+            </if>
+            <if test="serialnoMulti != null and serialnoMulti != ''">
+                AND ST_SNINFO.SERIALNO      IN
+                <foreach collection="serialnoMulti" item="item" open="(" separator="," close=")">
+                    #{item}
+                </foreach> 
+            </if>
+            <if test="contractcustkeyMulti != null and contractcustkeyMulti != ''">
+                AND ST_SNINFO.CONTRACTCUSTKEY      IN
+                <foreach collection="contractcustkeyMulti" item="item" open="(" separator="," close=")">
+                    #{item}
+                </foreach> 
+            </if>
+            <if test="contracttype != null and contracttype != ''">
+                AND ST_SNINFO.CONTRACTTYPE = #{contracttype} /* 계약유형 */ 
+            </if>                   
+            <if test="moveYn != null and moveYn != ''">
+                AND DM_EXDC_AUTOORD_CHECK.MOVE_YN = #{moveYn}    /* 이체여부 */
+            </if>                 
+            <if test="ordertype != null and ordertype != ''">
+                AND DM_EXDC_AUTOORD_CHECK.EXDC_ORDERTYPE = #{ordertype}  /* 구매유형 */ 
+            </if>  
+            <choose>
+            <when test="tempYn != null and tempYn != ''">                   /* 가중량여부 */
+                <if test="tempYn == '3'.toString()">
+                AND  DM_EXDC_AUTOORD_CHECK.EXDC_ORDERTYPE = #{tempYn} 
+                </if>
+                <if test="tempYn == '2'.toString()">
+                AND  DM_EXDC_AUTOORD_CHECK.EXDC_ORDERTYPE = #{tempYn} 
+                </if>
+                <if test="tempYn == 'Y'.toString()">
+                AND  DM_EXDC_AUTOORD_CHECK.TEMP_YN = #{tempYn}
+                </if>
+                <if test="tempYn == 'N'.toString()">
+                AND  DM_EXDC_AUTOORD_CHECK.TEMP_YN = #{tempYn}
+                </if>
+            </when>
+            </choose>
+            
+            <if test="skugroup != null and skugroup != ''">
+                AND SUBSTR(MS_SKU.SKUGROUP, 0, 2) = #{skugroup}    /* 상품대분류 */
+            </if>  
+                     
+            GROUP BY DM_EXDC_AUTOORD_CHECK.POKEY
+        ) M
+        
+        LEFT OUTER JOIN CM_CODE
+            ON CM_CODE.STORERKEY = #{gStorerkey}
+           AND CM_CODE.BASECODE  = M.SERIALINFO_CFM_YN
+           AND CM_CODE.CODELIST  = 'SERIAL_CFM_STATUS'
+                
+        LEFT OUTER JOIN FRAMEONE_USER USER1
+            ON USER1.USER_ID = M.ADDWHO OR USER1.USER_NO = M.ADDWHO 
+            
+        LEFT OUTER JOIN FRAMEONE_USER USER2
+            ON USER2.USER_ID = M.LASTWHO OR USER2.USER_NO = M.LASTWHO
+            
+        LEFT OUTER JOIN FRAMEONE_USER USER3
+            ON USER3.USER_ID = M.EDITWHO OR USER3.USER_NO = M.EDITWHO 
+        
+        WHERE 1 = 1  
+        <if test="serialinfoCfmYn != null and serialinfoCfmYn != ''">
+            AND M.SERIALINFO_CFM_YN = #{serialinfoCfmYn}    /* 진행상태 */
+         </if>            
+        ORDER BY CM_CODE.DATA1
+    </select>
+    
+    <select id="getDataLocalHeaderList" resultType="StConvertCFMResDto">
+	   SELECT  /* [stConvertCFMService.sqlx][getDataLocalHeaderList][입고이력정보 로컬 목록 조회][sunho.kim][2025.07.11] */ 
+	        A.DCCODE   
+	       ,A.MAPKEY_NO  
+           ,A.POKEY
+           ,A.DP_SOURCEKEY
+           ,A.ADDPOLINE
+           ,A.DELIVERYDATE
+           ,A.DOCDT
+           ,A.FROM_CUSTKEY
+           ,A.FROM_CUSTNAME
+           ,A.ORGANIZE
+           ,A.ORGANIZENAME
+           ,A.CREATEWHO
+           ,USRE1.USER_NM AS CREATEWHO_NM
+           ,A.REGWHO
+           ,USER2.USER_NM AS REGWHO_NM
+           ,A.REGDATE
+           ,A.FONTCOLOR
+           ,A.BGCOLOR    
+           ,A.LASTWHO
+           ,USER3.USER_NM AS LASTWHO_NM
+           ,A.AS LASTDATE
+           ,A.SERIALINFO_CFM_YN
+
+	   FROM (
+	        SELECT
+	             , #{fixdccode}                                                                                                              AS DCCODE
+	             ,EXDC_SCM_CFM_LOCAL.MAPKEY_NO                                                                                               AS MAPKEY_NO  
+	             ,MAX(EXDC_SCM_CFM_LOCAL.POKEY)                                                                                              AS POKEY
+	             ,MAX(PO.POKEY)                                                                                                              AS DP_SOURCEKEY
+	             ,MAX(PO.POLINE)                                                                                                             AS ADDPOLINE
+	             ,MAX(EXDC_SCM_CFM_LOCAL.DELIVERYDATE)                                                                                       AS DELIVERYDATE
+	             ,MAX(TO_CHAR(EXDC_SCM_CFM_LOCAL.ADDDATE,'YYYYMMDD'))                                                                        AS DOCDT
+	             ,MAX(EXDC_SCM_CFM_LOCAL.CUSTKEY)                                                                                            AS FROM_CUSTKEY
+	             ,MAX(MS_CUST.DESCRIPTION)                                                                                                   AS FROM_CUSTNAME
+	             ,MAX('2170-'||EXDC_SCM_CFM_LOCAL.ORGANIZE)                                                                                  AS ORGANIZE
+	             ,MAX((SELECT DESCRIPTION FROM CM_DCXORGANIZE WHERE ORGANIZE = '2170-'||EXDC_SCM_CFM_LOCAL.ORGANIZE))                        AS ORGANIZENAME
+	             ,MAX(EXDC_SCM_CFM_LOCAL.ADDWHO)                                                                                             AS CREATEWHO
+	             ,MAX(EXDC_SCM_CFM_LOCAL.REQ_WHO)                                                                                            AS REGWHO
+	             ,MAX(TO_CHAR( EXDC_SCM_CFM_LOCAL.ADDDATE,'YYYY-MM-DD HH24:MI'))                                                             AS REGDATE
+	             ,'black'                                                                                                                    AS FONTCOLOR
+	             ,CASE WHEN MAX(EXDC_SCM_CFM_LOCAL.CONFIRM_YN) = '20' 
+	                  THEN 'gray'
+	                  WHEN NVL(MAX(EXDC_SCM_CFM_LOCAL.CONFIRM_YN), '') = '' OR MAX(EXDC_SCM_CFM_LOCAL.CONFIRM_YN) IS NULL 
+	                  THEN /*예정*/
+	                        CASE WHEN TO_CHAR(MAX(EXDC_SCM_CFM_LOCAL.Adddate), 'YYYYMMDD') <![CDATA[<]]> TO_CHAR(SYSDATE, 'YYYYMMDD') 
+	                            THEN 'pink'  
+	                            ELSE '' END
+	                 ELSE  '' END                                                                                                            AS BGCOLOR    
+	             ,MAX(EXDC_SCM_CFM_LOCAL.EDITWHO)                                                                                            AS LASTWHO
+	             ,MAX(TO_CHAR(EXDC_SCM_CFM_LOCAL.EDITDATE,'YYYY-MM-DD HH24:MI'))                                                             AS LASTDATE
+	             ,MAX(CASE WHEN EXDC_SCM_CFM_LOCAL.CONFIRM_YN = '10' THEN '10'
+	                WHEN EXDC_SCM_CFM_LOCAL.CONFIRM_YN = '20' THEN '20'
+	                WHEN EXDC_SCM_CFM_LOCAL.CONFIRM_YN = '40' THEN '40'
+	                ELSE '40' END)                                                                                                           AS SERIALINFO_CFM_YN
+	             ,MAX(DECODE(MS_EXDCRATE.SKU, NULL, 'N', 'Y'))                                                                               AS EXDCRATE_YN     
+	        
+	        FROM EXDC_SCM_CFM_LOCAL 
+	         LEFT OUTER JOIN DM_EXDC_AUTOORD_CHECK
+	             ON EXDC_SCM_CFM_LOCAL.MAPKEY_NO    = DM_EXDC_AUTOORD_CHECK.MAPKEY_NO
+	             AND EXDC_SCM_CFM_LOCAL.MAPKEY_LINE = DM_EXDC_AUTOORD_CHECK.MAPKEY_LINE
+	             AND EXDC_SCM_CFM_LOCAL.ISSUE_NO    = DM_EXDC_AUTOORD_CHECK.ISSUE_NO
+	         LEFT OUTER JOIN MS_CUST 
+	             ON EXDC_SCM_CFM_LOCAL.STORERKEY    = MS_CUST.STORERKEY
+	             AND EXDC_SCM_CFM_LOCAL.CUSTKEY     = MS_CUST.CUSTKEY
+	         JOIN MS_SKU 
+	             ON EXDC_SCM_CFM_LOCAL.SKU          = MS_SKU.SKU
+	             AND EXDC_SCM_CFM_LOCAL.STORERKEY   = MS_SKU.STORERKEY 
+	         LEFT OUTER JOIN DM_EXDC_AUTOORD_CHECK B
+	            ON EXDC_SCM_CFM_LOCAL.MAPKEY_NO     = B.MAPKEY_NO
+	             AND EXDC_SCM_CFM_LOCAL.MAPKEY_LINE = B.MAPKEY_LINE
+	             AND EXDC_SCM_CFM_LOCAL.ISSUE_NO    = B.ISSUE_NO
+	         LEFT OUTER JOIN DM_EXDC_AUTOORD_CHECK PO
+	             ON B.POKEY                         = PO.DP_SOURCEKEY
+	             AND B.POLINE                       = PO.DP_SOURCEKEYLINE
+	             AND B.ISSUE_NO                     = PO.ISSUE_NO
+	             AND PO.ADD_YN                      =  'Y'
+	        
+	         LEFT OUTER JOIN FRAMEONE_USER USER1
+	             ON USER1.USER_ID = EXDC_SCM_CFM_LOCAL.ADDWHO OR USER1.USER_NO = EXDC_SCM_CFM_LOCAL.ADDWHO
+	        
+	        WHERE MS_CUST.CUSTTYPE = 'P'
+	        <if test="slipdtFrom != null and slipdtFrom != ''">
+	            AND EXDC_SCM_CFM_LOCAL.DELIVERYDATE <![CDATA[>=]]> #{slipdtFrom} 
+	        </if>
+	        <if test="slipdtTo != null and slipdtTo != ''">
+	            AND EXDC_SCM_CFM_LOCAL.DELIVERYDATE <![CDATA[<=]]> #{slipdtTo}   
+	        </if>     
+	        <if test="organizeMulti != null and organizeMulti != ''">
+                AND EXDC_SCM_CFM_LOCAL.ORGANIZE      IN
+                <foreach collection="organizeMulti" item="item" open="(" separator="," close=")">
+                    #{item}
+                </foreach> 
+            </if>
+	        <if test="fromCustkey != null and fromCustkey != ''">
+	            AND EXDC_SCM_CFM_LOCAL.CUSTKEY IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+	                                                  FROM (SELECT #{fromCustkey} AS VAL FROM DUAL) A
+	                                                  CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)  
+	        </if>
+	        <if test="sku != null and sku != ''">
+	            AND MS_SKU.SKU IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+	                               FROM (SELECT #{sku} AS VAL FROM DUAL) A
+	                               CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+	        </if>
+	        <if test="pokey != null and pokey != ''">
+	            AND EXDC_SCM_CFM_LOCAL.POKEY IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+	                                             FROM (SELECT #{pokey} AS VAL FROM DUAL) A
+	                                             CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)   
+	        </if>
+	        <if test="mapkeyNo != null and mapkeyNo != ''">
+	            AND EXDC_SCM_CFM_LOCAL.MAPKEY_NO IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+	                                                 FROM (SELECT #{mapkeyNo} AS VAL FROM DUAL) A
+	                                                 CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)  
+	        </if>
+	        <if test="blno != null and blno != ''">
+	            AND EXDC_SCM_CFM_LOCAL.CONVSERIALNO IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+	                                                    FROM (SELECT #{blno} AS VAL FROM DUAL) A
+	                                                    CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+	        </if>
+	        <if test="serialno != null and serialno != ''">
+	            AND EXDC_SCM_CFM_LOCAL.SERIALNO IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+	                                                FROM (SELECT #{serialno} AS VAL FROM DUAL) A
+	                                                CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0) 
+	        </if>
+	        <if test="moveYn != null and moveYn != ''">
+	            AND EXDC_SCM_CFM_LOCAL.MOVE_YN = #{moveYn}  /* 이체여부 */ 
+	        </if>                 
+	        <if test="tempYn != null and tempYn != ''">
+	            AND EXDC_SCM_CFM_LOCAL.TEMP_YN = #{tempYn}  /* 가중량여부 */
+	        </if>         
+	        <if test="skugroup != null and skugroup != ''">
+	            AND SUBSTR(MS_SKU.SKUGROUP, 0, 2) = #{skugroup}     /* 상품대분류 */
+	        </if>          
+	        <if test="serialinfoCfmYn != null and serialinfoCfmYn != ''">
+	            AND EXDC_SCM_CFM_LOCAL.CONFIRM_YN = #{serialinfoCfmYn}  /* 진행상태 */
+	        </if> 
+	        <if test="mapDiv != null and mapDiv != ''">
+	            AND EXDC_SCM_CFM_LOCAL.MAP_DIV = #{mapDiv}  /* 구매유형 */
+	        </if>
+	        <if test="stockid != null and stockid != ''">
+	            AND EXDC_SCM_CFM_LOCAL.ISSUE_NO IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+	                                                FROM (SELECT #{stockid} AS VAL FROM DUAL) A
+	                                                CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+	        </if>
+	            
+	        GROUP BY EXDC_SCM_CFM_LOCAL.MAPKEY_NO
+        ) A 
+        
+        LEFT OUTER JOIN FRAMEONE_USER USER1
+            ON USER1.USER_ID = A.CREATEWHO OR USER1.USER_NO = A.CREATEWHO
+            
+        LEFT OUTER JOIN FRAMEONE_USER USER2
+            ON USER2.USER_ID = A.REGWHO OR USER2.USER_NO = A.REGWHO    
+        
+        LEFT OUTER JOIN FRAMEONE_USER USER3
+            ON USER3.USER_ID = A.LASTWHO OR USER3.USER_NO = A.LASTWHO   
+            
+        ORDER BY A.MAPKEY_NO    
+    </select>
+        
+    <select id="getDataDetailList" resultType="StConvertCFMDetailResDto">
+        SELECT  /* [stConvertCFMService.sqlx][getDataDetailList][입고이력정보 Detail 확정 목록 조회][sunho.kim][2025.07.11] */
+             DP_INPLAN.DCCODE                                                                           AS DCCODE      
+            ,DP_INPLAN.STORERKEY                                                                        AS STORERKEY
+            ,DP_INPLAN.ORGANIZE                                                                         AS ORGANIZE                 /*창고코드*/
+            ,FN_DESCR_ORGANIZE(DP_INPLAN.DCCODE,DP_INPLAN.ORGANIZE)                                     AS ORGANIZENAME             /*창고명*/
+            ,DM_DOCUMENT_D.DOCDT                                                                        AS DOCDT                    /*생성일자*/
+            ,DM_DOCUMENT_H.FROM_CUSTKEY                                                                 AS FROM_CUSTKEY             /*생성일자*/
+            ,DM_DOCUMENT_D.DELIVERYDATE                                                                 AS DELIVERYDATE             /*출고일자*/
+            ,CASE WHEN DM_EXDC_AUTOORD_CHECK.ADD_YN='Y' THEN DM_EXDC_AUTOORD_CHECK.DP_SOURCEKEY 
+                   ELSE DM_EXDC_AUTOORD_CHECK.POKEY END                                                 AS POKEY                    /*정상주문번호 */
+            ,DM_EXDC_AUTOORD_CHECK.POLINE                                                               AS POLINE                   /*정상주문번호라인 */
+            ,CASE WHEN DM_EXDC_AUTOORD_CHECK.EXDC_ORDERTYPE != '1' THEN DM_EXDC_AUTOORD_CHECK.DP_SOURCEKEY
+                    ELSE ''  END                                                                        AS ADD_POKEY                /*조정구매번호*/ 
+            ,DM_EXDC_AUTOORD_CHECK.DP_SOURCEKEYLINE                                                     AS DP_SOURCEKEYLINE         /*조정구매번호라인*/
+            ,DM_EXDC_AUTOORD_CHECK.ADD_YN                                                               AS ADD_YN                   /*주문유형*/
+            ,DM_EXDC_AUTOORD_CHECK.EXDC_ORDERTYPE                                                       AS EXDC_ORDERTYPE           /*구매유형*/   
+            ,CD4.BASEDESCR                                                                              AS MOVE_YN                  /*이체여부*/
+            ,DECODE(DM_EXDC_AUTOORD_CHECK.EXDC_ORDERTYPE,'3','추가중량','2','반품중량',DECODE(DM_EXDC_AUTOORD_CHECK.TEMP_YN,'Y','가중량','N','실중량')) AS TEMP_YN /*가중량여부*/
+            ,DP_INPLAN.DOCLINE                                                                          AS DOCLINE                  /*오더항번*/
+            ,DP_INPLAN.SLIPDT                                                                           AS SLIPDT    
+            ,DP_INPLAN.SLIPNO                                                                           AS SLIPNO
+            ,DP_INPLAN.SLIPLINE                                                                         AS SLIPLINE       
+            ,DP_INPLAN.SKU                                                                              AS SKU                      /*상품코드 */
+            ,MS_SKU.DESCRIPTION                                                                         AS SKUNAME                  /*상품명 */
+            ,DM_DOCUMENT_D.STORERUOM                                                                    AS UOM                      /*단위 */
+            ,DM_DOCUMENT_D.STORERUOM                                                                    AS UOM2                     /*단위 */
+            ,DM_DOCUMENT_D.BUNJA                                                                        AS BUNJA                    /*분자 */
+            ,DM_DOCUMENT_D.BUNMO                                                                        AS BUNMO                    /*분모 */
+            ,NVL(ST_SNINFO.LOTTABLE01,'STD')                                                            AS LOTTABLE01
+            ,FN_LOTDURATION(DP_INPLAN.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, NVL(ST_SNINFO.LOTTABLE01,'STD'), 'N')||'/'||MS_SKU.DURATION      AS DURATION_TERM  /*유통기한*/
+            ,FN_LOTDURATION(DP_INPLAN.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, NVL(ST_SNINFO.LOTTABLE01,'STD'), 'N')||'/'||MS_SKU.DURATION      AS DURATION_TERM2 /*유통기한*/
+            ,DM_DOCUMENT_H.REFERENCE02                                                                  AS REFERENCE02
+            ,EXDC_AUTO_SERIALINFO.REJECT_REASON                                                         AS REASONCODE
+            ,EXDC_AUTO_SERIALINFO.SEND_MEMO                                                             AS REASONMSG
+            ,CASE WHEN NVL(ST_SNINFO.LOTTABLE01,'STD')='STD' THEN 'N' 
+                  WHEN MONTHS_BETWEEN(TO_DATE(NVL(ST_SNINFO.LOTTABLE01,'STD'),'yyyy-mm-dd'),SYSDATE)>3 
+                  THEN 'N' ELSE 'Y' END                                                                 AS NEARDURATIONYN                   /*임박여부*/
+            ,CASE WHEN NVL(ST_SNINFO.LOTTABLE01,'STD')='STD' THEN 'N' 
+                  WHEN MONTHS_BETWEEN(TO_DATE(NVL(ST_SNINFO.LOTTABLE01,'STD'),'yyyy-mm-dd'),SYSDATE)>3 
+                  THEN 'N' ELSE 'Y' END                                                                 AS NEARDURATIONYN2                  /*임박여부*/     
+            ,DM_DOCUMENT_D.STATUS                                                                       AS STATUS
+            ,MS_SKU.QTYPERBOX                                                                           AS QTYPERBOX
+            ,MS_SKU.QTYPERBOX                                                                           AS QTYPERBOX2
+            ,DM_DOCUMENT_D.CHANNEL                                                                      AS CHANNEL     
+            ,DM_DOCUMENT_D.ORDERQTY                                                                     AS TMP_ORDERQTY
+            ,DM_DOCUMENT_D.QCQTY                                                                        AS TMP_QCQTY 
+            ,MS_SKU.DURATION                                                                            AS DURATION   /*기준일*/
+            ,MS_SKU.DURATIONTYPE                                                                        AS DURATIONTYPE
+            ,''                                                                                         AS LASTLOTTABLE01
+            ,ST_SNINFO.STOCKID                                                                          AS STOCKID
+            ,DP_INPLAN.STOCKGRADE                                                                       AS STOCKGRADE 
+            ,DM_DOCUMENT_D.PLANT                                                                        AS PLANT
+            ,'['||DM_DOCUMENT_D.PLANT||']'||fn_descr_plant(DM_DOCUMENT_D.PLANT)                         AS PLANT_DESCR
+            ,CD1.BASEDESCR                                                                              AS CHANNEL_NAME 
+            ,CD2.BASEDESCR                                                                              AS STORAGETYPENAME                  /*저장*/           
+            ,ST_SNINFO.SERIALNO                                                                         AS TMP_SERIALNO                     /*이력번호*/
+            ,ST_SNINFO.CONVSERIALNO                                                                     AS TMP_CONVSERIALNO                 /*BL번호*/
+            ,ST_SNINFO.FACTORYNAME                                                                      AS TMP_FACTORYNAME
+            ,ST_SNINFO.CONTRACTCUSTKEY                                                                  AS TMP_CONTRACTCOMPANY              /*고객코드*/                  
+            ,( SELECT DESCRIPTION  FROM MS_CUST
+                 WHERE CUSTKEY = ST_SNINFO.CONTRACTCUSTKEY
+                   AND ROWNUM = 1)                                                                      AS TMP_CONTRACTCOMPANYNAME          /*고객명*/
+            ,CD3.BASEDESCR                                                                              AS TMP_CONTRACTTYPE                 /*계약구분*/
+            ,ST_SNINFO.BUTCHERYDT                                                                       AS TMP_BUTCHERYDT
+            ,ST_SNINFO.FROMVALIDDT                                                                      AS TMP_FROMVALIDDT
+            ,ST_SNINFO.TOVALIDDT                                                                        AS TMP_TOVALIDDT
+            ,ST_SNINFO.STOCKID                                                                          AS TMP_BARCODE  
+            ,EXDC_AUTO_SERIALINFO.SALESUOM                                                              AS SALEUOM                          /*판매단위*/
+            ,EXDC_AUTO_SERIALINFO.SERIALTYPE                                                            AS SERIALTYPE                       /*BL번호*/
+            ,EXDC_AUTO_SERIALINFO.RANNO                                                                 AS RANNO
+            ,EXDC_AUTO_SERIALINFO.HSNO                                                                  AS HSNO
+            ,EXDC_AUTO_SERIALINFO.FACTORYDATE                                                           AS FACTORYDATE
+            ,EXDC_AUTO_SERIALINFO.FACTORYNAME                                                           AS FACTORYNAME
+            ,EXDC_AUTO_SERIALINFO.RECEIVE_MEMO                                                          AS RECEIVE_MEMO
+            ,EXDC_AUTO_SERIALINFO.REF_CUST_DOCID                                                        AS REF_CUST_DOCID                   /*기본첨부파일*/
+            ,EXDC_AUTO_SERIALINFO.REF_DOCID                                                             AS REF_DOCID                        /*추가첨부파일*/
+            ,EXDC_AUTO_SERIALINFO.ADD_REF_DOCID                                                         AS ADD_DOCID                        /*추가첨부파일*/
+            ,EXDC_AUTO_SERIALINFO.SERIALNO                                                              AS SERIALNO
+            ,EXDC_AUTO_SERIALINFO.CONVSERIALNO                                                          AS CONVSERIALNO
+            ,MS_SKU.SERIALYN                                                                            AS SERIALYN
+            ,DM_DOCUMENT_H.REFERENCE02                                                                  AS PAY_YMD                          /*MA상신 시 대금지급일*/
+            ,DM_DOCUMENT_D.MAPKEY_NO                                                                    AS MAPKEY_NO                        /*구매요청번호*/
+            ,DM_DOCUMENT_D.MAPKEY_LINE                                                                  AS MAPKEY_LINE
+            ,DM_EXDC_AUTOORD_CHECK.DP_SOURCEKEY                                                         AS DP_SOURCEKEY
+            ,NVL(DM_DOCUMENT_D.ISSUE_NO, EXDC_AUTO_SERIALINFO.ISSUE_NO)                                 AS ISSUE_NO
+            ,EXDC_AUTO_SERIALINFO.RECEIVE_MEMO                                                          AS RECEIVE_MEMO                     /*영업확인사항메모*/
+            ,EXDC_AUTO_SERIALINFO.GROSSWEIGHT                                                           AS GROSSWEIGHT
+            ,EXDC_AUTO_SERIALINFO.ORDR_QTY                                                              AS ORDR_QTY 
+            ,TO_CHAR(DM_EXDC_AUTOORD_CHECK.ADDDATE,'YYYY-MM-DD HH24:MI')                                AS CREATEDATE
+            ,EXDC_AUTO_SERIALINFO.EDITWHO                                                               AS CFMWHO                           /* 확정자 : SCM 확정한 사람 */
+            ,USER1.USER_NM                                                                              AS CFMWHO_NM                        /* 확정자 : SCM 확정한 사람 */
+            ,TO_CHAR(EXDC_AUTO_SERIALINFO.EDITDATE,'YYYY-MM-DD HH24:MI')                                AS CFMDATE            
+            ,NVL(EXDC_AUTO_SERIALINFO.EDITWHO, DM_DOCUMENT_D.EDITWHO)                                   AS LASTWHO                          /* 최종 수정자 : 오더에 최종 수정자 */
+            ,USER2.USER_NM                                                                              AS LASTWHO_NM                       /* 확정자 : SCM 확정한 사람 */
+            ,TO_CHAR(DM_DOCUMENT_D.EDITDATE,'YYYY-MM-DD HH24:MI')                                       AS LASTDATE                    
+            ,NVL(DECODE(DM_EXDC_AUTOORD_CHECK.ADD_YN,'Y','10',DM_EXDC_AUTOORD_CHECK.SERIALINFO_CFM_YN),'40') AS SERIALINFO_CFM_YN
+            ,EXDC_AUTO_SERIALINFO.CONFIRM_YN                                                            AS CONFIRM_YN
+            ,DM_EXDC_AUTOORD_CHECK.TMP_SOKEY                                                            AS TMP_SOKEY    
+            ,DM_EXDC_AUTOORD_CHECK.TMP_SOLINE                                                           AS TMP_SOLINE
+            ,DM_EXDC_AUTOORD_CHECK.TMP_DPKEY                                                            AS TMP_DPKEY    
+            ,DM_EXDC_AUTOORD_CHECK.TMP_DPLINE                                                           AS TMP_DPLINE     
+            ,'('||MS_SKU.PLACEOFORIGIN||')'||
+              (SELECT BASEDESCR 
+               FROM CM_CODE 
+               WHERE STORERKEY = MS_SKU.STORERKEY AND CM_CODE.CODELIST = 'COUNTRY' 
+                 AND BASECODE = MS_SKU.PLACEOFORIGIN AND DEL_YN = 'N')                                  AS ORG
+            ,DM_EXDC_AUTOORD_CHECK.EXDC_ORDERTYPE                                                       AS EXDC_ORDERTYPE
+            ,DM_EXDC_AUTOORD_CHECK.CANCELRMK                                                            AS CANCELRMK
+            ,DECODE(MS_EXDCRATE.SKU, NULL, 'N', 'Y')                                                    AS EXDCRATE_YN                     /*요율등록여부*/         
+
+        FROM 
+              DP_INPLAN           
+          JOIN 
+            DM_DOCUMENT_H          
+                  ON     DM_DOCUMENT_H.DCCODE             = DP_INPLAN.DCCODE         
+                  AND    DM_DOCUMENT_H.STORERKEY          = DP_INPLAN.STORERKEY         
+                  AND    DM_DOCUMENT_H.DOCDT              = DP_INPLAN.DOCDT         
+                  AND    DM_DOCUMENT_H.DOCTYPE            = DP_INPLAN.DOCTYPE               
+                  AND    DM_DOCUMENT_H.DOCNO              = DP_INPLAN.DOCNO        
+                  AND    DM_DOCUMENT_H.DOCTYPE            = 'DP'         
+                  AND    DM_DOCUMENT_H.DEL_YN             = 'N'  
+          JOIN  
+              DM_DOCUMENT_D
+                  ON    DM_DOCUMENT_D.DCCODE      = DP_INPLAN.DCCODE      
+                  AND   DM_DOCUMENT_D.STORERKEY   = DP_INPLAN.STORERKEY   
+                  AND   DM_DOCUMENT_D.DOCTYPE     = DP_INPLAN.DOCTYPE     
+                  AND   DM_DOCUMENT_D.DOCDT       = DP_INPLAN.DOCDT       
+                  AND   DM_DOCUMENT_D.DOCNO       = DP_INPLAN.DOCNO       
+                  AND   DM_DOCUMENT_D.DOCLINE     = DP_INPLAN.DOCLINE 
+                  AND   DM_DOCUMENT_D.CHANNEL     IN ('1','2','3')   
+                  AND   DM_DOCUMENT_D.DEL_YN      = 'N'    
+                    
+          JOIN 
+              DM_EXDC_AUTOORD_CHECK 
+                        ON    1 =1
+                       AND    DM_EXDC_AUTOORD_CHECK.MAPKEY_NO       =  DM_DOCUMENT_D.MAPKEY_NO         
+                       AND    DM_EXDC_AUTOORD_CHECK.MAPKEY_LINE     =  DM_DOCUMENT_D.MAPKEY_LINE         
+                       AND    DM_EXDC_AUTOORD_CHECK.ISSUE_NO        =  DM_DOCUMENT_D.ISSUE_NO 
+                       AND    DM_EXDC_AUTOORD_CHECK.MAP_DIV         =  DM_DOCUMENT_D.MAP_DIV
+                       AND    DM_EXDC_AUTOORD_CHECK.REAL_YN         =  DM_DOCUMENT_D.REAL_YN
+      
+          JOIN   
+              MS_SKU 
+                    ON   MS_SKU.STORERKEY               = DP_INPLAN.STORERKEY         
+                    AND   MS_SKU.SKU                    = DP_INPLAN.SKU
+                    AND   MS_SKU.DEL_YN                 = 'N'
+                                        
+          LEFT OUTER JOIN
+              DP_INVOICE_SN
+                    ON    DP_INVOICE_SN.DCCODE          = DP_INPLAN.DCCODE                   
+                    AND   DP_INVOICE_SN.STORERKEY       = DP_INPLAN.STORERKEY        
+                    AND   DP_INVOICE_SN.DOCTYPE         = DP_INPLAN.DOCTYPE
+                    AND   DP_INVOICE_SN.SLIPNO          = DP_INPLAN.SLIPNO                              
+                    AND   DP_INVOICE_SN.SLIPDT          = DP_INPLAN.SLIPDT                   
+                    AND   DP_INVOICE_SN.SLIPLINE        = DP_INPLAN.SLIPLINE                    
+                    AND   DP_INVOICE_SN.SKU             = DP_INPLAN.SKU
+                    
+          LEFT OUTER JOIN
+              ST_SNINFO                        
+                    ON    ST_SNINFO.STORERKEY           = DP_INVOICE_SN.STORERKEY 
+                    AND   ST_SNINFO.SKU                 = DP_INVOICE_SN.SKU       
+                    AND   ST_SNINFO.SERIALNO            = DP_INVOICE_SN.SERIALNO 
+                    AND   ST_SNINFO.STOCKID             = DP_INVOICE_SN.STOCKID
+                 
+          LEFT OUTER JOIN
+                  EXDC_AUTO_SERIALINFO
+                     ON   DM_EXDC_AUTOORD_CHECK.MAPKEY_NO   = EXDC_AUTO_SERIALINFO.MAPKEY_NO
+                    AND   DM_EXDC_AUTOORD_CHECK.MAPKEY_LINE = EXDC_AUTO_SERIALINFO.MAPKEY_LINE         
+                  
+          LEFT OUTER JOIN (
+                    SELECT 
+                        DCCODE, ORGANIZE, SKU, AREA_PRICE_UOM
+                    FROM MS_EXDCRATE 
+                    WHERE MS_EXDCRATE.DCCODE                  = #{dccode}
+                        AND  MS_EXDCRATE.DEL_YN               = 'N'
+                        AND  MS_EXDCRATE.FROMDATE    <![CDATA[<=]]> #{slipdtFrom} 
+                        AND  MS_EXDCRATE.TODATE      <![CDATA[>=]]> #{slipdtTo} 
+                    GROUP BY DCCODE, ORGANIZE, SKU, AREA_PRICE_UOM
+                     )  MS_EXDCRATE 
+           ON MS_EXDCRATE.DCCODE                        = DM_DOCUMENT_D.DCCODE
+          AND MS_EXDCRATE.ORGANIZE                      = DM_DOCUMENT_D.ORGANIZE
+          AND MS_EXDCRATE.SKU                           = DM_DOCUMENT_D.SKU
+          
+          LEFT OUTER JOIN CM_CODE_STORER CD1
+                    ON CD1.STORERKEY = DP_INPLAN.STORERKEY
+                   AND CD1.CODELIST  = 'PUTAWAYTYPE'   
+                   AND CD1.BASECODE  = DM_DOCUMENT_D.CHANNEL
+          LEFT OUTER JOIN CM_CODE_STORER CD2
+                    ON CD2.STORERKEY = MS_SKU.STORERKEY
+                   AND CD2.CODELIST  = 'STORAGETYPE'   
+                   AND CD2.BASECODE  = MS_SKU.STORAGETYPE
+          LEFT OUTER JOIN CM_CODE_STORER CD3
+                    ON CD3.STORERKEY = ST_SNINFO.STORERKEY
+                   AND CD3.CODELIST  = 'MAP_DIV'   
+                   AND CD3.BASECODE  = DM_EXDC_AUTOORD_CHECK.MAP_DIV       
+          LEFT OUTER JOIN CM_CODE_STORER CD4
+                    ON CD4.STORERKEY = DP_INPLAN.STORERKEY
+                   AND CD4.CODELIST  = 'EXDC_MOVE'   
+                   AND CD4.BASECODE  = DM_EXDC_AUTOORD_CHECK.MOVE_YN
+                   
+          LEFT OUTER JOIN FRAMEONE_USER USER1
+                    ON USER1.USER_ID = EXDC_AUTO_SERIALINFO.EDITWHO OR USER1.USER_NO = EXDC_AUTO_SERIALINFO.EDITWHO
+          LEFT OUTER JOIN FRAMEONE_USER USER2
+                    ON USER2.USER_ID = EXDC_AUTO_SERIALINFO.EDITWHO OR USER2.USER_NO = DM_DOCUMENT_D.EDITWHO   
+                   
+        WHERE    1=1             
+          AND    DM_EXDC_AUTOORD_CHECK.REAL_YN        = 'T'
+          AND    DM_EXDC_AUTOORD_CHECK.EXDC_ORDERTYPE = '1'
+          AND    DM_DOCUMENT_D.POKEY                  = #{pokey}  
+          AND    ST_SNINFO.pokey                      = #{pokey} 
+    </select>
+    
+    <select id="getDataLocalDetailList" resultType="StConvertCFMDetailResDto">
+        SELECT   /* [stConvertCFMService.sqlx][getDataLocalDetailList][입고이력정보 Detail 확정 목록 조회][sunho.kim][2025.07.11] */
+               EXDC_SCM_CFM_LOCAL.MAPKEY_NO                                                         AS MAPKEY_NO                    /*구매요청번호*/
+              ,EXDC_SCM_CFM_LOCAL.MAPKEY_LINE                                                       AS MAPKEY_LINE       
+              ,EXDC_SCM_CFM_LOCAL.ISSUE_NO                                                          AS ISSUE_NO
+              ,EXDC_SCM_CFM_LOCAL.ISSUE_NO                                                          AS STOCKID 
+              ,EXDC_SCM_CFM_LOCAL.POKEY                                                             AS POKEY  
+              ,EXDC_SCM_CFM_LOCAL.POLINE                                                            AS POLINE
+              ,PO.POKEY                                                                             AS DP_SOURCEKEY
+              ,PO.POLINE                                                                            AS ADDPOLINE
+              ,EXDC_SCM_CFM_LOCAL.MOVE_YN                                                           AS MOVE_YN
+              ,EXDC_SCM_CFM_LOCAL.TEMP_YN                                                           AS TEMP_YN
+              ,EXDC_SCM_CFM_LOCAL.DELIVERYDATE                                                      AS DELIVERYDATE
+              ,EXDC_SCM_CFM_LOCAL.SERIALNO                                                          AS SERIALNO 
+              ,EXDC_SCM_CFM_LOCAL.CONVSERIALNO                                                      AS CONVSERIALNO
+              ,EXDC_SCM_CFM_LOCAL.SEND_MEMO                                                         AS REASONMSG 
+              ,EXDC_SCM_CFM_LOCAL.REJECT_REASON                                                     AS REASONCODE   
+              ,EXDC_SCM_CFM_LOCAL.RECEIVE_MEMO                                                      AS RECEIVE_MEMO
+              ,NVL(EXDC_SCM_CFM_LOCAL.CONFIRM_YN,'40')                                              AS SERIALINFO_CFM_YN              
+              ,EXDC_SCM_CFM_LOCAL.DELIVERYDATE                                                      AS DELIVERYDATE
+              ,TO_CHAR(EXDC_SCM_CFM_LOCAL.ADDDATE,'YYYYMMDD')                                       AS DOCDT
+              ,EXDC_SCM_CFM_LOCAL.SKU                                                               AS SKU
+              ,MS_SKU.DESCRIPTION                                                                   AS SKUNAME                   
+              ,CD1.BASEDESCR                                                                        AS STORAGETYPENAME              /*저장*/   
+              ,'('||MS_SKU.PLACEOFORIGIN||')'||(SELECT BASEDESCR FROM CM_CODE WHERE STORERKEY = MS_SKU.STORERKEY AND CM_CODE.CODELIST = 'COUNTRY' AND BASECODE = MS_SKU.PLACEOFORIGIN AND DEL_YN = 'N') AS ORG
+              ,'2170-'||EXDC_SCM_CFM_LOCAL.ORGANIZE                                                 AS ORGANIZE
+              ,(SELECT DESCRIPTION FROM CM_DCXORGANIZE WHERE ORGANIZE = '2170-'||EXDC_SCM_CFM_LOCAL.ORGANIZE) AS ORGANIZENAME
+              ,EXDC_SCM_CFM_LOCAL.PAY_YMD                                                           AS REFERENCE02   
+              ,TO_CHAR( EXDC_SCM_CFM_LOCAL.ADDDATE,'YYYY-MM-DD HH24:MI')                            AS CREATEDATE
+              ,EXDC_SCM_CFM_LOCAL.REF_DOCID                                                         AS REF_DOCID
+              ,EXDC_SCM_CFM_LOCAL.REF_CUST_DOCID                                                    AS REF_CUST_DOCID
+              ,EXDC_SCM_CFM_LOCAL.GROSSWEIGHT                                                       AS ORDERQTY
+              ,EXDC_SCM_CFM_LOCAL.BASEUOM                                                           AS UOM
+              ,EXDC_SCM_CFM_LOCAL.BASEUOM                                                           AS UOM2
+              ,EXDC_SCM_CFM_LOCAL.ORDR_QTY                                                          AS ETCQTY
+              ,MS_SKU.QTYPERBOX                                                                     AS QTYPERBOX
+              ,MS_SKU.QTYPERBOX                                                                     AS QTYPERBOX2
+              ,EXDC_SCM_CFM_LOCAL.EDITWHO                                                           AS LASTWHO                      /* 최종수정자 */
+              ,USER1.USER_NM                                                                        AS LASTWHO_NM                   /* 최종수정자 */
+              ,TO_CHAR(EXDC_SCM_CFM_LOCAL.EDITDATE,'YYYY-MM-DD HH24:MI')                            AS LASTDATE  
+              ,EXDC_SCM_CFM_LOCAL.EDITWHO                                                           AS CFMWHO                       /* 확정자 */
+              ,USER2.USER_NM                                                                        AS CFMWHO_NM                    /* 확정자 */
+              ,TO_CHAR(EXDC_SCM_CFM_LOCAL.EDITDATE,'YYYY-MM-DD HH24:MI')                            AS CFMDATE 
+              ,DM_EXDC_AUTOORD_CHECK.EXDC_ORDERTYPE                                                 AS EXDC_ORDERTYPE
+              ,CD2.BASEDESCR                                                                        AS TMP_CONTRACTTYPE            /*계약구분*/    
+              ,EXDC_SCM_CFM_LOCAL.GROSSWEIGHT                                                       AS GROSSWEIGHT 
+              ,EXDC_SCM_CFM_LOCAL.ORDR_QTY                                                          AS ORDR_QTY
+              ,ST_SNINFO.LOTTABLE01                                                                 AS LOTTABLE01
+              ,FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, NVL(ST_SNINFO.LOTTABLE01,'STD'), 'N')||'/'||MS_SKU.DURATION AS DURATION_TERM  /*유통기한*/
+              ,FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, NVL(ST_SNINFO.LOTTABLE01,'STD'), 'N')||'/'||MS_SKU.DURATION AS DURATION_TERM2  /*유통기한*/
+              ,CASE WHEN NVL(ST_SNINFO.LOTTABLE01,'STD')='STD' 
+                    THEN 'N' 
+                    WHEN MONTHS_BETWEEN(TO_DATE(NVL(ST_SNINFO.LOTTABLE01,'STD'),'yyyy-mm-dd'),SYSDATE)>3 
+                    THEN 'N' 
+                    ELSE 'Y' 
+                END                                                                                 AS NEARDURATIONYN               /*임박여부*/   
+              ,CASE WHEN NVL(ST_SNINFO.LOTTABLE01,'STD')='STD' 
+                    THEN 'N' 
+                    WHEN MONTHS_BETWEEN(TO_DATE(NVL(ST_SNINFO.LOTTABLE01,'STD'),'yyyy-mm-dd'),SYSDATE)>3 
+                    THEN 'N' 
+                    ELSE 'Y' 
+                END                                                                                 AS NEARDURATIONYN2              /*임박여부*/        
+              ,EXDC_SCM_CFM_LOCAL.TO_CUSTKEY                                                        AS TMP_CONTRACTCOMPANY          /*고객코드*/                  
+              ,( SELECT DESCRIPTION  FROM MS_CUST
+                     WHERE CUSTKEY = EXDC_SCM_CFM_LOCAL.TO_CUSTKEY
+                         AND ROWNUM = 1)                                                            AS TMP_CONTRACTCOMPANYNAME      /*고객명*/
+              ,DECODE(MS_EXDCRATE.SKU, NULL, 'N', 'Y')                                              AS EXDCRATE_YN                  /*요율등록여부*/         
+              ,EXDC_SCM_CFM_LOCAL.FACTORYDATE                                                       AS FACTORYDATE                  /*제조일자 */
+        
+        FROM EXDC_SCM_CFM_LOCAL
+        LEFT OUTER JOIN DM_EXDC_AUTOORD_CHECK 
+            ON EXDC_SCM_CFM_LOCAL.MAPKEY_NO     = DM_EXDC_AUTOORD_CHECK.MAPKEY_NO
+           AND EXDC_SCM_CFM_LOCAL.MAPKEY_LINE   = DM_EXDC_AUTOORD_CHECK.MAPKEY_LINE
+           AND EXDC_SCM_CFM_LOCAL.ISSUE_NO      = DM_EXDC_AUTOORD_CHECK.ISSUE_NO
+        LEFT OUTER JOIN DM_EXDC_AUTOORD_CHECK PO
+           ON DM_EXDC_AUTOORD_CHECK.POKEY       = PO.DP_SOURCEKEY
+          AND DM_EXDC_AUTOORD_CHECK.POLINE      = PO.DP_SOURCEKEYLINE
+          AND DM_EXDC_AUTOORD_CHECK.ISSUE_NO    = PO.ISSUE_NO
+          AND PO.ADD_YN                         =  'Y'
+          JOIN MS_SKU 
+           ON EXDC_SCM_CFM_LOCAL.STORERKEY      = MS_SKU.STORERKEY
+          AND EXDC_SCM_CFM_LOCAL.SKU            = MS_SKU.SKU
+        LEFT OUTER JOIN  ST_SNINFO                        
+           ON ST_SNINFO.STORERKEY               = EXDC_SCM_CFM_LOCAL.STORERKEY 
+          AND ST_SNINFO.SKU                     = EXDC_SCM_CFM_LOCAL.SKU       
+          AND ST_SNINFO.SERIALNO                = EXDC_SCM_CFM_LOCAL.SERIALNO 
+          AND ST_SNINFO.STOCKID                 = EXDC_SCM_CFM_LOCAL.ISSUE_NO
+        LEFT OUTER JOIN (
+                    SELECT 
+                        DCCODE, ORGANIZE, SKU, AREA_PRICE_UOM
+                    FROM MS_EXDCRATE 
+                    WHERE MS_EXDCRATE.DCCODE                  = #{dccode}
+                        AND  MS_EXDCRATE.DEL_YN               = 'N'
+                        AND  MS_EXDCRATE.FROMDATE    <![CDATA[<=]]> #{slipdtFrom} 
+                        AND  MS_EXDCRATE.TODATE      <![CDATA[>=]]> #{slipdtTo} 
+                    GROUP BY DCCODE, ORGANIZE, SKU, AREA_PRICE_UOM
+                     )  MS_EXDCRATE 
+          ON  MS_EXDCRATE.ORGANIZE              = EXDC_SCM_CFM_LOCAL.ORGANIZE
+          AND MS_EXDCRATE.SKU                   = EXDC_SCM_CFM_LOCAL.SKU
+        
+        LEFT OUTER JOIN CM_CODE_STORER CD1
+            ON CD1.STORERKEY                    = MS_SKU.STORERKEY
+           AND CD1.CODELIST                     = 'STORAGETYPE'   
+           AND CD1.BASECODE                     = MS_SKU.STORAGETYPE
+        LEFT OUTER JOIN CM_CODE_STORER CD2
+            ON CD2.STORERKEY                    = EXDC_SCM_CFM_LOCAL.STORERKEY
+           AND CD2.CODELIST                     = 'MAP_DIV'   
+           AND CD2.BASECODE                     = EXDC_SCM_CFM_LOCAL.MAP_DIV   
+        
+        LEFT OUTER JOIN FRAMEONE_USER USER1
+            ON USER1.USER_ID = EXDC_SCM_CFM_LOCAL.EDITWHO OR USER1.USER_NO = EXDC_SCM_CFM_LOCAL.EDITWHO
+        LEFT OUTER JOIN FRAMEONE_USER USER2
+            ON USER2.USER_ID = EXDC_SCM_CFM_LOCAL.EDITWHO OR USER2.USER_NO = EXDC_SCM_CFM_LOCAL.EDITWHO    
+        
+        WHERE     1=1                 
+          AND    EXDC_SCM_CFM_LOCAL.MAPKEY_NO = #{mapkeyNo}    
+    </select>
+    
+    <update id="save">
+        UPDATE    /* [stConvertCFMService.sqlx][save][입고 이력정보 저장][sunho.kim][2025.07.11] */ 
+        EXDC_AUTO_SERIALINFO
+        SET    SEND_MEMO      = #{reasonmsg} 
+              ,REJECT_REASON  = #{reasoncode}
+              ,EDITDATE       = SYSDATE
+              ,EDITWHO        = #{gUserId}
+        WHERE  ISSUE_NO       = #{issueNo}
+        AND    MAPKEY_NO      = #{mapkeyNo}
+        AND    MAPKEY_LINE    = #{mapkeyLine}        
+    </update>
+    
+    <update id="saveLocal">
+        UPDATE   /* [stConvertCFMService.sqlx][saveLocal][입고 이력정보 저장][sunho.kim][2025.07.11] */ 
+        EXDC_SCM_CFM_LOCAL
+        SET    SEND_MEMO      = #{reasonmsg} 
+              ,REJECT_REASON  = #{reasoncode}
+              ,EDITDATE       = SYSDATE
+              ,EDITWHO        = #{gUserId}
+        WHERE  ISSUE_NO       = #{issueNo}
+        AND    MAPKEY_NO      = #{mapkeyNo}
+        AND    MAPKEY_LINE  = #{mapkeyLine}       
+    </update>
+        
+    <update id="confirm">
+    BEGIN     /* [stConvertCFMService.sqlx][confirm][입고 이력정보 확정][sunho.kim][2025.07.11] */  
+        
+        /* SCM0670 */
+        INSERT INTO IF_EXDC_AUTO_SCMCFM
+        (
+            SERIALKEY
+            ,STORERKEY
+            ,ADD_YN
+            ,PROCESS_FLAG
+            ,MAPKEY_NO
+            ,MAPKEY_LINE
+            ,ISSUE_NO
+            ,DOCNO
+            ,DOCLINE
+            ,CFM_YN
+            ,MEMO
+            ,ADDDATE
+            ,ADDWHO         
+            ,EDITDATE
+            ,EDITWHO
+            ,IF_ID
+            ,IF_DATE
+            ,IF_DESTINATION
+            ,IF_FLAG            
+        )
+        SELECT SEQ_IF_EXDC_AUTO_SCMCFM.NEXTVAL
+            ,#{gStorerkey}
+            ,DECODE(#{addYn},'Y','Y','N')
+            ,'10'                           /* PROCESS_FLAG */
+            ,MAPKEY_NO
+            ,MAPKEY_LINE
+            ,#{issueNo}
+            ,TMP_SOKEY
+            ,TMP_SOLINE
+            ,'10'                           /* CFM_YN 10:승인, 20:반려 */
+            ,#{reasonmsg}                   /* MEMO */
+            ,SYSDATE                        /* ADDDATE */
+            ,(SELECT USER_NO FROM FRAMEONE_USER WHERE USER_ID = #{gUserId} AND ROWNUM=1)    /* ADDWHO */
+            ,SYSDATE                        /* EDITDATE */
+            ,(SELECT USER_NO FROM FRAMEONE_USER WHERE USER_ID = #{gUserId} AND ROWNUM=1)    /* EDITWHO */                       
+            ,'SCM0670'                      /* IF_ID */
+            ,SYSDATE                        /* IF_DATE */
+            ,'SA/FS'                        /* IF_DESTINATION */
+            ,'N'                            /* IF_FLAG */
+        FROM   DM_EXDC_AUTOORD_CHECK
+        WHERE  MAPKEY_NO    = #{mapkeyNo}
+        AND    MAPKEY_LINE  = #{mapkeyLine}
+        AND    REAL_YN      = 'T'
+        AND    MAP_DIV      = '20'
+        AND    ADD_YN       = 'N';
+                            
+        UPDATE EXDC_AUTO_SERIALINFO         
+        SET    CONFIRM_YN   = '10'            /*10:확정, 빈값:예정, 20:반려, 30:취소*/
+              ,SEND_MEMO    = #{reasonmsg}             
+              ,EDITDATE     = SYSDATE
+              ,EDITWHO      = #{gUserId}
+        WHERE  ISSUE_NO     = #{issueNo}
+        AND    MAPKEY_NO    = #{mapkeyNo}
+        AND    MAPKEY_LINE  = #{mapkeyLine};
+        
+        UPDATE DM_EXDC_AUTOORD_CHECK
+        SET    SERIALINFO_CFM_YN = '10'
+              ,EDITDATE     = SYSDATE
+              ,EDITWHO      = #{gUserId}
+        WHERE  MAPKEY_NO    = #{mapkeyNo}
+        AND    MAPKEY_LINE  = #{mapkeyLine}    
+        AND    ADD_YN       = 'N'
+        AND    REAL_YN      = 'T'
+        AND    MAP_DIV      = '20';
+        
+        INSERT INTO IF_EXDC_AUTO_SERIALINFO_S
+        (
+             SERIALKEY
+            ,STORERKEY
+            ,ISSUE_NO
+            ,MAPKEY_NO
+            ,MAPKEY_LINE
+            ,POKEY
+            ,POLINE
+            ,CUSTKEY
+            ,SKU
+            ,SERIALNO
+            ,SERIALTYPE
+            ,CONVSERIALNO 
+            ,RANNO
+            ,HSNO
+            ,FACTORYDATE
+            ,FACTORYNAME
+            ,NETWEIGHT
+            ,ETC_QTY
+            ,TEMP_YN
+            ,MOVE_YN
+            ,IF_ID
+            ,IF_FLAG            
+            ,IF_DESTINATION
+            ,ADDDATE
+            ,ADDWHO            
+            ,EDITDATE
+            ,EDITWHO
+        )
+        SELECT SEQ_IF_EXDC_AUTO_SERIALINFO_S.NEXTVAL
+            ,STORERKEY
+            ,#{issueNo}
+            ,MAPKEY_NO
+            ,MAPKEY_LINE
+            ,DOCNO
+            ,DOCLINE
+            ,#{fromCustkey}
+            ,#{sku}
+            ,SERIALNO
+            ,SERIALTYPE
+            ,CONVSERIALNO
+            ,RANNO
+            ,HSNO
+            ,FACTORYDATE
+            ,FACTORYNAME
+            ,GROSSWEIGHT
+            ,ORDR_QTY
+            ,TEMP_YN
+            ,MOVE_YN
+            ,'SCM710'   AS IF_ID
+            ,'N'        AS IF_FLAG               
+            ,'SRM'      AS IF_DESTINATION
+            ,ADDDATE
+            ,ADDWHO
+            ,SYSDATE
+            ,#{gUserId}
+        FROM   EXDC_AUTO_SERIALINFO
+        WHERE  ISSUE_NO     = #{issueNo}
+        AND    MAPKEY_NO    = #{mapkeyNo}
+        AND    MAPKEY_LINE  = #{mapkeyLine};     
+        
+        UPDATE EXDC_AUTO_SERIALINFO
+        SET    GROSSWEIGHT  = #{grossweight}
+              ,ORDR_QTY     = #{ordrQty}
+        WHERE  ISSUE_NO     = #{issueNo}
+        AND    MAPKEY_NO    = #{mapkeyNo}
+        AND    MAPKEY_LINE  = #{mapkeyLine};
+                       
+    END;
+    </update>
+    
+    <update id="confirmLocal">
+    BEGIN   /* [stConvertCFMService.sqlx][confirmLocal][입고 이력정보 확정][sunho.kim][2025.07.11] */      
+            
+        INSERT INTO IF_EXDC_SCM_CFM_LOCAL
+        (
+           SERIALKEY 
+          ,STORERKEY
+          ,MAPKEY_NO
+          ,MAPKEY_LINE
+          ,ISSUE_NO
+          ,POKEY
+          ,POLINE
+          ,CONFIRM_YN
+          ,REJECT_REASON
+          ,REJECT_CODE
+          ,EDITWHO
+          ,EDITDATE
+          ,IF_ID
+          ,IF_DATE
+          ,IF_DESTINATION
+          ,IF_FLAG
+          ,IF_MEMO
+          ,IF_TIMESTAMP
+          ,PAY_YMD
+        )
+        SELECT 
+           SEQ_IF_EXDC_SCM_CFM_LOCAL.NEXTVAL
+          ,EXDC_SCM_CFM_LOCAL.STORERKEY
+          ,EXDC_SCM_CFM_LOCAL.MAPKEY_NO
+          ,EXDC_SCM_CFM_LOCAL.MAPKEY_LINE
+          ,EXDC_SCM_CFM_LOCAL.ISSUE_NO
+          ,EXDC_SCM_CFM_LOCAL.POKEY
+          ,EXDC_SCM_CFM_LOCAL.POLINE
+          ,'10'
+          ,#{reasonmsg}  
+          ,(select c.basedescr  from cm_code c where c.codelist  = 'REJECT_REASON_WD' and c.basecode = #{reasoncode})
+          ,#{gUserId}
+          ,SYSDATE
+          ,'SCM0700'
+          ,SYSDATE
+          ,'SRM'
+          ,'N'
+          ,''
+          ,''
+          ,EXDC_SCM_CFM_LOCAL.PAY_YMD
+        FROM EXDC_SCM_CFM_LOCAL
+        WHERE  ISSUE_NO      = #{issueNo}
+        AND    MAPKEY_NO     = #{mapkeyNo}
+        AND    MAPKEY_LINE   = #{mapkeyLine};
+                
+        UPDATE EXDC_SCM_CFM_LOCAL 
+        SET CONFIRM_YN      = '10'
+           ,EDITDATE        = SYSDATE
+           ,EDITWHO         = #{gUserId}
+           ,SEND_MEMO       = #{reasonmsg} 
+           ,REJECT_CODE     = #{reasoncode} 
+        WHERE  ISSUE_NO     = #{issueNo}
+        AND    MAPKEY_NO    = #{mapkeyNo}
+        AND    MAPKEY_LINE  = #{mapkeyLine};
+
+    END;
+    </update>
+    
+    <update id="reject">
+    BEGIN   /* [stConvertCFMService.sqlx][reject][입고 이력정보 반려][sunho.kim][2025.07.11] */
+        
+        /* SCM070 */
+        INSERT INTO IF_EXDC_AUTO_SCMCFM
+        (
+            SERIALKEY
+            ,STORERKEY
+            ,ADD_YN
+            ,PROCESS_FLAG
+            ,MAPKEY_NO
+            ,MAPKEY_LINE
+            ,ISSUE_NO
+            ,DOCNO
+            ,DOCLINE
+            ,CFM_YN
+            ,MEMO
+            ,ADDDATE
+            ,ADDWHO     
+            ,EDITDATE
+            ,EDITWHO    
+            ,IF_ID
+            ,IF_DATE
+            ,IF_DESTINATION
+            ,IF_FLAG            
+        )
+        VALUES
+        (
+            SEQ_IF_EXDC_AUTO_SCMCFM.NEXTVAL
+            ,#{gStorerkey}
+            ,DECODE(#{addYn},'Y','Y','N')
+            ,'10'           /* PROCESS_FLAG */
+            ,#{mapkeyNo}
+            ,#{mapkeyLine}
+            ,#{issueNo}
+            ,#{tmpSokey}
+            ,#{tmpSoline}
+            ,'20'           /* CFM_YN 10:승인, 20:반려 */
+            ,#{reasonmsg}   /* MEMO */
+            ,SYSDATE        /* ADDDATE */
+            ,#{gUserId}     /* ADDWHO */
+            ,SYSDATE        /* EDITDATE */
+            ,#{gUserId}     /* EDITWHO */                       
+            ,'SCM0670'      /* IF_ID */
+            ,SYSDATE        /* IF_DATE */
+            ,'SA/FS'        /* IF_DESTINATION */
+            ,'N'            /* IF_FLAG */
+        );  
+    
+        UPDATE EXDC_AUTO_SERIALINFO
+        SET    CONFIRM_YN = '20' /*10:확정, 빈값:예정, 20:반려, 30:취소*/
+            <if test="reasoncode != null and reasoncode != ''">
+              ,REJECT_REASON = #{reasoncode}
+            </if>
+              ,SEND_MEMO    = #{reasonmsg}
+              ,EDITDATE     = SYSDATE
+              ,EDITWHO      = #{gUserId}
+        WHERE  ISSUE_NO     = #{issueNo}
+        AND    MAPKEY_NO    = #{mapkeyNo}
+        AND    MAPKEY_LINE  = #{mapkeyLine};
+        
+        UPDATE DM_EXDC_AUTOORD_CHECK
+        SET    SERIALINFO_CFM_YN = '20'
+              ,EDITDATE          = SYSDATE
+              ,EDITWHO           = #{gUserId}
+        WHERE  MAPKEY_NO         = #{mapkeyNo}
+        AND    MAPKEY_LINE  = #{mapkeyLine}      
+        AND    ADD_YN       = 'N'
+        AND    REAL_YN      = 'T'
+        AND    MAP_DIV      = '20';  
+        
+    END;
+    </update>  
+
+    <update id="rejectLocal">
+    BEGIN   /* [stConvertCFMService.sqlx][rejectLocal][입고 이력정보 반려][sunho.kim][2025.07.11] */
+        
+        INSERT INTO IF_EXDC_SCM_CFM_LOCAL
+        (
+           SERIALKEY 
+          ,STORERKEY
+          ,MAPKEY_NO
+          ,MAPKEY_LINE
+          ,ISSUE_NO
+          ,POKEY
+          ,POLINE
+          ,CONFIRM_YN
+          ,REJECT_REASON
+          ,REJECT_CODE
+          ,EDITWHO
+          ,EDITDATE
+          ,IF_ID
+          ,IF_DATE
+          ,IF_DESTINATION
+          ,IF_FLAG
+          ,IF_MEMO
+          ,IF_TIMESTAMP
+          ,PAY_YMD
+        )
+        SELECT 
+           SEQ_IF_EXDC_SCM_CFM_LOCAL.NEXTVAL
+          ,EXDC_SCM_CFM_LOCAL.STORERKEY
+          ,EXDC_SCM_CFM_LOCAL.MAPKEY_NO
+          ,EXDC_SCM_CFM_LOCAL.MAPKEY_LINE
+          ,EXDC_SCM_CFM_LOCAL.ISSUE_NO
+          ,EXDC_SCM_CFM_LOCAL.POKEY
+          ,EXDC_SCM_CFM_LOCAL.POLINE
+          ,'20'
+          ,#{reasonmsg}  
+          ,(SELECT C.BASEDESCR  FROM CM_CODE C WHERE C.CODELIST  = 'REJECT_REASON_WD' AND C.BASECODE = #{reasoncode})
+          ,#{gUserId} 
+          ,SYSDATE
+          ,'SCM0700'
+          ,SYSDATE
+          ,'SRM'
+          ,'N'
+          ,''
+          ,''
+          ,EXDC_SCM_CFM_LOCAL.PAY_YMD
+      FROM EXDC_SCM_CFM_LOCAL
+      WHERE  MAPKEY_NO   = #{mapkeyNo}
+      AND    MAPKEY_LINE = #{mapkeyLine}
+      AND    ISSUE_NO    = #{issueNo};
+                
+      UPDATE EXDC_SCM_CFM_LOCAL 
+      SET   CONFIRM_YN      = '20'
+           ,EDITDATE        = SYSDATE
+           ,EDITWHO         = #{gUserId}
+           ,SEND_MEMO       = #{reasonmsg}  
+           ,REJECT_REASON   = #{reasoncode}
+      WHERE  MAPKEY_NO      = #{mapkeyNo}
+      AND    MAPKEY_LINE    = #{mapkeyLine}  
+      AND    ISSUE_NO       = #{issueNo};
+        
+    END;
+    </update>  
+    
+    <select id="checkExist" resultType="HMap">
+        SELECT    /* [stConvertCFMService.sqlx][checkExist][확정/반려 중복 조회][sunho.kim][2025.07.11] */
+            COUNT(1) AS CHECK_CNT
+        FROM   DM_EXDC_AUTOORD_CHECK 
+        WHERE  MAPKEY_NO    = #{mapkeyNo}
+        AND    MAPKEY_LINE  = #{mapkeyLine}
+        AND    ISSUE_NO     = #{issueNo}
+        AND    SERIALINFO_CFM_YN IN ('10', '20')
+    </select>  
+
+</mapper>

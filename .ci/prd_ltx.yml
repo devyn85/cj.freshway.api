@@ -1,0 +1,75 @@
+# PRD LTX 배포 파이프라인 구성
+# LTX 4개 인스턴스 병렬 배포 (PLTX11, PLTX12, PLTX21, PLTX22)
+
+# ===========================================
+# LTX 배포 (4개 인스턴스 병렬 배포)
+# ===========================================
+prd-ltx:deploy:
+  stage: LTX
+  needs:
+    - job: build
+  variables:
+    GIT_STRATEGY: none
+  before_script:
+    - !reference [.ssh_helper, script]
+  resource_group: "PRD_LTX_DEPLOY"
+  parallel:
+    matrix:
+      - SERVER_NAME: "pltx11"
+        DEPLOY_IP: "${PRD_WAS_LTX_IP_01}"
+        DEPLOY_USER: "${PRD_WAS_USER_01}"
+        DEPLOY_RSA: "${PRD_WAS_LTX_ID_RSA_01}"        
+        DEPLOY_PATH: "/app/deploy/pltx1"
+        DEPLOY_APP: "pltx1"
+      - SERVER_NAME: "pltx12"
+        DEPLOY_IP: "${PRD_WAS_LTX_IP_01}"
+        DEPLOY_USER: "${PRD_WAS_USER_01}"
+        DEPLOY_RSA: "${PRD_WAS_LTX_ID_RSA_01}"
+        DEPLOY_PATH: "/app/deploy/pltx2"
+        DEPLOY_APP: "pltx2"
+      - SERVER_NAME: "pltx21"
+        DEPLOY_IP: "${PRD_WAS_LTX_IP_02}"
+        DEPLOY_USER: "${PRD_WAS_USER_02}"
+        DEPLOY_RSA: "${PRD_WAS_LTX_ID_RSA_02}"
+        DEPLOY_PATH: "/app/deploy/pltx1"
+        DEPLOY_APP: "pltx1"
+      - SERVER_NAME: "pltx22"
+        DEPLOY_IP: "${PRD_WAS_LTX_IP_02}"
+        DEPLOY_USER: "${PRD_WAS_USER_02}"
+        DEPLOY_RSA: "${PRD_WAS_LTX_ID_RSA_02}"
+        DEPLOY_PATH: "/app/deploy/pltx2"
+        DEPLOY_APP: "pltx2"
+
+  script:
+    - ssh_init "$DEPLOY_RSA" "$DEPLOY_IP"
+    
+    # Shutdown
+    - echo "=========================================="
+    - echo "🛑 [${SERVER_NAME}] LTX 애플리케이션 종료"
+    - echo "Server:${DEPLOY_IP} → ${DEPLOY_PATH}"
+    - echo "=========================================="
+    - ssh_run "$DEPLOY_USER" "$DEPLOY_IP" "source ~/.bash_profile && /app/scripts/${DEPLOY_APP}/shutdown.sh || echo 'Shutdown script not found or already stopped'"
+    - echo "⏳ Waiting for graceful shutdown..."
+    - ssh_run "$DEPLOY_USER" "$DEPLOY_IP" "sleep 3"
+    - echo "✅ [${SERVER_NAME}] Shutdown 완료"
+    
+    # Deploy
+    - echo "=========================================="
+    - echo "📦 [${SERVER_NAME}] LTX 파일 배포"
+    - echo "=========================================="
+    - scp_run "$DEPLOY_USER" "$DEPLOY_IP" "-rp ./cjfw-wms-api/build/libs/*.jar" "${DEPLOY_PATH}/"
+    - ssh_run "$DEPLOY_USER" "$DEPLOY_IP" "ls -al ${DEPLOY_PATH}/*.jar"
+    - echo "✅ [${SERVER_NAME}] 파일 배포 완료"
+    
+    # Start
+    - echo "=========================================="
+    - echo "🔄 [${SERVER_NAME}] LTX 애플리케이션 시작"
+    - echo "=========================================="
+    - ssh_run "$DEPLOY_USER" "$DEPLOY_IP" "source ~/.bash_profile && /app/scripts/${DEPLOY_APP}/restart.sh"
+    - echo "⏳ Waiting for startup..."
+    - ssh_run "$DEPLOY_USER" "$DEPLOY_IP" "sleep 5"
+    - ssh_run "$DEPLOY_USER" "$DEPLOY_IP" "ps -ef | grep ${SERVER_NAME} | grep -v grep || echo 'Process check required'"
+    - echo "✅ [${SERVER_NAME}] 배포 완료"    
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "master" || $CI_COMMIT_BRANCH == "main"  || $CI_COMMIT_BRANCH == "feature/cicd"'
+      when: manual

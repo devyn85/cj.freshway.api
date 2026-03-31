@@ -1,0 +1,205 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="msCenterDocService">
+	<!-- 센터서류 정보 조회(목록) -->
+    <select id="getMasterList" resultType="MsCenterDocResDto">
+    	SELECT  /* [msCenterDocService.sqlx][msCenterDocService.getMasterList][센터서류 정보 조회][jangjaehyun][20250624]  */ 
+			MS_CENTER_DOC_R.SERIALKEY 
+	      	,MS_CENTER_DOC_R.DCCODE 
+	      	,(SELECT DCNAME FROM CM_DC WHERE DCCODE = MS_CENTER_DOC_R.DCCODE	) AS DCNAME 
+	      	,MS_CENTER_DOC_R.CUSTKEY
+	      	,CUST1.DESCRIPTION AS CUSTNAME
+	      	,MS_CENTER_DOC_R.REQ_ID 
+	      	,MS_CENTER_DOC_R.REQ_DOC
+	      	,TO_CHAR(MS_CENTER_DOC_R.REQ_DATE, 'YYYY-MM-DD') AS REQ_DATE   
+	      	,MS_CENTER_DOC_R.ADDWHO 
+	      	,TO_CHAR(MS_CENTER_DOC_R.ADDDATE, 'YYYY-MM-DD hh24:mi:ss') AS ADDDATE 
+	      	,MS_CENTER_DOC_R.EDITWHO 
+	      	,TO_CHAR(MS_CENTER_DOC_R.EDITDATE, 'YYYY-MM-DD hh24:mi:ss') AS EDITDATE 
+	      	,MS_CENTER_DOC_R.REG_MEMO
+	      	,'' AS CENTERFILE
+	      	,MS_CENTER_DOC_R.REG_YN
+	      	,MS_CENTER_DOC_R.DOC_CNT
+	      	,MS_CENTER_DOC_R.REQ_NO
+	      	,MS_CENTER_DOC_R.OTHER01
+	      	,MS_CENTER_DOC_R.OTHER02
+	      	,USER1.USER_NM AS ADDWHO_NM  /*등록자명*/
+			,USER2.USER_NM AS EDITWHO_NM  /*수정자명*/
+		     FROM MS_CENTER_DOC_R
+		     LEFT JOIN MS_CUST CUST1 	  ON CUST1.STORERKEY = MS_CENTER_DOC_R.STORERKEY AND CUST1.CUSTTYPE  = 'C' 	AND CUST1.CUSTKEY   = MS_CENTER_DOC_R.CUSTKEY
+		     LEFT JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = MS_CENTER_DOC_R.ADDWHO   /*등록자명*/
+             LEFT JOIN FRAMEONE_USER USER2 ON USER2.USER_ID = MS_CENTER_DOC_R.EDITWHO  /*수정자명*/
+		WHERE  1=1
+		  AND MS_CENTER_DOC_R.DEL_YN = 'N'
+		<if test='multiDcCode != null and multiDcCode.length > 0'>
+		  AND MS_CENTER_DOC_R.DCCODE IN
+	        <foreach collection="multiDcCode" item="dccodeItem" open="(" separator="," close=")">
+	            #{dccodeItem}
+	        </foreach>
+		</if>
+        <if test="fromDt != null and fromDt.trim().length() > 0">
+        	AND    MS_CENTER_DOC_R.ADDDATE             <![CDATA[>=]]> TO_DATE(#{fromDt},'YYYYMMDD')
+        </if>
+        <if test="toDt != null and toDt.trim().length() > 0">
+        	AND    MS_CENTER_DOC_R.ADDDATE            <![CDATA[<=]]> TO_DATE(#{toDt},'YYYYMMDD')+1
+        </if>
+		<if test='custKey != null and custKey !=""'>
+          AND MS_CENTER_DOC_R.CUSTKEY IN
+          (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                        FROM (SELECT #{custKey} AS VAL FROM DUAL) A
+                     CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+        </if>        
+        <if test="reqNo != null and reqNo.trim().length() > 0">
+        	AND    MS_CENTER_DOC_R.REQ_NO             = #{reqNo}
+        </if>
+        <if test="reqDoc != null and reqDoc.trim().length() > 0">
+        	AND    MS_CENTER_DOC_R.REQ_DOC             = #{reqDoc}
+        </if>
+        <if test="regYn != null and regYn.trim().length() > 0">
+        	AND    MS_CENTER_DOC_R.REG_YN             = #{regYn}
+        </if>
+	   	ORDER BY MS_CENTER_DOC_R.SERIALKEY DESC	   
+    </select>
+    
+    
+    <!-- 센터서류 정보 INSERT -->
+    <insert id="insertMaster">			 
+		INSERT /* [msCenterDocService.sqlx][msCenterDocService.insertMaster][센터서류 정보 INSERT][jangjaehyun][20250624] */ 
+		INTO IF_MS_CENTER_DOC_S
+			(SERIALKEY,
+			STORERKEY,
+			REQ_NO,
+			REQ_ID,
+			REQ_DOC,
+			STATUS,
+			DEL_YN,
+			IF_ID,
+			IF_DESTINATION,
+			IF_FLAG,
+			ADDWHO,
+			ADDDATE,
+			EDITWHO,
+			EDITDATE)
+		SELECT
+			SEQ_IF_MS_CENTER_DOC_S.nextval,
+			STORERKEY,
+			REQ_NO,
+			REQ_ID,
+			REQ_DOC,
+			'90',
+			DEL_YN,
+			'SCM0800',
+			'ODR',
+			'N',
+			#{gUserId},
+			SYSDATE,
+			#{gUserId},
+			SYSDATE
+		FROM MS_CENTER_DOC_R
+		WHERE REQ_NO = #{reqNo}
+		 AND SERIALKEY = #{serialKey}
+    </insert>
+    
+    <!-- EDMS 업로드 후 인터페이스 테이블 INSERT -->
+    <insert id="insertEdmsIf">
+		INSERT /* [msCenterDocService.sqlx][msCenterDocService.insertEdmsIf][EDMS 인터페이스 INSERT][김대영][20260224] */
+		INTO IF_MS_CENTER_DOC_S
+			(SERIALKEY,
+			STORERKEY,
+			REQ_NO,
+			REQ_ID,
+			REQ_DOC,
+			STATUS,
+			DEL_YN,
+			IF_ID,
+			IF_DESTINATION,
+			IF_FLAG,
+			ADDWHO,
+			ADDDATE,
+			EDITWHO,
+			EDITDATE)
+		SELECT
+			SEQ_IF_MS_CENTER_DOC_S.nextval,
+			STORERKEY,
+			REQ_NO,
+			REQ_ID,
+			REQ_DOC,
+			'90',
+			DEL_YN,
+			'SCM0800',
+			'ODR',
+			'N',
+			#{gUserId},
+			SYSDATE,
+			#{gUserId},
+			SYSDATE
+		FROM MS_CENTER_DOC_R
+		WHERE REQ_NO = #{reqNo}
+		  AND SERIALKEY = #{serialKey}
+    </insert>
+
+    <!-- 센터서류 정보 UPDATE -->
+    <update id="updateMaster">		
+		UPDATE /* [msCenterDocService.sqlx][msCenterDocService.updateMaster][센터서류 정보 UPDATE][jangjaehyun][20250624] */ 
+		    MS_CENTER_DOC_R
+		   SET DOC_CNT    = #{docCnt}   
+		      ,REG_YN     = #{regYn}   
+		  	  ,EDITDATE   = SYSDATE
+			  ,EDITWHO    = #{gUserId}
+		 WHERE REQ_NO     = #{reqNo}
+		   AND SERIALKEY = #{serialKey}
+	</update>    
+	
+	<select id="selectVatnoByReqNo" resultType="MsCenterDocRResDto">
+		SELECT /* [msCenterDocService.sqlx][msCenterDocService.selectVatnoByReqNo][사업자번호 조회][김대영][20260226] */
+			   MAX(MS_CUST.VATNO) AS VATNO
+		  FROM MS_CENTER_DOC_R MS_CENTER_DOC_R
+		  LEFT JOIN MS_CUST
+		    ON MS_CUST.STORERKEY = MS_CENTER_DOC_R.STORERKEY
+		   AND MS_CUST.CUSTTYPE  = 'C'
+		   AND MS_CUST.CUSTKEY   = MS_CENTER_DOC_R.CUSTKEY
+		 WHERE MS_CENTER_DOC_R.REQ_NO = #{reqNo}
+	</select>
+
+	<select id="getMasterFileList" resultType="MsCenterDocResDto">
+    	SELECT  /* [msCenterDocService.sqlx][msCenterDocService.getMasterFileList][센터서류 파일 목록 조회][JGS][20260205]  */ 
+    		 SERIALKEY
+			,UPLOAD_RES_DOC_ID
+			,FILE_NAME
+			,FILE_EXTENSION
+			,FILE_SIZE_BYTES
+			,TRANS_FILE_NAME
+		FROM MS_CENTER_DOC_R
+		WHERE 1 = 1
+		  	AND SERIALKEY = #{serialKey}
+		  	AND UPLOAD_RES_DOC_ID IS NOT NULL
+    </select>
+    
+    <update id="updateMasterFile">
+		UPDATE /* [msCenterDocService.sqlx][msCenterDocService.updateMasterFile][센터서류 파일 정보 UPDATE][JGS][20260206] */
+		    MS_CENTER_DOC_R
+		   SET UPLOAD_RES_DOC_ID    	= #{uploadResDocId}
+		      ,FILE_NAME     			= #{fileName}
+		      ,FILE_EXTENSION     		= #{fileExtension}
+		      ,FILE_SIZE_BYTES     		= #{fileSizeBytes}
+		      ,TRANS_FILE_NAME     		= #{transFileName}
+		  	  ,EDITDATE   				= SYSDATE
+			  ,EDITWHO    				= #{gUserId}
+		 WHERE SERIALKEY 				= #{serialKey}
+	</update>
+
+    <update id="updateEdmsFile">
+		UPDATE /* [msCenterDocService.sqlx][msCenterDocService.updateEdmsFile][센터서류 EDMS 파일 정보 UPDATE][김대영][20260224] */
+		    MS_CENTER_DOC_R
+		   SET UPLOAD_RES_DOC_ID    	= #{uploadResDocId}
+		      ,FILE_NAME     			= #{fileName}
+		      ,FILE_EXTENSION     		= #{fileExtension}
+		      ,FILE_SIZE_BYTES     		= #{fileSizeBytes}
+		      ,TRANS_FILE_NAME     		= #{transFileName}
+		      ,REG_YN                   = 'Y'
+		  	  ,EDITDATE   				= SYSDATE
+			  ,EDITWHO    				= #{gUserId}
+		 WHERE SERIALKEY 				= #{serialKey}
+	</update>
+
+</mapper>

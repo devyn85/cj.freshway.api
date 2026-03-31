@@ -1,0 +1,509 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="stStockOutOrgService">
+
+	<select id="getDataHeaderlist" resultType="StStockOutOrgResDto">
+		SELECT /* [stStockOutOrgService.sqlx][getDataHeaderlist][외부창고재고정보조회][ParkJinWoo][20250723] */
+			'0'                                                                  AS CHECKYN               /* 체크여부 */
+			,SUM(QTY) OVER (
+			        PARTITION BY
+			        ST_STOCK.DCCODE       
+			        ,ST_STOCK.STORERKEY    
+			        ,ST_STOCK.ORGANIZE     
+			        ,ST_STOCK.AREA         
+			        ,ST_STOCK.SKU          
+			        ,ST_STOCK.LOT          
+			        ,ST_STOCK.STOCKID   
+			        ,ST_STOCK.STOCKGRADE   
+			        ,ST_STOCK.STOCKTYPE    
+			        ,ST_STOCK.UOM   
+			        )                                                          AS SUM_QTY    
+			,0                                                                 AS STOCKQTY
+			, ST_STOCK.DCCODE                                                  AS DCCODE                /* 물류센터 */
+			, ST_STOCK.ORGANIZE                                                AS ORGANIZE              /* 창고 */
+			, CM_DCXORGANIZE.DESCRIPTION                                       AS ORGANIZENAME          /* 창고명 */
+			, NVL(CD1.BASEDESCR,ST_STOCK.STOCKTYPE)                            AS STOCKTYPE             /*재고유형*/
+			, NVL(CD2.BASEDESCR,ST_STOCK.STOCKGRADE)                           AS STOCKGRADE            /*재고등급*/
+			, ST_STOCK.LOC                                                     AS LOC                   /* 로케이션 */
+			, ST_STOCK.SKU                                                     AS SKU                   /* 상품코드 */
+			, MS_SKU.DESCRIPTION                                               AS SKUNAME               /* 상품명 */
+			, ST_STOCK.UOM                                                     AS UOM                   /* 단위 */
+			, ST_STOCK.QTY                                                     AS QTY                   /* 수량 */
+			, ST_STOCK.OPENQTY                                                 AS OPENQTY               /* 가용수량 */
+			, ST_STOCK.QTYALLOCATED                                            AS QTYALLOCATED          /* 할당수량 */
+			, ST_STOCK.QTYPICKED                                               AS QTYPICKED             /* 피킹수량 */
+			, FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01, 'Y')
+			                                                                   AS NEARDURATIONYN        /* 유통기한임박여부 */
+			, CM_LOT.LOTTABLE01                                                AS LOTTABLE01            /* LOT번호 */
+			/*
+			* 기준일(제조) ~까지 : DURATIONTYPE = 1 일때 LOTTABLE01 - DURATION
+			*                  DURATIONTYPE = 2 일때 LOTTABLE01
+			* 기준일(소비) ~부터 : DURATIONTYPE = 1 일때 LOTTABLE01
+			*                  DURATIONTYPE = 2 일때 LOTTABLE01 + DURATION  -1
+			*/
+			, CASE WHEN VALIDATE_CONVERSION(CM_LOT.LOTTABLE01 AS DATE, 'YYYYMMDD') = 1
+			       THEN (CASE WHEN MS_SKU.DURATIONTYPE = '1'
+			                  THEN TO_CHAR(TO_DATE(REPLACE(CM_LOT.LOTTABLE01,'-',''),'YYYYMMDD') - MS_SKU.DURATION,'YYYY-MM-DD')
+			                  WHEN MS_SKU.DURATIONTYPE = '2'
+			                  THEN TO_CHAR(TO_DATE(REPLACE(CM_LOT.LOTTABLE01,'-',''),'YYYYMMDD'),'YYYY-MM-DD')
+			                  ELSE ''
+			              END)
+			       ELSE ''
+			   END                                                             AS MANUFACTUREDT   /*제조일자*/
+			, CASE WHEN VALIDATE_CONVERSION(CM_LOT.LOTTABLE01 AS DATE, 'YYYYMMDD') = 1
+			       THEN (CASE WHEN MS_SKU.DURATIONTYPE = '1'
+			                  THEN TO_CHAR(TO_DATE(REPLACE(CM_LOT.LOTTABLE01,'-',''),'YYYYMMDD'),'YYYY-MM-DD')
+			                  WHEN MS_SKU.DURATIONTYPE = '2'
+			                  THEN TO_CHAR(TO_DATE(REPLACE(CM_LOT.LOTTABLE01,'-',''),'YYYYMMDD') + MS_SKU.DURATION -1,'YYYY-MM-DD')
+			                  ELSE ''
+			              END)
+			       ELSE ''
+			 END                                                               AS EXPIREDT   
+			, FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01, 'N')
+			    || '/' || MS_SKU.DURATION                                      AS DURATION_TERM         /* 유통기한_표기 */
+			, ST_SERIALINFO.SERIALNO                                           AS SERIALNO              /* 시리얼번호 */
+			, NVL(CD3.BASEDESCR,MS_SKU.STORAGETYPE)                            AS STORAGETYPE           /* 보관유형*/    
+			, NVL(CD4.BASEDESCR,ST_SERIALINFO.CONTRACTTYPE)                    AS CONTRACTTYPE          /* 보관유형*/
+			, MS_SKU.DURATION                                                  AS DURATION              /* 유통기간(일) */
+			, MS_SKU.DURATIONTYPE                                              AS DURATIONTYPE          /* 유통기간유형 */
+			, MS_SKU.SKUGROUP                                                  AS SKUGROUP              /* 상품그룹 */
+			, SUBSTR(MS_SKU.SKUGROUP, 0, 2) AS SKUL
+			, SUBSTR(MS_SKU.SKUGROUP, 0, 4) AS SKUM
+			, SUBSTR(MS_SKU.SKUGROUP, 0, 6) AS SKUS
+			, SUBSTR(MS_SKU.SKUGROUP, 0, 8) AS SKUD
+			, CASE WHEN MS_SKU.SKUGROUP = FN_TPL_SKUGROUP() THEN '위탁' 
+			       WHEN ST_STOCK.QTY > 0                    THEN '상품' 
+			  END                                                              AS STOCKSTATUS           /* 재고상태 */
+			, ''                                                               AS SAPPRICE              /* SAP가격 */
+			, CASE                                                             
+				WHEN ST_STOCK.UOM IN ('KG', 'BOX') THEN ST_STOCK.QTY
+				ELSE CASE
+				    WHEN FN_CONV_UOM(ST_STOCK.STORERKEY, ST_STOCK.SKU, 'BOX', ST_STOCK.UOM, 1) = 0
+				    THEN ST_STOCK.QTY
+				    ELSE TRUNC(FN_CONV_UOM(ST_STOCK.STORERKEY, ST_STOCK.SKU, ST_STOCK.UOM, 'BOX', ST_STOCK.QTY))
+				    END
+			 END                                                              AS QTY_1                 /* 수량(BOX)_정수 */
+			, CASE                                                             
+			  WHEN ST_STOCK.UOM IN ('KG', 'BOX') THEN 0
+			  ELSE CASE
+			         WHEN FN_CONV_UOM(ST_STOCK.STORERKEY, ST_STOCK.SKU, 'BOX', ST_STOCK.UOM, 1) = 0
+			              THEN 0
+			         ELSE MOD(ST_STOCK.QTY,
+			                  FN_CONV_UOM(ST_STOCK.STORERKEY, ST_STOCK.SKU,
+			                               'BOX', ST_STOCK.UOM, 1))
+			        END
+			END                                                              AS QTY_2                 /* BOX수량_나머지 */
+			, CASE                                                             /* 단위_정수 */
+			    WHEN ST_STOCK.UOM IN ('KG', 'BOX') THEN ST_STOCK.UOM
+			    ELSE CASE
+			           WHEN FN_CONV_UOM(ST_STOCK.STORERKEY, ST_STOCK.SKU, 'BOX', ST_STOCK.UOM, 1) = 0
+			                THEN ST_STOCK.UOM
+			           ELSE 'BOX'
+			          END
+			  END                                                              AS UOM_1                 /* 단위1 */
+			, CASE                                                                                      /* 단위_나머지 */
+			    WHEN ST_STOCK.UOM IN ('BOX') THEN ''
+			    WHEN ST_STOCK.UOM = 'KG' THEN '' 
+			    ELSE CASE
+			           WHEN FN_CONV_UOM(ST_STOCK.STORERKEY, ST_STOCK.SKU, 'BOX', ST_STOCK.UOM, 1) = 0
+			                THEN ''
+			           ELSE ST_STOCK.UOM
+			          END
+			  END                                                              AS UOM_2                 /* 단위2 */
+			, CASE
+			    WHEN TO_NUMBER(NVL(MS_SKU.LINE02, 0)) <![CDATA[ <>]]> 0
+			    THEN TO_NUMBER(NVL(MS_SKU.LINE02, 0))
+			    ELSE 0
+			  END                                                             AS AVGWEIGHT             /* 평균중량 */
+			, ROUND(
+			    CASE
+			      WHEN TO_NUMBER(NVL(MS_SKU.LINE02, 0)) <![CDATA[ <>]]> 0
+			          AND ST_STOCK.UOM = 'KG'
+			      THEN ST_STOCK.QTY / TO_NUMBER(NVL(MS_SKU.LINE02, 0))
+			     ELSE 0
+			   END , 2)                                                        AS CALBOX                /* 환산박스 */
+			, ROUND(ST_STOCK.BOXQTY, 2)                                        AS REALBOX               /* 실제박스수 */
+			, ST_SERIALINFO.FACTORYNAME                                        AS FACTORYNAME           /* 공장명 */
+			, ST_SERIALINFO.CONVSERIALNO                                       AS CONVSERIALNO          /* 변환시리얼 */
+			, ST_SERIALINFO.BUTCHERYDT                                         AS BUTCHERYDT            /* 도축일자 */
+			, ST_SERIALINFO.CONTRACTCUSTKEY                                    AS CONTRACTCOMPANY       /* 계약사코드 */
+			, (SELECT DESCRIPTION
+			     FROM MS_CUST
+			    WHERE MS_CUST.STORERKEY = ST_SERIALINFO.STORERKEY
+			      AND MS_CUST.CUSTKEY   = ST_SERIALINFO.CONTRACTCUSTKEY
+			      AND ROWNUM = 1)                                              AS CONTRACTCOMPANYNAME   /* 계약사명 */
+			, (SELECT EMPNAME1
+			     FROM MS_CUST
+			    WHERE MS_CUST.STORERKEY = ST_SERIALINFO.STORERKEY
+			      AND MS_CUST.CUSTKEY   = ST_SERIALINFO.CONTRACTCUSTKEY
+			      AND ROWNUM = 1)                                              AS CONTRACTCOMPANYEMPNAME1  /* 계약사담당자명 */
+			, ST_SERIALINFO.FROMVALIDDT                                        AS FROMVALIDDT              /* 유효시작일 */
+			, ST_SERIALINFO.TOVALIDDT                                          AS TOVALIDDT                /* 유효종료일 */
+			, FN_CODEDESCR(ST_STOCK.STORERKEY, 'CONTRACTTYPE_SN', ST_SERIALINFO.CONTRACTTYPE)
+			, NVL(CD4.BASEDESCR,ST_SERIALINFO.CONTRACTTYPE)
+			, ST_SERIALINFO.STOCKID                                            AS BARCODE                  /* 바코드 */
+			, ST_STOCK_SERIALINFODETAIL.POKEY                                  AS POKEY                    /* 발주KEY */
+			, ST_STOCK_SERIALINFODETAIL.POLINE                                 AS POLINE                   /* 발주LINE */
+			, CASE
+			    WHEN TO_NUMBER(NVL(MS_SKU.LINE02, 0)) <![CDATA[ <>]]> 0
+			       AND ST_STOCK.DCCODE = '2170'
+			       AND NVL(MS_SKU.LINE01, 'N') = 'Y'
+			    THEN TO_NUMBER(NVL(MS_SKU.LINE02, 0))
+			  ELSE 0
+			END                                                                AS AVGWEIGHT_2170           /* 평균중량_2170 */
+			, ROUND(
+			    CASE
+			      WHEN TO_NUMBER(NVL(MS_SKU.LINE02, 0)) <![CDATA[ <>]]> 0
+			              AND ST_STOCK.DCCODE = '2170'
+			              AND NVL(MS_SKU.LINE01, 'N') = 'Y'
+			          THEN ST_STOCK.QTY / TO_NUMBER(NVL(MS_SKU.LINE02, 0))
+			         ELSE 0
+			       END
+			     , 2)                                                          AS CALBOX_2170              /* 환산박스_2170 */
+			, CASE
+			    WHEN ST_STOCK.DCCODE = '2170'
+			         AND NVL(MS_SKU.LINE01, 'N') = 'Y'
+			      THEN NVL(ST_STOCK.BOXQTY, 0)
+			    ELSE 0
+			  END                                                              AS REALORDERBOX             /* 실박스예정 */
+			, CASE
+			    WHEN ST_STOCK.DCCODE = '2170'
+			         AND NVL(MS_SKU.LINE01, 'N') = 'Y'
+			      THEN NVL(ST_STOCK.BOXQTY, 0)
+			    ELSE 0
+			  END                                                              AS REALCFMBOX               /* 실박스확정 */
+			, CASE
+			    WHEN ST_STOCK.DCCODE = '2170'
+			         AND NVL(MS_SKU.LINE01, 'N') = 'Y'
+			      THEN 'Y'
+			    ELSE 'N'
+			  END                                                              AS BOXFLAG                  /* BOX플래그 */
+			, ST_SERIALINFO.REAL_YN                                            AS REAL_YN                  /* 실적여부 */
+			, MS_SKU.QTYPERBOX                                                 AS QTYPERBOX                /* 박스당수량 */
+			, FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01, 'R') || '%' AS DURATION_RATE
+			, CASE WHEN ST_STOCK.DCCODE IN ('1000', '2170')
+			              THEN fn_dataparse(ST_STOCK.ORGANIZE, '-', 2)
+			              ELSE CASE WHEN ST_STOCK.STOCKTYPE = 'GOOD'
+			                        THEN '1000'
+			                        ELSE '2000'
+			                    END
+			               END                                                 AS STORAGELOC
+			, NVL(MS_SKU.SERIALTYPE,'3')                                       AS SERIALTYPE
+			, ST_STOCK.SERIALKEY	                                           AS SERIALKEY		
+			, MS_SKU.SOMDCODE                                                  AS SOMDCODE                /* 판매담당코드*/ 
+			, MS_SKU.SOMDNAME                                                  AS SOMDNAME                /* 판매담당명*/
+					
+		FROM     ST_STOCK    
+				<if test="fixDcCode == null or fixDcCode == ''">
+				JOIN CM_USER_AUTHORITY
+				    ON 1 = 1
+				<if test="gDccode != null and gDccode != '%'">
+				    AND CM_USER_AUTHORITY.DCCODE    = #{gDccode}
+				</if>
+				<if test="gStorerkey != null and gStorerkey != '%'">
+				    AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey}
+				</if>
+				<if test="gOrganize != null and gOrganize != '%'">
+				    AND CM_USER_AUTHORITY.ORGANIZE  = #{gOrganize}
+				</if>
+				<if test="gArea != null and gArea != '%'">
+				    AND CM_USER_AUTHORITY.AREA      = #{gArea}
+				</if>
+				
+				<if test="gOrganize != null and gOrganize != ''">
+				    AND CM_USER_AUTHORITY.ORGANIZE IN (
+				            SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS ORGANIZE
+				            FROM (SELECT #{gOrganize} AS VAL FROM DUAL)
+				            CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) <![CDATA[ >]]> 0
+				)
+				</if>		
+				    AND CM_USER_AUTHORITY.USERID    = #{gUserId}
+				    AND CM_USER_AUTHORITY.DCCODE    = ST_STOCK.DCCODE
+				    AND CM_USER_AUTHORITY.STORERKEY = ST_STOCK.STORERKEY
+				    AND CM_USER_AUTHORITY.ORGANIZE  = ST_STOCK.ORGANIZE
+				    AND CM_USER_AUTHORITY.AREA      = ST_STOCK.AREA
+				</if>
+				
+				JOIN MS_SKU
+				    ON  MS_SKU.STORERKEY = ST_STOCK.STORERKEY
+				    AND MS_SKU.SKU       = ST_STOCK.SKU
+				
+				<choose>
+				<when test="searchSerial != null and searchSerial != ''">
+				JOIN ST_SNINFO ST_SERIALINFO
+				    ON  ST_STOCK.STORERKEY = ST_SERIALINFO.STORERKEY
+				    AND ST_STOCK.SKU       = ST_SERIALINFO.SKU
+				    AND ST_STOCK.STOCKID   = ST_SERIALINFO.STOCKID
+				    AND ST_SERIALINFO.DEL_YN = 'N'
+				</when>
+				<otherwise>
+				LEFT JOIN ST_SNINFO ST_SERIALINFO
+				    ON  ST_STOCK.STORERKEY = ST_SERIALINFO.STORERKEY
+				    AND ST_STOCK.SKU       = ST_SERIALINFO.SKU
+				    AND ST_STOCK.STOCKID   = ST_SERIALINFO.STOCKID
+				    AND ST_SERIALINFO.DEL_YN = 'N'
+				</otherwise>
+				</choose>
+				LEFT JOIN CM_CODE_STORER CD1 ON CD1.STORERKEY = ST_STOCK.STORERKEY AND CD1.CODELIST = 'STOCKTYPE'       AND CD1.BASECODE = ST_STOCK.STOCKTYPE  /*재고유형*/
+				LEFT JOIN CM_CODE_STORER CD2 ON CD2.STORERKEY = ST_STOCK.STORERKEY AND CD2.CODELIST = 'STOCKGRADE'      AND CD2.BASECODE = ST_STOCK.STOCKGRADE /*재고등급*/
+				LEFT JOIN CM_CODE_STORER CD3 ON CD3.STORERKEY = MS_SKU.STORERKEY   AND CD3.CODELIST = 'STORAGETYPE'     AND CD3.BASECODE = MS_SKU.STORAGETYPE  /*보관유형*/
+				LEFT JOIN CM_CODE_STORER CD4 ON CD4.STORERKEY = ST_STOCK.STORERKEY AND CD4.CODELIST = 'CONTRACTTYPE_SN' AND CD4.BASECODE = ST_SERIALINFO.CONTRACTTYPE  /*계약유형*/
+				
+				JOIN CM_LOT
+				    ON  CM_LOT.STORERKEY = ST_STOCK.STORERKEY
+				    AND CM_LOT.LOT       = ST_STOCK.LOT
+				    AND CM_LOT.DEL_YN    = 'N'
+				<if test="lottable01Yn == 'Y'.toString()">
+					AND CM_LOT.LOTTABLE01 <![CDATA[ <>]]> 'STD'
+				</if>
+				<if test="lottable01Yn == 'N'.toString()">
+					AND CM_LOT.LOTTABLE01 = 'STD'
+				</if>
+				
+				JOIN MS_LOCATION
+				    ON  MS_LOCATION.DCCODE = ST_STOCK.DCCODE
+				    AND MS_LOCATION.LOC    = ST_STOCK.LOC
+				
+				JOIN CM_DCXORGANIZE
+				    ON  CM_DCXORGANIZE.DCCODE   = ST_STOCK.DCCODE
+				    AND CM_DCXORGANIZE.ORGANIZE = ST_STOCK.ORGANIZE
+				
+				LEFT JOIN ST_STOCK_SERIALINFODETAIL
+				    ON  ST_STOCK_SERIALINFODETAIL.STORERKEY = ST_SERIALINFO.STORERKEY
+				    AND ST_STOCK_SERIALINFODETAIL.STOCKID   = ST_SERIALINFO.STOCKID
+
+				WHERE
+					( ST_STOCK.QTY > 0 OR ST_STOCK.BOXQTY <![CDATA[ >]]> 0 )
+				<choose>
+					<when test="skuall == 'Y'.toString() and skutpl == 'Y'.toString()">
+					</when>
+					<when test="skuall == 'Y'.toString() and skutpl != 'Y'.toString()">
+					AND MS_SKU.SKUGROUP != FN_TPL_SKUGROUP()
+					</when>
+					<when test="skuall != 'Y'.toString() and skutpl == 'Y'.toString()">
+					AND MS_SKU.SKUGROUP = FN_TPL_SKUGROUP()
+					</when>
+				</choose>
+				<if test="gStorerkey != null and gStorerkey != ''">
+					AND ST_STOCK.STORERKEY = #{gStorerkey}
+				</if>
+				<if test="fixDcCode != null and fixDcCode != ''">
+					AND ST_STOCK.DCCODE = #{fixDcCode}
+				</if>
+				<if test="organize != null and organize != ''">
+					AND ST_STOCK.ORGANIZE IN (
+					           SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS ORGANIZE
+					           FROM (SELECT #{organize} AS VAL FROM DUAL)
+					           CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) <![CDATA[>]]> 0
+					)
+				</if>			
+				<if test="stockType   != null and stockType   != ''"> AND ST_STOCK.STOCKTYPE     = #{stockType}   </if>
+				<if test="stockGrade  != null and stockGrade  != ''"> AND ST_STOCK.STOCKGRADE    = #{stockGrade}  </if>
+				<if test="zone        != null and zone        != ''"> AND MS_LOCATION.ZONE       = #{zone}        </if>
+				<if test="serialNo    != null and serialNo    != ''"> AND ST_SERIALINFO.SERIALNO = #{serialNo} </if>
+				<if test="blNoMulti != null and blNoMulti != ''">
+					AND ST_SERIALINFO.CONVSERIALNO      IN
+					<foreach collection="blNoMulti" item="item" open="(" separator="," close=")">
+				        #{item}
+					</foreach> 
+					</if>
+				<if test="contractCompany != null and contractCompany != ''">
+					AND ST_SERIALINFO.CONTRACTCUSTKEY = #{contractCompany}
+				</if>
+				<if test="storageType != null and storageType != ''">
+					AND MS_SKU.STORAGETYPE LIKE #{storageType}
+				</if>
+				<if test="skuMulti != null and skuMulti != ''">
+					<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+						<foreach collection="skuMulti" item="item">
+						OR MS_SKU.SKU IN
+						<foreach collection="item" item="code" open="(" close=")" separator=",">
+						#{code}      
+						</foreach>
+						</foreach>
+					</trim>
+				</if>
+				<if test="skuL != null and skuL != ''"> AND LEFT(MS_SKU.SKUGROUP,2)  = #{skuL} </if>
+				<if test="skuM != null and skuM != ''"> AND LEFT(MS_SKU.SKUGROUP,4)  = #{skuM} </if>
+				<if test="skuS != null and skuS != ''"> AND LEFT(MS_SKU.SKUGROUP,6)  = #{skuS} </if>
+				<if test="skuD != null and skuD != ''"> AND MS_SKU.SKUGROUP          = #{skuD} </if>
+				<if test="boxQtyYn != null and boxQtyYn != ''">
+					<choose>
+					<when test="boxQtyYn == 'Y'">
+				    AND ST_STOCK.BOXQTY <![CDATA[ =]]> 0
+					</when>
+					<otherwise>
+				    AND ST_STOCK.BOXQTY <![CDATA[ <=]]> 0
+					</otherwise>
+					</choose>
+				</if>
+				<if test="duratuinTerm != null and duratuinTerm != ''">
+				    AND ROUND(FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01, 'R')) <![CDATA[<=]]> #{duratuinTerm}
+				</if>
+				<if test="chkQty != null and chkQty == 1">
+					AND ST_STOCK.UOM = 'KG'
+				    AND ST_STOCK.QTY = 0                                            /* 재고 0 */
+				    AND ROUND(NVL(ST_STOCK.BOXQTY,0),2) > 0                         /* BOXQTY 값 있음 */
+				</if>
+					<if test="chkQty1 != null and chkQty1 == 1">
+					AND ST_STOCK.UOM = 'KG'
+				    AND ST_STOCK.QTY > 0                                            /* 재고 0 */
+				    AND ROUND(NVL(ST_STOCK.BOXQTY,0),2) = 0                         /* BOXQTY 값 있음 */
+				</if>
+				<choose>
+				        <when test="stockStatus != null and stockStatus == 20">
+				            <![CDATA[
+				                                   /* 재고 있는거 */
+				            ]]>
+				        </when>
+				        <when test="stockStatus != null and stockStatus == 30">
+				            <![CDATA[
+				                 /* 미착재고 */
+				            ]]>
+				        </when>
+				        <otherwise>
+				                /* 재고 선택시 모든 상품 보여줌 */
+				        </otherwise>
+				    </choose>
+				--    AND ST_STOCK.QTY > 0          
+			ORDER BY  ST_STOCK.DCCODE
+			         ,ST_STOCK.LOC
+			         ,ST_STOCK.STORERKEY
+			         ,ST_STOCK.SKU
+	</select>   
+	
+	<select id="getWithTempTable" parameterType="java.util.List" resultType="StStockOutOrgResDto">
+        WITH TEMP AS (    /* [stStockOutOrgService.sqlx][getWithTempTable][미착재고 조회][sunho.kim][2025.09.30] */
+        <foreach collection="list" item="item" separator="UNION ALL">
+            SELECT #{item.storerkey}        AS STORERKEY
+                 , #{item.dcCode}           AS DCCODE
+                 , #{item.docno}            AS DOCNO
+                 , #{item.docline}          AS DOCLINE 
+                 , #{item.sku}              AS SKU
+                 , #{item.organize}         AS ORGANIZE
+                 , #{item.contractType}     AS CONTRACTTYPE
+                 , #{item.custkey}          AS CUSTKEY
+                 , #{item.convSerialNo}     AS CONVSERIALNO
+                 , #{item.stockQty}         AS STOCK_QTY
+                 , #{item.bondQty}          AS BOND_QTY
+                 , #{item.uom}              AS UOM
+                 , #{item.stockBox}         AS STOCK_BOX
+                 , #{item.bondCarryDate}    AS BOND_CARRY_DATE 
+                 , #{item.estNo}            AS EST_NO 
+                 , #{item.countryoforigin}  AS COUNTRYOFORIGIN 
+                 , #{item.containerno}      AS CONTAINERNO
+                 , #{item.expiryDay}        AS EXPIRY_DAY
+                 , #{item.lcNo}             AS LC_NO
+            FROM DUAL
+        </foreach>
+        )
+        SELECT 
+			  T.DCCODE                                                         AS DCCODE               /* 물류센터 */
+			, T.SKU                                                            AS SKU                  /* 상품코드 */
+			, MS_SKU.DESCRIPTION                                               AS SKUNAME              /* 상품명 */
+			, T.ORGANIZE                                                       AS ORGANIZE             /* 창고 */
+			, CM_DCXORGANIZE.DESCRIPTION                                       AS ORGANIZENAME         /* 창고명 */
+			, NVL(CD1.BASEDESCR, T.CONTRACTTYPE)                               AS CONTRACTTYPE         /* 보관유형명 */
+			, T.CUSTKEY                                                        AS CONTRACTCOMPANY      /* 계약사코드 */ 
+			, (SELECT DESCRIPTION
+			        FROM MS_CUST
+			       WHERE MS_CUST.STORERKEY = T.STORERKEY
+			         AND MS_CUST.CUSTKEY   = T.CUSTKEY
+			         AND ROWNUM = 1)                                           AS CONTRACTCOMPANYNAME  /* 계약사명 */
+			, T.CONVSERIALNO                                                   AS CONVSERIALNO         /* B/L번호 */
+			, T.STOCK_QTY                                                      AS STOCK_QTY            /* 미통관(보세입고전) 수량 */
+			, T.BOND_QTY                                                       AS BOND_QTY             /* 미통관(보세입고후) 수량 */
+			, T.UOM                                                            AS UOM                  /* 단위 */   
+			, T.STOCK_BOX                                                      AS STOCK_BOX            /* 미통관(보세입고전) 박스수량 */
+			, T.BOND_CARRY_DATE                                                AS BOND_CARRY_DATE      /* 보세입고일 */
+			, T.EST_NO                                                         AS EST_NO               /* EST No */
+			, T.COUNTRYOFORIGIN                                                AS COUNTRYOFORIGIN      /* 주재료 원산국 */
+			, T.CONTAINERNO                                                    AS CONTAINERNO          /* 컨테이너번호 */
+			, T.EXPIRY_DAY                                                     AS EXPIRY_DAY           /* 유통기한(일) */
+			, T.LC_NO                                                          AS LC_NO                /* LC No */
+			, MS_SKU.SKUGROUP                                                  AS SKUGROUP              /* 상품그룹 */
+			, SUBSTR(MS_SKU.SKUGROUP, 0, 2) AS SKUL
+			, SUBSTR(MS_SKU.SKUGROUP, 0, 4) AS SKUM
+			, SUBSTR(MS_SKU.SKUGROUP, 0, 6) AS SKUS
+			, SUBSTR(MS_SKU.SKUGROUP, 0, 8) AS SKUD
+			, CASE
+			          WHEN TO_NUMBER(NVL(MS_SKU.LINE02, 0)) <![CDATA[ <>]]> 0
+			         THEN TO_NUMBER(NVL(MS_SKU.LINE02, 0))
+			       ELSE 0
+			     END                                                           AS AVGWEIGHT             /* 평균중량 */
+			, ROUND(
+			       CASE
+			         WHEN TO_NUMBER(NVL(MS_SKU.LINE02, 0)) <![CDATA[ <>]]> 0
+			                 AND T.UOM = 'KG'
+			             THEN T.STOCK_QTY / TO_NUMBER(NVL(MS_SKU.LINE02, 0))
+			            ELSE 0
+			          END
+			        , 2)                                                       AS CALBOX                /* 환산박스 */
+			, ROUND(T.STOCK_BOX, 2)                                            AS REALBOX               /* 실제박스수 */
+			, NVL(CD3.BASEDESCR,MS_SKU.STORAGETYPE)                            AS STORAGETYPE           /* 보관유형*/
+			, MS_SKU.SOMDCODE                                                  AS SOMDCODE              /* 판매담당코드*/ 
+			, MS_SKU.SOMDNAME                                                  AS SOMDNAME              /* 판매담당명*/
+			, '미착'                                                            AS STOCKSTATUS           /* 재고상태*/
+         FROM TEMP T
+         
+         LEFT OUTER JOIN MS_SKU
+             ON MS_SKU.STORERKEY = T.STORERKEY
+            AND MS_SKU.SKU       = T.SKU
+            
+         JOIN CM_DCXORGANIZE
+             ON  CM_DCXORGANIZE.DCCODE   = T.DCCODE
+            AND CM_DCXORGANIZE.ORGANIZE  = T.ORGANIZE
+         
+         LEFT OUTER JOIN CM_CODE_STORER CD1
+             ON CD1.STORERKEY  = T.STORERKEY 
+            AND CD1.CODELIST   = 'CONTRACTTYPE_SN'
+            AND CD1.BASECODE   = T.CONTRACTTYPE
+            LEFT JOIN CM_CODE_STORER CD3 ON CD3.STORERKEY = MS_SKU.STORERKEY   AND CD3.CODELIST = 'STORAGETYPE'     AND CD3.BASECODE = MS_SKU.STORAGETYPE  /*보관유형*/
+    </select>
+    
+    <select id="getEmailId" resultType="Map">
+        SELECT /* [stStockOutOrgService.sqlx][getEmailId][사용자 이메일 조회][ParkJinWoo][20250723] */
+            A.MAIL_ID, A.EMP_NM
+        FROM LOGISONE.FRAMEONE_EMP A 
+        WHERE A.EMP_NO = (
+            SELECT DATA4 
+            FROM CM_CODE
+            WHERE CODELIST = 'PURCHASEGROUP'
+              AND BASECODE = (
+                    SELECT SOMDCODE
+                    FROM  MS_SKU 
+                    WHERE MS_SKU.STORERKEY = #{gStorerkey}
+                      AND MS_SKU.SKU       = #{sku}
+                    )
+        )
+    </select> 
+    
+    <delete id="delete" parameterType="Map">
+        DELETE   /* [stStockOutOrgService.sqlx][delete][외부창고재고정보 재고금액 삭제][sunho.kim][20260220] */
+        FROM SY_EXDC_STOCK_AMOUNT
+    </delete>
+
+    <insert id="insert" parameterType="cjfw.wms.st.entity.ExdcSkuAmountEntity">
+        INSERT  /* [stStockOutOrgService.sqlx][insert][외부창고재고정보 재고금액 저장][sunho.kim][20260220] */ 
+        INTO SY_EXDC_STOCK_AMOUNT
+        (     SERIALKEY
+            , DCCODE
+            , ORGANIZE
+            , SKU
+            , STOCKGRADE
+            , QTY
+            , PRICE
+            , STOCK_AMOUNT
+        ) VALUES (
+            #{serialkey}
+          , #{dccode}
+          , #{organize}
+          , #{sku}
+          , #{stockgrade}
+          , #{qty}
+          , #{stockprice}
+          , #{stockamt}
+        )
+    </insert>
+	
+</mapper>

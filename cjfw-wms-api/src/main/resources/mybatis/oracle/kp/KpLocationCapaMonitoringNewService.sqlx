@@ -1,0 +1,434 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="kpLocationCapaMonitoringNewService">
+    <select id="getMasterListTab1" parameterType="cjfw.wms.kp.dto.KpLocationCapaMonitoringNewReqDto" resultType="HMap">
+        /* [KpLocationCapaMonitoringNewService.sqlx][KpLocationCapaMonitoringNewService.getMasterListTab1][센터Capa현황(New) - 요약 탭 조회][여승철][2025.11.17] */
+        SELECT
+               CASE WHEN GROUPING(DCCODE) = 1 THEN 'total' ELSE DCCODE END                       AS DCCODE
+             , CASE WHEN GROUPING(DCCODE) = 1 THEN '전체합계' ELSE MAX(FN_GETDCNAME(DCCODE)) END    AS DCNAME
+             , SUM(PK_RT_P_STOCK_CNT)                   AS PK_RT_P_STOCK_CNT
+             , SUM(PK_RT_S_STOCK_CNT)                   AS PK_RT_S_STOCK_CNT
+             , SUM(PK_CD_P_STOCK_CNT)                   AS PK_CD_P_STOCK_CNT
+             , SUM(PK_CD_S_STOCK_CNT)                   AS PK_CD_S_STOCK_CNT
+             , SUM(PK_FZ_P_STOCK_CNT)                   AS PK_FZ_P_STOCK_CNT
+             , SUM(PK_FZ_S_STOCK_CNT)                   AS PK_FZ_S_STOCK_CNT
+             , SUM(KP_RT_P_STOCK_CNT)                   AS KP_RT_P_STOCK_CNT
+             , SUM(KP_RT_S_STOCK_CNT)                   AS KP_RT_S_STOCK_CNT
+             , SUM(KP_CD_P_STOCK_CNT)                   AS KP_CD_P_STOCK_CNT
+             , SUM(KP_CD_S_STOCK_CNT)                   AS KP_CD_S_STOCK_CNT
+             , SUM(KP_FZ_P_STOCK_CNT)                   AS KP_FZ_P_STOCK_CNT
+             , SUM(KP_FZ_S_STOCK_CNT)                   AS KP_FZ_S_STOCK_CNT
+             , SUM(PK_RT_P_FREE_CNT)                    AS PK_RT_P_FREE_CNT
+             , SUM(PK_RT_S_FREE_CNT)                    AS PK_RT_S_FREE_CNT
+             , SUM(PK_CD_P_FREE_CNT)                    AS PK_CD_P_FREE_CNT
+             , SUM(PK_CD_S_FREE_CNT)                    AS PK_CD_S_FREE_CNT
+             , SUM(PK_FZ_P_FREE_CNT)                    AS PK_FZ_P_FREE_CNT
+             , SUM(PK_FZ_S_FREE_CNT)                    AS PK_FZ_S_FREE_CNT
+             , SUM(KP_RT_P_FREE_CNT)                    AS KP_RT_P_FREE_CNT
+             , SUM(KP_RT_S_FREE_CNT)                    AS KP_RT_S_FREE_CNT
+             , SUM(KP_CD_P_FREE_CNT)                    AS KP_CD_P_FREE_CNT
+             , SUM(KP_CD_S_FREE_CNT)                    AS KP_CD_S_FREE_CNT
+             , SUM(KP_FZ_P_FREE_CNT)                    AS KP_FZ_P_FREE_CNT
+             , SUM(KP_FZ_S_FREE_CNT)                    AS KP_FZ_S_FREE_CNT
+         FROM KP_DAILYLOACTION_HIS
+        WHERE 1=1
+        <!-- START.다중센터 -->
+        <choose>   
+            <when test="fixdccodeMulti != null and fixdccodeMulti != ''">
+          AND KP_DAILYLOACTION_HIS.DCCODE IN
+                <foreach collection="fixdccodeMulti" item="code" open="(" close=")" separator=",">
+                   #{code}
+                </foreach>
+            </when>
+            <otherwise>
+          AND 1=2 /*full방지*/
+            </otherwise>
+        </choose>
+        <!-- END.다중센터 --> 
+          AND SLIPDT = TO_CHAR(SYSDATE, 'YYYYMMDD')
+          AND DEL_YN = 'N'
+        GROUP BY ROLLUP(DCCODE)
+    </select>
+
+	<!-- 센터capa현황(new) Tab2 - "목록" 영역 조회 -->
+	<select id="getMasterListTab2" resultType="HMap">
+	    SELECT /*[KpLocationCapaMonitoringNewService.sqlx][KpLocationCapaMonitoringNewService.getMasterListTab2][센터 Capa현황(New) - 랙별 상세탭 상단 그리드 조회][여승철][2025.11.17] */
+	           MS_LOCATION.DCCODE       AS DCCODE
+	          ,MS_LOCATION.ZONE         AS ZONE
+	          ,MS_LOCATION.LOC			AS LOC
+	          ,MS_LOCATION.RACK         AS RACK
+	          ,MS_LOCATION.RACKLINE     AS RACKLINE
+	          ,MS_LOCATION.RACKCOLUMN   AS RACKCOLUMN
+	          ,NVL(SUM(ST_STOCK.QTY),0) AS QTY
+	          ,CASE
+	               WHEN NVL(SUM(ST_STOCK.QTY),0) = 0 AND MS_LOCATION.CAPA_LOCTYPE != 'KEEP' THEN '1'
+	               WHEN NVL(SUM(ST_STOCK.QTY),0) = 0 AND MS_LOCATION.CAPA_LOCTYPE  = 'KEEP' <!-- AND KP_DAILYLOACTION.STATUS = '0' --> THEN 'K0'              /*빈보관렉*/
+	               WHEN NVL(SUM(ST_STOCK.QTY),0) = 0 AND MS_LOCATION.CAPA_LOCTYPE  = 'KEEP' <!-- AND NVL(KP_DAILYLOACTION.STATUS, '1') != '0' --> THEN 'K1'   /*가용보관렉*/
+	               WHEN MAX(ST_STOCK.STATUS) = '2' THEN 'G'
+	               WHEN MAX(ST_STOCK.STATUS) = '3' THEN 'B'
+	               WHEN MAX(ST_STOCK.STATUS) = '4' THEN 'R'
+	               ELSE '1'
+	           END AS STATUS
+	          ,MAX(MS_LOCATION.DESCRIPTION) AS LOC_DESCRIPTION
+	      FROM MS_LOCATION
+     LEFT JOIN ( 
+				 <include refid="ST_STOCK_REF"/>
+			   ) ST_STOCK
+	        ON ST_STOCK.DCCODE     = MS_LOCATION.DCCODE
+	       AND ST_STOCK.LOC        = MS_LOCATION.LOC
+	     WHERE MS_LOCATION.DCCODE  = #{fixdccode}
+		   AND MS_LOCATION.DEL_YN  = 'N'
+		   AND MS_LOCATION.CAPA_YN = 'Y'
+	    <if test="zone != null and zone != ''">
+			AND    MS_LOCATION.ZONE    	= #{zone}
+		</if>
+	    <if test="rack != null and rack != ''">
+	    	AND    MS_LOCATION.RACK    	= #{rack}
+	    </if>
+    
+	<where>
+	    <if test="status == 'W'">
+	        AND NVL(ST_STOCK.QTY, 0) = 0
+	    </if>
+	    <if test="status == 'G'">
+	        AND ST_STOCK.STATUS = '2'
+	    </if>
+	    <if test="status == 'B'">
+	        AND ST_STOCK.STATUS = '3'
+	    </if>
+	    <if test="status == 'R'">
+	        AND ST_STOCK.STATUS = '4'
+	    </if>
+	</where>
+
+    GROUP BY MS_LOCATION.DCCODE
+            ,MS_LOCATION.ZONE
+            ,MS_LOCATION.LOC
+            ,MS_LOCATION.RACK
+            ,MS_LOCATION.RACKLINE
+            ,MS_LOCATION.RACKCOLUMN
+            ,MS_LOCATION.CAPA_LOCTYPE
+            <!-- ,KP_DAILYLOACTION.STATUS -->
+  </select>
+  
+  <sql id="ST_STOCK_REF">
+    SELECT DCCODE,
+           LOC,
+           MAX(FN_DURATIONCHECK(CM_LOT.LOTTABLE01, MS_SKU.DURATION, MS_SKU.DURATIONTYPE)) AS STATUS,
+           SUM(ST_STOCK.QTY) AS QTY
+      FROM ST_STOCK
+      JOIN MS_SKU
+        ON MS_SKU.STORERKEY = ST_STOCK.STORERKEY
+       AND MS_SKU.SKU       = ST_STOCK.SKU
+       AND MS_SKU.DEL_YN    = 'N'
+      LEFT JOIN CM_LOT
+        ON CM_LOT.STORERKEY = ST_STOCK.STORERKEY
+       AND CM_LOT.LOT       = ST_STOCK.LOT
+     WHERE ST_STOCK.DCCODE = #{fixdccode}
+       <!-- START.권한센터 -->
+       AND EXISTS (SELECT 1
+                     FROM CM_USER_AUTHORITY 
+                    WHERE CM_USER_AUTHORITY.DCCODE    = ST_STOCK.DCCODE    
+                      AND CM_USER_AUTHORITY.STORERKEY = ST_STOCK.STORERKEY 
+                      AND CM_USER_AUTHORITY.ORGANIZE  = ST_STOCK.ORGANIZE  
+                      AND CM_USER_AUTHORITY.AREA      = ST_STOCK.AREA  
+                      AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey}
+                      AND CM_USER_AUTHORITY.USERID    = #{gUserId}
+       	             AND CM_USER_AUTHORITY.DCCODE     = #{fixdccode}
+                      AND CM_USER_AUTHORITY.AREA      = #{gArea}   
+       	           <!-- 창고.다중검색 -->
+       	           <if test="organizeMulti != null and organizeMulti != ''">
+       		           AND CM_USER_AUTHORITY.ORGANIZE IN
+       		           <foreach collection="gOrganizeMulti" item="code" open="(" close=")" separator=",">
+       		             #{code}
+       		           </foreach>
+       	           </if>                       
+                  )
+       <!-- END.권한센터	--> 	     
+       AND ST_STOCK.LOC IN (
+             SELECT MS_LOCATION.LOC
+               FROM MS_LOCATION
+              WHERE MS_LOCATION.DEL_YN = 'N'
+              <if test="rack != null and rack != ''">
+                AND MS_LOCATION.RACK = #{rack}
+              </if>
+              <if test="zone != null and zone != ''">
+                AND MS_LOCATION.ZONE = #{zone}
+              </if>
+           )
+     <if test="storagetype != null and storagetype != ''">
+       AND MS_SKU.STORAGETYPE = #{storagetype}
+     </if>
+    GROUP BY DCCODE, LOC
+</sql>
+  
+  
+  
+  <!-- 렉별 상세탭 - CAPA 상세 조회 조회(하단 그리드) -->
+  <select id="getDetailRead" resultType="cjfw.wms.kp.dto.KpLocationCapaMonitoringNewResDto">
+     SELECT /* [KpLocationCapaMonitoringNewService.sqlx][KpLocationCapaMonitoringNewService.getDetailRead][CAPA Detail조회][ParkJongYeon][2025.11.17] */
+           ST_STOCK.DCCODE           AS DCCODE
+          ,ST_STOCK.STORERKEY        AS STORERKEY
+          ,ST_STOCK.ORGANIZE         AS ORGANIZE
+          ,ST_STOCK.AREA             AS AREA
+          ,FN_DESCR_AREA(ST_STOCK.STORERKEY, ST_STOCK.AREA) AS AREANAME
+          ,ST_STOCK.SKU              AS SKU
+          ,MS_SKU.DESCRIPTION        AS DESCRIPTION
+          ,MS_SKU.STYLECODE          AS STYLECODE
+          ,MS_SKU.COLORCODE          AS COLORCODE
+          ,MS_SKU.SIZECODE           AS SIZECODE
+          ,MS_SKU.SKUGROUP           AS SKUGROUP
+          ,MS_SKU.BARCODE1           AS BARCODE1
+          ,MS_SKU.BARCODE2           AS BARCODE2
+          ,MS_SKU.BARCODE3           AS BARCODE3
+          ,ST_STOCK.UOM              AS UOM
+          ,ST_STOCK.LOC              AS LOC
+          ,ST_STOCK.LOT              AS LOT
+          ,CM_LOT.LOTTABLE01         AS LOTTABLE01
+          ,CM_LOT.LOTTABLE02         AS LOTTABLE02
+          ,CM_LOT.LOTTABLE03         AS LOTTABLE03
+          ,CM_LOT.LOTTABLE04         AS LOTTABLE04
+          ,CM_LOT.LOTTABLE05         AS LOTTABLE05
+          ,ST_STOCK.STOCKID          AS STOCKID
+          ,NVL(CD2.BASEDESCR,ST_STOCK.STOCKGRADE) AS STOCKGRADE   /*재고등급*/ 
+          ,ST_STOCK.QTY              AS QTY
+          ,ST_STOCK.QTYALLOCATED     AS QTYALLOCATED
+          ,ST_STOCK.QTYPICKED        AS QTYPICKED
+          ,ST_STOCK.OPENQTY          AS OPENQTY
+          ,DECODE(FN_DURATIONCHECK(CM_LOT.LOTTABLE01,MS_SKU.DURATION,MS_SKU.DURATIONTYPE),'2','G','3','B','4','R','W') AS STATUS
+      FROM ST_STOCK
+      JOIN MS_SKU
+        ON MS_SKU.STORERKEY = ST_STOCK.STORERKEY
+       AND MS_SKU.SKU       = ST_STOCK.SKU
+       AND MS_SKU.DEL_YN    = 'N'
+      JOIN CM_LOT           
+        ON CM_LOT.STORERKEY = ST_STOCK.STORERKEY
+       AND CM_LOT.LOT       = ST_STOCK.LOT     
+     <if test="lot != null and lot != ''">
+     	AND    CM_LOT.LOT        =  #{lot}
+     </if>
+     <if test="lottable01 != null and lottable01 != ''">
+     	AND    CM_LOT.LOTTABLE01 =  #{lottable01}
+     </if>
+     <if test="lottable02 != null and lottable02 != ''">
+     	AND    CM_LOT.LOTTABLE02 =  #{lottable02}         
+     </if>
+     <if test="lottable03 != null and lottable03 != ''">
+     	AND    CM_LOT.LOTTABLE03 =  #{lottable03}         
+     </if>
+     <if test="lottable04 != null and lottable04 != ''">
+     	AND    CM_LOT.LOTTABLE04 =  #{lottable04}          
+     </if>
+     <if test="lottable05 != null and lottable05 != ''"> 
+     	AND    CM_LOT.LOTTABLE05 =  #{lottable05}          
+     </if>     
+      AND CM_LOT.DEL_YN      = 'N'
+     JOIN MS_LOCATION        
+       ON MS_LOCATION.DCCODE = ST_STOCK.DCCODE
+      AND MS_LOCATION.LOC    = ST_STOCK.LOC
+	  AND MS_LOCATION.DEL_YN = 'N'	 
+LEFT JOIN CM_CODE CD2 ON CD2.STORERKEY = 'STD' AND CD2.CODELIST = 'STOCKGRADE'  AND CD2.BASECODE = ST_STOCK.STOCKGRADE AND CD2.DEL_YN = 'N' /*재고등급*/      
+	WHERE ST_STOCK.DCCODE = #{fixdccode}
+     <if test="fromzone != null and fromzone != ''">
+     	AND    MS_LOCATION.ZONE &gt;=  #{fromzone}
+	 </if>	
+     <if test="tozone != null and tozone != ''">
+     	AND    MS_LOCATION.ZONE &lt;=  #{tozone}||'9'
+     </if>    	
+    <!-- START.권한센터 -->
+    AND EXISTS (SELECT 1
+                  FROM CM_USER_AUTHORITY 
+                 WHERE CM_USER_AUTHORITY.DCCODE    = ST_STOCK.DCCODE    
+                   AND CM_USER_AUTHORITY.STORERKEY = ST_STOCK.STORERKEY 
+                   AND CM_USER_AUTHORITY.ORGANIZE  = ST_STOCK.ORGANIZE  
+                   AND CM_USER_AUTHORITY.AREA      = ST_STOCK.AREA  
+                   AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey}
+                   AND CM_USER_AUTHORITY.USERID    = #{gUserId}
+    	           AND CM_USER_AUTHORITY.DCCODE    = #{fixdccode}
+                   AND CM_USER_AUTHORITY.AREA      = #{gArea}   
+    	           <!-- 창고.다중검색 -->
+    	           <if test="organizeMulti != null and organizeMulti != ''">
+    		           AND CM_USER_AUTHORITY.ORGANIZE IN
+    		           <foreach collection="gOrganizeMulti" item="code" open="(" close=")" separator=",">
+    		             #{code}
+    		           </foreach>
+    	           </if>                       
+               )
+    <!-- END.권한센터	--> 	
+     	AND    ST_STOCK.LOC		    =  #{loc}          
+     <if test="stockid != null and stockid != ''">    
+     	AND    CM_LOT.LOTTABLE04 	=  #{stockid}      
+     </if>
+     <if test="stockgrade != null and stockgrade != ''"> 
+     	AND    CM_LOT.LOTTABLE05 	=  #{stockgrade}   
+     </if>
+     <if test="storagetype != null and storagetype != ''">
+    	AND    MS_SKU.STORAGETYPE   =  #{storagetype}
+     </if>
+     ORDER BY ST_STOCK.LOC
+             ,ST_STOCK.STORERKEY
+             ,ST_STOCK.SKU
+	</select>	  
+
+ 
+
+	<!-- 센터capa현황(new) Tab2 - 렉별 상세 재고상태, 갯수 조회(TO-BE: 유통기한임박, 빈로케이션, 보관로케이션) -->
+	<select id="getDataStatusCount" resultType="HMap">
+	    SELECT /*[KpLocationCapaMonitoringNewService.sqlx][KpLocationCapaMonitoringNewService.getDataStatusCount][센터 Capa현황(New) - 잔여, 전체 CAPA 조회][여승철][2025.11.17] */
+	           RCD_A.DCCODE               AS DCCODE
+	         , SUM(RCD_A.RACK_EMPTY     ) AS B          -- RACK_EMPTY       (빈로케이션)
+	         , SUM(RCD_A.RACK_IMMINENT  ) AS W          -- RACK_IMMINENT    (유통기한임박)
+	         , SUM(RCD_A.RACK_EXSIT     ) AS K          -- RACK_EXSIT       (보관로케이션)
+	      FROM
+	        (
+	            SELECT RCD_A.*
+	                 , CASE WHEN NVL(RCD_A.QTY,0) = 0           THEN 1 ELSE 0 END AS RACK_EMPTY
+	                 , CASE WHEN RCD_A.STATUS = 'R'             
+	                             AND NVL(RCD_A.QTY,0) > 0       THEN 1 ELSE 0 END AS RACK_IMMINENT
+	                 , CASE WHEN NVL(RCD_A.STATUS,'-') != 'R'
+	                             AND NVL(RCD_A.QTY,0) > 0       THEN 1 ELSE 0 END AS RACK_EXSIT
+	              FROM
+	                (
+	                    SELECT MS_LOCATION.DCCODE       AS DCCODE
+	                          ,MS_LOCATION.ZONE         AS ZONE
+	                          ,MS_LOCATION.LOC          AS LOC
+	                          ,MS_LOCATION.RACK         AS RACK
+	                          ,MS_LOCATION.RACKLINE     AS RACKLINE
+	                          ,MS_LOCATION.RACKCOLUMN   AS RACKCOLUMN
+	                          ,NVL(SUM(ST_STOCK.QTY),0) AS QTY
+	                          ,CASE WHEN NVL(SUM(ST_STOCK.QTY),0) = 0 AND MS_LOCATION.CAPA_LOCTYPE != 'KEEP'  THEN '1'
+	                                WHEN NVL(SUM(ST_STOCK.QTY),0) = 0 AND MS_LOCATION.CAPA_LOCTYPE  = 'KEEP'  THEN 'K0' /*빈보관렉*/
+	                                WHEN NVL(SUM(ST_STOCK.QTY),0) = 0 AND MS_LOCATION.CAPA_LOCTYPE  = 'KEEP'  THEN 'K1' /*가용보관렉*/
+	                                WHEN MAX(ST_STOCK.STATUS) = '2' THEN 'G'
+	                                WHEN MAX(ST_STOCK.STATUS) = '3' THEN 'B'
+	                                WHEN MAX(ST_STOCK.STATUS) = '4' THEN 'R'
+	                                ELSE '1'
+	                           END AS STATUS
+	                     FROM MS_LOCATION
+                         LEFT JOIN ( 
+	                    			 <include refid="ST_STOCK_REF"/>
+	                    		   ) ST_STOCK
+	                            ON ST_STOCK.DCCODE     = MS_LOCATION.DCCODE
+	                           AND ST_STOCK.LOC        = MS_LOCATION.LOC
+	                         WHERE MS_LOCATION.DCCODE  = #{fixdccode}
+	                    	   AND MS_LOCATION.DEL_YN  = 'N'
+	                    	   AND MS_LOCATION.CAPA_YN = 'Y'
+	                        <if test="zone != null and zone != ''">
+	                    		AND    MS_LOCATION.ZONE    	= #{zone}
+	                    	</if>
+	                        <if test="rack != null and rack != ''">
+	                        	AND    MS_LOCATION.RACK    	= #{rack}
+	                        </if>     
+	                               
+	                    GROUP BY MS_LOCATION.DCCODE
+	                            ,MS_LOCATION.ZONE
+	                            ,MS_LOCATION.LOC
+	                            ,MS_LOCATION.RACK
+	                            ,MS_LOCATION.RACKLINE
+	                            ,MS_LOCATION.RACKCOLUMN
+	                            ,MS_LOCATION.CAPA_LOCTYPE
+	                    ORDER BY RACK, RACKLINE, RACKCOLUMN
+	                ) RCD_A
+	             ORDER BY RCD_A.RACK, RCD_A.RACKLINE, RCD_A.RACKCOLUMN
+	        )       RCD_A
+	     GROUP BY RCD_A.DCCODE
+  </select>
+
+
+	<!-- 센터capa현황(new) Tab2 - 렉별 잔여Capa, 전체Capa 조회 -->
+	<select id="getDataTotalCount" resultType="cjfw.wms.kp.dto.KpLocationCapaMonitoringNewResDto">
+    	SELECT /* [KpLocationCapaMonitoringNewService.sqlx][KpLocationCapaMonitoringNewService.getDataTotalCount][센터 Capa현황(New) - 잔여, 전체 CAPA 조회][여승철][2025.11.17] */
+                COUNT(ST_STOCK.LOC)                                AS TOT_LOC
+               ,SUM(CASE WHEN ST_STOCK.QTY = 0 THEN 1 ELSE 0 END)  AS EMP_LOC
+		FROM (
+			   SELECT MS_LOCATION.LOC   			AS LOC
+		             ,SUM(NVL(ST_STOCK.QTY, 0)) 	AS QTY
+		         FROM MS_LOCATION
+		    LEFT JOIN (
+		    			<include refid="ST_STOCK_REF"/>
+		              ) ST_STOCK
+		          ON MS_LOCATION.DCCODE = ST_STOCK.DCCODE    
+		         AND MS_LOCATION.LOC    = ST_STOCK.LOC
+	           WHERE MS_LOCATION.DCCODE  = #{fixdccode}
+		         AND MS_LOCATION.DEL_YN  = 'N'
+		         AND MS_LOCATION.CAPA_YN = 'Y'	
+			     <if test="zone != null and zone != ''">
+				 	AND    MS_LOCATION.ZONE    	= #{zone}
+				 </if>
+			     <if test="rack != null and rack != ''">
+			     	AND    MS_LOCATION.RACK    	= #{rack}
+			     </if>		         	         
+			GROUP BY MS_LOCATION.LOC
+		) ST_STOCK
+  </select>
+
+  <insert id="saveData">
+    /* [KpLocationCapaMonitoringNewService.sqlx][KpLocationCapaMonitoringNewService.saveData][센터별Capa 렉별현황 보관렉 수정][여승철][2025.11.17] */
+    MERGE INTO KP_DAILYLOACTION
+    USING DUAL ON (DCCODE = #{DCCODE}
+        AND SLIPDT = TO_CHAR(SYSDATE+(24-DECODE(FN_CODEDESCR('FW00','PDA_KPSCAN_YN', #{DCCODE}), #{DCCODE}, '24', FN_CODEDESCR('FW00','PDA_KPSCAN_YN', #{DCCODE})))/24, 'YYYYMMDD')
+        AND LOC = #{LOC})
+
+    WHEN MATCHED THEN
+    UPDATE SET STATUS = DECODE(#{STATUS},'K0','0','K1','1',NULL),
+               EDITWHO = #{gUserId},
+               EDITDATE = SYSDATE
+
+    WHEN NOT MATCHED THEN
+    INSERT (SERIALKEY
+           ,DCCODE
+           ,SLIPDT
+           ,LOC
+           ,STATUS
+           ,DEL_YN
+           ,ADDWHO
+           ,EDITWHO
+           ,ADDDATE
+           ,EDITDATE )
+    VALUES (SEQ_KP_DAILYLOACTION.Nextval
+           ,#{DCCODE}
+           ,TO_CHAR(SYSDATE+(24-DECODE(FN_CODEDESCR('FW00','PDA_KPSCAN_YN', #{DCCODE}), #{DCCODE}, '24', FN_CODEDESCR('FW00','PDA_KPSCAN_YN', #{DCCODE})))/24, 'YYYYMMDD')
+           ,#{LOC}
+           ,DECODE(#{STATUS},'K0','0','K1','1',NULL)
+           ,'N'
+           ,#{gUserId}
+           ,#{gUserId}
+           ,SYSDATE
+           ,SYSDATE)
+  </insert>
+
+  <insert id="uploadData">
+    /* [KpLocationCapaMonitoringNewService.sqlx][KpLocationCapaMonitoringNewService.uploadData][센터별Capa 렉별현황 보관렉 정보 엑셀 업로드][여승철][2025.11.17] */
+    MERGE INTO KP_DAILYLOACTION
+    USING DUAL ON (DCCODE = #{DCCODE}
+        AND SLIPDT = TO_CHAR(SYSDATE+(24-DECODE(FN_CODEDESCR('FW00','PDA_KPSCAN_YN', #{DCCODE}), #{DCCODE}, '24', FN_CODEDESCR('FW00','PDA_KPSCAN_YN', #{DCCODE})))/24, 'YYYYMMDD')
+        AND LOC = #{LOC})
+
+    WHEN MATCHED THEN
+    UPDATE SET STATUS = DECODE(#{STATUS},'K0','0','K1','1',NVL(#{STATUS},1)),
+               EDITWHO = #{gUserId},
+               EDITDATE = SYSDATE
+
+    WHEN NOT MATCHED THEN
+    INSERT (SERIALKEY
+           ,DCCODE
+           ,SLIPDT
+           ,LOC
+           ,STATUS
+           ,DEL_YN
+           ,ADDWHO
+           ,EDITWHO
+           ,ADDDATE
+           ,EDITDATE )
+    VALUES (SEQ_KP_DAILYLOACTION.Nextval
+           ,#{DCCODE}
+           ,TO_CHAR(SYSDATE+(24-DECODE(FN_CODEDESCR('FW00','PDA_KPSCAN_YN', #{DCCODE}), #{DCCODE}, '24', FN_CODEDESCR('FW00','PDA_KPSCAN_YN', #{DCCODE})))/24, 'YYYYMMDD')
+           ,#{LOC}
+           ,DECODE(#{STATUS},'K0','0','K1','1',NVL(#{STATUS},1))
+           ,'N'
+           ,#{gUserId}
+           ,#{gUserId}
+           ,SYSDATE
+           ,SYSDATE)
+  </insert>
+</mapper>

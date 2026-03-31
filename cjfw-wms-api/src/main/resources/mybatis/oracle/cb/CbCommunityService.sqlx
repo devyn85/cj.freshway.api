@@ -1,0 +1,181 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cbCommunityService">
+
+	<select id="getCommunityBoardList" resultType="CbCommunityResDto">
+            WITH RES AS (
+		        SELECT A.*, D.DCNAME
+		        FROM CB_COMMUNITY_BOARD A
+		        JOIN CM_DC D
+		            ON D.DCCODE = A.BRDUSRDCCODE
+		        WHERE A.DEL_YN = 'N'
+		          AND A.BRDDOCDIVCD = #{brdDocDivCd}
+		          <if test="brdTit != null and brdTit != ''">
+		            AND A.BRDTIT LIKE '%' || #{brdTit} || '%'
+		          </if>
+		          <if test="brdCntt != null and brdCntt != ''">
+		            AND A.BRDCNTT LIKE '%' || #{brdCntt} || '%'
+		          </if>
+		          AND A.BRDEXPRDT <![CDATA[>=]]> TO_CHAR(SYSDATE, 'YYYYMMDD')
+		          AND A.RCVUSRID IN ('STD', #{gUserId})
+		          AND EXISTS (
+		            SELECT 'A'
+		            FROM CM_USER_AUTHORITY U
+		            WHERE U.USERID = #{gUserId}
+		              AND A.RCVDCCODE IN ('STD', U.DCCODE)
+		              AND A.RCVSTORERKEY IN ('STD', U.STORERKEY)
+		              AND A.RCVORGANIZE IN ('STD', U.ORGANIZE)
+		              AND A.RCVAREA IN ('STD', U.AREA)
+		          )
+		    )
+		    SELECT BOARD.*
+		    FROM (
+		        SELECT
+		            R.SERIALKEY AS SERIALKEY,
+		            R.BRDNUM AS BRDNUM,
+		            0 AS SEQNUM,
+		            R.BRDTIT AS BRDTIT,
+		            R.BRDUSRID AS BRDUSRID,
+		            R.BRDUSRDCCODE AS BRDUSRDCCODE,
+		            R.DCNAME AS BRDUSRDCNAME,
+		            R.BRDREGDT AS BRDREGDT,
+		            R.QRYFRQ AS QRYFRQ
+		        FROM RES R
+		        UNION ALL
+		        SELECT
+		            B.SERIALKEY AS SERIALKEY,
+		            B.BRDNUM AS BRDNUM,
+		            B.SEQNUM AS SEQNUM,
+		            '    [RE] ' || B.BRDTIT AS BRDTIT,
+		            B.BRDUSRID AS BRDUSRID,
+		            B.BRDUSRDCCODE AS BRDUSRDCCODE,
+		            D.DCNAME AS BRDUSRDCNAME,
+		            B.BRDREGDT AS BRDREGDT,
+		            B.QRYFRQ AS QRYFRQ
+		        FROM CB_COMMUNITY_BOARD_REPLY B
+		        JOIN RES R ON R.BRDNUM = B.BRDNUM
+		        JOIN CM_DC D ON D.DCCODE = B.BRDUSRDCCODE
+		        WHERE B.DEL_YN = 'N'
+		    ) BOARD
+    </select>
+    
+    <select id="getCommunityBoardDetail" resultType="CbCommunityDetailResDto">
+        SELECT /* [CbCommunityService.sqlx][cbCommunityService.getCommunityBoardDetail][게시판 정보 조회 (단건)][JiSooKim] */
+               A.SERIALKEY                     AS SERIALKEY
+              ,A.BRDNUM                        AS BRDNUM         /* 게시판번호 */
+              ,A.BRDUSRDCCODE                  AS BRDUSRDCCODE   /* 게시자센터코드 */
+              ,D.DCNAME                        AS BRDUSRDCNAME   /* 게시센터명 */
+              ,A.BRDUSRID                      AS BRDUSRID       /* 게시자ID */
+              ,U.USER_NM                       AS BRDUSRNAME     /* 게시자명 */
+              ,A.BRDREGDT                      AS BRDREGDT       /* 게시판등록일자 */
+              ,A.BRDSTDT                       AS BRDSTDT        /* 게시시작일자 */
+              ,A.BRDEXPRDT                     AS BRDEXPRDT      /* 게시종료일자 */
+              ,A.BRDDOCDIVCD                   AS BRDDOCDIVCD    /* 게시문서구분코드 */
+              ,A.BRDDOCKNDCD                   AS BRDDOCKNDCD    /* 게시문서종류코드 */
+              ,A.BRDTIT                        AS BRDTIT         /* 게시판제목 */
+              ,A.BRDCNTT                       AS BRDCNTT        /* 게시판내용 */
+              ,A.ARRORD                        AS ARRORD         /* 정렬순서 */
+              ,A.QRYFRQ                        AS QRYFRQ         /* 조회횟수 */
+              ,A.DEL_YN                        AS DEL_YN         /* 삭제여부 */
+              ,TO_CHAR(A.ADDDATE, 'yyyymmddhh24miss')  AS ADDDATE  /* 최초등록시간 */
+              ,TO_CHAR(A.EDITDATE, 'yyyymmddhh24miss') AS EDITDATE /* 최종변경시간 */
+              ,A.ADDWHO                        AS ADDWHO         /* 최초등록자 */
+              ,U.USER_NM                       AS ADDWHONAME     /* 최초등록자명 */
+              ,A.EDITWHO                       AS EDITWHO        /* 최종변경자 */
+        FROM   CB_COMMUNITY_BOARD A
+        JOIN   CM_DC D
+            ON D.DCCODE = A.BRDUSRDCCODE
+        JOIN   FRAMEONE_USER U
+            ON U.USER_ID = A.ADDWHO
+        WHERE  1=1
+        AND    A.BRDNUM           = #{brdNum}
+        AND    A.DEL_YN           = 'N'
+    </select>
+    
+
+	<update id="updateReadCount" >
+	    UPDATE CB_COMMUNITY_BOARD
+	    SET QRYFRQ = NVL(QRYFRQ, 0) + 1
+	    WHERE BRDNUM = #{brdNum}
+	</update>
+
+    
+    <select id="getBoardKey" resultType="string">
+    	SELECT /* [CbCommunityService.sqlx][cbCommunityService.getBoardKey][게시판 KEY 조회][JiSooKim] */
+               NVL(
+                   (SELECT /*+INDEX_DESC(A PK_CB_COMMUNITY_BOARD)*/ MAX(BRDNUM)+1 SS FROM CB_COMMUNITY_BOARD A 
+                   WHERE A.BRDNUM LIKE TO_CHAR(SYSDATE , 'YYYYMMDD') || '%' )
+                   , TO_CHAR(SYSDATE,'YYYYMMDD')|| '00001') AS BRDNUM
+         FROM DUAL		
+    </select>
+    
+    
+	<insert id="insertBoard">
+	    INSERT INTO CB_COMMUNITY_BOARD
+	      (SERIALKEY,
+	       BRDNUM,
+	       BRDUSRDCCODE,
+	       BRDUSRID,
+	       BRDREGDT,
+	       BRDSTDT,
+	       BRDEXPRDT,
+	       BRDDOCDIVCD,
+	       BRDDOCKNDCD,
+	       BRDTIT,
+	       BRDCNTT,
+	       ARRORD,
+	       QRYFRQ,
+	       USEYN,
+	       DEL_YN,
+	       ADDDATE,
+	       EDITDATE,
+	       ADDWHO,
+	       EDITWHO)
+	    VALUES
+	      (
+	        SEQ_CB_COMMUNITY_BOARD.NEXTVAL,
+	        #{brdNum},
+	        #{brdUsrDcCode},
+        	#{brdUsrId},
+	        TO_CHAR(SYSDATE, 'YYYYMMDD'),
+	        #{brdStDt},
+	        #{brdExprDt},
+	        #{brdDocDivCd},
+	        #{brdDocKndCd},
+	        #{brdTit},
+	        #{brdCntt},
+	        #{arrOrd},
+	        0,
+	        'Y',
+	        'N',
+	        SYSDATE,
+	        SYSDATE,
+	        #{addWho},
+        	#{editWho}
+	      )
+	</insert>
+    
+	<update id="updateBoard">
+	    UPDATE CB_COMMUNITY_BOARD
+	    SET BRDUSRDCCODE = #{brdUsrDcCode},
+	        BRDUSRID     = #{brdUsrId},
+	        BRDSTDT      = #{brdStDt},
+	        BRDEXPRDT    = #{brdExprDt},
+	        BRDTIT       = #{brdTit},
+	        BRDCNTT      = #{brdCntt},
+	        EDITDATE     = SYSDATE,
+	        EDITWHO      = #{editWho}
+	    WHERE SERIALKEY = #{serialKey}
+	</update>
+    
+	<update id="deleteBoard">
+	    UPDATE CB_COMMUNITY_BOARD
+	    SET DEL_YN   = 'Y',
+	        EDITDATE = SYSDATE,
+	        EDITWHO  = #{editWho}
+	    WHERE SERIALKEY = #{serialKey}
+	</update>
+    
+
+    
+</mapper>

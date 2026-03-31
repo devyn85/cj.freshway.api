@@ -1,0 +1,2170 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="wdAllocationBatchGroupService">
+
+
+	<select id="getTab1MasterList" resultType="WdAllocationBatchGroupResTab1Dto">
+	   WITH T_RESULT AS ( /* [WdAllocationBatchGroupService.sqlx][getTab1MasterList][출고재고분배-자동분배 목록 조회][공두경][2025.07.08] */
+            SELECT 
+                   WD_INPLAN.SLIPDT    		      									AS SLIPDT          	/*작업지시일자*/
+                  ,NVL(MS_PICKBATCHGROUP.PLANT       ,DM_DOCUMENT_D.PLANT) 			AS PLANT			/*플랜트*/
+                  ,NVL(MS_PICKBATCHGROUP.STORAGETYPE ,MS_SKU.STORAGETYPE) 			AS STORAGETYPE		/*저장조건*/
+                  ,CASE WHEN NVL(MS_PICKBATCHGROUP.DEL_YN,'N') = 'Y' THEN ''
+                        ELSE NVL(MS_PICKBATCHGROUP.DISTANCETYPE,MS_CUSTDLVINFO.DISTANCETYPE) END 	AS DISTANCETYPE		/*원거리유형*/
+                  ,MS_PICKBATCHGROUP.BATCHGROUP  									AS CREATEKEY		/*생성키*/
+                  ,MAX(MS_PICKBATCHGROUP.DESCRIPTION)        						AS CREATEDESCR 		/*생성키명*/
+                  ,MS_SKU.SERIALYN                									AS SERIALYN			/*식별번호유무*/
+                  ,SUM(WD_INPLAN.ORDERQTY)                                          AS ORDERQTY         /*주문량*/
+                  ,SUM(WD_INPLAN.QTYALLOCATED)    									AS PROCESSQTY       /*분배량*/
+                  ,NVL(SUM(OM_SDY_REGN_REPL_D.MOVE_QTY),0)                          AS STOQTY           /*STO할당량*/
+                  ,SUM(WD_INPLAN.OPENQTY)-SUM(WD_INPLAN.QTYALLOCATED)    			AS PROCESSOPENQTY   /*미분배량*/
+                  ,WD_INPLAN.DCCODE       		  									AS DCCODE           /**/
+                  ,WD_INPLAN.STORERKEY    		  									AS STORERKEY        /**/
+                  ,MS_PICKBATCHGROUP.BATCHGROUP   									AS WAVEKEY          /* SY_PROCESSTEMP_WD.용 생성 배치키 */
+                  ,MS_PICKBATCHGROUP.BATCHGROUP   									AS BATCHGROUP       /**/
+                  ,SUM(WD_INPLAN.OPENQTY)      	  									AS OPENQTY          /**/
+                  ,SUM(WD_INPLAN.QTYPICKED )      									AS WORKQTY          /**/
+                  ,SUM(WD_INPLAN.INSPECTQTY)      									AS INSPECTQTY       /**/
+                  ,SUM(WD_INPLAN.CONFIRMQTY)      									AS CONFIRMQTY       /**/
+            FROM   DM_DOCUMENT_D
+            JOIN   DM_DOCUMENT_H
+            ON     DM_DOCUMENT_H.DCCODE            = DM_DOCUMENT_D.DCCODE
+            AND    DM_DOCUMENT_H.DOCTYPE           = DM_DOCUMENT_D.DOCTYPE
+            AND    DM_DOCUMENT_H.DOCNO             = DM_DOCUMENT_D.DOCNO
+            AND    DM_DOCUMENT_H.DELIVERYDATE      = DM_DOCUMENT_D.DELIVERYDATE
+            AND    DM_DOCUMENT_H.DEL_YN        = 'N'
+            <!-- 고객 다중선택 -->
+			<if test="toCustkeyMulti != null and toCustkeyMulti != '' ">
+		    	<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+		    		<foreach collection="toCustkeyMulti" item="item">
+		    			OR DM_DOCUMENT_H.TO_CUSTKEY IN
+		    			<foreach collection="item" item="code" open="(" close=")" separator=",">
+		    				#{code} 	 
+		          		</foreach>
+		        	</foreach>
+		      	</trim>			                                    
+            </if>
+            JOIN   WD_INPLAN
+            ON     WD_INPLAN.DCCODE            = DM_DOCUMENT_D.DCCODE
+            AND    WD_INPLAN.STORERKEY         = DM_DOCUMENT_D.STORERKEY
+            AND    WD_INPLAN.DOCTYPE           = DM_DOCUMENT_D.DOCTYPE
+            AND    WD_INPLAN.DOCNO             = DM_DOCUMENT_D.DOCNO
+            AND    WD_INPLAN.DOCLINE           = DM_DOCUMENT_D.DOCLINE
+            AND    WD_INPLAN.SLIPDT            = DM_DOCUMENT_D.DELIVERYDATE
+            AND    WD_INPLAN.DEL_YN            = 'N'
+            <if test="status != null and status != ''">	AND WD_INPLAN.STATUS =	#{status}		</if>
+            JOIN   MS_SKU
+            ON     MS_SKU.STORERKEY            = DM_DOCUMENT_D.STORERKEY
+            AND    MS_SKU.SKU                  = DM_DOCUMENT_D.SKU
+            <if test="storagetype != null and storagetype != ''">	AND MS_SKU.STORAGETYPE 	=	#{storagetype}		</if>
+            <if test="serialyn != null and serialyn != ''">			AND MS_SKU.SERIALYN 	=	#{serialyn}			</if>            
+            JOIN   MS_PLANT
+            ON     MS_PLANT.PLANT               = DM_DOCUMENT_D.PLANT
+            JOIN   MS_CUSTDLVINFO
+            ON     MS_CUSTDLVINFO.STORERKEY     = DM_DOCUMENT_H.STORERKEY
+            AND    MS_CUSTDLVINFO.CUSTTYPE      = DM_DOCUMENT_H.TO_CUSTTYPE
+            AND    MS_CUSTDLVINFO.DLVCUSTKEY    = DM_DOCUMENT_H.TO_CUSTKEY
+            AND    (MS_CUSTDLVINFO.DISTANCETYPE   != 'CAR' OR  MS_CUSTDLVINFO.DISTANCETYPE IS NULL)
+            LEFT JOIN   MS_PICKBATCHGROUP
+            ON     DM_DOCUMENT_D.DCCODE        = MS_PICKBATCHGROUP.DCCODE
+            AND    DM_DOCUMENT_D.PLANT         = MS_PICKBATCHGROUP.PLANT 
+            AND    MS_SKU.STORAGETYPE          = MS_PICKBATCHGROUP.STORAGETYPE
+            AND    MS_CUSTDLVINFO.DISTANCETYPE = MS_PICKBATCHGROUP.DISTANCETYPE
+            AND    (MS_PICKBATCHGROUP.DISTANCETYPE  != 'CAR' OR  MS_PICKBATCHGROUP.DISTANCETYPE IS NULL)
+            LEFT JOIN  (SELECT SOKEY, SOLINE, SUM(MOVE_QTY) AS MOVE_QTY
+                            FROM  OM_SDY_REGN_REPL_D
+                            GROUP BY SOKEY, SOLINE) OM_SDY_REGN_REPL_D
+            ON    OM_SDY_REGN_REPL_D.SOKEY     = DM_DOCUMENT_D.DOCNO
+            AND   OM_SDY_REGN_REPL_D.SOLINE    = DM_DOCUMENT_D.DOCLINE
+            <if test="zone != null and zone != ''">   
+                JOIN  ST_STOCK
+                ON    ST_STOCK.DCCODE    = DM_DOCUMENT_D.DCCODE
+                AND   ST_STOCK.STORERKEY = DM_DOCUMENT_D.STORERKEY
+                AND   ST_STOCK.SKU       = DM_DOCUMENT_D.SKU
+                AND   ST_STOCK.STOCKTYPE = 'GOOD'
+                AND   ST_STOCK.OPENQTY   <![CDATA[>]]>   0
+                JOIN  MS_LOCATION
+                ON    MS_LOCATION.DCCODE    = ST_STOCK.DCCODE
+                AND   MS_LOCATION.LOC       = ST_STOCK.LOC        
+                JOIN  MS_ZONE
+                ON    MS_ZONE.DCCODE        = MS_LOCATION.DCCODE
+                AND   MS_ZONE.ZONE          = MS_LOCATION.ZONE
+                AND   MS_ZONE.ZONE          = #{zone} 
+                AND   MS_ZONE.ZONE  NOT IN ('RETURN','ADJUST','CROSS')
+            </if> 
+            WHERE  DM_DOCUMENT_D.DCCODE        = #{fixdccode}
+            AND    DM_DOCUMENT_D.STORERKEY     = #{gStorerkey}
+            AND    DM_DOCUMENT_D.DOCTYPE       = 'WD'
+            AND    DM_DOCUMENT_D.CHANNEL       = '1'
+            AND    DM_DOCUMENT_D.DEL_YN        = 'N'
+            AND    DM_DOCUMENT_D.PROCPOSS_YN   <![CDATA[<>]]>  'R'
+            AND DM_DOCUMENT_D.DELIVERYDATE	<![CDATA[>=]]> 	#{fromSlipdt}
+			AND DM_DOCUMENT_D.DELIVERYDATE	<![CDATA[<=]]> 	#{toSlipdt}
+			<if test="workprocesscode != null and workprocesscode != ''">	AND DM_DOCUMENT_D.WORKPROCESSCODE 	=	#{workprocesscode}		</if>
+			<if test="ordertype != null and ordertype != ''">				AND DM_DOCUMENT_D.ORDERTYPE 		=	#{ordertype}			</if>
+			<!-- 상품 다중선택 -->
+            <if test="sku != null and sku != '' ">
+                <if test="skuMulti != null and skuMulti.size() > 0">
+                    <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                        <foreach collection="skuMulti" item="item">
+                            OR DM_DOCUMENT_D.SKU IN
+                            <foreach collection="item" item="code" open="(" close=")" separator=",">
+                                #{code}      
+                            </foreach>
+                        </foreach>
+                    </trim>                                             
+                </if>
+            </if>
+            AND    DM_DOCUMENT_D.STATUS <![CDATA[<]]> '90'
+            <!-- START.권한센터 -->
+		    AND EXISTS (SELECT 1
+	                      FROM CM_USER_AUTHORITY 
+	                     WHERE CM_USER_AUTHORITY.DCCODE    = DM_DOCUMENT_D.DCCODE       
+	                       AND CM_USER_AUTHORITY.STORERKEY = DM_DOCUMENT_D.STORERKEY    
+	                       AND CM_USER_AUTHORITY.ORGANIZE  = DM_DOCUMENT_D.ORGANIZE     
+	                       AND CM_USER_AUTHORITY.AREA      = DM_DOCUMENT_D.AREA         
+	                       AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey}
+	                       AND CM_USER_AUTHORITY.USERID    = #{gUserId}
+	                       AND CM_USER_AUTHORITY.DCCODE    = #{fixdccode}
+	                       AND CM_USER_AUTHORITY.AREA      = #{gArea}   
+				           <!-- 창고.다중검색 -->
+				           <if test='gOrganizeMulti != null and gOrganizeMulti.length > 0'>
+					           AND CM_USER_AUTHORITY.ORGANIZE IN
+					           <foreach collection="gOrganizeMulti" item="code" open="(" close=")" separator=",">
+					             #{code}
+					           </foreach>
+				           </if>                       
+	                   )
+	        <if test="dailyDeadlineYn == 'Y'.toString()">           
+    	        <!-- 분배예외처리거래처에 등록된 거래처는 제외한다 -->           
+    	        AND NOT EXISTS (SELECT 1   
+    	                          FROM MS_ALLOC_EXCP_CUST
+    	                         WHERE MS_ALLOC_EXCP_CUST.DCCODE    = DM_DOCUMENT_H.DCCODE
+    	                           AND MS_ALLOC_EXCP_CUST.STORERKEY = DM_DOCUMENT_H.STORERKEY
+    	                           AND MS_ALLOC_EXCP_CUST.CUSTKEY   = DM_DOCUMENT_H.TO_CUSTKEY
+    	                           AND MS_ALLOC_EXCP_CUST.USE_YN    = 'Y'
+    	                       )           
+    	        <!-- 분배예외처리상품에 등록된 상품는 제외한다 -->           
+    	        AND NOT EXISTS (SELECT 1   
+    	                          FROM MS_ALLOC_EXCP_SKU
+    	                         WHERE MS_ALLOC_EXCP_SKU.DCCODE    = DM_DOCUMENT_D.DCCODE
+    	                           AND MS_ALLOC_EXCP_SKU.STORERKEY = DM_DOCUMENT_D.STORERKEY
+    	                           AND MS_ALLOC_EXCP_SKU.SKU       = DM_DOCUMENT_D.SKU
+    	                           AND MS_ALLOC_EXCP_SKU.USE_YN    = 'Y'
+    	                       )    
+	        </if>               
+		    <!-- END.권한센터	--> 		     
+            GROUP BY  WD_INPLAN.DCCODE    
+                     ,WD_INPLAN.STORERKEY 
+                     ,WD_INPLAN.SLIPDT
+                     ,DM_DOCUMENT_D.PLANT
+                     ,MS_SKU.STORAGETYPE
+                     ,MS_CUSTDLVINFO.DISTANCETYPE        
+                     ,MS_PICKBATCHGROUP.PLANT        
+                     ,MS_PICKBATCHGROUP.STORAGETYPE  
+                     ,MS_PICKBATCHGROUP.DISTANCETYPE 
+                     ,MS_PICKBATCHGROUP.BATCHGROUP  
+                     ,MS_PICKBATCHGROUP.DEL_YN
+                     ,MS_SKU.SERIALYN
+        )
+        SELECT T_RESULT.*
+              ,DECODE(TRIM(NVL(PLANT1.DESCRIPTION,'')),'',PLANT1.PLANT,TRIM(NVL(PLANT1.DESCRIPTION,''))) AS PLANTDESC
+              ,NVL(CD1.BASEDESCR,CD1.BASECODE) 	AS STORAGETYPEDESC
+        FROM  T_RESULT
+        LEFT JOIN CM_CODE_STORER CD1 ON (CD1.STORERKEY = T_RESULT.STORERKEY	AND CD1.CODELIST = 'STORAGETYPE' 	AND CD1.BASECODE  = T_RESULT.STORAGETYPE)
+        LEFT JOIN MS_PLANT PLANT1 	 ON PLANT1.PLANT = T_RESULT.PLANT
+        WHERE 1=1
+        ORDER BY  T_RESULT.DCCODE    
+                 ,T_RESULT.STORERKEY 
+                 ,T_RESULT.WAVEKEY 
+                 ,T_RESULT.CREATEKEY
+                 ,T_RESULT.PLANT
+                 ,T_RESULT.STORAGETYPE
+                 ,T_RESULT.DISTANCETYPE
+                 ,T_RESULT.CREATEDESCR    	
+    </select>
+    
+    <select id="getTab1CustList" resultType="WdAllocationBatchGroupResTab1CustDto">		
+		SELECT /* [WdAllocationBatchGroupService.sqlx][getTab1CustList][자동분배-거래처별 상세 조회][공두경][2025.07.08] */
+               DM_DOCUMENT_H.TO_CUSTKEY         			AS  TO_CUSTKEY          /*관리처코드*/
+              ,MAX(DM_DOCUMENT_H.TO_CUSTNAME)           	AS  TO_CUSTNAME         /*배송인도처명*/
+              ,MAX(NVL(CD1.BASEDESCR,CD1.BASECODE))			AS  ORDERTYPE_DESCR 	/*주문유형*/
+              ,SUM(DECODE(DM_DOCUMENT_D.OMS_FLAG,'N',1,0)) 	AS  OMS_FLAG			/*미마감건수*/
+              ,COUNT(DISTINCT WD_INPLAN.DOCNO )   			AS  SLIPCNT 			/*전표수*/
+              ,COUNT(DISTINCT WD_INPLAN.SKU   )   			AS  SKUCNT 				/*상품수*/
+              ,SUM(WD_INPLAN.ORDERQTY )           			AS  ORDERQTY 			/*주문량*/
+              ,SUM(WD_INPLAN.QTYALLOCATED )       			AS  PROCESSQTY          /*분배량*/
+              ,SUM(WD_INPLAN.QTYPICKED    )       			AS  WORKQTY             /*피킹량*/
+              ,SUM(WD_INPLAN.INSPECTQTY )         			AS  INSPECTQTY          /*상차스캔량*/
+              ,SUM(WD_INPLAN.CONFIRMQTY )         			AS  CONFIRMQTY          /*출고확정량*/
+              ,DM_DOCUMENT_D.WORKPROCESSCODE      			AS  WORKPROCESSCODE 	/*WORKPROCESSCODE*/
+              ,DM_DOCUMENT_H.DCCODE      					AS  DCCODE  			/**/    
+              ,DM_DOCUMENT_H.STORERKEY      				AS  STORERKEY   		/**/
+              ,DM_DOCUMENT_H.ORDERTYPE						AS  ORDERTYPE			/**/
+              ,MAX(WD_INPLAN.UOM)                 			AS  UOM                 /**/
+              ,SUM(WD_INPLAN.ORDERQTY )           			AS  ORDERQTY 			/**/
+              ,SUM(WD_INPLAN.OPENQTY )         	  			AS  OPENQTY             /**/
+              ,#{plant}                           			AS  PLANT        		/**/ 
+              ,#{storagetype}                     			AS  STORAGETYPE   		/**/
+              ,#{distancetype}                     			AS  DISTANCETYPE  		/**/
+              ,#{batchgroup}                      			AS  BATCHGROUP    		/**/
+              ,#{slipdt}                            		AS  SLIPDT     			/**/
+              ,MS_SKU.SERIALYN      						AS  SERIALYN			/**/
+        FROM   DM_DOCUMENT_D
+        JOIN   DM_DOCUMENT_H
+        ON     DM_DOCUMENT_H.DCCODE                     = DM_DOCUMENT_D.DCCODE
+        AND    DM_DOCUMENT_H.DOCTYPE                    = DM_DOCUMENT_D.DOCTYPE
+        AND    DM_DOCUMENT_H.DOCNO                      = DM_DOCUMENT_D.DOCNO
+        AND    DM_DOCUMENT_H.DELIVERYDATE               = DM_DOCUMENT_D.DELIVERYDATE
+        AND    DM_DOCUMENT_H.DEL_YN                     = 'N'
+        <!-- 고객 다중선택 -->
+		<if test="toCustkeyMulti != null and toCustkeyMulti != '' ">
+		    	<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+		    		<foreach collection="toCustkeyMulti" item="item">
+		    			OR DM_DOCUMENT_H.TO_CUSTKEY IN
+		    			<foreach collection="item" item="code" open="(" close=")" separator=",">
+		    				#{code} 	 
+		          		</foreach>
+		        	</foreach>
+		      	</trim>			                                    
+            </if>
+        JOIN   WD_INPLAN
+        ON     WD_INPLAN.DCCODE                         = DM_DOCUMENT_D.DCCODE
+        AND    WD_INPLAN.STORERKEY                      = DM_DOCUMENT_D.STORERKEY
+        AND    WD_INPLAN.ORGANIZE                       = DM_DOCUMENT_D.ORGANIZE
+        AND    WD_INPLAN.AREA                           = DM_DOCUMENT_D.AREA
+        AND    WD_INPLAN.DOCTYPE                        = DM_DOCUMENT_D.DOCTYPE        
+        AND    WD_INPLAN.DOCNO                          = DM_DOCUMENT_D.DOCNO
+        AND    WD_INPLAN.DOCLINE                        = DM_DOCUMENT_D.DOCLINE
+        AND    WD_INPLAN.SLIPDT                         = DM_DOCUMENT_D.DELIVERYDATE
+        AND    WD_INPLAN.DEL_YN                         = 'N'
+        JOIN   MS_SKU                                   
+        ON     MS_SKU.STORERKEY                         = DM_DOCUMENT_D.STORERKEY
+        AND    MS_SKU.SKU                               = DM_DOCUMENT_D.SKU
+        AND    MS_SKU.STORAGETYPE                       = #{storagetype}
+        AND    MS_SKU.DEL_YN                            = 'N'
+        <if test="serialyn != null and serialyn != ''">			AND MS_SKU.SERIALYN 	=	#{serialyn}			</if>
+        JOIN   MS_PLANT                                 
+        ON     MS_PLANT.PLANT                           = DM_DOCUMENT_D.PLANT
+        AND    MS_PLANT.PLANT                           = #{plant} 
+        JOIN   MS_CUSTDLVINFO                           
+        ON     MS_CUSTDLVINFO.STORERKEY                 = DM_DOCUMENT_H.STORERKEY
+        AND    MS_CUSTDLVINFO.CUSTTYPE                  = DM_DOCUMENT_H.TO_CUSTTYPE
+        AND    MS_CUSTDLVINFO.DLVCUSTKEY                = DM_DOCUMENT_H.TO_CUSTKEY
+        AND    MS_CUSTDLVINFO.DISTANCETYPE              = #{distancetype}
+        AND    (MS_CUSTDLVINFO.DISTANCETYPE   != 'CAR' OR  MS_CUSTDLVINFO.DISTANCETYPE IS NULL)
+        JOIN   MS_PICKBATCHGROUP
+        ON     MS_PICKBATCHGROUP.DCCODE                 = DM_DOCUMENT_D.DCCODE             
+        AND    MS_PICKBATCHGROUP.PLANT                  = DM_DOCUMENT_D.PLANT          
+        AND    MS_PICKBATCHGROUP.STORAGETYPE            = MS_SKU.STORAGETYPE           
+        AND    MS_PICKBATCHGROUP.DISTANCETYPE           = MS_CUSTDLVINFO.DISTANCETYPE  
+        AND    MS_PICKBATCHGROUP.BATCHGROUP             = #{batchgroup} 
+        AND    (MS_PICKBATCHGROUP.DISTANCETYPE  != 'CAR' OR  MS_PICKBATCHGROUP.DISTANCETYPE IS NULL)
+        <if test="zone != null and zone != ''">   
+            JOIN  ST_STOCK
+            ON    ST_STOCK.DCCODE    = DM_DOCUMENT_D.DCCODE
+            AND   ST_STOCK.STORERKEY = DM_DOCUMENT_D.STORERKEY
+            AND   ST_STOCK.SKU       = DM_DOCUMENT_D.SKU
+            AND   ST_STOCK.STOCKTYPE = 'GOOD'
+            AND   ST_STOCK.OPENQTY   <![CDATA[>]]>   0
+            JOIN  MS_LOCATION
+            ON    MS_LOCATION.DCCODE    = ST_STOCK.DCCODE
+            AND   MS_LOCATION.LOC       = ST_STOCK.LOC        
+            JOIN  MS_ZONE
+            ON    MS_ZONE.DCCODE        = MS_LOCATION.DCCODE
+            AND   MS_ZONE.ZONE          = MS_LOCATION.ZONE
+            AND   MS_ZONE.ZONE          = #{zone} 
+            AND   MS_ZONE.ZONE  NOT IN ('RETURN','ADJUST','CROSS')
+        </if> 
+        LEFT JOIN CM_CODE_STORER CD1 ON (CD1.STORERKEY = DM_DOCUMENT_H.STORERKEY	AND CD1.CODELIST = 'ORDERTYPE_WD' 	AND CD1.BASECODE  = DM_DOCUMENT_H.ORDERTYPE)
+        WHERE  DM_DOCUMENT_D.DCCODE                     = #{dccode}
+        AND    DM_DOCUMENT_D.STORERKEY                  = #{storerkey}
+        AND    DM_DOCUMENT_D.DOCTYPE                    = 'WD'
+        AND    DM_DOCUMENT_D.CHANNEL                    = '1'
+        AND    DM_DOCUMENT_D.PLANT                      = #{plant}
+        AND    DM_DOCUMENT_D.DEL_YN                     = 'N'
+        AND    DM_DOCUMENT_D.DELIVERYDATE               = #{slipdt}
+		AND    DM_DOCUMENT_D.STATUS                <![CDATA[<]]> '90'  
+		AND    DM_DOCUMENT_D.PROCPOSS_YN           <![CDATA[<>]]>  'R'
+		<!-- 상품 다중선택 -->
+        <if test="sku != null and sku != '' ">
+            <if test="skuMulti != null and skuMulti.size() > 0">
+                <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                    <foreach collection="skuMulti" item="item">
+                        OR DM_DOCUMENT_D.SKU IN
+                        <foreach collection="item" item="code" open="(" close=")" separator=",">
+                            #{code}      
+                        </foreach>
+                    </foreach>
+                </trim>                                             
+            </if>
+        </if>
+		<if test="dailyDeadlineYn == 'Y'.toString()">           
+            <!-- 분배예외처리거래처에 등록된 거래처는 제외한다 -->           
+            AND NOT EXISTS (SELECT 1   
+                              FROM MS_ALLOC_EXCP_CUST
+                             WHERE MS_ALLOC_EXCP_CUST.DCCODE    = DM_DOCUMENT_H.DCCODE
+                               AND MS_ALLOC_EXCP_CUST.STORERKEY = DM_DOCUMENT_H.STORERKEY
+                               AND MS_ALLOC_EXCP_CUST.CUSTKEY   = DM_DOCUMENT_H.TO_CUSTKEY
+                               AND MS_ALLOC_EXCP_CUST.USE_YN    = 'Y'
+                           )           
+            <!-- 분배예외처리상품에 등록된 상품는 제외한다 -->           
+            AND NOT EXISTS (SELECT 1   
+                              FROM MS_ALLOC_EXCP_SKU
+                             WHERE MS_ALLOC_EXCP_SKU.DCCODE    = DM_DOCUMENT_D.DCCODE
+                               AND MS_ALLOC_EXCP_SKU.STORERKEY = DM_DOCUMENT_D.STORERKEY
+                               AND MS_ALLOC_EXCP_SKU.SKU       = DM_DOCUMENT_D.SKU
+                               AND MS_ALLOC_EXCP_SKU.USE_YN    = 'Y'
+                           )    
+        </if>             
+		GROUP BY DM_DOCUMENT_H.DCCODE      
+                ,DM_DOCUMENT_H.TO_CUSTKEY         
+                ,DM_DOCUMENT_H.STORERKEY
+                ,DM_DOCUMENT_H.ORDERTYPE    
+                ,MS_SKU.SERIALYN 
+                ,DM_DOCUMENT_D.WORKPROCESSCODE 
+        ORDER BY CASE WHEN SUM(WD_INPLAN.OPENQTY ) <![CDATA[<>]]> SUM(WD_INPLAN.QTYALLOCATED ) THEN 1 ELSE 2 END      
+                ,DM_DOCUMENT_H.DCCODE 
+        		,DM_DOCUMENT_H.TO_CUSTKEY         
+                ,DM_DOCUMENT_H.STORERKEY
+                ,DM_DOCUMENT_H.ORDERTYPE      
+    </select>
+    
+    <select id="getTab1SlipList" resultType="WdAllocationBatchGroupResTab1SlipDto">		
+		SELECT /* [WdAllocationBatchGroupService.sqlx][getTab1SlipList][자동분배-전표별 상세 조회][공두경][2025.07.08] */
+               WD_INPLAN.SLIPNO								AS  SLIPNO  			/*전표번호*/
+              ,DM_DOCUMENT_H.TO_CUSTKEY         			AS  TO_CUSTKEY       	/*관리처코드*/   
+              ,MAX(DM_DOCUMENT_H.TO_CUSTNAME)           	AS  TO_CUSTNAME  		/*배송인도처명*/
+              ,MAX(NVL(CD1.BASEDESCR,CD1.BASECODE))			AS  ORDERTYPE_DESCR 	/*주문유형*/
+              ,SUM(DECODE(DM_DOCUMENT_D.OMS_FLAG,'N',1,0)) 	AS  OMS_FLAG			/*OMS미마감건수*/
+              ,SUM(WD_INPLAN.ORDERQTY )           			AS  ORDERQTY 			/*주문량*/
+              ,SUM(WD_INPLAN.QTYALLOCATED )       			AS  PROCESSQTY          /*분배량*/
+              ,SUM(WD_INPLAN.QTYPICKED    )       			AS  WORKQTY             /*피킹량*/
+              ,SUM(WD_INPLAN.INSPECTQTY )         			AS  INSPECTQTY          /*상차스캔량*/
+              ,SUM(WD_INPLAN.CONFIRMQTY )         			AS  CONFIRMQTY          /*출고확정량*/
+              ,DM_DOCUMENT_H.DCCODE      					AS  DCCODE  			/**/
+              ,DM_DOCUMENT_H.STORERKEY      				AS  STORERKEY   		/**/
+              ,DM_DOCUMENT_H.ORDERTYPE						AS  ORDERTYPE			/**/
+              ,MAX(WD_INPLAN.UOM)                 			AS  UOM          		/**/       
+              ,SUM(WD_INPLAN.OPENQTY )         	  			AS  OPENQTY             /**/
+              ,#{plant}                           			AS  PLANT        		/**/ 
+              ,#{storagetype}                     			AS  STORAGETYPE   		/**/
+              ,#{distancetype}                     			AS  DISTANCETYPE  		/**/
+              ,#{batchgroup}                      			AS  BATCHGROUP    		/**/
+              ,#{slipdt}                            		AS  SLIPDT     			/**/
+              ,MS_SKU.SERIALYN                    			AS SERIALYN   			/**/
+        FROM   DM_DOCUMENT_D
+        JOIN   DM_DOCUMENT_H
+        ON     DM_DOCUMENT_H.DCCODE                     = DM_DOCUMENT_D.DCCODE
+        AND    DM_DOCUMENT_H.DOCTYPE                    = DM_DOCUMENT_D.DOCTYPE
+        AND    DM_DOCUMENT_H.DOCNO                      = DM_DOCUMENT_D.DOCNO
+        AND    DM_DOCUMENT_H.DELIVERYDATE               = DM_DOCUMENT_D.DELIVERYDATE
+        AND    DM_DOCUMENT_H.DEL_YN                     = 'N'
+        <!-- 고객 다중선택 -->
+		<if test="toCustkeyMulti != null and toCustkeyMulti != '' ">
+	    	<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+	    		<foreach collection="toCustkeyMulti" item="item">
+	    			OR DM_DOCUMENT_H.TO_CUSTKEY IN
+	    			<foreach collection="item" item="code" open="(" close=")" separator=",">
+	    				#{code} 	 
+	          		</foreach>
+	        	</foreach>
+	      	</trim>			                                    
+        </if>
+        JOIN   MS_SKU
+        ON     MS_SKU.STORERKEY                         = DM_DOCUMENT_D.STORERKEY
+        AND    MS_SKU.SKU                               = DM_DOCUMENT_D.SKU
+        AND    MS_SKU.STORAGETYPE                       = #{storagetype}
+        <if test="serialyn != null and serialyn != ''">			AND MS_SKU.SERIALYN 	=	#{serialyn}			</if>        
+        JOIN   WD_INPLAN
+        ON     WD_INPLAN.DCCODE                         = DM_DOCUMENT_D.DCCODE
+        AND    WD_INPLAN.DOCTYPE                        = DM_DOCUMENT_D.DOCTYPE
+        AND    WD_INPLAN.DOCNO                          = DM_DOCUMENT_D.DOCNO
+        AND    WD_INPLAN.DOCLINE                        = DM_DOCUMENT_D.DOCLINE
+        AND    WD_INPLAN.SLIPDT                         = DM_DOCUMENT_D.DELIVERYDATE
+        AND    WD_INPLAN.DEL_YN                         = 'N'
+        JOIN   MS_PLANT                                 
+        ON     MS_PLANT.PLANT                           = DM_DOCUMENT_D.PLANT
+        JOIN   MS_CUSTDLVINFO                           
+        ON     MS_CUSTDLVINFO.STORERKEY                 = DM_DOCUMENT_H.STORERKEY
+        AND    MS_CUSTDLVINFO.CUSTTYPE                  = DM_DOCUMENT_H.TO_CUSTTYPE
+        AND    MS_CUSTDLVINFO.DLVCUSTKEY                = DM_DOCUMENT_H.TO_CUSTKEY
+        AND    MS_CUSTDLVINFO.DISTANCETYPE              = #{distancetype} 
+        AND    (MS_CUSTDLVINFO.DISTANCETYPE   != 'CAR' OR  MS_CUSTDLVINFO.DISTANCETYPE IS NULL)
+        JOIN   MS_PICKBATCHGROUP
+        ON     MS_PICKBATCHGROUP.DCCODE                 = DM_DOCUMENT_D.DCCODE             
+        AND    MS_PICKBATCHGROUP.PLANT                  = DM_DOCUMENT_D.PLANT          
+        AND    MS_PICKBATCHGROUP.STORAGETYPE            = MS_SKU.STORAGETYPE           
+        AND    MS_PICKBATCHGROUP.DISTANCETYPE           = MS_CUSTDLVINFO.DISTANCETYPE  
+        AND    MS_PICKBATCHGROUP.BATCHGROUP             = #{batchgroup}
+        AND    (MS_PICKBATCHGROUP.DISTANCETYPE  != 'CAR' OR  MS_PICKBATCHGROUP.DISTANCETYPE IS NULL)
+        <if test="zone != null and zone != ''">   
+            JOIN  ST_STOCK
+            ON    ST_STOCK.DCCODE    = DM_DOCUMENT_D.DCCODE
+            AND   ST_STOCK.STORERKEY = DM_DOCUMENT_D.STORERKEY
+            AND   ST_STOCK.SKU       = DM_DOCUMENT_D.SKU
+            AND   ST_STOCK.STOCKTYPE = 'GOOD'
+            AND   ST_STOCK.OPENQTY   <![CDATA[>]]>   0
+            JOIN  MS_LOCATION
+            ON    MS_LOCATION.DCCODE    = ST_STOCK.DCCODE
+            AND   MS_LOCATION.LOC       = ST_STOCK.LOC        
+            JOIN  MS_ZONE
+            ON    MS_ZONE.DCCODE        = MS_LOCATION.DCCODE
+            AND   MS_ZONE.ZONE          = MS_LOCATION.ZONE
+            AND   MS_ZONE.ZONE          = #{zone} 
+            AND   MS_ZONE.ZONE  NOT IN ('RETURN','ADJUST','CROSS')
+        </if> 
+        LEFT JOIN CM_CODE_STORER CD1 ON (CD1.STORERKEY = DM_DOCUMENT_H.STORERKEY	AND CD1.CODELIST = 'ORDERTYPE_WD' 	AND CD1.BASECODE  = DM_DOCUMENT_H.ORDERTYPE)
+        WHERE  DM_DOCUMENT_D.DCCODE                     = #{dccode}
+        AND    DM_DOCUMENT_D.STORERKEY                  = #{storerkey}
+        AND    DM_DOCUMENT_D.DOCTYPE                    = 'WD'
+        AND    DM_DOCUMENT_D.CHANNEL                    = '1'
+        AND    DM_DOCUMENT_D.PLANT                      = #{plant}
+        AND    DM_DOCUMENT_D.DEL_YN                     = 'N'
+        AND    DM_DOCUMENT_D.DELIVERYDATE   	        = #{slipdt}
+		AND    DM_DOCUMENT_D.STATUS                <![CDATA[<]]> '90'
+		AND    DM_DOCUMENT_D.PROCPOSS_YN           <![CDATA[<>]]>  'R'
+		<!-- 상품 다중선택 -->
+        <if test="sku != null and sku != '' ">
+            <if test="skuMulti != null and skuMulti.size() > 0">
+                <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                    <foreach collection="skuMulti" item="item">
+                        OR DM_DOCUMENT_D.SKU IN
+                        <foreach collection="item" item="code" open="(" close=")" separator=",">
+                            #{code}      
+                        </foreach>
+                    </foreach>
+                </trim>                                             
+            </if>
+        </if>
+		<if test="dailyDeadlineYn == 'Y'.toString()">           
+            <!-- 분배예외처리거래처에 등록된 거래처는 제외한다 -->           
+            AND NOT EXISTS (SELECT 1   
+                              FROM MS_ALLOC_EXCP_CUST
+                             WHERE MS_ALLOC_EXCP_CUST.DCCODE    = DM_DOCUMENT_H.DCCODE
+                               AND MS_ALLOC_EXCP_CUST.STORERKEY = DM_DOCUMENT_H.STORERKEY
+                               AND MS_ALLOC_EXCP_CUST.CUSTKEY   = DM_DOCUMENT_H.TO_CUSTKEY
+                               AND MS_ALLOC_EXCP_CUST.USE_YN    = 'Y'
+                           )           
+            <!-- 분배예외처리상품에 등록된 상품는 제외한다 -->           
+            AND NOT EXISTS (SELECT 1   
+                              FROM MS_ALLOC_EXCP_SKU
+                             WHERE MS_ALLOC_EXCP_SKU.DCCODE    = DM_DOCUMENT_D.DCCODE
+                               AND MS_ALLOC_EXCP_SKU.STORERKEY = DM_DOCUMENT_D.STORERKEY
+                               AND MS_ALLOC_EXCP_SKU.SKU       = DM_DOCUMENT_D.SKU
+                               AND MS_ALLOC_EXCP_SKU.USE_YN    = 'Y'
+                           )    
+        </if>    
+		GROUP BY DM_DOCUMENT_H.DCCODE   
+				,WD_INPLAN.SLIPNO   
+                ,DM_DOCUMENT_H.TO_CUSTKEY         
+                ,DM_DOCUMENT_H.STORERKEY
+                ,DM_DOCUMENT_H.ORDERTYPE    
+                ,MS_SKU.SERIALYN
+        ORDER BY CASE WHEN SUM(WD_INPLAN.OPENQTY ) <![CDATA[<>]]> SUM(WD_INPLAN.QTYALLOCATED ) THEN 1 ELSE 2 END      
+                ,DM_DOCUMENT_H.DCCODE 
+                ,WD_INPLAN.SLIPNO
+        		,DM_DOCUMENT_H.TO_CUSTKEY         
+                ,DM_DOCUMENT_H.STORERKEY
+                ,DM_DOCUMENT_H.ORDERTYPE     
+    </select>
+    
+    <select id="getTab1SkuList" resultType="WdAllocationBatchGroupResTab1SkuDto">		
+		SELECT /* [WdAllocationBatchGroupService.sqlx][getTab1SkuList][자동분배-상품별 상세 조회][공두경][2025.07.08] */
+               MS_SKU.SKU									AS  SKU
+              ,MAX(MS_SKU.DESCRIPTION)              		AS SKUNAME
+              ,SUM(DECODE(DM_DOCUMENT_D.OMS_FLAG,'N',1,0)) 	AS  OMS_FLAG			/*OMS미마감건수*/
+              ,COUNT(DISTINCT WD_INPLAN.DOCNO )   			AS  SLIPCNT 			/*전표수*/
+              ,COUNT(DISTINCT WD_INPLAN.SKU   )   			AS  SKUCNT				/*상품수*/
+              ,SUM(WD_INPLAN.ORDERQTY )           			AS  ORDERQTY 			/*주문량*/
+              ,SUM(WD_INPLAN.QTYALLOCATED )       			AS  PROCESSQTY          /*분배량*/
+              ,SUM(WD_INPLAN.QTYPICKED    )       			AS  WORKQTY             /*피킹량*/
+              ,SUM(WD_INPLAN.INSPECTQTY )         			AS  INSPECTQTY          /*상차스캔량*/
+              ,SUM(WD_INPLAN.CONFIRMQTY )         			AS  CONFIRMQTY          /*출고확정량*/              
+              ,DM_DOCUMENT_D.WORKPROCESSCODE      			AS  WORKPROCESSCODE 	/*WORKPROCESSCODE*/
+              ,DM_DOCUMENT_H.DCCODE      					AS  DCCODE  			/**/
+              ,DM_DOCUMENT_H.STORERKEY      				AS  STORERKEY   		/**/
+              ,MAX(WD_INPLAN.UOM)                 			AS  UOM          		/**/       
+              ,SUM(WD_INPLAN.OPENQTY )         	  			AS  OPENQTY             /**/
+              ,#{plant}                           			AS  PLANT        		/**/ 
+              ,#{storagetype}                     			AS  STORAGETYPE   		/**/
+              ,#{distancetype}                     			AS  DISTANCETYPE  		/**/
+              ,#{batchgroup}                      			AS  BATCHGROUP    		/**/
+              ,#{slipdt}                            		AS  SLIPDT     			/**/
+              ,MS_SKU.SERIALYN                    			AS SERIALYN   			/**/
+        FROM   DM_DOCUMENT_D
+        JOIN   DM_DOCUMENT_H
+        ON     DM_DOCUMENT_H.DCCODE                     = DM_DOCUMENT_D.DCCODE
+        AND    DM_DOCUMENT_H.DOCTYPE                    = DM_DOCUMENT_D.DOCTYPE
+        AND    DM_DOCUMENT_H.DOCNO                      = DM_DOCUMENT_D.DOCNO
+        AND    DM_DOCUMENT_H.DELIVERYDATE               = DM_DOCUMENT_D.DELIVERYDATE
+        AND    DM_DOCUMENT_H.DEL_YN                     = 'N'
+        <!-- 고객 다중선택 -->
+		<if test="toCustkeyMulti != null and toCustkeyMulti != '' ">
+		    	<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+		    		<foreach collection="toCustkeyMulti" item="item">
+		    			OR DM_DOCUMENT_H.TO_CUSTKEY IN
+		    			<foreach collection="item" item="code" open="(" close=")" separator=",">
+		    				#{code} 	 
+		          		</foreach>
+		        	</foreach>
+		      	</trim>			                                    
+            </if>
+        JOIN   MS_SKU
+        ON     MS_SKU.STORERKEY                         = DM_DOCUMENT_D.STORERKEY
+        AND    MS_SKU.SKU                               = DM_DOCUMENT_D.SKU
+        AND    MS_SKU.STORAGETYPE                       = #{storagetype}
+        AND    MS_SKU.DEL_YN                            = 'N'
+        <if test="serialyn != null and serialyn != ''">			AND MS_SKU.SERIALYN 	=	#{serialyn}			</if>        
+        JOIN   WD_INPLAN
+        ON     WD_INPLAN.DCCODE                         = DM_DOCUMENT_D.DCCODE
+        AND    WD_INPLAN.DOCTYPE                        = DM_DOCUMENT_D.DOCTYPE
+        AND    WD_INPLAN.DOCNO                          = DM_DOCUMENT_D.DOCNO
+        AND    WD_INPLAN.DOCLINE                        = DM_DOCUMENT_D.DOCLINE
+        AND    WD_INPLAN.SLIPDT                         = DM_DOCUMENT_D.DELIVERYDATE
+        AND    WD_INPLAN.DEL_YN                         = 'N'
+        JOIN   MS_PLANT                                 
+        ON     MS_PLANT.PLANT                           = DM_DOCUMENT_D.PLANT
+        AND    MS_PLANT.PLANT                           = #{plant}
+        JOIN   MS_CUSTDLVINFO                           
+        ON     MS_CUSTDLVINFO.STORERKEY                 = DM_DOCUMENT_H.STORERKEY
+        AND    MS_CUSTDLVINFO.CUSTTYPE                  = DM_DOCUMENT_H.TO_CUSTTYPE
+        AND    MS_CUSTDLVINFO.DLVCUSTKEY                = DM_DOCUMENT_H.TO_CUSTKEY
+        AND    MS_CUSTDLVINFO.DISTANCETYPE              = #{distancetype} 
+        AND    (MS_CUSTDLVINFO.DISTANCETYPE   != 'CAR' OR  MS_CUSTDLVINFO.DISTANCETYPE IS NULL)
+        JOIN   MS_PICKBATCHGROUP
+        ON     MS_PICKBATCHGROUP.DCCODE                 = DM_DOCUMENT_D.DCCODE             
+        AND    MS_PICKBATCHGROUP.PLANT                  = DM_DOCUMENT_D.PLANT          
+        AND    MS_PICKBATCHGROUP.STORAGETYPE            = MS_SKU.STORAGETYPE           
+        AND    MS_PICKBATCHGROUP.DISTANCETYPE           = MS_CUSTDLVINFO.DISTANCETYPE  
+        AND    MS_PICKBATCHGROUP.BATCHGROUP             = #{batchgroup}
+        AND    (MS_PICKBATCHGROUP.DISTANCETYPE  != 'CAR' OR  MS_PICKBATCHGROUP.DISTANCETYPE IS NULL)
+        <if test="zone != null and zone != ''">   
+            JOIN  ST_STOCK
+            ON    ST_STOCK.DCCODE    = DM_DOCUMENT_D.DCCODE
+            AND   ST_STOCK.STORERKEY = DM_DOCUMENT_D.STORERKEY
+            AND   ST_STOCK.SKU       = DM_DOCUMENT_D.SKU
+            AND   ST_STOCK.STOCKTYPE = 'GOOD'
+            AND   ST_STOCK.OPENQTY   <![CDATA[>]]>   0
+            JOIN  MS_LOCATION
+            ON    MS_LOCATION.DCCODE    = ST_STOCK.DCCODE
+            AND   MS_LOCATION.LOC       = ST_STOCK.LOC        
+            JOIN  MS_ZONE
+            ON    MS_ZONE.DCCODE        = MS_LOCATION.DCCODE
+            AND   MS_ZONE.ZONE          = MS_LOCATION.ZONE
+            AND   MS_ZONE.ZONE          = #{zone} 
+            AND   MS_ZONE.ZONE  NOT IN ('RETURN','ADJUST','CROSS')
+        </if> 
+        LEFT JOIN CM_CODE_STORER CD1 ON (CD1.STORERKEY = DM_DOCUMENT_H.STORERKEY	AND CD1.CODELIST = 'ORDERTYPE_WD' 	AND CD1.BASECODE  = DM_DOCUMENT_H.ORDERTYPE)
+        WHERE  DM_DOCUMENT_D.DCCODE                     = #{dccode}
+        AND    DM_DOCUMENT_D.STORERKEY                  = #{storerkey}
+        AND    DM_DOCUMENT_D.DOCTYPE                    = 'WD'
+        AND    DM_DOCUMENT_D.CHANNEL                    = '1'
+        AND    DM_DOCUMENT_D.PLANT                      = #{plant}
+        AND    DM_DOCUMENT_D.DEL_YN                     = 'N'
+        AND    DM_DOCUMENT_D.DELIVERYDATE   	        = #{slipdt}
+		AND    DM_DOCUMENT_D.STATUS                <![CDATA[<]]> '90'
+		AND    DM_DOCUMENT_D.PROCPOSS_YN           <![CDATA[<>]]>  'R'  
+		<!-- 상품 다중선택 -->
+		<if test="sku != null and sku != '' ">
+			<if test="skuMulti != null and skuMulti.size() > 0">
+				<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+					<foreach collection="skuMulti" item="item">
+						OR DM_DOCUMENT_D.SKU IN
+						<foreach collection="item" item="code" open="(" close=")" separator=",">
+							#{code} 	 
+			      		</foreach>
+			    	</foreach>
+			  	</trim>			                                    
+	    	</if>
+        </if>
+	    <if test="dailyDeadlineYn == 'Y'.toString()">           
+            <!-- 분배예외처리거래처에 등록된 거래처는 제외한다 -->           
+            AND NOT EXISTS (SELECT 1   
+                              FROM MS_ALLOC_EXCP_CUST
+                             WHERE MS_ALLOC_EXCP_CUST.DCCODE    = DM_DOCUMENT_H.DCCODE
+                               AND MS_ALLOC_EXCP_CUST.STORERKEY = DM_DOCUMENT_H.STORERKEY
+                               AND MS_ALLOC_EXCP_CUST.CUSTKEY   = DM_DOCUMENT_H.TO_CUSTKEY
+                               AND MS_ALLOC_EXCP_CUST.USE_YN    = 'Y'
+                           )           
+            <!-- 분배예외처리상품에 등록된 상품는 제외한다 -->           
+            AND NOT EXISTS (SELECT 1   
+                              FROM MS_ALLOC_EXCP_SKU
+                             WHERE MS_ALLOC_EXCP_SKU.DCCODE    = DM_DOCUMENT_D.DCCODE
+                               AND MS_ALLOC_EXCP_SKU.STORERKEY = DM_DOCUMENT_D.STORERKEY
+                               AND MS_ALLOC_EXCP_SKU.SKU       = DM_DOCUMENT_D.SKU
+                               AND MS_ALLOC_EXCP_SKU.USE_YN    = 'Y'
+                           )    
+        </if>    
+		GROUP BY DM_DOCUMENT_H.DCCODE   
+				,MS_SKU.SKU         
+                ,DM_DOCUMENT_H.STORERKEY
+                ,MS_SKU.SERIALYN 
+                ,DM_DOCUMENT_D.WORKPROCESSCODE 
+        ORDER BY CASE WHEN SUM(WD_INPLAN.OPENQTY ) <![CDATA[<>]]> SUM(WD_INPLAN.QTYALLOCATED ) THEN 1 ELSE 2 END      
+                ,DM_DOCUMENT_H.DCCODE 
+        		,MS_SKU.SKU         
+                ,DM_DOCUMENT_H.STORERKEY  
+    </select>
+    
+    <select id="getTab1CarnoList" resultType="WdAllocationBatchGroupResTab1CarnoDto">
+    WITH T_ALLOCATION AS (	/* [WdAllocationBatchGroupService.sqlx][getTab1CarnoList][자동분배-차량별 상세 조회][공두경][2025.08.11] */ 
+		    	SELECT
+		        /* ======================================= 1. GROUP BY 전에 CARNO를 미리 계산 ======================================= */
+		    	/*
+		        COALESCE(
+		           (SELECT CM_CAR.CARNO
+		            FROM MS_DISTRICT
+		            JOIN CM_CAR ON CM_CAR.CARID = MS_DISTRICT.CARNO
+		            WHERE MS_DISTRICT.DCCODE = DM_DOCUMENT_H.DCCODE
+		              AND DM_DOCUMENT_H.DCCODE IN ('2230','2620','2260','2600','2690','2810','2630', '2650', '2660', '2270')
+		              AND MS_DISTRICT.DISTRICTCODE = (
+		                  SELECT POPNO FROM (
+		                      SELECT POPNO FROM MS_CUSTXPOP
+		                      WHERE DCCODE = DM_DOCUMENT_H.DCCODE AND STORERKEY = DM_DOCUMENT_H.STORERKEY AND CUSTTYPE LIKE NVL(DM_DOCUMENT_H.TO_CUSTTYPE, '%')
+		                        AND CUSTKEY = DM_DOCUMENT_H.TO_CUSTKEY AND FROMDATE <![CDATA[<=]]> DM_DOCUMENT_H.DELIVERYDATE AND TODATE <![CDATA[>=]]> DM_DOCUMENT_H.DELIVERYDATE
+		                      ORDER BY FROMDATE DESC
+		                  ) WHERE ROWNUM = 1
+		              ) AND ROWNUM = 1),
+		           (SELECT CM_CAR.CARNO
+		            FROM MS_DISTRICT
+		            JOIN CM_CAR ON CM_CAR.CARID = MS_DISTRICT.CARNO
+		            WHERE MS_DISTRICT.DCCODE = DM_DOCUMENT_H.DCCODE
+		              AND DM_DOCUMENT_H.DCCODE IN ('2230','2620','2260','2600','2690','2810','2630', '2650', '2660', '2270')
+		              AND MS_DISTRICT.DISTRICTCODE = (
+		                  SELECT CONVCODE FROM CM_CODE WHERE CODELIST = 'DEFAULTCAR' AND BASECODE = DM_DOCUMENT_H.DCCODE AND ROWNUM = 1
+		              ) AND ROWNUM = 1),
+		           (SELECT DM_DOCUMENT_H.DCCODE || '배송차량'
+		            FROM CM_CODE a
+		            WHERE a.storerkey = 'FW00' AND a.codelist = 'WMS_MNG_DC' AND a.basecode = DM_DOCUMENT_H.DCCODE AND a.Data3 = 'Y'
+		              AND ROWNUM = 1),
+		           'INPLAN'
+		        ) AS CARNO,
+		        */
+		    	(SELECT POPNAME 
+		    	   FROM (SELECT POPNAME 
+				    	   FROM MS_CUSTXPOP Z
+		                  WHERE Z.DCCODE = DM_DOCUMENT_H.DCCODE 
+		                    AND Z.STORERKEY = DM_DOCUMENT_H.STORERKEY 
+		                    AND Z.CUSTTYPE LIKE NVL(DM_DOCUMENT_H.TO_CUSTTYPE, '%')
+		                    AND CUSTKEY = DM_DOCUMENT_H.TO_CUSTKEY 
+		                    AND FROMDATE <![CDATA[<=]]> DM_DOCUMENT_H.DELIVERYDATE 
+		                    AND TODATE <![CDATA[>=]]> DM_DOCUMENT_H.DELIVERYDATE
+		                 ORDER BY FROMDATE DESC)
+		           WHERE ROWNUM = 1) AS CARNO,
+		        /* 집계에 필요한 컬럼들을 그대로 선택 */
+		        DM_DOCUMENT_D.OMS_FLAG,
+		        WD_INPLAN.DOCNO,
+		        WD_INPLAN.SKU,
+		        WD_INPLAN.ORDERQTY,
+		        WD_INPLAN.QTYPICKED,
+		        WD_INPLAN.INSPECTQTY,
+		        WD_INPLAN.CONFIRMQTY,
+		        WD_INPLAN.OPENQTY,
+		        WD_INPLAN.QTYALLOCATED,
+		        DM_DOCUMENT_D.WORKPROCESSCODE,
+		        DM_DOCUMENT_H.DCCODE,
+		        DM_DOCUMENT_H.STORERKEY,
+		        WD_INPLAN.UOM,
+		        MS_SKU.SERIALYN
+		    FROM   DM_DOCUMENT_D
+		    JOIN   DM_DOCUMENT_H
+	        ON     DM_DOCUMENT_H.DCCODE 	= DM_DOCUMENT_D.DCCODE
+	        AND    DM_DOCUMENT_H.DOCTYPE 	= DM_DOCUMENT_D.DOCTYPE
+	        AND    DM_DOCUMENT_H.DOCNO 		= DM_DOCUMENT_D.DOCNO
+	        AND    DM_DOCUMENT_H.DELIVERYDATE = DM_DOCUMENT_D.DELIVERYDATE
+	        AND    DM_DOCUMENT_H.DEL_YN 	= 'N'
+	        <!-- 고객 다중선택 -->
+			<if test="toCustkeyMulti != null and toCustkeyMulti != '' ">
+		    	<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+		    		<foreach collection="toCustkeyMulti" item="item">
+		    			OR DM_DOCUMENT_H.TO_CUSTKEY IN
+		    			<foreach collection="item" item="code" open="(" close=")" separator=",">
+		    				#{code} 	 
+		          		</foreach>
+		        	</foreach>
+		      	</trim>			                                    
+            </if>
+		    JOIN   MS_SKU
+	        ON     MS_SKU.STORERKEY 	= DM_DOCUMENT_D.STORERKEY
+	        AND    MS_SKU.SKU 			= DM_DOCUMENT_D.SKU
+	        AND    MS_SKU.STORAGETYPE   = #{storagetype}
+	        AND    MS_SKU.DEL_YN        = 'N'
+	        <if test="serialyn != null and serialyn != ''">			AND MS_SKU.SERIALYN 	=	#{serialyn}			</if> 
+		    JOIN   WD_INPLAN
+	        ON     WD_INPLAN.DCCODE 	= DM_DOCUMENT_D.DCCODE
+	        AND    WD_INPLAN.DOCTYPE 	= DM_DOCUMENT_D.DOCTYPE
+	        AND    WD_INPLAN.DOCNO 		= DM_DOCUMENT_D.DOCNO
+	        AND    WD_INPLAN.DOCLINE 	= DM_DOCUMENT_D.DOCLINE
+	        AND    WD_INPLAN.SLIPDT 	= DM_DOCUMENT_D.DELIVERYDATE
+	        AND    WD_INPLAN.DEL_YN 	= 'N'
+		    JOIN   MS_PLANT
+	        ON     MS_PLANT.PLANT 		= DM_DOCUMENT_D.PLANT
+	        AND    MS_PLANT.PLANT       = #{plant}
+		    JOIN   MS_CUSTDLVINFO
+	        ON     MS_CUSTDLVINFO.STORERKEY 	= DM_DOCUMENT_H.STORERKEY
+	        AND    MS_CUSTDLVINFO.CUSTTYPE 		= DM_DOCUMENT_H.TO_CUSTTYPE
+	        AND    MS_CUSTDLVINFO.DLVCUSTKEY 	= DM_DOCUMENT_H.TO_CUSTKEY
+	        AND    MS_CUSTDLVINFO.DISTANCETYPE  = #{distancetype} 
+	        AND    (MS_CUSTDLVINFO.DISTANCETYPE   != 'CAR' OR  MS_CUSTDLVINFO.DISTANCETYPE IS NULL)
+		    JOIN   MS_PICKBATCHGROUP
+	        ON     MS_PICKBATCHGROUP.DCCODE 	  = DM_DOCUMENT_D.DCCODE
+	        AND    MS_PICKBATCHGROUP.PLANT 		  = DM_DOCUMENT_D.PLANT
+	        AND    MS_PICKBATCHGROUP.STORAGETYPE  = MS_SKU.STORAGETYPE
+	        AND    MS_PICKBATCHGROUP.DISTANCETYPE = MS_CUSTDLVINFO.DISTANCETYPE		        
+	        AND    MS_PICKBATCHGROUP.BATCHGROUP             = #{batchgroup}
+	        AND    (MS_PICKBATCHGROUP.DISTANCETYPE     != 'CAR' OR  MS_PICKBATCHGROUP.DISTANCETYPE IS NULL)
+	        <if test="zone != null and zone != ''">   
+                JOIN  ST_STOCK
+                ON    ST_STOCK.DCCODE    = DM_DOCUMENT_D.DCCODE
+                AND   ST_STOCK.STORERKEY = DM_DOCUMENT_D.STORERKEY
+                AND   ST_STOCK.SKU       = DM_DOCUMENT_D.SKU
+                AND   ST_STOCK.STOCKTYPE = 'GOOD'
+                AND   ST_STOCK.OPENQTY   <![CDATA[>]]>   0
+                JOIN  MS_LOCATION
+                ON    MS_LOCATION.DCCODE    = ST_STOCK.DCCODE
+                AND   MS_LOCATION.LOC       = ST_STOCK.LOC        
+                JOIN  MS_ZONE
+                ON    MS_ZONE.DCCODE        = MS_LOCATION.DCCODE
+                AND   MS_ZONE.ZONE          = MS_LOCATION.ZONE
+                AND   MS_ZONE.ZONE          = #{zone} 
+                AND   MS_ZONE.ZONE  NOT IN ('RETURN','ADJUST','CROSS')
+            </if> 
+		    LEFT JOIN CM_CODE_STORER CD1 ON (CD1.STORERKEY = DM_DOCUMENT_H.STORERKEY AND CD1.CODELIST = 'ORDERTYPE_WD' AND CD1.BASECODE = DM_DOCUMENT_H.ORDERTYPE)
+		    WHERE  DM_DOCUMENT_D.DCCODE                     = #{dccode}
+	        AND    DM_DOCUMENT_D.STORERKEY                  = #{storerkey}
+	        AND    DM_DOCUMENT_D.DOCTYPE                    = 'WD'
+	        AND    DM_DOCUMENT_D.CHANNEL                    = '1'
+	        AND    DM_DOCUMENT_D.PLANT                      = #{plant}
+	        AND    DM_DOCUMENT_D.DEL_YN                     = 'N'
+	        AND    DM_DOCUMENT_D.DELIVERYDATE   	        = #{slipdt}
+			AND    DM_DOCUMENT_D.STATUS                <![CDATA[<]]> '90'
+			AND    DM_DOCUMENT_D.PROCPOSS_YN           <![CDATA[<>]]>  'R'  
+			<!-- 상품 다중선택 -->
+			<if test="sku != null and sku != '' ">
+				<if test="skuMulti != null and skuMulti.size() > 0">
+					<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+						<foreach collection="skuMulti" item="item">
+							OR DM_DOCUMENT_D.SKU IN
+							<foreach collection="item" item="code" open="(" close=")" separator=",">
+								#{code} 	 
+				      		</foreach>
+				    	</foreach>
+				  	</trim>			                                    
+		    	</if>
+	        </if>
+	        <if test="dailyDeadlineYn == 'Y'.toString()">           
+                <!-- 분배예외처리거래처에 등록된 거래처는 제외한다 -->           
+                AND NOT EXISTS (SELECT 1   
+                                  FROM MS_ALLOC_EXCP_CUST
+                                 WHERE MS_ALLOC_EXCP_CUST.DCCODE    = DM_DOCUMENT_H.DCCODE
+                                   AND MS_ALLOC_EXCP_CUST.STORERKEY = DM_DOCUMENT_H.STORERKEY
+                                   AND MS_ALLOC_EXCP_CUST.CUSTKEY   = DM_DOCUMENT_H.TO_CUSTKEY
+                                   AND MS_ALLOC_EXCP_CUST.USE_YN    = 'Y'
+                               )           
+                <!-- 분배예외처리상품에 등록된 상품는 제외한다 -->           
+                AND NOT EXISTS (SELECT 1   
+                                  FROM MS_ALLOC_EXCP_SKU
+                                 WHERE MS_ALLOC_EXCP_SKU.DCCODE    = DM_DOCUMENT_D.DCCODE
+                                   AND MS_ALLOC_EXCP_SKU.STORERKEY = DM_DOCUMENT_D.STORERKEY
+                                   AND MS_ALLOC_EXCP_SKU.SKU       = DM_DOCUMENT_D.SKU
+                                   AND MS_ALLOC_EXCP_SKU.USE_YN    = 'Y'
+                               )    
+            </if>            
+		)
+		/* ======================================= 2. 미리 계산된 CARNO를 사용하여 GROUP BY 및 최종 집계 수행 ======================================= */
+		SELECT
+		    CARNO							AS CARNO			/*차량번호*/
+		    ,SUM(DECODE(OMS_FLAG,'N',1,0)) 	AS OMS_FLAG			/*OMS미마감건수*/
+		    ,COUNT(DISTINCT DOCNO )   		AS SLIPCNT			/*전표수*/
+		    ,COUNT(DISTINCT SKU   )   		AS SKUCNT			/*상품수*/
+		    ,SUM(ORDERQTY )           		AS ORDERQTY			/*주문량*/
+		    ,SUM(QTYALLOCATED )       		AS PROCESSQTY       /*분배량*/
+		    ,SUM(QTYPICKED    )       		AS WORKQTY          /*피킹량*/
+		    ,SUM(INSPECTQTY )         		AS INSPECTQTY       /*상차스캔량*/
+		    ,SUM(CONFIRMQTY )         		AS CONFIRMQTY       /*출고확정량*/
+		    ,DCCODE							AS DCCODE           /**/
+		    ,STORERKEY						AS STORERKEY        /**/
+		    ,MAX(UOM)                 		AS UOM              /**/
+		    ,SUM(OPENQTY )         	  		AS OPENQTY          /**/
+		    ,'2600'                         AS PLANT            /**/
+		    ,'20'                     		AS STORAGETYPE      /**/
+		    ,'N'                     		AS DISTANCETYPE     /**/
+		    ,'2000'                      	AS BATCHGROUP       /**/
+		    ,'20250324'                     AS SLIPDT           /**/
+		    ,SERIALYN						AS SERIALYN         /**/
+		    /* [수정 1] 정렬 기준을 SELECT 절에 추가하고 'SORT_ORDER' 라는 별칭 부여 */
+		    ,CASE WHEN SUM(OPENQTY) <![CDATA[<>]]> SUM(QTYALLOCATED) THEN 1 ELSE 2 END AS SORT_ORDER
+		FROM T_ALLOCATION
+		GROUP BY
+		    CARNO,
+		    DCCODE,
+		    STORERKEY,
+		    SERIALYN,
+		    WORKPROCESSCODE
+		ORDER BY
+		    /* [수정 2] 복잡한 CASE 문 대신 부여한 별칭을 사용하여 정렬 */
+		    SORT_ORDER,
+		    CARNO,
+		    DCCODE,
+		    STORERKEY
+						
+    </select>
+    
+    <select id="getTab1ZoneList" resultType="WdAllocationBatchGroupResTab1ZoneDto">		
+        WITH STOCK AS (
+          SELECT 
+                 ST_STOCK.DCCODE
+                , ST_STOCK.STORERKEY
+                , ST_STOCK.SKU                
+                , MAX(MS_ZONE.ZONE) KEEP (DENSE_RANK LAST ORDER BY ST_STOCK.QTY - ST_STOCK.QTYALLOCATED - ST_STOCK.QTYPICKED - ST_STOCK.QTYRESERVE) AS ZONE
+          FROM ST_STOCK
+          JOIN  MS_LOCATION
+            ON    MS_LOCATION.DCCODE    = ST_STOCK.DCCODE
+            AND   MS_LOCATION.LOC       = ST_STOCK.LOC        
+            LEFT JOIN  MS_ZONE
+            ON    MS_ZONE.DCCODE        = MS_LOCATION.DCCODE
+            AND   MS_ZONE.ZONE          = MS_LOCATION.ZONE
+            AND   MS_ZONE.ZONE  NOT IN ('RETURN','ADJUST','CROSS')
+          WHERE ST_STOCK.DCCODE     = #{dccode}
+            AND ST_STOCK.STOCKGRADE = 'STD'
+            AND ST_STOCK.STOCKTYPE = 'GOOD'
+            AND ST_STOCK.QTY - ST_STOCK.QTYALLOCATED - ST_STOCK.QTYPICKED - ST_STOCK.QTYRESERVE > 0
+            GROUP BY ST_STOCK.DCCODE, ST_STOCK.STORERKEY, ST_STOCK.SKU
+          )
+		SELECT /* [WdAllocationBatchGroupService.sqlx][getTab1ZoneList][자동분배-피킹존별 상세 조회][공두경][2025.08.19] */
+               NVL(STOCK.ZONE,'STD')					AS  ZONE
+              ,SUM(DECODE(DM_DOCUMENT_D.OMS_FLAG,'N',1,0)) 	AS  OMS_FLAG			/*OMS미마감건수*/
+              ,COUNT(DISTINCT WD_INPLAN.DOCNO )   			AS  SLIPCNT 			/*전표수*/
+              ,COUNT(DISTINCT WD_INPLAN.SKU   )   			AS  SKUCNT				/*상품수*/
+              ,SUM(WD_INPLAN.ORDERQTY )           			AS  ORDERQTY 			/*주문량*/
+              ,SUM(WD_INPLAN.QTYALLOCATED )       			AS  PROCESSQTY          /*분배량*/
+              ,SUM(WD_INPLAN.QTYPICKED    )       			AS  WORKQTY             /*피킹량*/
+              ,SUM(WD_INPLAN.INSPECTQTY )         			AS  INSPECTQTY          /*상차스캔량*/
+              ,SUM(WD_INPLAN.CONFIRMQTY )         			AS  CONFIRMQTY          /*출고확정량*/        
+              ,DM_DOCUMENT_H.DCCODE      					AS  DCCODE  			/**/
+              ,DM_DOCUMENT_H.STORERKEY      				AS  STORERKEY   		/**/
+              ,MAX(WD_INPLAN.UOM)                 			AS  UOM          		/**/       
+              ,SUM(WD_INPLAN.OPENQTY )         	  			AS  OPENQTY             /**/
+              ,#{plant}                           			AS  PLANT        		/**/ 
+              ,#{storagetype}                     			AS  STORAGETYPE   		/**/
+              ,#{distancetype}                     			AS  DISTANCETYPE  		/**/
+              ,#{batchgroup}                      			AS  BATCHGROUP    		/**/
+              ,#{slipdt}                            		AS  SLIPDT     			/**/
+              ,MS_SKU.SERIALYN                    			AS SERIALYN   			/**/
+        FROM   DM_DOCUMENT_D
+        JOIN   DM_DOCUMENT_H
+        ON     DM_DOCUMENT_H.DCCODE                     = DM_DOCUMENT_D.DCCODE
+        AND    DM_DOCUMENT_H.DOCTYPE                    = DM_DOCUMENT_D.DOCTYPE
+        AND    DM_DOCUMENT_H.DOCNO                      = DM_DOCUMENT_D.DOCNO
+        AND    DM_DOCUMENT_H.DELIVERYDATE               = DM_DOCUMENT_D.DELIVERYDATE
+        AND    DM_DOCUMENT_H.DEL_YN                     = 'N'
+        <!-- 고객 다중선택 -->
+		<if test="toCustkeyMulti != null and toCustkeyMulti != '' ">
+		    	<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+		    		<foreach collection="toCustkeyMulti" item="item">
+		    			OR DM_DOCUMENT_H.TO_CUSTKEY IN
+		    			<foreach collection="item" item="code" open="(" close=")" separator=",">
+		    				#{code} 	 
+		          		</foreach>
+		        	</foreach>
+		      	</trim>			                                    
+            </if>
+        JOIN   MS_SKU
+        ON     MS_SKU.STORERKEY                         = DM_DOCUMENT_D.STORERKEY
+        AND    MS_SKU.SKU                               = DM_DOCUMENT_D.SKU
+        AND    MS_SKU.STORAGETYPE                       = #{storagetype}
+        AND    MS_SKU.DEL_YN                            = 'N'
+        <if test="serialyn != null and serialyn != ''">			AND MS_SKU.SERIALYN 	=	#{serialyn}			</if>        
+        JOIN   WD_INPLAN
+        ON     WD_INPLAN.DCCODE                         = DM_DOCUMENT_D.DCCODE
+        AND    WD_INPLAN.DOCTYPE                        = DM_DOCUMENT_D.DOCTYPE
+        AND    WD_INPLAN.DOCNO                          = DM_DOCUMENT_D.DOCNO
+        AND    WD_INPLAN.DOCLINE                        = DM_DOCUMENT_D.DOCLINE
+        AND    WD_INPLAN.SLIPDT                         = DM_DOCUMENT_D.DELIVERYDATE
+        AND    WD_INPLAN.DEL_YN                         = 'N'
+        JOIN   MS_PLANT                                 
+        ON     MS_PLANT.PLANT                           = DM_DOCUMENT_D.PLANT
+        AND    MS_PLANT.PLANT                           = #{plant}
+        JOIN   MS_CUSTDLVINFO                           
+        ON     MS_CUSTDLVINFO.STORERKEY                 = DM_DOCUMENT_H.STORERKEY
+        AND    MS_CUSTDLVINFO.CUSTTYPE                  = DM_DOCUMENT_H.TO_CUSTTYPE
+        AND    MS_CUSTDLVINFO.DLVCUSTKEY                = DM_DOCUMENT_H.TO_CUSTKEY
+        AND    MS_CUSTDLVINFO.DISTANCETYPE              = #{distancetype}
+        AND    (MS_CUSTDLVINFO.DISTANCETYPE   != 'CAR' OR  MS_CUSTDLVINFO.DISTANCETYPE IS NULL)
+        JOIN   MS_PICKBATCHGROUP
+        ON     MS_PICKBATCHGROUP.DCCODE                 = DM_DOCUMENT_D.DCCODE             
+        AND    MS_PICKBATCHGROUP.PLANT                  = DM_DOCUMENT_D.PLANT          
+        AND    MS_PICKBATCHGROUP.STORAGETYPE            = MS_SKU.STORAGETYPE           
+        AND    MS_PICKBATCHGROUP.DISTANCETYPE           = MS_CUSTDLVINFO.DISTANCETYPE  
+        AND    MS_PICKBATCHGROUP.BATCHGROUP             = #{batchgroup}
+        AND    (MS_PICKBATCHGROUP.DISTANCETYPE  != 'CAR' OR  MS_PICKBATCHGROUP.DISTANCETYPE IS NULL)
+        <choose>
+            <when test="zone != null and zone != ''">
+                JOIN  STOCK
+                ON    STOCK.DCCODE    = DM_DOCUMENT_D.DCCODE
+                AND   STOCK.STORERKEY = DM_DOCUMENT_D.STORERKEY
+                AND   STOCK.SKU       = DM_DOCUMENT_D.SKU
+                AND   STOCK.ZONE      = #{zone} 
+            </when>
+            <otherwise>
+                LEFT JOIN  STOCK
+                ON    STOCK.DCCODE    = DM_DOCUMENT_D.DCCODE
+                AND   STOCK.STORERKEY = DM_DOCUMENT_D.STORERKEY
+                AND   STOCK.SKU       = DM_DOCUMENT_D.SKU
+            </otherwise>
+        </choose> 
+        LEFT JOIN CM_CODE_STORER CD1 ON (CD1.STORERKEY = DM_DOCUMENT_H.STORERKEY	AND CD1.CODELIST = 'ORDERTYPE_WD' 	AND CD1.BASECODE  = DM_DOCUMENT_H.ORDERTYPE)
+        WHERE  DM_DOCUMENT_D.DCCODE                     = #{dccode}
+        AND    DM_DOCUMENT_D.STORERKEY                  = #{storerkey}
+        AND    DM_DOCUMENT_D.DOCTYPE                    = 'WD'
+        AND    DM_DOCUMENT_D.CHANNEL                    = '1'
+        AND    DM_DOCUMENT_D.PLANT                      = #{plant}
+        AND    DM_DOCUMENT_D.DEL_YN                     = 'N'
+        AND    DM_DOCUMENT_D.DELIVERYDATE   	        = #{slipdt}
+		AND    DM_DOCUMENT_D.STATUS                <![CDATA[<]]> '90'
+		AND    DM_DOCUMENT_D.PROCPOSS_YN           <![CDATA[<>]]>  'R'  
+		<!-- 상품 다중선택 -->
+		<if test="sku != null and sku != '' ">
+				<if test="skuMulti != null and skuMulti.size() > 0">
+					<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+						<foreach collection="skuMulti" item="item">
+							OR DM_DOCUMENT_D.SKU IN
+							<foreach collection="item" item="code" open="(" close=")" separator=",">
+								#{code} 	 
+				      		</foreach>
+				    	</foreach>
+				  	</trim>			                                    
+		    	</if>
+	        </if>
+	    <if test="dailyDeadlineYn == 'Y'.toString()">           
+            <!-- 분배예외처리거래처에 등록된 거래처는 제외한다 -->           
+            AND NOT EXISTS (SELECT 1   
+                              FROM MS_ALLOC_EXCP_CUST
+                             WHERE MS_ALLOC_EXCP_CUST.DCCODE    = DM_DOCUMENT_H.DCCODE
+                               AND MS_ALLOC_EXCP_CUST.STORERKEY = DM_DOCUMENT_H.STORERKEY
+                               AND MS_ALLOC_EXCP_CUST.CUSTKEY   = DM_DOCUMENT_H.TO_CUSTKEY
+                               AND MS_ALLOC_EXCP_CUST.USE_YN    = 'Y'
+                           )           
+            <!-- 분배예외처리상품에 등록된 상품는 제외한다 -->           
+            AND NOT EXISTS (SELECT 1   
+                              FROM MS_ALLOC_EXCP_SKU
+                             WHERE MS_ALLOC_EXCP_SKU.DCCODE    = DM_DOCUMENT_D.DCCODE
+                               AND MS_ALLOC_EXCP_SKU.STORERKEY = DM_DOCUMENT_D.STORERKEY
+                               AND MS_ALLOC_EXCP_SKU.SKU       = DM_DOCUMENT_D.SKU
+                               AND MS_ALLOC_EXCP_SKU.USE_YN    = 'Y'
+                           )    
+        </if>      
+		GROUP BY DM_DOCUMENT_H.DCCODE   
+				,STOCK.ZONE        
+                ,DM_DOCUMENT_H.STORERKEY
+                ,MS_SKU.SERIALYN  
+        ORDER BY CASE WHEN SUM(WD_INPLAN.OPENQTY ) <![CDATA[<>]]> SUM(WD_INPLAN.QTYALLOCATED ) THEN 1 ELSE 2 END      
+                ,DM_DOCUMENT_H.DCCODE 
+        		,STOCK.ZONE         
+                ,DM_DOCUMENT_H.STORERKEY  
+    </select>
+    
+    <select id="getTab2MasterList" resultType="WdAllocationBatchGroupResTab2Dto">		
+		SELECT /* [WdAllocationBatchGroupService.sqlx][getTab2MasterList][지정분배 목록 조회][공두경][2025.07.10] */
+		       WD_INPLAN.DOCNO                                                                    AS DOCNO			/*전표번호*/
+		      ,WD_INPLAN.DOCLINE                                                                  AS DOCLINE		/*품목번호*/
+		      ,NVL(CD1.BASEDESCR,CD1.BASECODE)            										  AS STATUS			/*진행상태*/
+		      ,MS_SKUSPEC.SPECDESCR                                       						  AS SKUGROUP		/*상품분류*/
+		      ,WD_INPLAN.SKU                                                                      AS SKU			/*상품코드*/
+		      ,MS_SKU.DESCRIPTION                                                                 AS SKUNAME		/*상품명칭*/
+		      ,WD_INPLAN.UOM                                                                      AS UOM			/*단위*/
+		      ,NVL(CD2.BASEDESCR,CD2.BASECODE)													  AS CHANNEL		/*저장유무*/
+		      ,NVL(CD3.BASEDESCR,CD3.BASECODE)													  AS STORAGETYPE    /*저장조건*/
+		      ,MS_SKU.SERIALYN                                                                    AS SERIALYN		/*식별번호유무*/
+		      ,(DM_DOCUMENT_D.STOREROPENQTY * DM_DOCUMENT_D.BUNJA/DM_DOCUMENT_D.BUNMO)            AS ORDERQTY_ST	/*원주문수량*/
+		      ,WD_INPLAN.ORDERQTY            												      AS ORDERQTY		/*주문수량*/
+		      ,WD_INPLAN.QTYALLOCATED                                                             AS PROCESSQTY		/*분배량*/
+		      ,WD_INPLAN.STOCKID                                                                  AS TO_STOCKID		/*개체식별/소비이력*/
+		      ,NVL(MS_SKUDCSET.LOC,WD_INPLAN.LOC)                                                 AS TO_LOC			/*LOC*/
+              ,WD_INPLAN.DCCODE                                                                   AS DCCODE			/**/
+		      ,WD_INPLAN.STORERKEY                                                                AS STORERKEY		/**/
+		      ,WD_INPLAN.ORGANIZE                                                                 AS ORGANIZE       /**/  	
+              ,WD_INPLAN.AREA                                                                     AS AREA     		/**/
+		      ,WD_INPLAN.CUSTKEY                                                                  AS CUSTKEY		/**/
+		      ,WD_INPLAN.DOCDT                                                                    AS DOCDT			/**/
+		      ,WD_INPLAN.DOCTYPE                                                                  AS DOCTYPE		/**/
+		      ,WD_INPLAN.SLIPDT                                                                   AS SLIPDT			/**/
+		      ,WD_INPLAN.SLIPNO                                                                   AS SLIPNO			/**/
+		      ,WD_INPLAN.SLIPLINE                                                                 AS SLIPLINE		/**/
+		      ,MS_SKU.LINE01                                                                      AS LINE01			/**/
+		FROM   DM_DOCUMENT_D
+		JOIN   WD_INPLAN           
+		ON     WD_INPLAN.DCCODE             =  DM_DOCUMENT_D.DCCODE        
+		AND    WD_INPLAN.DOCNO              =  DM_DOCUMENT_D.DOCNO         
+		AND    WD_INPLAN.DOCLINE            =  DM_DOCUMENT_D.DOCLINE  
+		AND    WD_INPLAN.DOCTYPE            =  DM_DOCUMENT_D.DOCTYPE  
+		AND    WD_INPLAN.SLIPDT             =  DM_DOCUMENT_D.DELIVERYDATE
+		AND    WD_INPLAN.DEL_YN             = 'N'
+		JOIN   DM_DOCUMENT_H      
+		ON     DM_DOCUMENT_H.DCCODE         =  DM_DOCUMENT_D.DCCODE         
+		AND    DM_DOCUMENT_H.DELIVERYDATE   =  DM_DOCUMENT_D.DELIVERYDATE         
+		AND    DM_DOCUMENT_H.DOCNO          =  DM_DOCUMENT_D.DOCNO         
+		AND    DM_DOCUMENT_H.DOCTYPE        =  DM_DOCUMENT_D.DOCTYPE  
+		AND    DM_DOCUMENT_H.STATUS         <![CDATA[<]]>  '90'         
+		AND    DM_DOCUMENT_H.DEL_YN         =  'N'  
+		AND    DM_DOCUMENT_H.TO_CUSTKEY	    =  #{toCustkey}
+		JOIN   MS_SKU 
+		ON     MS_SKU.STORERKEY             =  DM_DOCUMENT_D.STORERKEY         
+		AND    MS_SKU.SKU                   =  DM_DOCUMENT_D.SKU
+		AND    MS_SKU.DEL_YN                = 'N'     
+		<if test="storagetype != null and storagetype != ''">	AND MS_SKU.STORAGETYPE 	=	#{storagetype}		</if>
+		<if test="serialyn != null and serialyn != ''">			AND MS_SKU.SERIALYN 	=	#{serialyn}			</if>
+        JOIN   MS_PLANT                                 
+        ON     MS_PLANT.PLANT                           = DM_DOCUMENT_D.PLANT
+        JOIN   MS_CUSTDLVINFO                           
+        ON     MS_CUSTDLVINFO.STORERKEY                 = DM_DOCUMENT_H.STORERKEY
+        AND    MS_CUSTDLVINFO.CUSTTYPE                  = DM_DOCUMENT_H.TO_CUSTTYPE
+        AND    MS_CUSTDLVINFO.DLVCUSTKEY                = DM_DOCUMENT_H.TO_CUSTKEY
+        AND    MS_CUSTDLVINFO.DISTANCETYPE              = #{distancetype}
+        JOIN   MS_PICKBATCHGROUP
+        ON     MS_PICKBATCHGROUP.DCCODE                 = DM_DOCUMENT_D.DCCODE             
+        AND    MS_PICKBATCHGROUP.PLANT                  = DM_DOCUMENT_D.PLANT          
+        AND    MS_PICKBATCHGROUP.STORAGETYPE            = MS_SKU.STORAGETYPE           
+        AND    MS_PICKBATCHGROUP.DISTANCETYPE           = MS_CUSTDLVINFO.DISTANCETYPE  
+        AND    MS_PICKBATCHGROUP.BATCHGROUP             = #{batchgroup}
+        LEFT JOIN MS_SKUSPEC
+        ON	   MS_SKUSPEC.STORERKEY    = MS_SKU.STORERKEY    
+        AND	   MS_SKUSPEC.SPECCODE     = MS_SKU.SKUGROUP        
+        AND    MS_SKUSPEC.SPECCATEGORY = 'SKUGROUP'  
+        AND    SPECCLASS               = 'MC'
+        LEFT JOIN MS_SKUDCSET
+        ON     MS_SKUDCSET.DCCODE      = DM_DOCUMENT_D.DCCODE
+        AND    MS_SKUDCSET.STORERKEY   = DM_DOCUMENT_D.STORERKEY
+        AND    MS_SKUDCSET.SKU         = DM_DOCUMENT_D.SKU
+        <if test="zone != null and zone != ''">   
+            JOIN  ST_STOCK
+            ON    ST_STOCK.DCCODE    = DM_DOCUMENT_D.DCCODE
+            AND   ST_STOCK.STORERKEY = DM_DOCUMENT_D.STORERKEY
+            AND   ST_STOCK.SKU       = DM_DOCUMENT_D.SKU
+            AND   ST_STOCK.STOCKTYPE = 'GOOD'
+            AND   ST_STOCK.OPENQTY   <![CDATA[>]]>   0
+            JOIN  MS_LOCATION
+            ON    MS_LOCATION.DCCODE    = ST_STOCK.DCCODE
+            AND   MS_LOCATION.LOC       = ST_STOCK.LOC        
+            JOIN  MS_ZONE
+            ON    MS_ZONE.DCCODE        = MS_LOCATION.DCCODE
+            AND   MS_ZONE.ZONE          = MS_LOCATION.ZONE
+            AND   MS_ZONE.ZONE          = #{zone} 
+            AND   MS_ZONE.ZONE  NOT IN ('RETURN','ADJUST','CROSS')
+        </if> 
+        LEFT JOIN CM_CODE_STORER CD1  ON CD1.STORERKEY  = DM_DOCUMENT_D.STORERKEY AND CD1.CODELIST  = 'STATUS_WD' 		AND CD1.BASECODE   = DM_DOCUMENT_D.STATUS
+        LEFT JOIN CM_CODE_STORER CD2  ON CD2.STORERKEY  = DM_DOCUMENT_D.STORERKEY AND CD2.CODELIST  = 'PUTAWAYTYPE' 	AND CD2.BASECODE   = DM_DOCUMENT_D.CHANNEL
+        LEFT JOIN CM_CODE_STORER CD3  ON CD3.STORERKEY  = MS_SKU.STORERKEY 		  AND CD3.CODELIST  = 'STORAGETYPE'		AND CD3.BASECODE   = MS_SKU.STORAGETYPE
+		WHERE  DM_DOCUMENT_D.CHANNEL        = '1'  <!--일배는 할당하지 않는다.-->         
+		AND    DM_DOCUMENT_D.DOCTYPE        = 'WD'  
+		AND    DM_DOCUMENT_D.STATUS         <![CDATA[<]]>  '90'         
+		AND    DM_DOCUMENT_D.DEL_YN         =  'N'  
+		<if test="slipdt != null and slipdt != ''">	AND DM_DOCUMENT_D.DELIVERYDATE	= #{slipdt}			</if>
+		<if test="plant != null and plant != ''">	AND DM_DOCUMENT_D.PLANT	= #{plant}			</if>
+	    AND    DM_DOCUMENT_D.DCCODE	        =  #{dccode}
+		AND    DM_DOCUMENT_D.STORERKEY	    =  #{storerkey}
+		AND    DM_DOCUMENT_D.STATUS         <![CDATA[<]]>  '90'
+		AND    DM_DOCUMENT_D.ORDERQTY + DM_DOCUMENT_D.ORDERADJUSTQTY  <![CDATA[>]]>  DM_DOCUMENT_D.PROCESSQTY
+		AND    DM_DOCUMENT_D.ORDERTYPE 		= #{ordertype}
+		AND    DM_DOCUMENT_D.PROCPOSS_YN    <![CDATA[<>]]>  'R'
+		<!-- START.권한센터 -->
+		    AND EXISTS (SELECT 1
+	                      FROM CM_USER_AUTHORITY 
+	                     WHERE CM_USER_AUTHORITY.DCCODE    = DM_DOCUMENT_D.DCCODE       
+	                       AND CM_USER_AUTHORITY.STORERKEY = DM_DOCUMENT_D.STORERKEY    
+	                       AND CM_USER_AUTHORITY.ORGANIZE  = DM_DOCUMENT_D.ORGANIZE     
+	                       AND CM_USER_AUTHORITY.AREA      = DM_DOCUMENT_D.AREA         
+	                       AND CM_USER_AUTHORITY.STORERKEY = #{storerkey}
+	                       AND CM_USER_AUTHORITY.USERID    = #{gUserId}
+	                       AND CM_USER_AUTHORITY.DCCODE    = #{dccode}               
+	                   )
+		    <!-- END.권한센터	--> 
+		<if test="dailyDeadlineYn == 'Y'.toString()">           
+            <!-- 분배예외처리거래처에 등록된 거래처는 제외한다 -->           
+            AND NOT EXISTS (SELECT 1   
+                              FROM MS_ALLOC_EXCP_CUST
+                             WHERE MS_ALLOC_EXCP_CUST.DCCODE    = DM_DOCUMENT_H.DCCODE
+                               AND MS_ALLOC_EXCP_CUST.STORERKEY = DM_DOCUMENT_H.STORERKEY
+                               AND MS_ALLOC_EXCP_CUST.CUSTKEY   = DM_DOCUMENT_H.TO_CUSTKEY
+                               AND MS_ALLOC_EXCP_CUST.USE_YN    = 'Y'
+                           )           
+            <!-- 분배예외처리상품에 등록된 상품는 제외한다 -->           
+            AND NOT EXISTS (SELECT 1   
+                              FROM MS_ALLOC_EXCP_SKU
+                             WHERE MS_ALLOC_EXCP_SKU.DCCODE    = DM_DOCUMENT_D.DCCODE
+                               AND MS_ALLOC_EXCP_SKU.STORERKEY = DM_DOCUMENT_D.STORERKEY
+                               AND MS_ALLOC_EXCP_SKU.SKU       = DM_DOCUMENT_D.SKU
+                               AND MS_ALLOC_EXCP_SKU.USE_YN    = 'Y'
+                           )    
+        </if>                
+        <!-- 상품 다중선택 -->
+        <if test="sku != null and sku != '' ">
+            <if test="skuMulti != null and skuMulti.size() > 0">
+                <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                    <foreach collection="skuMulti" item="item">
+                        OR DM_DOCUMENT_D.SKU IN
+                        <foreach collection="item" item="code" open="(" close=")" separator=",">
+                            #{code}      
+                        </foreach>
+                    </foreach>
+                </trim>                                             
+            </if>
+        </if>
+		ORDER BY DM_DOCUMENT_D.DOCNO
+		        ,TO_NUMBER(DM_DOCUMENT_D.DOCLINE)
+		        ,DM_DOCUMENT_D.SKU 
+    </select>
+    
+    <select id="getTab2DetailList" resultType="WdAllocationBatchGroupResTab2DetailDto">		
+    <if test="serialyn == 'N'.toString()"> 
+		SELECT /* [WdAllocationBatchGroupService.sqlx][getTab2DetailList][지정분배 상세 조회-serialyn:N일때][공두경][2025.07.10] */
+		       ST_STOCK.DCCODE                                                   AS DCCODE		/*물류센터*/
+              ,ST_STOCK.ORGANIZE                                                 AS ORGANIZE	/*창고*/
+              ,ST_STOCK.LOC                                                      AS LOC			/*로케이션*/
+              ,ST_STOCK.SKU                                                      AS SKU			/*상품코드*/
+              ,MS_SKU.DESCRIPTION                                                AS SKUNAME		/*상품명칭*/
+              ,SUBSTR(MS_SKU.SKUGROUP,-2)                                          AS MC			/*상품분류*/
+              ,ST_STOCK.QTY                                                      AS QTY			/*현재고수량*/
+              ,ST_STOCK.OPENQTY                                                  AS OPENQTY		/*가용재고수량*/
+              ,0                                                                 AS ALLOCATEQTY /*지정량*/    	                    
+              ,ST_STOCK.UOM                                                      AS UOM			/*단위*/
+              ,NVL(CD1.BASEDESCR,CD1.BASECODE)									 AS STOCKTYPENAME	/*재고위치*/
+              ,CASE WHEN REGEXP_LIKE(CM_LOT.LOTTABLE01, '^\d{8}$') 
+              		THEN FN_FORMAT_MASK2(CM_LOT.LOTTABLE01,'####-##-##')
+				    ELSE CM_LOT.LOTTABLE01
+			   END                                                 				 AS LOTTABLE01	/*준일(소비,제조)*/
+              ,ST_STOCK.STOCKID                                                  AS SERIALNO	/*이력번호*/
+              ,''                                                                AS BOXBARCODE	/*박스바코드*/
+              ,ST_STOCK.STORERKEY                                                AS STORERKEY	/**/
+              ,ST_STOCK.AREA                                                     AS AREA		/**/
+              ,ST_STOCK.LOT                                                      AS LOT			/**/
+              ,MS_SKU.SERIALYN                                                   AS SERIALYN	/**/
+              ,ST_STOCK.STOCKID                                                  AS STOCKID		/**/
+              ,ST_STOCK.STOCKGRADE                                               AS STOCKGRADE	/**/
+              ,ST_STOCK.STOCKTYPE                                                AS STOCKTYPE	/**/
+        FROM   ST_STOCK      
+        JOIN   MS_SKU
+        ON     MS_SKU.STORERKEY                = ST_STOCK.STORERKEY
+        AND    MS_SKU.SKU                      = ST_STOCK.SKU
+        AND    MS_SKU.SERIALYN                 = 'N' /*시리얼 관리대상은 제외 한다. */    
+        AND    MS_SKU.DEL_YN                   = 'N'
+        JOIN   MS_LOCATION
+        ON     MS_LOCATION.DCCODE              = ST_STOCK.DCCODE
+        AND    MS_LOCATION.LOC                 = ST_STOCK.LOC
+        AND    MS_LOCATION.LOCFLAG			   = 'GOOD'
+        JOIN   CM_LOT
+        ON     CM_LOT.STORERKEY                = ST_STOCK.STORERKEY
+        AND    CM_LOT.LOT                      = ST_STOCK.LOT
+        AND    CM_LOT.DEL_YN                   = 'N'
+        LEFT JOIN CM_CODE_STORER CD1  ON CD1.STORERKEY  = ST_STOCK.STORERKEY AND CD1.CODELIST  = 'STOCKTYPE' 	AND CD1.BASECODE   = ST_STOCK.STOCKTYPE
+        WHERE  ST_STOCK.OPENQTY             <![CDATA[>]]>  0
+        AND ST_STOCK.STOCKTYPE != 'BAD'
+        <if test="dccode != null and dccode != ''">			AND ST_STOCK.DCCODE		=  #{dccode}		</if>
+        <if test="storerkey != null and storerkey != ''">	AND ST_STOCK.STORERKEY	=  #{storerkey}		</if>
+        <if test="organize != null and organize != ''">		AND ST_STOCK.ORGANIZE	=  #{organize}		</if>
+        <if test="sku != null and sku != ''">				AND ST_STOCK.SKU		=  #{sku}			</if>
+        /*
+        <if test="toLoc != null and toLoc != ''">			<!-- AND ST_STOCK.LOC		=  CASE WHEN #{toLoc} = 'STD' THEN ST_STOCK.LOC ELSE #{toLoc} END	-->	</if>
+        */
+        <if test="toStockid != null and toStockid != ''">	AND ST_STOCK.STOCKID	=  CASE WHEN #{toStockid} = 'STD' THEN ST_STOCK.STOCKID ELSE #{toStockid} END		</if>
+        <!-- START.권한센터 -->
+		    AND EXISTS (SELECT 1
+	                      FROM CM_USER_AUTHORITY 
+	                     WHERE CM_USER_AUTHORITY.DCCODE    = ST_STOCK.DCCODE       
+	                       AND CM_USER_AUTHORITY.STORERKEY = ST_STOCK.STORERKEY     
+	                       AND CM_USER_AUTHORITY.ORGANIZE  = ST_STOCK.ORGANIZE     
+	                       AND CM_USER_AUTHORITY.AREA      = ST_STOCK.AREA         
+	                       AND CM_USER_AUTHORITY.STORERKEY = #{storerkey}
+	                       AND CM_USER_AUTHORITY.USERID    = #{gUserId}
+	                       AND CM_USER_AUTHORITY.DCCODE    = #{dccode}
+	                       <if test="organize != null and organize != ''">		AND CM_USER_AUTHORITY.ORGANIZE	=  #{organize}		</if>               
+	                   )
+		    <!-- END.권한센터	-->     
+        ORDER BY CM_LOT.LOTTABLE01
+                ,ST_STOCK.DCCODE
+                ,ST_STOCK.LOC
+                ,ST_STOCK.STORERKEY
+                ,ST_STOCK.SKU
+    </if>
+    <if test="serialyn == 'Y'.toString()"> 
+		SELECT /* [WdAllocationBatchGroupService.sqlx][getTab2DetailList][지정분배 상세 조회-serialyn:Y일때][공두경][2025.07.10] */
+			   ST_STOCK.DCCODE                                                   AS DCCODE		/*물류센터*/
+              ,ST_STOCK.ORGANIZE                                                 AS ORGANIZE	/*창고*/
+              ,ST_STOCK.LOC                                                      AS LOC			/*로케이션*/
+              ,ST_STOCK.SKU                                                      AS SKU			/*상품코드*/
+              ,MS_SKU.DESCRIPTION                                                AS SKUNAME		/*상품명칭*/
+              ,SUBSTR(MS_SKU.SKUGROUP,-2)                                          AS MC			/*상품분류*/
+              ,ST_STOCK.QTY                                                      AS QTY			/*현재고수량*/
+              ,ST_STOCK.OPENQTY                                                  AS OPENQTY		/*가용재고수량*/
+              ,ST_STOCK.QTYALLOCATED                                             AS ALLOCATEQTY /*지정량*/                    
+              ,ST_STOCK.UOM                                                      AS UOM			/*단위*/
+              ,NVL(CD1.BASEDESCR,CD1.BASECODE) 									 AS STOCKTYPENAME	/*재고위치*/
+              ,CASE WHEN REGEXP_LIKE(ST_SERIALINFO.LOTTABLE01, '^\d{8}$') 
+              		THEN FN_FORMAT_MASK2(ST_SERIALINFO.LOTTABLE01,'####-##-##')
+				    ELSE ST_SERIALINFO.LOTTABLE01
+			   END                                                 				 AS LOTTABLE01	/*준일(소비,제조)*/
+              ,ST_SERIALINFO.SERIALNO                                            AS SERIALNO	/*이력번호*/
+              ,ST_SERIALINFO.STOCKID                                             AS BOXBARCODE  /*박스바코드*/ 	
+              ,ST_STOCK.STORERKEY                                                AS STORERKEY	/**/
+              ,ST_STOCK.AREA                                                     AS AREA		/**/
+              ,ST_STOCK.LOT                                                      AS LOT			/**/
+              ,MS_SKU.SERIALYN                                                   AS SERIALYN	/**/
+              ,ST_STOCK.STOCKID                                                  AS STOCKID		/**/
+              ,ST_STOCK.STOCKGRADE                                               AS STOCKGRADE	/**/
+              ,ST_STOCK.STOCKTYPE                                                AS STOCKTYPE	/**/
+        FROM   ST_STOCK    
+        JOIN   ST_SNINFO ST_SERIALINFO
+        ON     ST_SERIALINFO.STORERKEY = ST_STOCK.STORERKEY
+        AND    ST_SERIALINFO.SKU       = ST_STOCK.SKU
+        AND    ST_SERIALINFO.STOCKID   = ST_STOCK.STOCKID		        
+        JOIN   MS_SKU
+        ON     MS_SKU.STORERKEY                = ST_STOCK.STORERKEY
+        AND    MS_SKU.SKU                      = ST_STOCK.SKU
+        AND    MS_SKU.SERIALYN                 = 'Y' /*시리얼 관리대상만 보여준다. */   
+        AND    MS_SKU.DEL_YN                   = 'N'
+        LEFT JOIN CM_CODE_STORER CD1  ON CD1.STORERKEY  = ST_STOCK.STORERKEY AND CD1.CODELIST  = 'STOCKTYPE' 	AND CD1.BASECODE   = ST_STOCK.STOCKTYPE
+        WHERE  1=1
+        <if test="dccode != null and dccode != ''">			AND ST_STOCK.DCCODE		=  #{dccode}		</if>
+        <if test="storerkey != null and storerkey != ''">	AND ST_STOCK.STORERKEY	=  #{storerkey}		</if>
+        <if test="sku != null and sku != ''">				AND ST_STOCK.SKU		=  #{sku}			</if>
+        <if test="toLoc != null and toLoc != ''">			AND ST_STOCK.LOC		=  CASE WHEN #{toLoc} = 'STD' THEN ST_STOCK.LOC ELSE #{toLoc} END		</if>
+        <if test="toStockid != null and toStockid != ''">	AND ST_STOCK.STOCKID	=  CASE WHEN #{toStockid} = 'STD' THEN ST_STOCK.STOCKID ELSE #{toStockid} END		</if>
+        <!-- START.권한센터 -->
+		    AND EXISTS (SELECT 1
+	                      FROM CM_USER_AUTHORITY 
+	                     WHERE CM_USER_AUTHORITY.DCCODE    = ST_STOCK.DCCODE       
+	                       AND CM_USER_AUTHORITY.STORERKEY = ST_STOCK.STORERKEY    
+	                       AND CM_USER_AUTHORITY.ORGANIZE  = ST_STOCK.ORGANIZE     
+	                       AND CM_USER_AUTHORITY.AREA      = ST_STOCK.AREA         
+	                       AND CM_USER_AUTHORITY.STORERKEY = #{storerkey}
+	                       AND CM_USER_AUTHORITY.USERID    = #{gUserId}
+	                       AND CM_USER_AUTHORITY.DCCODE    = #{dccode}         
+	                   )
+		    <!-- END.권한센터	-->
+		<if test="dailyDeadlineYn == 'Y'.toString()">           
+            <!-- 분배예외처리거래처에 등록된 거래처는 제외한다 -->           
+            AND NOT EXISTS (SELECT 1   
+                              FROM MS_ALLOC_EXCP_CUST
+                             WHERE MS_ALLOC_EXCP_CUST.DCCODE    = DM_DOCUMENT_H.DCCODE
+                               AND MS_ALLOC_EXCP_CUST.STORERKEY = DM_DOCUMENT_H.STORERKEY
+                               AND MS_ALLOC_EXCP_CUST.CUSTKEY   = DM_DOCUMENT_H.TO_CUSTKEY
+                               AND MS_ALLOC_EXCP_CUST.USE_YN    = 'Y'
+                           )           
+            <!-- 분배예외처리상품에 등록된 상품는 제외한다 -->           
+            AND NOT EXISTS (SELECT 1   
+                              FROM MS_ALLOC_EXCP_SKU
+                             WHERE MS_ALLOC_EXCP_SKU.DCCODE    = DM_DOCUMENT_D.DCCODE
+                               AND MS_ALLOC_EXCP_SKU.STORERKEY = DM_DOCUMENT_D.STORERKEY
+                               AND MS_ALLOC_EXCP_SKU.SKU       = DM_DOCUMENT_D.SKU
+                               AND MS_ALLOC_EXCP_SKU.USE_YN    = 'Y'
+                           )    
+        </if>    
+        ORDER BY ST_STOCK.DCCODE
+                ,ST_STOCK.STORERKEY
+                ,ST_STOCK.SKU
+                ,ST_SERIALINFO.LOTTABLE01
+                ,ST_STOCK.LOC
+    </if>
+    </select>
+    
+    <select id="getTab3MasterList" resultType="WdAllocationBatchGroupResTab3Dto">
+		WITH T_ORDER AS ( /* [WdAllocationBatchGroupService.sqlx][getTab3MasterList][피킹유형 미정의 관리처 목록 조회][공두경][2025.07.11] */
+            SELECT DM_DOCUMENT_H.DCCODE
+                 , DM_DOCUMENT_H.STORERKEY
+                 , DM_DOCUMENT_D.DELIVERYDATE
+                 , MAX(DM_DOCUMENT_H.DOCNO) AS DOCNO
+                 , DM_DOCUMENT_H.TO_CUSTKEY
+                 , MIN(MS_CUST.DESCRIPTION) TO_CUSTNAME
+                 , MIN(MS_CUST.CUSTSTRATEGY4) AS CUSTSTRATEGY4
+                 , DM_DOCUMENT_D.PLANT
+                 , MS_SKU.STORAGETYPE
+                 , MS_CUSTDLVINFO.DISTANCETYPE
+                 , MS_CUSTDLVINFO.ZIPCODE
+                 , MS_CUSTDLVINFO.ADDRESS1
+                 , MS_CUSTDLVINFO.ADDRESS2
+                 , MS_CUSTDLVINFO.ADDRESS3
+                 , MS_CUSTDLVINFO.ADDRESS4
+                 , MS_CUSTDLVINFO.SERIALKEY
+                 , DM_DOCUMENT_H.TO_CUSTTYPE 
+            FROM   DM_DOCUMENT_H   
+            JOIN   DM_DOCUMENT_D   
+            ON     DM_DOCUMENT_D.DCCODE     = DM_DOCUMENT_H.DCCODE   
+            AND    DM_DOCUMENT_D.STORERKEY  = DM_DOCUMENT_H.STORERKEY   
+            AND    DM_DOCUMENT_D.ORGANIZE   = DM_DOCUMENT_H.ORGANIZE   
+            AND    DM_DOCUMENT_D.DELIVERYDATE      = DM_DOCUMENT_H.DELIVERYDATE   
+            AND    DM_DOCUMENT_D.DOCNO      = DM_DOCUMENT_H.DOCNO   
+            AND    DM_DOCUMENT_D.DOCTYPE    = DM_DOCUMENT_H.DOCTYPE
+            AND    DM_DOCUMENT_D.CHANNEL    = '1'
+            AND    DM_DOCUMENT_D.DEL_YN     = 'N' 
+            AND    DM_DOCUMENT_D.PROCPOSS_YN   <![CDATA[<>]]>  'R'   
+            JOIN   MS_SKU   
+            ON     MS_SKU.STORERKEY         = DM_DOCUMENT_D.STORERKEY   
+            AND    MS_SKU.SKU               = DM_DOCUMENT_D.SKU
+            JOIN   MS_CUST   
+            ON     MS_CUST.STORERKEY        = DM_DOCUMENT_H.STORERKEY   
+            AND    MS_CUST.CUSTKEY          = DM_DOCUMENT_H.TO_CUSTKEY   
+            AND    MS_CUST.CUSTTYPE         = DM_DOCUMENT_H.TO_CUSTTYPE   
+            LEFT OUTER JOIN MS_CUSTDLVINFO   
+            ON     MS_CUST.STORERKEY        = MS_CUSTDLVINFO.STORERKEY   
+            AND    MS_CUST.CUSTKEY          = MS_CUSTDLVINFO.DLVCUSTKEY   
+            AND    MS_CUST.CUSTTYPE         = MS_CUSTDLVINFO.CUSTTYPE   
+            WHERE  DM_DOCUMENT_H.STORERKEY  =  #{gStorerkey} 
+            AND    DM_DOCUMENT_H.DCCODE     =  #{fixdccode}            
+            AND    DM_DOCUMENT_H.DOCTYPE    =  'WD'    
+            AND    DM_DOCUMENT_H.WORKPROCESSCODE <![CDATA[<>]]> 'PO'   
+            AND    DM_DOCUMENT_D.DELIVERYDATE	<![CDATA[>=]]> 	#{fromSlipdt} 		
+	    	AND    DM_DOCUMENT_D.DELIVERYDATE	<![CDATA[<=]]> 	#{toSlipdt} 		
+		    <!-- 문서번호 다중선택 -->
+			<if test="docnoMulti != null and docnoMulti != ''">
+		       AND DM_DOCUMENT_D.DOCNO IN
+		       <foreach collection="docnoMulti" item="code" open="(" close=")" separator=",">
+		         #{code}
+		       </foreach>   
+	        </if>    
+            GROUP BY DM_DOCUMENT_H.DCCODE, DM_DOCUMENT_H.STORERKEY, DM_DOCUMENT_D.DELIVERYDATE 
+                   , DM_DOCUMENT_H.TO_CUSTKEY, DM_DOCUMENT_D.PLANT, MS_CUSTDLVINFO.DISTANCETYPE, MS_SKU.STORAGETYPE
+                   , MS_CUSTDLVINFO.ZIPCODE, MS_CUSTDLVINFO.ADDRESS1, MS_CUSTDLVINFO.ADDRESS2, MS_CUSTDLVINFO.ADDRESS3
+                   , MS_CUSTDLVINFO.ADDRESS4, MS_CUSTDLVINFO.SERIALKEY,DM_DOCUMENT_H.TO_CUSTTYPE 
+        )
+        SELECT T_ORDER.DCCODE               	AS DCCODE     			/*물류센터*/  
+        	  ,T_ORDER.DELIVERYDATE         	AS DELIVERYDATE 		/*배송일자*/
+        	  ,T_ORDER.PLANT                	AS PLANT        		/*플랜트코드*/
+        	  ,MS_PLANT.DESCRIPTION         	AS DESCRIPTION 			/*플랜트명*/
+        	  ,CASE WHEN MS_CUSTXPOP.POPNAME IS NULL 
+              		THEN 'N' ELSE 'N' END 		AS CUSTXPOP_YN 			/*거래처별POP등록여부*/
+              <!-- 거래처의 피킹그룹 정보 -->
+        	  ,T_ORDER.TO_CUSTKEY               AS TO_CUSTKEY 			/*관리처*/
+        	  ,T_ORDER.TO_CUSTNAME              AS TO_CUSTNAME 			/*관리처명*/
+        	  ,T_ORDER.CUSTSTRATEGY4            AS CUSTSTRATEGY4        /*고객마감유형*/
+        	  ,T_ORDER.DISTANCETYPE             AS MNG_DISTANCETYPE 	/*피킹(원거리)유형*/
+        	  ,MAX(T_ORDER.DOCNO)               AS DOCNO				/*주문번호*/        	  
+        	  ,T_ORDER.ZIPCODE					AS ZIPCODE				/*우편번호*/
+              ,T_ORDER.ADDRESS1                 AS ADDRESS1             /*주소1*/
+              ,T_ORDER.ADDRESS2                 AS ADDRESS2             /*주소2*/
+              ,T_ORDER.ADDRESS3                 AS ADDRESS3             /*주소3*/
+              ,T_ORDER.ADDRESS4                 AS ADDRESS4             /*주소4*/
+              ,T_ORDER.SERIALKEY                AS SERIALKEY             /**/
+              ,T_ORDER.STORERKEY            	AS STORERKEY			/**/
+        FROM   T_ORDER
+        JOIN   MS_PLANT
+        ON     MS_PLANT.PLANT           = T_ORDER.PLANT
+        LEFT JOIN MS_PICKBATCHGROUP   
+        ON     T_ORDER.DCCODE           = MS_PICKBATCHGROUP.DCCODE   
+        AND    T_ORDER.PLANT            = MS_PICKBATCHGROUP.PLANT     
+        AND    T_ORDER.STORAGETYPE      = MS_PICKBATCHGROUP.STORAGETYPE     
+        AND    T_ORDER.DISTANCETYPE     = MS_PICKBATCHGROUP.DISTANCETYPE 
+        AND    MS_PICKBATCHGROUP.DEL_YN = 'N'   /*사용여부가 사용인경우 체크 - 20251223 이창진요청 공두경코딩*/
+        LEFT JOIN LATERAL (
+		    SELECT X.POPNAME
+		    FROM MS_CUSTXPOP X
+		    WHERE X.DCCODE = T_ORDER.DCCODE
+		      AND X.STORERKEY = T_ORDER.STORERKEY
+		      AND X.CUSTKEY = T_ORDER.TO_CUSTKEY
+		      AND X.CUSTTYPE = T_ORDER.TO_CUSTTYPE
+		      AND X.FROMDATE <![CDATA[<=]]> T_ORDER.DELIVERYDATE
+		    ORDER BY X.FROMDATE DESC
+		    FETCH FIRST 1 ROWS ONLY
+		) MS_CUSTXPOP ON 1 = 1
+        WHERE  (  T_ORDER.DISTANCETYPE <![CDATA[<>]]> MS_PICKBATCHGROUP.DISTANCETYPE
+               OR MS_PICKBATCHGROUP.DISTANCETYPE IS NULL 
+               OR (MS_PICKBATCHGROUP.DISTANCETYPE = 'CAR' AND MS_CUSTXPOP.POPNAME IS NULL))
+        GROUP BY T_ORDER.DCCODE       
+				,T_ORDER.DELIVERYDATE 
+				,T_ORDER.PLANT        
+				,MS_PLANT.DESCRIPTION 
+				,T_ORDER.TO_CUSTKEY   
+				,T_ORDER.TO_CUSTNAME  
+				,T_ORDER.CUSTSTRATEGY4
+				,T_ORDER.DISTANCETYPE 
+				,T_ORDER.STORERKEY    
+				, T_ORDER.ZIPCODE
+                , T_ORDER.ADDRESS1
+                , T_ORDER.ADDRESS2
+                , T_ORDER.ADDRESS3
+                , T_ORDER.ADDRESS4
+                , T_ORDER.SERIALKEY  
+                , MS_CUSTXPOP.POPNAME 
+        ORDER BY
+            T_ORDER.DELIVERYDATE
+           ,T_ORDER.TO_CUSTKEY 
+           ,T_ORDER.PLANT
+           ,T_ORDER.DISTANCETYPE        
+    </select>
+    
+    <select id="getTab4MasterList" resultType="WdAllocationBatchGroupResTab4Dto">		
+		WITH T_RESULT AS ( /* [WdAllocationBatchGroupService.sqlx][getTab4MasterList][차량별분배 목록 조회][공두경][2025.08.19] */
+            SELECT 
+                   WD_INPLAN.SLIPDT    		      									AS SLIPDT          	/*작업지시일자*/
+                  ,NVL(MS_PICKBATCHGROUP.PLANT       ,DM_DOCUMENT_D.PLANT) 			AS PLANT			/*플랜트*/
+                  ,NVL(MS_PICKBATCHGROUP.STORAGETYPE ,MS_SKU.STORAGETYPE) 			AS STORAGETYPE		/*저장조건*/
+                  ,CASE WHEN NVL(MS_PICKBATCHGROUP.DEL_YN,'N') = 'Y' THEN ''
+                        ELSE NVL(MS_PICKBATCHGROUP.DISTANCETYPE,MS_CUSTDLVINFO.DISTANCETYPE) END 	AS DISTANCETYPE		/*원거리유형*/
+                  ,MS_PICKBATCHGROUP.BATCHGROUP  									AS CREATEKEY		/*생성키*/
+                  ,MAX(MS_PICKBATCHGROUP.DESCRIPTION)        						AS CREATEDESCR 		/*생성키명*/
+                  ,MS_SKU.SERIALYN                									AS SERIALYN			/*식별번호유무*/
+                  ,SUM(WD_INPLAN.ORDERQTY)     	  									AS ORDERQTY         /*주문량*/
+                  ,SUM(WD_INPLAN.QTYALLOCATED)    									AS PROCESSQTY       /*분배량*/
+                  ,NVL(SUM(OM_SDY_REGN_REPL_D.MOVE_QTY),0)                          AS STOQTY           /*STO할당량*/
+                  ,SUM(WD_INPLAN.OPENQTY)-SUM(WD_INPLAN.QTYALLOCATED)    			AS PROCESSOPENQTY   /*미분배량*/
+                  ,WD_INPLAN.DCCODE       		  									AS DCCODE           /**/
+                  ,WD_INPLAN.STORERKEY    		  									AS STORERKEY        /**/
+                  ,MS_PICKBATCHGROUP.BATCHGROUP   									AS WAVEKEY          /* SY_PROCESSTEMP_WD.용 생성 배치키 */
+                  ,MS_PICKBATCHGROUP.BATCHGROUP   									AS BATCHGROUP       /**/
+                  ,SUM(WD_INPLAN.OPENQTY)      	  									AS OPENQTY          /**/
+                  ,SUM(WD_INPLAN.QTYPICKED )      									AS WORKQTY          /**/
+                  ,SUM(WD_INPLAN.INSPECTQTY)      									AS INSPECTQTY       /**/
+                  ,SUM(WD_INPLAN.CONFIRMQTY)      									AS CONFIRMQTY       /**/
+                  ,DM_DOCUMENT_H.TO_CUSTTYPE										AS TO_CUSTTYPE		/**/
+                  ,DM_DOCUMENT_H.TO_CUSTKEY											AS TO_CUSTKEY		/**/
+            FROM   DM_DOCUMENT_D
+            JOIN   DM_DOCUMENT_H
+            ON     DM_DOCUMENT_H.DCCODE            = DM_DOCUMENT_D.DCCODE
+            AND    DM_DOCUMENT_H.DOCTYPE           = DM_DOCUMENT_D.DOCTYPE
+            AND    DM_DOCUMENT_H.DOCNO             = DM_DOCUMENT_D.DOCNO
+            AND    DM_DOCUMENT_H.DELIVERYDATE      = DM_DOCUMENT_D.DELIVERYDATE
+            AND    DM_DOCUMENT_H.DEL_YN        = 'N'
+            <!-- 고객 다중선택 -->
+			<if test="toCustkeyMulti != null and toCustkeyMulti != '' ">
+		    	<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+		    		<foreach collection="toCustkeyMulti" item="item">
+		    			OR DM_DOCUMENT_H.TO_CUSTKEY IN
+		    			<foreach collection="item" item="code" open="(" close=")" separator=",">
+		    				#{code} 	 
+		          		</foreach>
+		        	</foreach>
+		      	</trim>			                                    
+            </if>
+            JOIN   WD_INPLAN
+            ON     WD_INPLAN.DCCODE            = DM_DOCUMENT_D.DCCODE
+            AND    WD_INPLAN.STORERKEY         = DM_DOCUMENT_D.STORERKEY
+            AND    WD_INPLAN.DOCTYPE           = DM_DOCUMENT_D.DOCTYPE
+            AND    WD_INPLAN.DOCNO             = DM_DOCUMENT_D.DOCNO
+            AND    WD_INPLAN.DOCLINE           = DM_DOCUMENT_D.DOCLINE
+            AND    WD_INPLAN.SLIPDT            = DM_DOCUMENT_D.DELIVERYDATE
+            AND    WD_INPLAN.DEL_YN            = 'N'
+            <if test="status != null and status != ''">	AND WD_INPLAN.STATUS =	#{status}		</if>
+            JOIN   MS_SKU
+            ON     MS_SKU.STORERKEY            = DM_DOCUMENT_D.STORERKEY
+            AND    MS_SKU.SKU                  = DM_DOCUMENT_D.SKU
+            <if test="storagetype != null and storagetype != ''">	AND MS_SKU.STORAGETYPE 	=	#{storagetype}		</if>
+            <if test="serialyn != null and serialyn != ''">			AND MS_SKU.SERIALYN 	=	#{serialyn}			</if>
+            JOIN   MS_PLANT
+            ON     MS_PLANT.PLANT               = DM_DOCUMENT_D.PLANT
+            JOIN   MS_CUSTDLVINFO
+            ON     MS_CUSTDLVINFO.STORERKEY     = DM_DOCUMENT_H.STORERKEY
+            AND    MS_CUSTDLVINFO.CUSTTYPE      = DM_DOCUMENT_H.TO_CUSTTYPE
+            AND    MS_CUSTDLVINFO.DLVCUSTKEY    = DM_DOCUMENT_H.TO_CUSTKEY
+            AND    MS_CUSTDLVINFO.DISTANCETYPE   = 'CAR'
+            JOIN   MS_PICKBATCHGROUP
+            ON     DM_DOCUMENT_D.DCCODE        = MS_PICKBATCHGROUP.DCCODE
+            AND    DM_DOCUMENT_D.PLANT         = MS_PICKBATCHGROUP.PLANT 
+            AND    MS_SKU.STORAGETYPE          = MS_PICKBATCHGROUP.STORAGETYPE
+            AND    MS_CUSTDLVINFO.DISTANCETYPE = MS_PICKBATCHGROUP.DISTANCETYPE
+            AND    MS_PICKBATCHGROUP.DISTANCETYPE = 'CAR'
+            LEFT JOIN  (SELECT SOKEY, SOLINE, SUM(MOVE_QTY) AS MOVE_QTY
+                            FROM  OM_SDY_REGN_REPL_D
+                            GROUP BY SOKEY, SOLINE) OM_SDY_REGN_REPL_D
+            ON    OM_SDY_REGN_REPL_D.SOKEY     = DM_DOCUMENT_D.DOCNO
+            AND   OM_SDY_REGN_REPL_D.SOLINE    = DM_DOCUMENT_D.DOCLINE
+            <if test="zone != null and zone != ''">   
+                JOIN  ST_STOCK
+                ON    ST_STOCK.DCCODE    = DM_DOCUMENT_D.DCCODE
+                AND   ST_STOCK.STORERKEY = DM_DOCUMENT_D.STORERKEY
+                AND   ST_STOCK.SKU       = DM_DOCUMENT_D.SKU
+                AND   ST_STOCK.STOCKTYPE = 'GOOD'
+                AND   ST_STOCK.OPENQTY   <![CDATA[>]]>   0
+                JOIN  MS_LOCATION
+                ON    MS_LOCATION.DCCODE    = ST_STOCK.DCCODE
+                AND   MS_LOCATION.LOC       = ST_STOCK.LOC        
+                JOIN  MS_ZONE
+                ON    MS_ZONE.DCCODE        = MS_LOCATION.DCCODE
+                AND   MS_ZONE.ZONE          = MS_LOCATION.ZONE
+                AND   MS_ZONE.ZONE          = #{zone} 
+                AND   MS_ZONE.ZONE  NOT IN ('RETURN','ADJUST','CROSS')
+            </if> 
+            WHERE  DM_DOCUMENT_D.DCCODE        = #{fixdccode}
+            AND    DM_DOCUMENT_D.STORERKEY     = #{gStorerkey}
+            AND    DM_DOCUMENT_D.DOCTYPE       = 'WD'
+            AND    DM_DOCUMENT_D.CHANNEL       = '1'
+            AND    DM_DOCUMENT_D.DEL_YN        = 'N'
+            AND    DM_DOCUMENT_D.PROCPOSS_YN   <![CDATA[<>]]>  'R'
+            AND DM_DOCUMENT_D.DELIVERYDATE	<![CDATA[>=]]> 	#{fromSlipdt} 	
+			AND DM_DOCUMENT_D.DELIVERYDATE	<![CDATA[<=]]> 	#{toSlipdt}		
+			<if test="workprocesscode != null and workprocesscode != ''">	AND DM_DOCUMENT_D.WORKPROCESSCODE 	=	#{workprocesscode}		</if>
+			<if test="ordertype != null and ordertype != ''">				AND DM_DOCUMENT_D.ORDERTYPE 		=	#{ordertype}			</if>
+            <!-- 상품 다중선택 -->
+            <if test="sku != null and sku != '' ">
+                <if test="skuMulti != null and skuMulti.size() > 0">
+                    <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                        <foreach collection="skuMulti" item="item">
+                            OR DM_DOCUMENT_D.SKU IN
+                            <foreach collection="item" item="code" open="(" close=")" separator=",">
+                                #{code}      
+                            </foreach>
+                        </foreach>
+                    </trim>                                             
+                </if>
+            </if>
+            AND    DM_DOCUMENT_D.STATUS <![CDATA[<]]> '90'
+            <!-- START.권한센터 -->
+		    AND EXISTS (SELECT 1
+	                      FROM CM_USER_AUTHORITY 
+	                     WHERE CM_USER_AUTHORITY.DCCODE    = DM_DOCUMENT_D.DCCODE       
+	                       AND CM_USER_AUTHORITY.STORERKEY = DM_DOCUMENT_D.STORERKEY    
+	                       AND CM_USER_AUTHORITY.ORGANIZE  = DM_DOCUMENT_D.ORGANIZE     
+	                       AND CM_USER_AUTHORITY.AREA      = DM_DOCUMENT_D.AREA         
+	                       AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey}
+	                       AND CM_USER_AUTHORITY.USERID    = #{gUserId}
+	                       AND CM_USER_AUTHORITY.DCCODE    = #{fixdccode}
+	                       AND CM_USER_AUTHORITY.AREA      = #{gArea}   
+				           <!-- 창고.다중검색 -->
+				           <if test='gOrganizeMulti != null and gOrganizeMulti.length > 0'>
+					           AND CM_USER_AUTHORITY.ORGANIZE IN
+					           <foreach collection="gOrganizeMulti" item="code" open="(" close=")" separator=",">
+					             #{code}
+					           </foreach>
+				           </if>                       
+	                   )
+	        <if test="dailyDeadlineYn == 'Y'.toString()">           
+                <!-- 분배예외처리거래처에 등록된 거래처는 제외한다 -->           
+                AND NOT EXISTS (SELECT 1   
+                                  FROM MS_ALLOC_EXCP_CUST
+                                 WHERE MS_ALLOC_EXCP_CUST.DCCODE    = DM_DOCUMENT_H.DCCODE
+                                   AND MS_ALLOC_EXCP_CUST.STORERKEY = DM_DOCUMENT_H.STORERKEY
+                                   AND MS_ALLOC_EXCP_CUST.CUSTKEY   = DM_DOCUMENT_H.TO_CUSTKEY
+                                   AND MS_ALLOC_EXCP_CUST.USE_YN    = 'Y'
+                               )           
+                <!-- 분배예외처리상품에 등록된 상품는 제외한다 -->           
+                AND NOT EXISTS (SELECT 1   
+                                  FROM MS_ALLOC_EXCP_SKU
+                                 WHERE MS_ALLOC_EXCP_SKU.DCCODE    = DM_DOCUMENT_D.DCCODE
+                                   AND MS_ALLOC_EXCP_SKU.STORERKEY = DM_DOCUMENT_D.STORERKEY
+                                   AND MS_ALLOC_EXCP_SKU.SKU       = DM_DOCUMENT_D.SKU
+                                   AND MS_ALLOC_EXCP_SKU.USE_YN    = 'Y'
+                               )    
+            </if>    
+		    <!-- END.권한센터	--> 
+            GROUP BY  WD_INPLAN.DCCODE    
+                     ,WD_INPLAN.STORERKEY 
+                     ,WD_INPLAN.SLIPDT
+                     ,DM_DOCUMENT_D.PLANT
+                     ,MS_SKU.STORAGETYPE
+                     ,MS_CUSTDLVINFO.DISTANCETYPE        
+                     ,MS_PICKBATCHGROUP.PLANT        
+                     ,MS_PICKBATCHGROUP.STORAGETYPE  
+                     ,MS_PICKBATCHGROUP.DISTANCETYPE 
+                     ,MS_PICKBATCHGROUP.BATCHGROUP  
+                     ,MS_SKU.SERIALYN
+                     ,DM_DOCUMENT_H.TO_CUSTTYPE
+                     ,DM_DOCUMENT_H.TO_CUSTKEY
+                     ,MS_PICKBATCHGROUP.DEL_YN
+        )
+        SELECT SLIPDT          	                        /*작업지시일자*/
+              ,CARNO			                        /*차량번호*/
+              ,PLANT			                        /*플랜트*/
+              ,STORAGETYPE		                        /*저장조건*/
+              ,STORAGETYPEDESC							/*저장조건명*/
+              ,DISTANCETYPE		                        /*원거리유형*/
+              ,CREATEKEY		                        /*생성키*/
+              ,CREATEDESCR 		                        /*생성키명*/
+              ,SERIALYN			                        /*식별번호유무*/
+              ,SUM(ORDERQTY) 		AS ORDERQTY         /*주문량*/
+              ,SUM(PROCESSQTY) 		AS PROCESSQTY       /*분배량*/
+              ,SUM(PROCESSOPENQTY) 	AS PROCESSOPENQTY   /*미분배량*/
+              ,SUM(STOQTY)          AS STOQTY           /*STO할당량*/
+              ,DCCODE           						/**/
+              ,STORERKEY        						/**/
+              ,WAVEKEY          						/* SY_PROCESSTEMP_WD.용 생성 배치키 */
+              ,BATCHGROUP       						/**/
+              ,SUM(OPENQTY) 		AS OPENQTY          /**/
+              ,SUM(WORKQTY) 		AS WORKQTY          /**/
+              ,SUM(INSPECTQTY) 		AS INSPECTQTY       /**/
+              ,SUM(CONFIRMQTY) 		AS CONFIRMQTY       /**/              
+          FROM (
+        SELECT T_RESULT.*
+              /*,(SELECT POPNAME 
+		    	   FROM (SELECT POPNAME 
+				    	   FROM MS_CUSTXPOP Z
+		                  WHERE Z.DCCODE = T_RESULT.DCCODE 
+		                    AND Z.STORERKEY = T_RESULT.STORERKEY 
+		                    AND Z.CUSTTYPE LIKE NVL(T_RESULT.TO_CUSTTYPE, '%')
+		                    AND CUSTKEY = T_RESULT.TO_CUSTKEY 
+		                    AND FROMDATE <![CDATA[<=]]> T_RESULT.SLIPDT 
+		                    AND TODATE <![CDATA[>=]]> T_RESULT.SLIPDT
+		                 ORDER BY FROMDATE DESC)
+		           WHERE ROWNUM = 1) AS CARNO*/
+        	  ,MS_CUSTXPOP.POPNAME AS CARNO
+              ,MS_CUSTXPOP.POPNO AS POPNO
+              ,MS_CUSTXPOP.FROMDATE AS FROMDATE
+              ,DECODE(TRIM(NVL(PLANT1.DESCRIPTION,'')),'',PLANT1.PLANT,TRIM(NVL(PLANT1.DESCRIPTION,''))) AS PLANTDESC
+              ,NVL(CD1.BASEDESCR,CD1.BASECODE) 	AS STORAGETYPEDESC
+        FROM  T_RESULT
+        LEFT JOIN (SELECT POPNO, POPNAME, CUSTKEY, CUSTTYPE, FROMDATE  
+				    	   FROM MS_CUSTXPOP Z
+		                  WHERE Z.DCCODE = #{fixdccode}
+		                    AND Z.STORERKEY = #{gStorerkey}
+		                    AND Z.FROMDATE  = (SELECT MAX(X.FROMDATE)  
+									    	   FROM MS_CUSTXPOP X
+							                  WHERE X.DCCODE = #{fixdccode}
+							                    AND X.STORERKEY = #{gStorerkey}
+							                    AND X.CUSTTYPE = Z.CUSTTYPE
+							                    AND X.CUSTKEY = Z.CUSTKEY
+							                    AND X.FROMDATE  <![CDATA[<=]]>  #{toSlipdt}	
+							                    AND X.TODATE  <![CDATA[>=]]>  #{fromSlipdt}		)		 	 
+		          ) MS_CUSTXPOP
+        ON    MS_CUSTXPOP.CUSTKEY = T_RESULT.TO_CUSTKEY
+        AND   MS_CUSTXPOP.CUSTTYPE LIKE NVL(T_RESULT.TO_CUSTTYPE, '%')
+        LEFT JOIN CM_CODE_STORER CD1 ON (CD1.STORERKEY = T_RESULT.STORERKEY	AND CD1.CODELIST = 'STORAGETYPE' 	AND CD1.BASECODE  = T_RESULT.STORAGETYPE)
+        LEFT JOIN MS_PLANT PLANT1 	 ON PLANT1.PLANT = T_RESULT.PLANT
+        )
+        GROUP BY SLIPDT        
+				,CARNO		
+				,PLANT			
+				,STORAGETYPE	
+				,STORAGETYPEDESC
+				,DISTANCETYPE		
+				,CREATEKEY		
+				,CREATEDESCR 		
+				,SERIALYN			
+				,DCCODE        
+				,STORERKEY     
+				,WAVEKEY       
+				,BATCHGROUP    
+        ORDER BY  CARNO
+        		 ,DCCODE    
+                 ,STORERKEY 
+                 ,SLIPDT
+                 ,WAVEKEY 
+                 ,CREATEKEY 
+                 ,PLANT
+                 ,STORAGETYPE
+                 ,DISTANCETYPE
+                 ,CREATEDESCR    	
+		       
+    </select>
+    
+    <select id="getTab4DetailList" resultType="WdAllocationBatchGroupResTab4DetailDto">		
+    	SELECT /* [WdAllocationBatchGroupService.sqlx][getTab4DetailList][차량별분배 상세 조회][공두경][2025.08.19] */
+    	       <choose>
+                    <when test="carno != null and carno != ''">
+                         /*+ LEADING(DM_DOCUMENT_D DM_DOCUMENT_H MS_ALLOC_EXCP_CUST MS_CUSTDLVINFO MS_PICKBATCHGROUP)  */
+                    </when>
+                    <otherwise>
+    			         /*+ LEADING(DM_DOCUMENT_D) */
+                    </otherwise>
+                </choose>
+               MS_CUSTXPOP.POPNAME							AS  CARNO				/*차량번호*/ 
+              ,DM_DOCUMENT_H.TO_CUSTKEY         			AS  TO_CUSTKEY          /*관리처코드*/
+              ,MAX(DM_DOCUMENT_H.TO_CUSTNAME)           	AS  TO_CUSTNAME         /*배송인도처명*/
+              ,MAX(NVL(CD1.BASEDESCR,CD1.BASECODE))			AS  ORDERTYPE_DESCR 	/*주문유형*/
+              ,SUM(DECODE(DM_DOCUMENT_D.OMS_FLAG,'N',1,0)) 	AS  OMS_FLAG			/*미마감건수*/
+              ,COUNT(DISTINCT WD_INPLAN.DOCNO )   			AS  SLIPCNT 			/*전표수*/
+              ,COUNT(DISTINCT WD_INPLAN.SKU   )   			AS  SKUCNT 				/*상품수*/
+              ,SUM(WD_INPLAN.ORDERQTY )           			AS  ORDERQTY 			/*주문량*/
+              ,SUM(WD_INPLAN.QTYALLOCATED )       			AS  PROCESSQTY          /*분배량*/
+              ,SUM(WD_INPLAN.QTYPICKED    )       			AS  WORKQTY             /*피킹량*/
+              ,SUM(WD_INPLAN.INSPECTQTY )         			AS  INSPECTQTY          /*상차스캔량*/
+              ,SUM(WD_INPLAN.CONFIRMQTY )         			AS  CONFIRMQTY          /*출고확정량*/
+              ,DM_DOCUMENT_D.WORKPROCESSCODE      			AS  WORKPROCESSCODE 	/*WORKPROCESSCODE*/
+              ,DM_DOCUMENT_H.DCCODE      					AS  DCCODE  			/**/    
+              ,DM_DOCUMENT_H.STORERKEY      				AS  STORERKEY   		/**/
+              ,DM_DOCUMENT_H.ORDERTYPE						AS  ORDERTYPE			/**/
+              ,MAX(WD_INPLAN.UOM)                 			AS  UOM                 /**/
+              ,SUM(WD_INPLAN.ORDERQTY )           			AS  ORDERQTY 			/**/
+              ,SUM(WD_INPLAN.OPENQTY )         	  			AS  OPENQTY             /**/
+              ,#{plant}                           			AS  PLANT        		/**/ 
+              ,#{storagetype}                     			AS  STORAGETYPE   		/**/
+              ,#{distancetype}                     			AS  DISTANCETYPE  		/**/
+              ,#{batchgroup}                      			AS  BATCHGROUP    		/**/
+              ,#{slipdt}                            		AS  SLIPDT     			/**/
+              ,MS_SKU.SERIALYN      						AS  SERIALYN			/**/
+        FROM   DM_DOCUMENT_D
+        JOIN   DM_DOCUMENT_H
+        ON     DM_DOCUMENT_H.DCCODE                     = DM_DOCUMENT_D.DCCODE
+        AND    DM_DOCUMENT_H.DOCTYPE                    = DM_DOCUMENT_D.DOCTYPE
+        AND    DM_DOCUMENT_H.DOCNO                      = DM_DOCUMENT_D.DOCNO
+        AND    DM_DOCUMENT_H.DELIVERYDATE               = DM_DOCUMENT_D.DELIVERYDATE
+        AND    DM_DOCUMENT_H.DEL_YN                     = 'N'
+        <!-- 고객 다중선택 -->
+		<if test="toCustkeyMulti != null and toCustkeyMulti != '' ">
+	    	<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+	    		<foreach collection="toCustkeyMulti" item="item">
+	    			OR DM_DOCUMENT_H.TO_CUSTKEY IN
+	    			<foreach collection="item" item="code" open="(" close=")" separator=",">
+	    				#{code} 	 
+	          		</foreach>
+	        	</foreach>
+	      	</trim>			                                    
+        </if>
+        JOIN   WD_INPLAN
+        ON     WD_INPLAN.DCCODE                         = DM_DOCUMENT_D.DCCODE
+        AND    WD_INPLAN.STORERKEY                      = DM_DOCUMENT_D.STORERKEY
+        AND    WD_INPLAN.ORGANIZE                       = DM_DOCUMENT_D.ORGANIZE
+        AND    WD_INPLAN.AREA                           = DM_DOCUMENT_D.AREA
+        AND    WD_INPLAN.DOCTYPE                        = DM_DOCUMENT_D.DOCTYPE        
+        AND    WD_INPLAN.DOCNO                          = DM_DOCUMENT_D.DOCNO
+        AND    WD_INPLAN.DOCLINE                        = DM_DOCUMENT_D.DOCLINE
+        AND    WD_INPLAN.SLIPDT                         = DM_DOCUMENT_D.DELIVERYDATE
+        AND    WD_INPLAN.DEL_YN                         = 'N'
+        JOIN   MS_SKU                                   
+        ON     MS_SKU.STORERKEY                         = DM_DOCUMENT_D.STORERKEY
+        AND    MS_SKU.SKU                               = DM_DOCUMENT_D.SKU
+        AND    MS_SKU.STORAGETYPE                       = #{storagetype}
+        AND    MS_SKU.DEL_YN                            = 'N'
+        <if test="serialyn != null and serialyn != ''">			AND MS_SKU.SERIALYN 	=	#{serialyn}			</if>
+        JOIN   MS_PLANT                                 
+        ON     MS_PLANT.PLANT                           = DM_DOCUMENT_D.PLANT
+        AND    MS_PLANT.PLANT                           = #{plant} 
+        JOIN   MS_CUSTDLVINFO                           
+        ON     MS_CUSTDLVINFO.STORERKEY                 = DM_DOCUMENT_H.STORERKEY
+        AND    MS_CUSTDLVINFO.CUSTTYPE                  = DM_DOCUMENT_H.TO_CUSTTYPE
+        AND    MS_CUSTDLVINFO.DLVCUSTKEY                = DM_DOCUMENT_H.TO_CUSTKEY
+        AND    MS_CUSTDLVINFO.DISTANCETYPE              = #{distancetype}
+        AND    MS_CUSTDLVINFO.DISTANCETYPE              = 'CAR'
+        JOIN   MS_PICKBATCHGROUP
+        ON     MS_PICKBATCHGROUP.DCCODE                 = DM_DOCUMENT_D.DCCODE             
+        AND    MS_PICKBATCHGROUP.PLANT                  = DM_DOCUMENT_D.PLANT          
+        AND    MS_PICKBATCHGROUP.STORAGETYPE            = MS_SKU.STORAGETYPE           
+        AND    MS_PICKBATCHGROUP.DISTANCETYPE           = MS_CUSTDLVINFO.DISTANCETYPE  
+        AND    MS_PICKBATCHGROUP.BATCHGROUP             = #{batchgroup} 
+        AND    MS_PICKBATCHGROUP.DISTANCETYPE 		    = 'CAR'
+        <choose>
+            <when test="carno != null and carno != ''">
+                JOIN  ( SELECT X.DCCODE, X.STORERKEY, X.CUSTKEY, X.CUSTTYPE, X.POPNAME, X.FROMDATE , RANK() OVER (PARTITION BY  X.DCCODE, X.STORERKEY, X.CUSTTYPE, X.CUSTKEY ORDER BY X.FROMDATE DESC) RN  
+                           FROM MS_CUSTXPOP X 
+                          WHERE X.DCCODE     = #{dccode}
+                            AND X.STORERKEY  = #{storerkey}
+                            AND X.FROMDATE <![CDATA[<=]]> #{slipdt} ) MS_CUSTXPOP
+                ON     DM_DOCUMENT_H.TO_CUSTKEY  = MS_CUSTXPOP.CUSTKEY
+                AND    DM_DOCUMENT_H.TO_CUSTTYPE = MS_CUSTXPOP.CUSTTYPE
+                AND    RN = 1
+                AND    MS_CUSTXPOP.POPNAME       = #{carno}                
+            </when>
+            <otherwise>
+            	LEFT JOIN   MS_CUSTXPOP	   
+		        ON     DM_DOCUMENT_H.TO_CUSTKEY  = MS_CUSTXPOP.CUSTKEY
+		        AND    DM_DOCUMENT_H.TO_CUSTTYPE = MS_CUSTXPOP.CUSTTYPE
+		        AND    MS_CUSTXPOP.DCCODE 		= #{dccode}
+		        AND    MS_CUSTXPOP.STORERKEY 	= #{storerkey}
+		        AND    MS_CUSTXPOP.POPNAME	    IS NULL
+		        AND    MS_CUSTXPOP.FROMDATE 	= (SELECT MAX(X.FROMDATE)  
+										    	    FROM MS_CUSTXPOP X
+								                   WHERE X.DCCODE 	 = MS_CUSTXPOP.DCCODE
+								                     AND X.STORERKEY = MS_CUSTXPOP.STORERKEY
+								                     AND X.CUSTTYPE  = MS_CUSTXPOP.CUSTTYPE
+								                     AND X.CUSTKEY 	 = MS_CUSTXPOP.CUSTKEY
+								                     AND X.FROMDATE  <![CDATA[<=]]>  #{slipdt})
+            </otherwise>
+        </choose>
+        <if test="zone != null and zone != ''">   
+            JOIN  ST_STOCK
+            ON    ST_STOCK.DCCODE    = DM_DOCUMENT_D.DCCODE
+            AND   ST_STOCK.STORERKEY = DM_DOCUMENT_D.STORERKEY
+            AND   ST_STOCK.SKU       = DM_DOCUMENT_D.SKU
+            AND   ST_STOCK.STOCKTYPE = 'GOOD'
+            AND   ST_STOCK.OPENQTY   <![CDATA[>]]>   0
+            JOIN  MS_LOCATION
+            ON    MS_LOCATION.DCCODE    = ST_STOCK.DCCODE
+            AND   MS_LOCATION.LOC       = ST_STOCK.LOC        
+            JOIN  MS_ZONE
+            ON    MS_ZONE.DCCODE        = MS_LOCATION.DCCODE
+            AND   MS_ZONE.ZONE          = MS_LOCATION.ZONE
+            AND   MS_ZONE.ZONE          = #{zone} 
+            AND   MS_ZONE.ZONE  NOT IN ('RETURN','ADJUST','CROSS')
+        </if> 
+        LEFT JOIN CM_CODE_STORER CD1 ON (CD1.STORERKEY = DM_DOCUMENT_H.STORERKEY	AND CD1.CODELIST = 'ORDERTYPE_WD' 	AND CD1.BASECODE  = DM_DOCUMENT_H.ORDERTYPE)
+        WHERE  DM_DOCUMENT_D.DCCODE                     = #{dccode}
+        AND    DM_DOCUMENT_D.STORERKEY                  = #{storerkey}
+        AND    DM_DOCUMENT_D.DOCTYPE                    = 'WD'
+        AND    DM_DOCUMENT_D.CHANNEL                    = '1'
+        AND    DM_DOCUMENT_D.PLANT                      = #{plant}
+        AND    DM_DOCUMENT_D.DEL_YN                     = 'N'
+        AND    DM_DOCUMENT_D.DELIVERYDATE               = #{slipdt}
+		AND    DM_DOCUMENT_D.STATUS                <![CDATA[<]]> '90'  
+		AND    DM_DOCUMENT_D.PROCPOSS_YN           <![CDATA[<>]]>  'R'
+        <!-- 상품 다중선택 -->
+        <if test="sku != null and sku != '' ">
+            <if test="skuMulti != null and skuMulti.size() > 0">
+                <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                    <foreach collection="skuMulti" item="item">
+                        OR DM_DOCUMENT_D.SKU IN
+                        <foreach collection="item" item="code" open="(" close=")" separator=",">
+                            #{code}      
+                        </foreach>
+                    </foreach>
+                </trim>                                             
+            </if>
+        </if>
+		<choose>
+            <when test="carno != null and carno != ''">
+                /* 위에가 JOIN이기에 EXISTS가 필요없음*/                                     
+            </when>
+            <otherwise>
+                AND NOT EXISTS(SELECT 1 
+                                FROM   MS_CUSTXPOP     
+                                WHERE  DM_DOCUMENT_H.TO_CUSTKEY  = MS_CUSTXPOP.CUSTKEY
+                                AND    DM_DOCUMENT_H.TO_CUSTTYPE = MS_CUSTXPOP.CUSTTYPE
+                                AND    MS_CUSTXPOP.DCCODE       = #{dccode}
+                                AND    MS_CUSTXPOP.STORERKEY    = #{storerkey}
+                                AND    MS_CUSTXPOP.POPNAME      IS NULL
+                                AND    MS_CUSTXPOP.FROMDATE     = (SELECT MAX(X.FROMDATE)  
+                                                                    FROM MS_CUSTXPOP X
+                                                                   WHERE X.DCCODE    = MS_CUSTXPOP.DCCODE
+                                                                     AND X.STORERKEY = MS_CUSTXPOP.STORERKEY
+                                                                     AND X.CUSTTYPE  = MS_CUSTXPOP.CUSTTYPE
+                                                                     AND X.CUSTKEY   = MS_CUSTXPOP.CUSTKEY
+                                                                     AND X.FROMDATE  <![CDATA[<=]]>  #{slipdt})
+                                )   
+            </otherwise>
+        </choose>		                                  
+		<if test="dailyDeadlineYn == 'Y'.toString()">           
+            <!-- 분배예외처리거래처에 등록된 거래처는 제외한다 -->           
+            AND NOT EXISTS (SELECT 1   
+                              FROM MS_ALLOC_EXCP_CUST
+                             WHERE MS_ALLOC_EXCP_CUST.DCCODE    = DM_DOCUMENT_H.DCCODE
+                               AND MS_ALLOC_EXCP_CUST.STORERKEY = DM_DOCUMENT_H.STORERKEY
+                               AND MS_ALLOC_EXCP_CUST.CUSTKEY   = DM_DOCUMENT_H.TO_CUSTKEY
+                               AND MS_ALLOC_EXCP_CUST.USE_YN    = 'Y'
+                           )           
+            <!-- 분배예외처리상품에 등록된 상품는 제외한다 -->           
+            AND NOT EXISTS (SELECT 1   
+                              FROM MS_ALLOC_EXCP_SKU
+                             WHERE MS_ALLOC_EXCP_SKU.DCCODE    = DM_DOCUMENT_D.DCCODE
+                               AND MS_ALLOC_EXCP_SKU.STORERKEY = DM_DOCUMENT_D.STORERKEY
+                               AND MS_ALLOC_EXCP_SKU.SKU       = DM_DOCUMENT_D.SKU
+                               AND MS_ALLOC_EXCP_SKU.USE_YN    = 'Y'
+                           )    
+        </if>     
+		GROUP BY DM_DOCUMENT_H.DCCODE      
+                ,DM_DOCUMENT_H.TO_CUSTKEY         
+                ,DM_DOCUMENT_H.STORERKEY
+                ,DM_DOCUMENT_H.ORDERTYPE    
+                ,MS_SKU.SERIALYN 
+                ,DM_DOCUMENT_D.WORKPROCESSCODE 
+                ,MS_CUSTXPOP.POPNAME
+        ORDER BY CASE WHEN SUM(WD_INPLAN.OPENQTY ) <![CDATA[<>]]> SUM(WD_INPLAN.QTYALLOCATED ) THEN 1 ELSE 2 END      
+                ,DM_DOCUMENT_H.DCCODE 
+        		,DM_DOCUMENT_H.TO_CUSTKEY         
+                ,DM_DOCUMENT_H.STORERKEY
+                ,DM_DOCUMENT_H.ORDERTYPE      
+    </select>
+    
+    
+    <select id="getTab5MasterList" resultType="WdAllocationBatchGroupResTab5Dto">		
+    	SELECT /* [WdAllocationBatchGroupService.sqlx][getTab5MasterList][거래처상품별 상미율 조회][공두경][2025.08.20] */
+               MS_CUSTXSKU_USEBYDATE.CUSTKEY			AS CUSTKEY				/*거래처코드*/
+              ,MS_CUST.DESCRIPTION						AS CUSTKEYNAME          /*거래처명*/
+              ,MS_CUSTXSKU_USEBYDATE.SKU				AS SKU                  /*상품코드*/
+              ,MS_SKU.DESCRIPTION						AS SKUNAME              /*상품명칭*/
+              ,MS_CUSTXSKU_USEBYDATE.USEBYDATE_FREE_RT  AS USEBYDATE_FREE_RT    /*소비기한 잔여율*/
+              ,MS_CUSTXSKU_USEBYDATE.RMK                AS RMK1                  /*비고*/
+              ,MS_CUSTXSKU_USEBYDATE.USE_YN				AS USE_YN				/*사용여부*/
+              ,MS_CUSTXSKU_USEBYDATE.ADDDATE            AS ADDDATE              /*등록자*/
+              ,USER1.USER_NM                            AS ADDWHO               /*등록일시*/
+              ,MS_CUSTXSKU_USEBYDATE.EDITDATE           AS EDITDATE             /*수정자*/
+              ,USER2.USER_NM                            AS EDITWHO              /*수정일시*/
+              ,MS_CUSTXSKU_USEBYDATE.DCCODE             AS DCCODE               /**/
+          FROM MS_CUSTXSKU_USEBYDATE
+          JOIN MS_SKU 
+          ON   MS_SKU.STORERKEY = #{gStorerkey}
+          AND  MS_SKU.SKU = MS_CUSTXSKU_USEBYDATE.SKU
+          JOIN MS_CUST
+          ON   MS_CUST.STORERKEY = #{gStorerkey}
+          AND  MS_CUST.CUSTKEY   = MS_CUSTXSKU_USEBYDATE.CUSTKEY
+          AND  MS_CUST.CUSTTYPE  = 'C'
+          LEFT JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = MS_CUSTXSKU_USEBYDATE.ADDWHO
+          LEFT JOIN FRAMEONE_USER USER2 ON USER2.USER_ID = MS_CUSTXSKU_USEBYDATE.EDITWHO
+         WHERE MS_CUSTXSKU_USEBYDATE.DCCODE = #{fixdccode}
+         <if test="useYn != null and useYn != ''">                      AND MS_CUSTXSKU_USEBYDATE.USE_YN                =   #{useYn}            </if>                  
+         <if test="usebydateFreeRt != null and usebydateFreeRt != ''">	AND MS_CUSTXSKU_USEBYDATE.USEBYDATE_FREE_RT 	=	#{usebydateFreeRt}	</if>
+         <!-- 상품 다중선택 -->
+         <if test="sku != null and sku != '' ">
+            <if test="skuMulti != null and skuMulti.size() > 0">
+                <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                    <foreach collection="skuMulti" item="item">
+                        OR MS_CUSTXSKU_USEBYDATE.SKU IN
+                        <foreach collection="item" item="code" open="(" close=")" separator=",">
+                            #{code}      
+                        </foreach>
+                    </foreach>
+                </trim>                                             
+            </if>
+         </if>
+         <!-- 고객 다중선택 -->
+         <if test="custkeyMulti != null and custkeyMulti != '' ">
+            <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                <foreach collection="custkeyMulti" item="item">
+                    OR MS_CUSTXSKU_USEBYDATE.CUSTKEY IN
+                    <foreach collection="item" item="code" open="(" close=")" separator=",">
+                        #{code}      
+                    </foreach>
+                </foreach>
+            </trim>                                             
+         </if>
+    </select>
+    
+    <select id="getTab6MasterList" resultType="WdAllocationBatchGroupResTab6Dto">       
+        SELECT /* [WdAllocationBatchGroupService.sqlx][getTab6MasterList][분배예외처리거래처 조회][공두경][2025.11.21] */
+               MS_ALLOC_EXCP_CUST.CUSTKEY            AS CUSTKEY              /*거래처코드*/
+              ,MS_CUST.DESCRIPTION                   AS CUSTKEYNAME          /*거래처명*/
+              ,MS_ALLOC_EXCP_CUST.RMK                AS RMK1                 /*비고*/
+              ,MS_ALLOC_EXCP_CUST.USE_YN             AS USE_YN               /*사용여부*/
+              ,MS_ALLOC_EXCP_CUST.ADDDATE            AS ADDDATE              /*등록자*/
+              ,USER1.USER_NM                         AS ADDWHO               /*등록일시*/
+              ,MS_ALLOC_EXCP_CUST.EDITDATE           AS EDITDATE             /*수정자*/
+              ,USER2.USER_NM                         AS EDITWHO              /*수정일시*/
+              ,MS_ALLOC_EXCP_CUST.DCCODE             AS DCCODE               /**/
+              ,MS_ALLOC_EXCP_CUST.STORERKEY          AS STORERKEY            /**/
+          FROM MS_ALLOC_EXCP_CUST
+          JOIN MS_CUST
+          ON   MS_CUST.STORERKEY = #{gStorerkey}
+          AND  MS_CUST.CUSTKEY   = MS_ALLOC_EXCP_CUST.CUSTKEY
+          AND  MS_CUST.CUSTTYPE  = 'C'
+          LEFT JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = MS_ALLOC_EXCP_CUST.ADDWHO
+          LEFT JOIN FRAMEONE_USER USER2 ON USER2.USER_ID = MS_ALLOC_EXCP_CUST.EDITWHO
+         WHERE MS_ALLOC_EXCP_CUST.DCCODE    = #{fixdccode}
+         AND   MS_ALLOC_EXCP_CUST.STORERKEY = #{gStorerkey}
+         <if test="useYn != null and useYn != ''">      AND MS_ALLOC_EXCP_CUST.USE_YN       =   #{useYn}         </if>
+         <if test="rmk1 != null and rmk1 != ''">        AND MS_ALLOC_EXCP_CUST.RMK  LIKE  '%' || #{rmk1} || '%'  </if>
+         <!-- 고객 다중선택 -->
+         <if test="custkeyMulti != null and custkeyMulti != '' ">
+            <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                <foreach collection="custkeyMulti" item="item">
+                    OR MS_ALLOC_EXCP_CUST.CUSTKEY IN
+                    <foreach collection="item" item="code" open="(" close=")" separator=",">
+                        #{code}      
+                    </foreach>
+                </foreach>
+            </trim>                                             
+         </if>
+    </select>
+    
+    <select id="getTab7MasterList" resultType="WdAllocationBatchGroupResTab7Dto">       
+        SELECT /* [WdAllocationBatchGroupService.sqlx][getTab7MasterList][분배예외처리상품 조회][공두경][2025.11.21] */
+               MS_ALLOC_EXCP_SKU.SKU                AS SKU              /*상품코드*/
+              ,MS_SKU.DESCRIPTION                   AS SKUNAME          /*상품명칭*/
+              ,MS_ALLOC_EXCP_SKU.RMK                AS RMK1                 /*비고*/
+              ,MS_ALLOC_EXCP_SKU.USE_YN             AS USE_YN               /*사용여부*/
+              ,MS_ALLOC_EXCP_SKU.ADDDATE            AS ADDDATE              /*등록자*/
+              ,USER1.USER_NM                         AS ADDWHO               /*등록일시*/
+              ,MS_ALLOC_EXCP_SKU.EDITDATE           AS EDITDATE             /*수정자*/
+              ,USER2.USER_NM                         AS EDITWHO              /*수정일시*/
+              ,MS_ALLOC_EXCP_SKU.DCCODE             AS DCCODE               /**/
+              ,MS_ALLOC_EXCP_SKU.STORERKEY          AS STORERKEY            /**/
+          FROM MS_ALLOC_EXCP_SKU
+          JOIN MS_SKU 
+          ON   MS_SKU.STORERKEY = #{gStorerkey}
+          AND  MS_SKU.SKU = MS_ALLOC_EXCP_SKU.SKU
+          LEFT JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = MS_ALLOC_EXCP_SKU.ADDWHO
+          LEFT JOIN FRAMEONE_USER USER2 ON USER2.USER_ID = MS_ALLOC_EXCP_SKU.EDITWHO
+         WHERE MS_ALLOC_EXCP_SKU.DCCODE    = #{fixdccode}
+         AND   MS_ALLOC_EXCP_SKU.STORERKEY = #{gStorerkey}
+         <if test="useYn != null and useYn != ''">      AND MS_ALLOC_EXCP_SKU.USE_YN    =   #{useYn}      </if>
+         <if test="rmk1 != null and rmk1 != ''">  AND MS_ALLOC_EXCP_SKU.RMK  LIKE  '%' || #{rmk1} || '%'  </if>
+         <!-- 상품 다중선택 -->
+         <if test="sku != null and sku != '' ">
+            <if test="skuMulti != null and skuMulti.size() > 0">
+                <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                    <foreach collection="skuMulti" item="item">
+                        OR MS_ALLOC_EXCP_SKU.SKU IN
+                        <foreach collection="item" item="code" open="(" close=")" separator=",">
+                            #{code}      
+                        </foreach>
+                    </foreach>
+                </trim>                                             
+            </if>
+         </if>
+    </select>
+    
+    
+    <update id="save">
+        UPDATE    /* [stConvertCFMService.sqlx][save][입고 이력정보 저장][sunho.kim][2025.07.11] */ 
+        EXDC_AUTO_SERIALINFO
+        SET    SEND_MEMO    = #{reasonmsg} 
+              ,REJECT_CODE  = #{reasoncode}
+              ,EDITDATE     = SYSDATE
+              ,EDITWHO      = #{gUserId}
+        WHERE  ISSUE_NO     = #{issueno}
+        AND    MAPKEY_NO    = #{mapkeyNo}
+        AND    MAPKEY_LINE  = #{mapkeyLine}        
+    </update>
+    
+    <update id="saveTab3MasterList" >        
+        UPDATE /* [WdAllocationBatchGroupService.sqlx][saveTab3MasterList][피킹유형 미정의 관리처 원거리유형 저장][공두경][2025.08.21] */ 
+        		MS_CUSTDLVINFO
+        SET
+                DISTANCETYPE = #{mngDistancetype},
+                EDITDATE = SYSDATE,
+                EDITWHO = #{gUserId}
+        WHERE   SERIALKEY = #{serialkey}           
+    </update>
+    
+    <insert id="saveTab5MasterList" >        
+        MERGE /* [WdAllocationBatchGroupService.sqlx][saveTab5MasterList][거래처상품별 상미율 저장][공두경][2025.08.19] */ 
+        INTO MS_CUSTXSKU_USEBYDATE
+             USING DUAL
+                ON (DCCODE = #{dccode} AND
+                    CUSTKEY = #{custkey} AND
+                    SKU = #{sku})
+        WHEN MATCHED THEN
+             UPDATE SET
+                    USEBYDATE_FREE_RT = #{usebydateFreeRt},
+                    RMK = #{rmk1},
+                    USE_YN = #{useYn},
+                    EDITDATE = SYSDATE,
+                    EDITWHO = #{gUserId}
+        WHEN NOT MATCHED THEN
+             INSERT (DCCODE
+                    ,CUSTKEY
+                    ,SKU
+                    ,USEBYDATE_FREE_RT
+                    ,RMK
+                    ,USE_YN
+                    ,ADDDATE
+                    ,ADDWHO
+                    ,EDITDATE
+                    ,EDITWHO)
+            VALUES  (#{dccode}
+                    ,#{custkey}
+                    ,#{sku}
+                    ,#{usebydateFreeRt}
+                    ,#{rmk1}
+                    ,#{useYn}
+                    ,SYSDATE
+                    ,#{gUserId}
+                    ,SYSDATE
+                    ,#{gUserId})
+    </insert>    
+    
+    <delete id="deleteTab5MasterList" >        
+        DELETE /* [WdAllocationBatchGroupService.sqlx][deleteTab5MasterList][거래처상품별 상미율 삭제][공두경][2025.11.25] */ 
+          FROM MS_CUSTXSKU_USEBYDATE
+         WHERE DCCODE   = #{dccode} 
+           AND CUSTKEY  = #{custkey} 
+           AND SKU      = #{sku}
+    </delete>
+        
+    <insert id="saveTab6MasterList" >        
+        MERGE /* [WdAllocationBatchGroupService.sqlx][saveTab6MasterList][분배예외처리거래처 저장][공두경][2025.11.21] */ 
+        INTO MS_ALLOC_EXCP_CUST
+             USING DUAL
+                ON (DCCODE = #{dccode} AND
+                    STORERKEY = #{gStorerkey} AND
+                    CUSTKEY = #{custkey})
+        WHEN MATCHED THEN
+             UPDATE SET
+                    RMK = #{rmk1},
+                    USE_YN = #{useYn},
+                    EDITDATE = SYSDATE,
+                    EDITWHO = #{gUserId}
+        WHEN NOT MATCHED THEN
+             INSERT (DCCODE
+                    ,STORERKEY
+                    ,CUSTKEY
+                    ,RMK
+                    ,USE_YN
+                    ,ADDDATE
+                    ,ADDWHO
+                    ,EDITDATE
+                    ,EDITWHO)
+            VALUES  (#{dccode}
+                    ,#{gStorerkey}
+                    ,#{custkey}
+                    ,#{rmk1}
+                    ,#{useYn}
+                    ,SYSDATE
+                    ,#{gUserId}
+                    ,SYSDATE
+                    ,#{gUserId})
+    </insert>
+        
+    <delete id="deleteTab6MasterList" >        
+        DELETE /* [WdAllocationBatchGroupService.sqlx][deleteTab6MasterList][분배예외처리거래처 삭제][공두경][2025.11.25] */ 
+          FROM MS_ALLOC_EXCP_CUST
+         WHERE DCCODE       = #{dccode}
+           AND STORERKEY    = #{gStorerkey}
+           AND CUSTKEY      = #{custkey}
+    </delete>
+            
+    <insert id="saveTab7MasterList" >        
+        MERGE /* [WdAllocationBatchGroupService.sqlx][saveTab7MasterList][분배예외처리상품 저장][공두경][2025.11.21] */ 
+        INTO MS_ALLOC_EXCP_SKU
+             USING DUAL
+                ON (DCCODE = #{dccode} AND
+                    STORERKEY = #{gStorerkey} AND
+                    SKU = #{sku})
+        WHEN MATCHED THEN
+             UPDATE SET
+                    RMK = #{rmk1},
+                    USE_YN = #{useYn},
+                    EDITDATE = SYSDATE,
+                    EDITWHO = #{gUserId}
+        WHEN NOT MATCHED THEN
+             INSERT (DCCODE
+                    ,STORERKEY
+                    ,SKU
+                    ,RMK
+                    ,USE_YN
+                    ,ADDDATE
+                    ,ADDWHO
+                    ,EDITDATE
+                    ,EDITWHO)
+            VALUES  (#{dccode}
+                    ,#{gStorerkey}
+                    ,#{sku}
+                    ,#{rmk1}
+                    ,#{useYn}
+                    ,SYSDATE
+                    ,#{gUserId}
+                    ,SYSDATE
+                    ,#{gUserId})
+    </insert>
+    
+    <delete id="deleteTab7MasterList" >        
+        DELETE /* [WdAllocationBatchGroupService.sqlx][deleteTab7MasterList][분배예외처리상품 삭제][공두경][2025.11.25] */ 
+          FROM MS_ALLOC_EXCP_SKU
+         WHERE DCCODE       = #{dccode}
+           AND STORERKEY    = #{gStorerkey}
+           AND SKU          = #{sku}
+    </delete>
+    
+    <!-- 선마감여부 조회 -->
+    <select id="getDailyDeadlineYn" resultType="WdAllocationBatchGroupResCheckDto">
+        /* [WdAllocationBatchGroupService.sqlx][getDailyDeadlineYN][선마감여부 조회][공두경][2025.11.26] */
+        SELECT CASE WHEN    NVL(
+                             (SELECT DATA1
+                                FROM CM_CODE
+                               WHERE CODELIST = 'PRE_CLOSING_CENTER'
+                                 AND BASECODE = #{fixdccode}),
+                             'N'
+                           ) = 'N' 
+                THEN 'N'
+                ELSE CASE WHEN (SELECT DATA1
+                                FROM CM_CODE
+                               WHERE CODELIST = 'PRE_CLOSING_CENTER'
+                                 AND BASECODE = #{fixdccode}) > TO_CHAR(SYSDATE, 'HH24MI') 
+                          THEN 'Y'
+                          ELSE 'N' END
+                END    AS DAILY_DEADLINE_YN   
+        FROM DUAL 
+    </select>
+    
+    <!-- 피킹그룹내 CAR 존재여부 조회 -->
+    <select id="getTab4CarInfo" resultType="WdAllocationBatchGroupResCarDto">
+        /* [WdAllocationBatchGroupService.sqlx][getTab4CarInfo][피킹그룹내 CAR 존재여부 조회][공두경][2026.02.27] */
+        SELECT NVL(
+                    (SELECT CASE WHEN CNT <![CDATA[<]]> 3 THEN 'N' ELSE 'Y' END
+                      FROM ( SELECT COUNT(1) AS CNT
+                               FROM MS_PICKBATCHGROUP
+                              WHERE DCCODE = #{fixdccode}
+                                AND PLANT  = #{fixdccode}
+                                AND DISTANCETYPE = 'CAR'
+                            )
+                    ),
+                    'N'
+                  ) AS CAR_EXIST_YN     /*원거리유형 CAR가 센터에 냉장, 상온, 냉동에 모두 존재하면 'Y', 3건이 안되는 모든건은 'N'으로 등록하라고 알림*/
+        FROM DUAL 
+    </select>
+    
+</mapper>

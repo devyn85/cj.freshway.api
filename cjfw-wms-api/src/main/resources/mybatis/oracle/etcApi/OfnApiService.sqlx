@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ofnApiService">
+
+
+	<select id="selectLocList" resultType="HMap">
+
+    		WITH T_RESULT AS (
+    		<![CDATA[
+           SELECT MIN(ST_STOCK.SERIALKEY)
+                           KEEP (DENSE_RANK FIRST
+                                     ORDER BY
+                                              CASE WHEN MS_LOCATION.LOC   = 'CANCEL' THEN 1
+                                                   WHEN MS_LOCATION.LOC  <> 'CROSS'  THEN 2
+                                                   ELSE 9
+                                              END
+                                             ,CASE WHEN CM_LOT.LOTTABLE01= 'STD' THEN 1
+                                                   ELSE 2
+                                              END
+                                             ,CM_LOT.LOTTABLE01
+                                             ,CASE WHEN MS_LOCATION.SORTKEY  IN ('1','2','3','4','5') THEN 1
+                                                   ELSE 2
+                                              END
+                                             ,MS_LOCATION.SORTKEY
+                                             ,ST_STOCK.LOC
+                                 ) AS SERIALKEY
+                    FROM   ST_STOCK
+                    JOIN   MS_SKU
+                    ON     MS_SKU.STORERKEY        = ST_STOCK.STORERKEY
+                    AND    MS_SKU.SKU              = ST_STOCK.SKU
+                    JOIN   MS_LOCATION
+                    ON     MS_LOCATION.DCCODE      = ST_STOCK.DCCODE
+                    AND    MS_LOCATION.LOC         = ST_STOCK.LOC
+                    AND    MS_LOCATION.LOC         NOT IN ('STOP','DAILYCROSS')
+                    AND    MS_LOCATION.LOCTYPE     IN ('PICK','CROSS','FIRSTOUT','LONGSTAY','CANCEL')
+                    AND    MS_LOCATION.LOCCATEGORY IN ('RACK','YARD')
+                    AND    MS_LOCATION.LOCFLAG     = 'GOOD'
+                    AND    MS_LOCATION.OUT_YN      = 'Y'
+                    AND    MS_LOCATION.DEL_YN      = 'N'
+                    JOIN   CM_LOT
+                    ON     CM_LOT.STORERKEY        = ST_STOCK.STORERKEY
+                    AND    CM_LOT.LOT              = ST_STOCK.LOT
+                    AND    'TRUE' = DECODE(#{DCCODE},2620,'TRUE',CASE
+                                                                       WHEN CM_LOT.LOTTABLE01   = 'STD' OR  MS_SKU.DURATIONTYPE = 'N'
+                                                                       THEN 'TRUE'
+                                                                       WHEN     MS_SKU.DURATIONTYPE = '1'
+                                                                            AND TO_DATE(CM_LOT.LOTTABLE01,'YYYYMMDD') < TRUNC(SYSDATE)
+                                                                       THEN 'FALSE'
+                                                                       WHEN     MS_SKU.DURATIONTYPE IN ('2','3')
+                                                                            AND TO_DATE(CM_LOT.LOTTABLE01,'YYYYMMDD') + MS_SKU.DURATION - 1 < TRUNC(SYSDATE)
+                                                                       THEN 'FALSE'
+                                                                       ELSE 'TRUE'
+                                                                  END)
+                     ]]>
+                    WHERE  ST_STOCK.DCCODE         = #{DCCODE}
+                    AND    ST_STOCK.STORERKEY      = #{STORERKEY}
+                    <if test='MULTI_SKU != null '>
+                          AND    ST_STOCK.SKU            IN
+                          <foreach collection="MULTI_SKU" item="sku" open="(" close=")" separator=",">
+                            #{sku}
+                          </foreach>
+                    </if>
+    		    	<![CDATA[
+                    AND    ST_STOCK.STOCKGRADE     = 'STD'
+                    AND    ST_STOCK.STOCKTYPE      = 'GOOD'
+                    AND    ST_STOCK.OPENQTY  - ST_STOCK.QTYEXPECTED  > 0
+                    GROUP BY ST_STOCK.SKU
+                    ]]>
+                )
+                SELECT ST_STOCK.SKU                                AS SKU
+                      ,MS_LOCATION.ZONE                            AS ZONE
+                      ,ST_STOCK.LOC                                AS LOC
+                      ,MS_SKU.STORAGETYPE                          AS STORAGETYPE
+                      ,ST_STOCK.STOCKGRADE                         AS STOCKGRADE
+                      ,ST_STOCK.OPENQTY  -  ST_STOCK.QTYEXPECTED   AS OPENQTY
+                      ,ST_STOCK.UOM                                AS UOM
+                      ,CM_LOT.LOTTABLE01                           AS LOTTABLE01
+                      ,MS_SKU.DURATIONTYPE                         AS DURATIONTYPE
+                      ,CAST((SELECT LOGISONESVC.FN_LOTDURATION(ST_STOCK.STORERKEY,MS_SKU.DURATIONTYPE,MS_SKU.DURATION,CM_LOT.LOTTABLE01,'Y') FROM DUAL) AS NVARCHAR2(4)) AS NEARDURATIONYN
+                FROM   ST_STOCK
+                JOIN   T_RESULT
+                ON     T_RESULT.SERIALKEY      = ST_STOCK.SERIALKEY
+                JOIN   MS_LOCATION
+                ON     MS_LOCATION.DCCODE      = ST_STOCK.DCCODE
+                AND    MS_LOCATION.LOC         = ST_STOCK.LOC
+                JOIN   CM_LOT
+                ON     CM_LOT.STORERKEY        = ST_STOCK.STORERKEY
+                AND    CM_LOT.LOT              = ST_STOCK.LOT
+                JOIN   MS_SKU
+                ON     MS_SKU.STORERKEY        = ST_STOCK.STORERKEY
+                AND    MS_SKU.SKU              = ST_STOCK.SKU
+
+    	</select>
+</mapper>

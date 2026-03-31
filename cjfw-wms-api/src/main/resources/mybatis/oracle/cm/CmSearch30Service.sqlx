@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cmSearch30Service">
+
+	<select id="getOrganizePopupList"  parameterType="CmOrganizePopupReqDto" resultType="CmOrganizePopupResDto">
+		SELECT /* [CmSearchService.sqlx][getOrganizeList][창고 목록 조회][KimSunHo][2025.05.09] */
+		     CM_DCXORGANIZE.ORGANIZE    AS CODE   /*창고코드*/
+		    ,CM_DCXORGANIZE.DESCRIPTION AS NAME   /*창고명*/
+		    ,CM_DCXORGANIZE.DCCODE		AS DCCODE
+		    ,#{keywordRegexp} AS KEYWORD_REGEXP
+		FROM CM_DCXORGANIZE
+	   WHERE 1=1 
+	    <if test='dccode != null and dccode !=""'>
+	   		AND CM_DCXORGANIZE.DCCODE = #{dccode}
+	    </if>
+	    
+        <choose>
+	        <!-- START.창고.다중검색 -->
+	        <when test="multiSelectMulti != null and multiSelectMulti != ''">    
+		       AND CM_DCXORGANIZE.ORGANIZE IN
+		       <foreach collection="multiSelectMulti" item="code" open="(" close=")" separator=",">
+		         #{code}
+		       </foreach>
+	        </when>   
+	        <!-- END.창고.다중검색 -->
+        <otherwise>
+	        <choose>
+		        <when test="isEnter == 'Y'.toString()"> <!-- 엔터검색.input/돋보기 =검색(성능) -->
+			          AND (CM_DCXORGANIZE.ORGANIZE = #{name}  OR CM_DCXORGANIZE.DESCRIPTION = #{name}) /*엔터검색*/
+		        </when>
+	        <otherwise>
+		        <if test='name != null and name != ""'>
+			        <choose>
+			        	<when test="fixedSearchYn == '' and fixedSearchYn == null"> <!-- FIX검색.%1개일 때(3/4) -->
+					     AND (
+					          CM_DCXORGANIZE.ORGANIZE 	 LIKE '%'||#{code}||'%'
+					       OR CM_DCXORGANIZE.ORGANIZE    LIKE '%'||#{name}||'%' 
+                           OR CM_DCXORGANIZE.DESCRIPTION LIKE '%'||#{name}||'%')
+				        </when>
+			        
+				        <when test="fixedSearchYn == 'Y'.toString()"> <!-- FIX검색.%1개일 때(3/4) -->
+					          AND (CM_DCXORGANIZE.ORGANIZE LIKE #{name} OR CM_DCXORGANIZE.DESCRIPTION LIKE #{name} )
+				        </when>
+			        <otherwise><!-- 2.단일검색,5.%다중검색  -->
+				        AND (CM_DCXORGANIZE.ORGANIZE LIKE '%'||#{name}||'%' OR CM_DCXORGANIZE.DESCRIPTION LIKE '%'||#{name}||'%' )
+			        </otherwise>
+			        </choose>		            
+		                
+	                <!-- START.검색요건 -->
+                       <if test= 'name != null and name.indexOf(" ") gt 0 '>
+                           OR REGEXP_LIKE (UPPER(CM_DCXORGANIZE.DESCRIPTION), REGEXP_REPLACE (UPPER(#{keywordRegexp}), '[ ]+', '|'))
+                       </if>
+                    <!-- END.검색요건 -->     
+		        </if>
+	        </otherwise>
+	        </choose>
+
+        </otherwise>
+        </choose>
+        
+        <!-- START.검색요건 -->
+        <choose>
+            <when test='name != null and name.indexOf(" ") gt 0 '>
+                ORDER BY
+                        REGEXP_COUNT(UPPER(CM_DCXORGANIZE.DESCRIPTION), REGEXP_REPLACE (UPPER(#{keywordRegexp}), '[ ]+', '|')) DESC, /*매치 검색 count*/
+                        UTL_MATCH.JARO_WINKLER_SIMILARITY(CM_DCXORGANIZE.DESCRIPTION, #{name}) DESC 
+                            
+            </when>
+            <otherwise>
+               /*ASIS처럼 정열 없음*/
+            </otherwise>
+        </choose>     
+        <!-- END.검색요건 -->          
+    </select>
+
+</mapper>

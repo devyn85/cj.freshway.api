@@ -1,0 +1,1452 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+    "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="stMKitService">
+
+    <select id="getMasterList01" resultType="cjfw.wms.st.dto.StMKitResT1Dto">
+        WITH STOCK AS (
+          SELECT 
+                 ST_STOCK.DCCODE
+                , ST_STOCK.STORERKEY
+                , ST_STOCK.SKU
+                , SUM(ST_STOCK.QTY)   QTY
+                , SUM(ST_STOCK.QTY) - SUM(ST_STOCK.QTYALLOCATED) - SUM(ST_STOCK.QTYPICKED)  - SUM(ST_STOCK.QTYRESERVE)  USEQTY
+                , MAX(ST_STOCK.STOCKGRADE) AS STOCKGRADE
+                , MAX(ST_STOCK.STOCKID) KEEP (DENSE_RANK LAST ORDER BY CM_LOT.LOTTABLE01) AS STOCKID
+                , MAX(ST_STOCK.LOC) KEEP (DENSE_RANK LAST ORDER BY CM_LOT.LOTTABLE01)  AS LOC
+                , MAX(ST_STOCK.LOT) KEEP (DENSE_RANK LAST ORDER BY CM_LOT.LOTTABLE01)  AS LOT
+                , CASE WHEN MAX(CM_LOT.LOTTABLE01) = 'STD' THEN 'STD' 
+                       WHEN VALIDATE_CONVERSION(MAX(CM_LOT.LOTTABLE01) AS DATE, 'YYYYMMDD') = 1  
+                              THEN (CASE WHEN MAX(MS_SKU.DURATIONTYPE) = '1' 
+                                         THEN TO_CHAR(TO_DATE(REPLACE(MAX(CM_LOT.LOTTABLE01),'-',''),'YYYYMMDD'),'YYYYMMDD')
+                                         WHEN MAX(MS_SKU.DURATIONTYPE) = '2'
+                                         THEN TO_CHAR(TO_DATE(REPLACE(MAX(CM_LOT.LOTTABLE01),'-',''),'YYYYMMDD') + MAX(MS_SKU.DURATION) -1,'YYYYMMDD')
+                                         ELSE TO_CHAR(TO_DATE(REPLACE(MAX(CM_LOT.LOTTABLE01),'-',''),'YYYYMMDD'),'YYYYMMDD') END)
+                              ELSE '' END                 AS EXPIREDT
+          FROM ST_STOCK
+          LEFT OUTER JOIN CM_LOT 
+             ON CM_LOT.STORERKEY  = ST_STOCK.STORERKEY
+            AND CM_LOT.LOT        = ST_STOCK.LOT
+          LEFT OUTER JOIN MS_SKU
+             ON MS_SKU.STORERKEY  = ST_STOCK.STORERKEY
+            AND MS_SKU.SKU        = ST_STOCK.SKU  
+          WHERE ST_STOCK.DCCODE     = #{fixdccode}
+            AND ST_STOCK.STOCKGRADE = 'STD'
+            AND ST_STOCK.QTY - ST_STOCK.QTYALLOCATED - ST_STOCK.QTYPICKED - ST_STOCK.QTYRESERVE > 0
+          GROUP BY ST_STOCK.DCCODE, ST_STOCK.STORERKEY, ST_STOCK.SKU
+          )
+        SELECT  /* [stMKitService.sqlx][getMasterList01][키트처리 이체대상 목록 조회][고혜미][20251030] */    
+            ROWNUM                                                        
+          , (ST_KIT_PLAN.DCCODE || ST_KIT_PLAN.PLAN_DT || ST_KIT_PLAN.SKU)           AS ROW_DIST       /*세로 병합*/  
+          , ST_KIT_PLAN.DCCODE                                   AS DCCODE         /*센터코드*/
+          , ST_KIT_PLAN.PLAN_DT                                  AS PLAN_DT        /*계획일자*/
+          , ST_KIT_PLAN.SKU                                      AS KIT_SKU        /*KIT상품코드*/
+          , MS_KITSKU.KIT_NM                                     AS KIT_NM         /*KIT상품명*/
+          , NVL(ST_KIT_PLAN.OPENQTY,0)                           AS OPENQTY               /*KIT계획수량*/
+          , NVL(ST_KIT_PLAN.CONFIRMQTY,0)                        AS CONFIRMQTY            /*KIT생산수량*/
+          , MS_KITSKU.SKU                                        AS SKU                   /*상품코드*/
+          , MS_SKU.DESCRIPTION                                   AS SKU_NM                /*상품명*/
+          , NVL((
+                SELECT MIN(D.BOM_SKU_USEBYDATE)
+                  FROM ST_KIT_PLANDETAIL D              
+                 WHERE D.DCCODE    = ST_KIT_PLANDETAIL.DCCODE
+                   AND D.STORERKEY = ST_KIT_PLANDETAIL.STORERKEY
+                   AND D.PLAN_DT   = ST_KIT_PLANDETAIL.PLAN_DT
+                   AND D.SKU       = ST_KIT_PLANDETAIL.SKU
+                   AND D.BOM_SKU   = ST_KIT_PLANDETAIL.BOM_SKU
+                   AND D.STATUS    = '10'
+                   AND D.FACTORY_DISASSEM_FLAG    = '1'
+                ),        
+                 (
+                    SELECT MIN(S.EXPIREDT)
+                      FROM STOCK S
+                     WHERE S.DCCODE    = MS_KITSKU.DCCODE
+                       AND S.STORERKEY = MS_KITSKU.STORERKEY
+                       AND S.SKU       = MS_KITSKU.SKU       /* 변경: 키트가 아닌 현재 행의 자품목 SKU와 매핑 */
+                 )
+             )                                                          AS MIN_EXPIREDT   /*키트품목 소비기한*/  
+          , NVL(ST_KIT_PLANDETAIL.BOM_SKU_USEBYDATE, STOCK.EXPIREDT)    AS EXPIREDT       /*자품목 소비기한*/
+          , NVL(STOCK.QTY,0)                                            AS STOCKQTY_TOTAL       /*현재재고량*/
+          , NVL(STOCK.USEQTY,0)                                         AS STOCKQTY       /*가용재고량*/
+          , NVL((MS_KITSKU.QTY * ST_KIT_PLAN.CONFIRMQTY),0)                                AS REQ_QTY        /*요청량*/
+          , NVL(ST_KIT_PLANDETAIL.STOCKID, STOCK.STOCKID)               AS STOCKID        /*재고구분ID*/
+          , NVL(ST_KIT_PLANDETAIL.STOCKGRADE, STOCK.STOCKGRADE)         AS STOCKGRADE     /*재고속성*/
+          , CD1.BASEDESCR                                               AS STOCKGRADE_NM         /*재고속성*/
+          , NVL(MS_KITSKU.QTY,0)                                        AS QTY            /*KIT구성수량*/
+          , ST_KIT_PLANDETAIL.STATUS                                    AS STATUS         /*진행상태*/
+          , '1'                                                         AS FACTORY_DISASSEM_FLAG         /*생산/해제구분*/ 
+          , ST_KIT_PLANDETAIL.DOCNO                                     AS DOCNO          /*문서번호*/
+          , ST_KIT_PLANDETAIL.RESP_DEPT_CD                              AS COSTCD         /*귀속부서*/
+          , ( SELECT DESCRIPTION
+                   FROM MS_COST
+                  WHERE MS_COST.STORERKEY = ST_KIT_PLANDETAIL.STORERKEY
+                    AND MS_COST.COSTCODE  = ST_KIT_PLANDETAIL.RESP_DEPT_CD
+                    AND MS_COST.FROMDATE  <![CDATA[<=]]>  ST_KIT_PLANDETAIL.PLAN_DT
+                    AND MS_COST.TODATE    <![CDATA[>=]]>  ST_KIT_PLANDETAIL.PLAN_DT
+                  FETCH FIRST 1 ROWS ONLY )                             AS COSTCDNAME     /*귀속부서명*/
+          , ST_KIT_PLANDETAIL.CUSTKEY                                   AS CUSTKEY        /*거래처*/
+          , ( SELECT DESCRIPTION
+                   FROM MS_CUST
+                  WHERE MS_CUST.STORERKEY = ST_KIT_PLANDETAIL.STORERKEY
+                    AND MS_CUST.CUSTKEY   = ST_KIT_PLANDETAIL.CUSTKEY
+                    AND ROWNUM = 1 )                                    AS CUSTNAME       /*거래처명*/
+          , MS_SKU.BASEUOM                                              AS KIT_UOM        /*키트상품 단위*/          
+          , MS_SKU_DETAIL.BASEUOM                                       AS SKU_UOM        /*자품목 단위*/
+          , NVL(ST_KIT_PLANDETAIL.LOC, STOCK.LOC)                       AS LOC 
+          , STOCK.LOT                                                   AS LOT 
+          , ST_SNINFO_KIT.SERIALNO                                      AS SERIALNO
+       FROM ST_KIT_PLAN 
+       
+      INNER JOIN MS_KITSKU
+        ON MS_KITSKU.DCCODE    = ST_KIT_PLAN.DCCODE
+       AND MS_KITSKU.STORERKEY = ST_KIT_PLAN.STORERKEY
+       AND MS_KITSKU.KIT_SKU   = ST_KIT_PLAN.SKU
+       
+      LEFT OUTER JOIN MS_SKU   
+         ON MS_SKU.STORERKEY = MS_KITSKU.STORERKEY
+        AND MS_SKU.SKU       = MS_KITSKU.SKU 
+      
+      LEFT OUTER JOIN ST_KIT_PLANDETAIL
+        ON ST_KIT_PLANDETAIL.STORERKEY = MS_KITSKU.STORERKEY
+       AND ST_KIT_PLANDETAIL.DCCODE    = MS_KITSKU.DCCODE
+       AND ST_KIT_PLANDETAIL.SKU       = MS_KITSKU.KIT_SKU
+       AND ST_KIT_PLANDETAIL.BOM_SKU   = MS_KITSKU.SKU
+       AND ST_KIT_PLANDETAIL.PLAN_DT   = ST_KIT_PLAN.PLAN_DT
+       AND ST_KIT_PLANDETAIL.STATUS    = '10'
+       AND ST_KIT_PLANDETAIL.FACTORY_DISASSEM_FLAG    = '1'
+      
+      LEFT JOIN MS_KITSKU MS_KITSKU_DETAIL
+        ON MS_KITSKU_DETAIL.DCCODE    = ST_KIT_PLANDETAIL.DCCODE
+       AND MS_KITSKU_DETAIL.STORERKEY = ST_KIT_PLANDETAIL.STORERKEY
+       AND MS_KITSKU_DETAIL.KIT_SKU   = ST_KIT_PLANDETAIL.SKU
+       AND MS_KITSKU_DETAIL.SKU       = ST_KIT_PLANDETAIL.BOM_SKU
+       
+      LEFT JOIN MS_SKU    MS_SKU_DETAIL
+        ON MS_SKU_DETAIL.STORERKEY = MS_KITSKU.STORERKEY
+       AND MS_SKU_DETAIL.SKU       = MS_KITSKU.SKU  
+ 
+      LEFT JOIN STOCK 
+        ON STOCK.STORERKEY = MS_KITSKU.STORERKEY
+       AND STOCK.DCCODE    = MS_KITSKU.DCCODE
+       AND STOCK.SKU       = MS_KITSKU.SKU
+       AND STOCK.LOC       = CASE WHEN ST_KIT_PLANDETAIL.LOC IS NULL THEN STOCK.LOC ELSE ST_KIT_PLANDETAIL.LOC END       
+       AND STOCK.STOCKID   = CASE WHEN ST_KIT_PLANDETAIL.STOCKID IS NULL THEN STOCK.STOCKID ELSE ST_KIT_PLANDETAIL.STOCKID END
+       
+     LEFT JOIN STOCK STOCK_KIT 
+        ON STOCK_KIT.STORERKEY = ST_KIT_PLAN.STORERKEY
+       AND STOCK_KIT.DCCODE    = ST_KIT_PLAN.DCCODE
+       AND STOCK_KIT.SKU       = ST_KIT_PLAN.SKU    
+ /*     
+      LEFT JOIN CM_LOT   
+        ON CM_LOT.STORERKEY = ST_STOCK.STORERKEY
+       AND CM_LOT.LOT       = ST_STOCK.LOT
+       AND CM_LOT.DEL_YN    = 'N'
+*/      
+      LEFT JOIN ST_SNINFO ST_SNINFO_KIT
+        ON ST_SNINFO_KIT.STORERKEY = STOCK_KIT.STORERKEY
+       AND ST_SNINFO_KIT.SKU       = STOCK_KIT.SKU
+       AND ST_SNINFO_KIT.STOCKID   = STOCK_KIT.STOCKID
+       
+      LEFT JOIN CM_CODE_STORER CD1
+        ON CD1.STORERKEY = STOCK.STORERKEY 
+       AND CD1.CODELIST  = 'STOCKGRADE'  
+       AND CD1.BASECODE  = NVL(ST_KIT_PLANDETAIL.STOCKGRADE, STOCK.STOCKGRADE) 
+     
+     WHERE 1 = 1
+       AND SUBSTR(ST_KIT_PLAN.PLAN_DT,7,2) != '00'
+       AND ST_KIT_PLAN.OPENQTY <![CDATA[>]]> 0 
+       AND ST_KIT_PLAN.DCCODE   = #{fixdccode}
+       AND ( MS_KITSKU.PRTN_YN  = 'N' 
+          OR MS_KITSKU.PRTN_YN  IS NULL 
+           )                                                             
+       AND MS_KITSKU.TODATE  <![CDATA[>]]>  TO_CHAR(SYSDATE, 'YYYYMMDD') 
+       AND MS_KITSKU.DEL_YN  = 'N'
+       AND ST_KIT_PLAN.PLAN_DT BETWEEN #{fromDate} AND #{toDate}
+     <!-- 상품 다중선택 -->
+     <if test="kitSku != null and kitSku != '' ">
+            <if test="kitSkuMulti != null and kitSkuMulti.size() > 0">
+                <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                    <foreach collection="kitSkuMulti" item="item">
+                        OR ST_KIT_PLAN.SKU IN
+                        <foreach collection="item" item="code" open="(" close=")" separator=",">
+                            #{code}      
+                        </foreach>
+                    </foreach>
+                </trim>                                             
+            </if>
+     </if>
+     <if test="storagetype != null and storagetype != ''">
+       AND MS_SKU.STORAGETYPE       = #{storagetype}
+     </if>
+     
+     AND NOT EXISTS (
+          SELECT 1
+          FROM ST_KIT_PLANDETAIL
+          WHERE ST_KIT_PLANDETAIL.DCCODE  = ST_KIT_PLAN.DCCODE
+          AND  ST_KIT_PLANDETAIL.STORERKEY = ST_KIT_PLAN.STORERKEY
+          AND  ST_KIT_PLANDETAIL.PLAN_DT = ST_KIT_PLAN.PLAN_DT
+          AND  ST_KIT_PLANDETAIL.SKU  = ST_KIT_PLAN.SKU
+          AND  ST_KIT_PLANDETAIL.STATUS != '10'      
+      )
+     
+      AND NOT EXISTS (
+            SELECT 1 FROM AJ_APPRREQUEST 
+                WHERE AJ_APPRREQUEST.DCCODE    = ST_KIT_PLAN.DCCODE 
+                  AND AJ_APPRREQUEST.STORERKEY = ST_KIT_PLAN.STORERKEY 
+                  AND AJ_APPRREQUEST.DOCDT     = ST_KIT_PLAN.PLAN_DT 
+                  AND AJ_APPRREQUEST.DOCNO     = ST_KIT_PLAN.SKU
+                  AND AJ_APPRREQUEST.DOCTYPE   = 'KIT'
+                  AND AJ_APPRREQUEST.APPROVALSTATUS <![CDATA[<>]]> '9'
+            )
+     
+       ORDER BY ST_KIT_PLAN.PLAN_DT
+              , MS_KITSKU.KIT_SKU
+              , MS_KITSKU.SKU
+	</select>
+	
+	<select id="getMasterList04" resultType="cjfw.wms.st.dto.StMKitResT1Dto">
+        SELECT  ROWNUM                                                        
+              , (ST_STOCK.DCCODE || ST_STOCK.LOC || ST_STOCK.SKU || NVL(ST_KIT_PLANDETAIL.PLAN_DT, TO_CHAR(SYSDATE,'YYYYMMDD')))           AS ROW_DIST       /*세로 병합*/  
+              , ST_STOCK.DCCODE                                             AS DCCODE         /*센터코드*/
+              , NVL(ST_KIT_PLANDETAIL.PLAN_DT, TO_CHAR(SYSDATE,'YYYYMMDD')) AS PLAN_DT        /*계획일자*/
+              , ST_STOCK.SKU                                                AS KIT_SKU        /*KIT상품코드*/
+              , MS_KITSKU.KIT_NM                                            AS KIT_NM         /*KIT상품명*/
+              , ST_STOCK.QTY                                                AS OPENQTY               /*KIT계획수량*/
+              , 0                                                           AS CONFIRMQTY            /*KIT생산수량*/
+              , MS_KITSKU.SKU                                               AS SKU                   /*상품코드*/
+              , MS_SKU.DESCRIPTION                                          AS SKU_NM                /*상품명*/
+              , NVL(
+                    (SELECT MIN(D.BOM_SKU_USEBYDATE)
+                      FROM ST_KIT_PLANDETAIL D              
+                     WHERE D.DCCODE    = ST_KIT_PLANDETAIL.DCCODE
+                       AND D.STORERKEY = ST_KIT_PLANDETAIL.STORERKEY
+                       AND D.PLAN_DT   = ST_KIT_PLANDETAIL.PLAN_DT
+                       AND D.SKU       = ST_KIT_PLANDETAIL.SKU
+                       AND D.BOM_SKU   = ST_KIT_PLANDETAIL.BOM_SKU
+                       AND D.STATUS    = '10'
+                       AND D.FACTORY_DISASSEM_FLAG    = '2'),
+                    (CASE WHEN NVL(CM_LOT.LOTTABLE01,'STD') = 'STD' THEN 'STD'
+                          WHEN VALIDATE_CONVERSION(CM_LOT.LOTTABLE01 AS DATE, 'YYYYMMDD') = 1  
+                              THEN (CASE WHEN MS_SKU.DURATIONTYPE = '1' 
+                                             THEN TO_CHAR(TO_DATE(REPLACE(CM_LOT.LOTTABLE01,'-',''),'YYYYMMDD'),'YYYYMMDD')
+                                             WHEN MS_SKU.DURATIONTYPE = '2'
+                                             THEN TO_CHAR(TO_DATE(REPLACE(CM_LOT.LOTTABLE01,'-',''),'YYYYMMDD') + MS_SKU.DURATION -1,'YYYYMMDD')
+                                             ELSE '' END)
+                              ELSE '' END)
+              )                                                             AS MIN_EXPIREDT   /*키트품목 소비기한*/  
+              , NVL(
+                        (SELECT MIN(D.BOM_SKU_USEBYDATE)
+                          FROM ST_KIT_PLANDETAIL D              
+                         WHERE D.DCCODE    = ST_KIT_PLANDETAIL.DCCODE
+                           AND D.STORERKEY = ST_KIT_PLANDETAIL.STORERKEY
+                           AND D.PLAN_DT   = ST_KIT_PLANDETAIL.PLAN_DT
+                           AND D.SKU       = ST_KIT_PLANDETAIL.SKU
+                           AND D.BOM_SKU   = ST_KIT_PLANDETAIL.BOM_SKU
+                           AND D.STATUS    = '10'
+                           AND D.FACTORY_DISASSEM_FLAG    = '2'),
+                        (CASE WHEN NVL(CM_LOT.LOTTABLE01,'STD') = 'STD' THEN 'STD'
+                              WHEN VALIDATE_CONVERSION(CM_LOT.LOTTABLE01 AS DATE, 'YYYYMMDD') = 1  
+                                  THEN (CASE WHEN MS_SKU.DURATIONTYPE = '1' 
+                                             THEN TO_CHAR(TO_DATE(REPLACE(CM_LOT.LOTTABLE01,'-',''),'YYYYMMDD'),'YYYYMMDD')
+                                             WHEN MS_SKU.DURATIONTYPE = '2'
+                                             THEN TO_CHAR(TO_DATE(REPLACE(CM_LOT.LOTTABLE01,'-',''),'YYYYMMDD') + MS_SKU.DURATION -1,'YYYYMMDD')
+                                             ELSE '' END)
+                                  ELSE '' END)
+                  )                                                         AS EXPIREDT       /*자품목 소비기한*/
+              , NVL(STOCK_DETAIL.QTY,0)                                     AS STOCKQTY       /*재고량*/
+              , 0                                                           AS REQ_QTY        /*요청량*/
+              , ST_STOCK.STOCKID                                            AS STOCKID        /*재고구분ID*/
+              , ST_STOCK.STOCKGRADE                                         AS STOCKGRADE     /*재고속성*/
+              , CD1.BASEDESCR                                               AS STOCKGRADE_NM         /*재고속성*/
+              , NVL(MS_KITSKU.UOMQTY,0)                                     AS QTY            /*KIT구성수량*/
+              , ST_KIT_PLANDETAIL.STATUS                                    AS STATUS         /*진행상태*/ 
+              , '2'                                                         AS FACTORY_DISASSEM_FLAG         /*생산/해제구분*/ 
+              , ST_KIT_PLANDETAIL.DOCNO                                     AS DOCNO          /*문서번호*/
+              , NVL(ST_KIT_PLANDETAIL.RESP_DEPT_CD,'3850')                              AS COSTCD         /*귀속부서*/
+              , NVL(( SELECT DESCRIPTION
+                       FROM MS_COST
+                      WHERE MS_COST.STORERKEY = ST_KIT_PLANDETAIL.STORERKEY
+                        AND MS_COST.COSTCODE  = ST_KIT_PLANDETAIL.RESP_DEPT_CD
+                        AND ST_KIT_PLANDETAIL.PLAN_DT BETWEEN MS_COST.FROMDATE AND MS_COST.TODATE
+                      FETCH FIRST 1 ROWS ONLY ),'FS중부2)경기4지점(판매)')                             AS COSTCDNAME     /*귀속부서명*/
+              , NVL(ST_KIT_PLANDETAIL.CUSTKEY , '385000')                                  AS CUSTKEY        /*거래처*/
+              , NVL(( SELECT DESCRIPTION
+                       FROM MS_CUST
+                      WHERE MS_CUST.STORERKEY = ST_KIT_PLANDETAIL.STORERKEY
+                        AND MS_CUST.CUSTKEY   = ST_KIT_PLANDETAIL.CUSTKEY
+                        AND ROWNUM = 1 ),'FS중부2)경기4지점(판매)')                                    AS CUSTNAME       /*거래처명*/
+              , MS_SKU.BASEUOM                                              AS KIT_UOM        /*키트상품 단위*/          
+              , MS_SKU_DETAIL.BASEUOM                                       AS SKU_UOM        /*자품목 단위*/
+              , NVL(ST_KIT_PLANDETAIL.LOC, ST_STOCK.LOC)                       AS LOC 
+              , ST_STOCK.LOT                                                   AS LOT 
+              , ST_SNINFO_KIT.SERIALNO                                      AS SERIALNO           
+        FROM  ST_STOCK
+        JOIN  MS_KITSKU
+        ON    MS_KITSKU.STORERKEY = ST_STOCK.STORERKEY
+        AND   MS_KITSKU.DCCODE    = ST_STOCK.DCCODE
+        AND   MS_KITSKU.KIT_SKU   = ST_STOCK.SKU   
+        AND   MS_KITSKU.TODATE    <![CDATA[>]]>  TO_CHAR(SYSDATE, 'YYYYMMDD') /*중단여부*/
+        AND   MS_KITSKU.DEL_YN    = 'N'   /*중단여부*/
+        LEFT OUTER JOIN ST_KIT_PLANDETAIL
+        ON    ST_KIT_PLANDETAIL.STORERKEY = MS_KITSKU.STORERKEY
+        AND   ST_KIT_PLANDETAIL.DCCODE    = MS_KITSKU.DCCODE
+        AND   ST_KIT_PLANDETAIL.SKU       = MS_KITSKU.KIT_SKU
+        AND   ST_KIT_PLANDETAIL.BOM_SKU   = MS_KITSKU.SKU
+        AND   ST_KIT_PLANDETAIL.PLAN_DT   BETWEEN #{fromDate} AND #{toDate}
+        AND   ST_KIT_PLANDETAIL.STATUS    = '10'
+        AND   ST_KIT_PLANDETAIL.FACTORY_DISASSEM_FLAG    = '2'
+        LEFT OUTER JOIN MS_SKU   
+        ON    MS_SKU.STORERKEY = MS_KITSKU.STORERKEY
+        AND   MS_SKU.SKU       = MS_KITSKU.SKU 
+        LEFT JOIN MS_SKU    MS_SKU_DETAIL
+        ON    MS_SKU_DETAIL.STORERKEY = MS_KITSKU.STORERKEY
+        AND   MS_SKU_DETAIL.SKU       = MS_KITSKU.SKU 
+        LEFT OUTER JOIN CM_LOT 
+        ON    CM_LOT.STORERKEY  = ST_STOCK.STORERKEY
+        AND   CM_LOT.LOT        = ST_STOCK.LOT
+        LEFT JOIN ST_SNINFO ST_SNINFO_KIT
+        ON    ST_SNINFO_KIT.STORERKEY = ST_STOCK.STORERKEY
+        AND   ST_SNINFO_KIT.SKU       = ST_STOCK.SKU
+        AND   ST_SNINFO_KIT.STOCKID   = ST_STOCK.STOCKID
+        LEFT JOIN ST_STOCK STOCK_DETAIL
+        ON    STOCK_DETAIL.DCCODE = ST_STOCK.DCCODE
+        AND   STOCK_DETAIL.STORERKEY = ST_STOCK.STORERKEY
+        AND   STOCK_DETAIL.ORGANIZE = ST_STOCK.ORGANIZE
+        AND   STOCK_DETAIL.AREA = ST_STOCK.AREA
+        AND   STOCK_DETAIL.SKU = MS_KITSKU.SKU
+        AND   STOCK_DETAIL.LOC = ST_STOCK.LOC
+        AND   STOCK_DETAIL.LOT = ST_STOCK.LOT
+        AND   STOCK_DETAIL.STOCKID = ST_STOCK.STOCKID
+        AND   STOCK_DETAIL.STOCKGRADE = ST_STOCK.STOCKGRADE
+        LEFT JOIN CM_CODE_STORER CD1
+        ON    CD1.STORERKEY = ST_STOCK.STORERKEY 
+        AND   CD1.CODELIST  = 'STOCKGRADE'  
+        AND   CD1.BASECODE  = ST_STOCK.STOCKGRADE 
+        WHERE ST_STOCK.DCCODE = #{fixdccode}
+          <if test="kitSku != null and kitSku != ''">
+           AND ST_STOCK.SKU                = #{kitSku}
+         </if>
+         <if test="storagetype != null and storagetype != ''">
+           AND MS_SKU.STORAGETYPE       = #{storagetype}
+         </if>
+         AND NOT EXISTS (
+              SELECT 1
+              FROM ST_KIT_PLANDETAIL D
+              WHERE D.DCCODE  = ST_KIT_PLANDETAIL.DCCODE
+              AND  D.STORERKEY = ST_KIT_PLANDETAIL.STORERKEY
+              AND  D.PLAN_DT = ST_KIT_PLANDETAIL.PLAN_DT
+              AND  D.SKU  = ST_KIT_PLANDETAIL.SKU
+              AND  D.STATUS != '10'      
+          )
+         
+          AND NOT EXISTS (
+                SELECT 1 FROM AJ_APPRREQUEST 
+                    WHERE AJ_APPRREQUEST.DCCODE    = ST_STOCK.DCCODE 
+                      AND AJ_APPRREQUEST.STORERKEY = ST_STOCK.STORERKEY 
+                      AND AJ_APPRREQUEST.DOCDT     = NVL(ST_KIT_PLANDETAIL.PLAN_DT, TO_CHAR(SYSDATE,'YYYYMMDD'))
+                      AND AJ_APPRREQUEST.DOCNO     = ST_STOCK.SKU
+                      AND AJ_APPRREQUEST.DOCTYPE   = 'KIT'
+                      AND AJ_APPRREQUEST.APPROVALSTATUS <![CDATA[<>]]> '9'
+                )
+         
+           ORDER BY NVL(ST_KIT_PLANDETAIL.PLAN_DT, TO_CHAR(SYSDATE,'YYYYMMDD'))
+                  , MS_KITSKU.KIT_SKU
+                  , MS_KITSKU.SKU
+    </select>
+	
+	<select id="getMasterResultList01" resultType="cjfw.wms.st.dto.StMKitResT1Dto">
+	    SELECT 
+			  A.DOCDT                AS PLAN_DT
+			 ,A.SKU                  AS KIT_SKU
+			 ,MS_SKU_KIT.DESCRIPTION AS KIT_NM 
+			 ,A.OPENQTY              AS OPENQTY
+			 ,A.ORDERQTY             AS CONFIRMQTY
+			 ,A.PROCESSFLAG          AS PROCESSFLAG
+			 ,NVL(A.PROCESSMSG, '-') AS PROCESSMSG
+			 ,B.SKU                  AS SKU
+			 ,MS_SKU.DESCRIPTION     AS SKU_NM 
+			 ,ABS(B.ORDERQTY)        AS REQ_QTY
+			 ,B.PROCESSFLAG          AS PROCESSFLAGITEM
+			 ,B.PROCESSMSG           AS PROCESSMSGITEM
+		FROM SY_PROCESSTEMP_AJ A
+		LEFT OUTER JOIN SY_PROCESSTEMP_AJ B 
+		   ON A.PROCESSCREATOR = B.PROCESSCREATOR
+		  AND A.SKU            = B.LIST_NO   
+		LEFT OUTER JOIN MS_SKU MS_SKU_KIT 
+		   ON A.STORERKEY  = MS_SKU_KIT.STORERKEY
+		  AND A.SKU        = MS_SKU_KIT.SKU  
+		LEFT OUTER JOIN MS_SKU MS_SKU 
+		   ON B.STORERKEY  = MS_SKU.STORERKEY
+		  AND B.SKU        = MS_SKU.SKU    
+		WHERE A.PROCESSTYPE    = 'AJ_ADJUSTMENTREQ_KIT_MAIN'
+		  AND B.PROCESSTYPE    = 'AJ_ADJUSTMENTREQ_KIT_SUB'  
+		  AND B.LIST_NO        = A.SKU 
+		  AND A.PROCESSCREATOR = #{gUserId}
+	</select>
+	
+    <select id="getKitList01" resultType="cjfw.wms.st.dto.StMKitResT1Dto">
+        SELECT  /* [stMKitService.sqlx][getKitList01][키트처리 이체대상 키트목록 조회][sunho.kim][2025.11.20] */
+            T.STORERKEY                                                
+          , T.DCCODE                                                        
+          , T.ORGANIZE
+          , T.PLAN_DT                                                       
+          , T.KIT_SKU        
+          , T.IMPUTETYPE                                               
+          , T.KITCALLQTY
+          , T.MIN_DURATION
+          , T.AVC_COMMAND
+          , T.AVC_REQUESTMSG
+          , T.COSTCD
+          , T.CUSTKEY
+          , T.STOCKGRADE
+          , T.LOC
+          , T.STOCKID
+          , C.DESCRIPTION                              AS KIT_NM          /*키트상품명*/
+        FROM (
+            SELECT  
+              A.DCCODE                                   AS DCCODE
+            , #{gStorerkey}                              AS STORERKEY
+            , #{gOrganize}                               AS ORGANIZE   
+            , A.PLAN_DT                                  AS PLAN_DT
+            , A.SKU                                      AS KIT_SKU
+            , '12'                                       AS IMPUTETYPE
+            , ''                                         AS KITCALLQTY
+            , ''                                         AS MIN_DURATION
+            , ''                                         AS AVC_COMMAND
+            , ''                                         AS AVC_REQUESTMSG
+            , ''                                         AS COSTCD
+            , ''                                         AS CUSTKEY
+            , 'STD'                                      AS STOCKGRADE
+            , 'STAGE'                                    AS LOC
+            , 'STAGE'                                    AS STOCKID
+            FROM ST_KIT_PLAN   A
+            LEFT JOIN MS_KITSKU B
+            ON   B.DCCODE    = A.DCCODE
+            AND  B.STORERKEY = A.STORERKEY
+            AND  B.KIT_SKU   = A.SKU
+            WHERE SUBSTR(A.PLAN_DT,7,2) != '00'
+               AND A.DCCODE              = #{fixdccode}                     /*물류센터 */
+        <if test="procdiv != null and procdiv != ''">
+               AND A.PLAN_DT BETWEEN #{fromDate} AND #{toDate}              /*계획일자*/
+        </if>
+        <if test="kitSku != null and kitSku != ''">
+               AND A.SKU                 = #{kitSku}                        /*키트상품코드*/
+        </if>
+               AND ( B.PRTN_YN           = 'N'
+                  OR B.PRTN_YN           IS NULL
+                   )                                                        /*소분여부*/
+               AND B.TODATE  <![CDATA[>]]>  TO_CHAR(SYSDATE, 'YYYYMMDD')    /*중단여부*/
+               AND B.DEL_YN    = 'N'   /*중단여부*/
+        <if test="storagetype != null and storagetype != ''">
+               AND B.STORAGETYPE         = #{storagetype}                   /*저장조건*/
+        </if>
+               AND NOT EXISTS (
+                SELECT 1 FROM AJ_APPRREQUEST 
+                  WHERE AJ_APPRREQUEST.DCCODE    = A.DCCODE 
+                    AND AJ_APPRREQUEST.STORERKEY = A.STORERKEY 
+                    AND AJ_APPRREQUEST.DOCDT     = A.PLAN_DT 
+                    AND AJ_APPRREQUEST.DOCNO     = A.SKU
+                    AND AJ_APPRREQUEST.DOCTYPE   = 'KIT'
+                    AND AJ_APPRREQUEST.APPROVALSTATUS <![CDATA[<>]]> '9'
+                )  
+            
+            GROUP BY A.DCCODE
+                , A.PLAN_DT
+                , A.SKU
+        ) T
+        LEFT JOIN MS_SKU   C
+           ON C.STORERKEY = #{gStorerkey}
+          AND C.SKU       = T.KIT_SKU
+          
+        
+    
+       ORDER BY T.PLAN_DT
+              , T.KIT_SKU
+    </select>
+	
+	<update id="updateStKitPlan" >
+	    UPDATE ST_KIT_PLAN
+	    SET CONFIRMQTY   = #{confirmqty}
+	      , EDITDATE     = SYSDATE
+	      , EDITWHO      = #{gUserId}
+	    WHERE DCCODE    = #{dccode}
+	      AND STORERKEY = #{gStorerkey}
+	      AND PLAN_DT   = #{planDt}
+	      AND SKU       = #{kitSku}
+	</update>
+	
+    <insert id="saveStKitPlandetail" >        
+        MERGE 
+        INTO ST_KIT_PLANDETAIL
+             USING DUAL
+                ON (STORERKEY         = #{gStorerkey}     /*고객사코드*/
+                AND DCCODE            = #{dccode}         /*센터코드*/
+                AND PLAN_DT           = #{planDt}         /*계획일자*/
+                AND SKU               = #{kitSku}         /*KIT상품코드[모품목]*/
+                AND BOM_SKU           = #{sku}            /*상품코드[자품목]*/
+                AND LOC               = #{loc}            /*로케이션*/
+                AND BOM_SKU_USEBYDATE = #{expiredt}       /*자품목소비기한*/
+                AND STOCKID           = #{stockid}        /*재고구분ID*/
+                AND STOCKGRADE        = #{stockgrade}     /*재고속성*/
+                AND SERIALNO          = NVL(#{serialno}, 'STD')       /*시리얼번호*/
+                AND FACTORY_DISASSEM_FLAG = #{factoryDisassemFlag}
+                )
+        WHEN MATCHED THEN
+             UPDATE SET
+                    OPENQTY         = NVL(#{reqQty},0)           /*계획수량*/
+                  , CONFIRMQTY      = NVL(#{confirmqty},0)       /*생산수량*/
+                  , SKU_USEBYDATE   = #{minExpiredt}             /*모품목소비기한*/
+                  , RMK             = #{rmk}                     /*비고*/
+                  , STATUS          = NVL(#{status}, '10')       /*상태*/
+                  , RESP_DEPT_CD    = #{costcd}                  /*책임부서코드*/
+                  , CUSTKEY         = #{custkey}                 /*고객사코드*/
+                  , EDITDATE        = SYSDATE
+                  , EDITWHO         = #{gUserId}
+        WHEN NOT MATCHED THEN
+             INSERT (DCCODE             /*1 .센터코드*/
+                   , STORERKEY          /*2 .고객사*/
+                   , PLAN_DT            /*3 .등록일*/
+                   , SKU                /*4 .모품목*/
+                   , BOM_SKU            /*5 .자품목*/
+                   , OPENQTY            /*6 .계획수량*/
+                   , CONFIRMQTY         /*7 .생산수량*/
+                   , LOC                /*8 .로케이션*/
+                   , BOM_SKU_USEBYDATE  /*9 .자품목소비기한*/
+                   , SKU_USEBYDATE      /*10.모품목소비기한*/
+                   , STOCKID            /*11.재고구분ID*/
+                   , STOCKGRADE         /*12.재고등급*/
+                   , SERIALNO           /*13.이력번호*/
+                   , RMK                /*14.비고*/
+                   , FACTORY_DISASSEM_FLAG  /*생산/해체구분*/
+                   , STATUS             /*상태*/
+                   , RESP_DEPT_CD       /*책임부서코드*/  
+                   , CUSTKEY            /*고객사코드*/   
+                   , ADDDATE            /*15.최초등록시간*/
+                   , EDITDATE           /*16.최종변경시간*/
+                   , ADDWHO             /*17.최초등록자*/ 
+                   , EDITWHO            /*18.최종변경자*/
+                 )
+            VALUES  (#{dccode}               /*1 .센터코드*/
+                    ,#{gStorerkey}           /*2 .고객사코드*/
+                    ,#{planDt}               /*3 .등록일*/
+                    ,#{kitSku}               /*4 .모품목*/
+                    ,#{sku}                  /*5 .자품목*/
+                    ,#{reqQty}               /*6 .계획수량*/
+                    ,#{confirmqty}           /*7 .생산수량*/
+                    ,#{loc}                  /*8 .로케이션*/
+                    ,#{expiredt}             /*9 .자품목소비기한*/
+                    ,#{minExpiredt}          /*10.모품목소비기한*/
+                    ,#{stockid}              /*11.재고구분ID*/
+                    ,#{stockgrade}           /*12.재고등급*/
+                    ,NVL(#{serialno}, 'STD') /*13.이력번호*/
+                    ,#{rmk}                  /*14.비고*/
+                    ,#{factoryDisassemFlag}  /*생산/해체구분*/
+                    ,NVL(#{status}, '10')    /*상태*/
+                    ,#{costcd}               /*책임부서코드*/  
+                    ,#{custkey}              /*고객사코드*/
+                    ,SYSDATE                 /*15.최초등록시간*/
+                    ,SYSDATE                 /*16.최종변경시간*/
+                    ,#{gUserId}              /*17.최초등록자*/ 
+                    ,#{gUserId}              /*18.최종변경자*/
+                 )
+    </insert>   
+    
+    <select id="getReportList" resultType="cjfw.wms.st.dto.StMKitResT1Dto">
+		SELECT /* [StMKitService.sqlx][StMKitService.getReportList][재고 > 재고조정 > 키트 처리 리포트 조회][KimDongHan][2025-11-13] */
+		       (SELECT  DESCRIPTION FROM MS_SKU WHERE SKU = ST_KIT_PLANDETAIL.SKU)                                                            AS UP_SKUNAME
+		     , ST_KIT_PLANDETAIL.SKU                                                                                                          AS UP_SKU
+		     , ST_KIT_PLANDETAIL.CONFIRMQTY                                                                                                   AS CONFIRMQTY
+		     , (SELECT  BASEUOM FROM MS_SKU WHERE SKU = ST_KIT_PLANDETAIL.SKU)                                                                AS UP_UOM 
+		     , TO_CHAR(TO_DATE(ST_KIT_PLANDETAIL.PLAN_DT,'YYYYMMDD'),'YYYY-MM-DD')                                                            AS PLAN_DT
+		     , ST_KIT_PLANDETAIL.LOC                                                                                                          AS LOC
+		     , ST_KIT_PLANDETAIL.BOM_SKU                                                                                                      AS DOWN_SKU
+		     , MS_SKU.DESCRIPTION                                                                                                             AS DOWN_SKUNAME 
+		     , MS_SKU.QTYPERBOX                                                                                                               AS QTYPERBOX
+			 , CASE WHEN MS_SKU.BASEUOM IN ('KG','BOX') THEN ST_KIT_PLANDETAIL.OPENQTY     
+		            ELSE CASE WHEN FN_CONV_UOM(MS_SKU.STORERKEY,MS_SKU.SKU,'BOX',MS_SKU.BASEUOM,1) = 0 THEN ST_KIT_PLANDETAIL.OPENQTY
+		                      ELSE TRUNC(FN_CONV_UOM(MS_SKU.STORERKEY,MS_SKU.SKU,MS_SKU.BASEUOM,'BOX', ST_KIT_PLANDETAIL.OPENQTY))
+		                      END 
+		            END                                                                                                                       AS BOX_QTY
+			 , 'BOX'                                                                                                                          AS BOX_UOM
+		     , CASE WHEN MS_SKU.BASEUOM IN ('KG','BOX') THEN 0
+		            ELSE CASE WHEN FN_CONV_UOM(MS_SKU.STORERKEY,MS_SKU.SKU,'BOX', MS_SKU.BASEUOM,1) = 0 THEN 0
+		                      ELSE MOD(ST_KIT_PLANDETAIL.OPENQTY,FN_CONV_UOM(MS_SKU.STORERKEY,MS_SKU.SKU,'BOX',MS_SKU.BASEUOM,1))
+							  END
+					     END                                                                                                                  AS EA_QTY
+		     , 'EA'                                                                                                                           AS EA_UOM    
+		     , ST_KIT_PLANDETAIL.OPENQTY                                                                                                      AS OPENQTY
+		     , ST_KIT_PLANDETAIL.BOM_SKU_USEBYDATE                                               AS USEBYDATE
+		  FROM ST_KIT_PLANDETAIL
+		  JOIN MS_SKU
+		    ON MS_SKU.SKU        = ST_KIT_PLANDETAIL.BOM_SKU
+		   AND MS_SKU.STORERKEY  = ST_KIT_PLANDETAIL.STORERKEY   
+		 WHERE 1=1   
+		<if test="fixdccode != null and fixdccode != ''">   
+		   AND ST_KIT_PLANDETAIL.DCCODE    = #{fixdccode}
+		</if>  
+		   AND ST_KIT_PLANDETAIL.STORERKEY = #{gStorerkey}
+		<!-- START.작업일자 멀티 -->
+		<if test="planDtMulti != null and planDtMulti != '' ">
+			<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+				<foreach collection="planDtMulti" item="item">
+					OR ST_KIT_PLANDETAIL.PLAN_DT IN
+					<foreach collection="item" item="code" open="(" close=")" separator=",">
+						#{code} 	 
+					</foreach>
+				</foreach>
+			</trim>			                                    
+		</if>
+		<!-- END.작업일자 멀티-->			    		  
+		<!-- START.상품멀티 -->
+		<if test="skuMulti != null and skuMulti != '' ">
+			<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+				<foreach collection="skuMulti" item="item">
+					OR ST_KIT_PLANDETAIL.SKU IN
+					<foreach collection="item" item="code" open="(" close=")" separator=",">
+						#{code} 	 
+					</foreach>
+				</foreach>
+			</trim>			                                    
+		</if>
+		<!-- END.상품멀티 -->	
+         ORDER BY ST_KIT_PLANDETAIL.PLAN_DT
+                , ST_KIT_PLANDETAIL.SKU
+    </select>
+    
+    <select id="getLocationList" resultType="String">
+        SELECT  /* [stMKitService.sqlx][getLocationList][로케이션 조회][sunho.kim][2025.11.20] */
+              LOC
+         FROM MS_LOCATION
+        WHERE DCCODE = #{fixdccode}
+          AND DEL_YN = 'N'  
+        FETCH FIRST 1 ROWS ONLY
+    </select>
+    
+    <select id="getExistKitZeroList" resultType="HMap">
+        SELECT  /* [stMKitService.sqlx][isExistKitZeroList][KIT Zero재고 유무조회][sunho.kim][2025.11.20] */
+               S1.STORERKEY                                             AS STORERKEY
+              ,S1.ORGANIZE                                              AS ORGANIZE 
+              ,S1.DCCODE                                                AS DCCODE
+              ,S1.SKU                                                   AS SKU
+              ,S1.AREA                                                  AS AREA
+              ,FN_CODEDESCR(S1.STORERKEY, 'STOCKTYPE', S1.STOCKTYPE)    AS STOCKTYPENM
+              ,S1.STOCKTYPE                                             AS STOCKTYPE
+              ,FN_CODEDESCR(S1.STORERKEY, 'STOCKGRADE', S1.STOCKGRADE)  AS STOCKGRADENAME
+              ,S1.LOC                                                   AS LOC
+              ,S1.LOT                                                   AS LOT
+              ,S1.QTYALLOCATED                                          AS QTYALLOCATED
+              ,S1.QTYPICKED                                             AS QTYPICKED
+              ,S1.STOCKID                                               AS STOCKID
+              ,S1.STOCKGRADE                                            AS STOCKGRADE
+              ,SUM(S1.QTY - S1.QTYALLOCATED - S1.QTYPICKED)             AS OPENQTY
+              ,MAX(UOM)                                                 AS UOM
+          FROM ST_STOCK S1
+          LEFT OUTER JOIN CM_LOT S2
+            ON S2.STORERKEY = S1.STORERKEY
+           AND S2.LOT       = S1.LOT
+           AND S2.DEL_YN    = 'N'
+         WHERE S1.STORERKEY  = #{gStorerkey}
+           AND S1.DCCODE     = #{dccode}
+           AND S1.SKU        = #{kitSku}
+           AND S1.STOCKID    = #{stockid}
+           AND S1.LOC        = #{loc}
+           AND S1.STOCKGRADE = 'STD'           
+         <if test="mixboxkey != null and mixboxkey !=''">
+           AND S2.LOTTABLE01 = #{mixboxkey}
+         </if>
+         GROUP BY S1.STORERKEY,S1.ORGANIZE,S1.DCCODE,S1.SKU,S1.AREA,S1.STOCKID,S1.STOCKTYPE,
+                  S1.STOCKGRADE,S1.LOC,S1.SKU,S1.LOT,S1.QTYALLOCATED,S1.QTYPICKED
+    </select>
+  
+    <select id="getDataHeaderKitZeroList" resultType="HMap">
+        SELECT /* [stMKitService.sqlx][getDataHeaderKitZeroList][KIT Zero재고 정보조회][sunho.kim][2025.11.20] */
+              #{gStorerkey}                                         AS STORERKEY
+             ,NVL(MAX(T3.ORGANIZE), #{gDccode})                     AS ORGANIZE
+             ,T3.AREA                                               AS AREA
+             ,T1.DCCODE                                             AS DCCODE
+             ,T1.SKU                                                AS SKU
+             ,T2.DESCRIPTION                                        AS KIT_NM
+             ,T3.STOCKTYPENM                                        AS STOCKTYPENM 
+             ,NVL(T3.STOCKTYPE, 'GOOD')                             AS STOCKTYPE
+             ,T3.STOCKGRADENAME                                     AS STOCKGRADENAME
+             ,NVL(T3.LOC, 'STAGE')                                  AS LOC
+             ,NVL(T3.LOT, '0000000001')                             AS LOT    
+             ,NVL(TO_NUMBER(T3.QTYPICKED), 0)                       AS QTYPICKED
+             ,NVL(#{openqty}, 0)                                    AS OPENQTY
+             ,NVL(#{confirmqty}, 0)                                 AS ORDERQTY
+             ,NVL(TO_NUMBER(T3.QTYALLOCATED), 0)                    AS QTYALLOCATED
+             ,'STD'                                                 AS STOCKGRADE
+             ,T2.BASEUOM                                            AS UOM
+             ,NVL(T3.STOCKID, 'STD')                                AS STOCKID   
+             ,MAX(T1.PLAN_DT)                                       AS PLAN_DT
+             ,#{custkey}                                            AS CUSTKEY
+             ,#{costcd}                                             AS RESP_DEPT_CD
+        FROM ST_KIT_PLAN T1 
+        JOIN MS_SKU      T2
+          ON T2.STORERKEY = #{gStorerkey}
+         AND T2.SKU       = T1.SKU
+        LEFT OUTER JOIN ( SELECT S1.STORERKEY
+                                ,S1.ORGANIZE
+                                ,S1.DCCODE
+                                ,S1.SKU
+                                ,S1.AREA
+                                ,FN_CODEDESCR(S1.STORERKEY, 'STOCKTYPE', S1.STOCKTYPE)   AS STOCKTYPENM
+                                ,S1.STOCKTYPE                                            AS STOCKTYPE
+                                ,FN_CODEDESCR(S1.STORERKEY, 'STOCKGRADE', S1.STOCKGRADE) AS STOCKGRADENAME
+                                ,S1.LOC                                                  AS LOC
+                                ,S1.LOT                                                  AS LOT
+                                ,S1.QTYALLOCATED                                         AS QTYALLOCATED
+                                ,S1.QTYPICKED                                            AS QTYPICKED
+                                ,S1.STOCKID                                              AS STOCKID   
+                                ,S1.STOCKGRADE                                           AS STOCKGRADE 
+                                ,SUM(S1.QTY - S1.QTYALLOCATED - S1.QTYPICKED)            AS OPENQTY
+                                ,MAX(UOM)                                                AS UOM
+                            FROM ST_STOCK          S1
+                            LEFT OUTER JOIN CM_LOT S2
+                              ON S2.STORERKEY = S1.STORERKEY
+                             AND S2.LOT       = S1.LOT
+                             AND S2.DEL_YN    = 'N'
+                           WHERE S1.STORERKEY  = #{gStorerkey}
+                             AND S1.DCCODE     = #{dccode}
+                             AND S1.STOCKID    = NVL(#{stockid}, 'STD')
+                             AND S1.STOCKGRADE = 'STD'
+                             AND S1.LOC = 'STAGE'
+                           <if test="mixboxkey != null and mixboxkey !=''">
+                             AND S2.LOTTABLE01 = #{mixboxkey}
+                           </if>
+                           GROUP BY S1.STORERKEY,S1.ORGANIZE,S1.DCCODE,S1.SKU,S1.AREA,S1.STOCKID,S1.STOCKTYPE,
+                                    S1.STOCKGRADE,S1.LOC,S1.SKU,S1.LOT,S1.QTYALLOCATED,S1.QTYPICKED) T3
+          ON  T3.STORERKEY = #{gStorerkey}
+         AND  T3.SKU       = T1.SKU
+         AND  T3.OPENQTY   = 0
+       WHERE T1.DCCODE     = #{dccode}
+         AND T1.SKU        = #{kitSku}
+         AND T1.PLAN_DT    = #{planDt}
+        /* AND T1.STATUS     = '60' */
+        /* AND T1.DEL_YN     = 'N' */
+       GROUP BY T3.ORGANIZE,
+                T1.DCCODE,
+                T1.SKU,
+                T2.DESCRIPTION,
+                T3.AREA,
+                T3.STOCKTYPENM,
+                T3.STOCKTYPE,
+                T3.STOCKGRADENAME,
+                T3.LOC,
+                T3.LOT,
+                T3.QTYALLOCATED,
+                T3.QTYPICKED,
+                T3.STOCKGRADE,
+                T3.OPENQTY,
+                T2.BASEUOM,
+                T3.STOCKID
+       ORDER BY T1.SKU
+    </select>
+    
+    <select id="getDataHeaderKitDivInfo" resultType="HMap">
+        SELECT /* [stMKitService.sqlx][getDataHeaderKitDivInfo][KIT 해체재고 정보조회][sunho.kim][2025.11.20] */
+              ST_STOCK.STORERKEY                                          AS STORERKEY
+             ,ST_STOCK.ORGANIZE                                           AS ORGANIZE
+             ,ST_STOCK.AREA                                               AS AREA
+             ,ST_STOCK.DCCODE                                             AS DCCODE
+             ,ST_STOCK.SKU                                                AS SKU
+             ,MS_SKU.DESCRIPTION                                          AS KIT_NM
+             ,FN_CODEDESCR(ST_STOCK.STORERKEY, 'STOCKTYPE', ST_STOCK.STOCKTYPE)             AS STOCKTYPENM 
+             ,NVL(ST_STOCK.STOCKTYPE, 'GOOD')                             AS STOCKTYPE
+             ,FN_CODEDESCR(ST_STOCK.STORERKEY, 'STOCKGRADE', ST_STOCK.STOCKGRADE)           AS STOCKGRADENAME
+             ,NVL(ST_STOCK.LOC, 'STD')                                    AS LOC
+             ,NVL(ST_STOCK.LOT, '0000000001')                             AS LOT    
+             ,NVL(TO_NUMBER(ST_STOCK.QTYPICKED), 0)                       AS QTYPICKED
+             ,ST_STOCK.QTY - ST_STOCK.QTYALLOCATED - ST_STOCK.QTYPICKED                     AS OPENQTY
+             ,NVL(#{confirmqty}, 0)                                       AS ORDERQTY
+             ,NVL(TO_NUMBER(ST_STOCK.QTYALLOCATED), 0)                    AS QTYALLOCATED
+             ,'STD'                                                       AS STOCKGRADE
+             ,MS_SKU.BASEUOM                                              AS UOM
+             ,ST_STOCK.STOCKID                                            AS STOCKID   
+             ,#{planDt}                                                   AS PLAN_DT
+             ,#{custkey}                                                  AS CUSTKEY
+             ,#{costcd}                                                   AS RESP_DEPT_CD
+        FROM ST_STOCK 
+        JOIN MS_SKU     
+          ON MS_SKU.STORERKEY = #{gStorerkey}
+         AND MS_SKU.SKU       = ST_STOCK.SKU
+       WHERE ST_STOCK.DCCODE     = #{dccode}
+         AND ST_STOCK.STORERKEY  = #{gStorerkey}
+         AND ST_STOCK.SKU        = #{kitSku}
+         AND ST_STOCK.LOC        = #{loc}
+         AND ST_STOCK.STOCKID    = #{stockid}
+         AND ST_STOCK.STOCKGRADE = 'STD'
+         AND ST_STOCK.QTY - ST_STOCK.QTYALLOCATED - ST_STOCK.QTYPICKED > 0
+       ORDER BY ST_STOCK.SKU, ST_STOCK.LOC, ST_STOCK.STOCKID
+    </select>
+    
+    <select id="getSyProcessTempAJ" resultType="Hmap">
+        SELECT 
+              SERIALKEY
+            , DOCDT
+            , LIST_NO
+            , SKU
+        FROM SY_PROCESSTEMP_AJ 
+        WHERE PROCESSTYPE     = #{processtype}
+         AND  PROCESSCREATOR  = #{gUserId}
+         AND  SPID            = #{gSpid}
+         AND  LIST_NO         = #{kitSku}
+         AND  DOCDT           = #{planDt}
+    </select>
+    
+    <insert id="insertSyProcessTempAJ" parameterType="java.util.List">
+          INSERT INTO SY_PROCESSTEMP_AJ (
+            PROCESSTYPE,
+            PROCESSCREATOR,
+            SPID,
+            PROCESSFLAG,
+            DCCODE,
+            DOCDT,
+            DOCNO,
+            DOCLINE,
+            SLIPDT,
+            SLIPNO,
+            SLIPLINE,
+            STORERKEY,
+            AREA,
+            ORGANIZE,
+            SKU,
+            LIST_NO,
+            STOCKTYPE,  
+            STOCKGRADE,
+            STOCKID,
+            LOC,
+            LOT,
+            PROCESSQTY,
+            WORKQTY,
+            OPENQTY,
+            ORDERQTY,
+            UOM,
+            CUSTKEY,
+            ADDDATE,
+            EDITDATE,
+            ADDWHO,
+            EDITWHO
+          )
+          <foreach collection="list" item="item" separator="UNION ALL">
+            SELECT
+              #{item.processtype} AS PROCESSTYPE,
+              #{item.gUserId} AS PROCESSCREATOR,
+              #{item.gSpid} AS SPID,
+              NVL(#{item.processflag},'N') AS PROCESSFLAG,
+              #{item.dccode} AS DCCODE,
+              #{item.docdt} AS DOCDT,
+              #{item.docno} AS DOCNO,
+              #{item.docline} AS DOCLINE,
+              #{item.slipdt} AS SLIPDT,
+              #{item.slipno} AS SLIPNO,
+              #{item.slipline} AS SLIPLINE,
+              #{item.storerkey} AS STORERKEY,
+              #{item.area} AS AREA,
+              #{item.organize} AS ORGANIZE,
+              #{item.sku} AS SKU,
+              #{item.kitSku} AS LIST_NO,
+              #{item.stocktype} AS STOCKTYPE,
+              #{item.stockgrade} AS STOCKGRADE,
+              #{item.stockid} AS STOCKID,
+              #{item.loc} AS LOC,
+              #{item.lot} AS LOT,
+              NVL(#{item.processqty}, 0) AS PROCESSQTY,
+              NVL(#{item.workqty}, 0) AS WORKQTY,
+              NVL(#{item.openqty}, 0) AS OPENQTY,
+              NVL(#{item.orderqty}, 0) AS ORDERQTY,
+              #{item.uom} AS UOM,
+              #{item.custkey} AS CUSTKEY,
+              SYSDATE AS ADDDATE,
+              SYSDATE AS EDITDATE,
+              #{item.gUserId} AS ADDWHO,
+              #{item.gUserId} AS EDITWHO
+            FROM DUAL
+          </foreach>
+    </insert>
+    
+    <select id="getMasterList02" resultType="cjfw.wms.st.dto.StMKitResT1Dto">
+        WITH STOCK AS (
+          SELECT 
+                 ST_STOCK.DCCODE
+                , ST_STOCK.STORERKEY
+                , ST_STOCK.SKU
+                , SUM(ST_STOCK.OPENQTY) QTY
+                , MAX(ST_STOCK.STOCKGRADE) AS STOCKGRADE
+                , MAX(ST_STOCK.STOCKID) KEEP (DENSE_RANK LAST ORDER BY CM_LOT.LOTTABLE01) AS STOCKID
+                , MAX(ST_STOCK.LOC) KEEP (DENSE_RANK LAST ORDER BY CM_LOT.LOTTABLE01)  AS LOC
+                , MAX(ST_STOCK.LOT) KEEP (DENSE_RANK LAST ORDER BY CM_LOT.LOTTABLE01)  AS LOT
+                , CASE WHEN MAX(CM_LOT.LOTTABLE01) = 'STD' THEN 'STD' 
+                       WHEN VALIDATE_CONVERSION(MAX(CM_LOT.LOTTABLE01) AS DATE, 'YYYYMMDD') = 1  
+                              THEN (CASE WHEN MAX(MS_SKU.DURATIONTYPE) = '1' 
+                                         THEN TO_CHAR(TO_DATE(REPLACE(MAX(CM_LOT.LOTTABLE01),'-',''),'YYYYMMDD'),'YYYYMMDD')
+                                         WHEN MAX(MS_SKU.DURATIONTYPE) = '2'
+                                         THEN TO_CHAR(TO_DATE(REPLACE(MAX(CM_LOT.LOTTABLE01),'-',''),'YYYYMMDD') + MAX(MS_SKU.DURATION) -1,'YYYYMMDD')
+                                         ELSE '' END)
+                              ELSE '' END                 AS EXPIREDT
+          FROM ST_STOCK
+          LEFT OUTER JOIN CM_LOT 
+             ON CM_LOT.STORERKEY = ST_STOCK.STORERKEY
+            AND CM_LOT.LOT = ST_STOCK.LOT           
+          LEFT OUTER JOIN MS_SKU
+             ON MS_SKU.STORERKEY = ST_STOCK.STORERKEY
+            AND MS_SKU.SKU       = ST_STOCK.SKU  
+          WHERE ST_STOCK.DCCODE     = #{fixdccode}
+            AND ST_STOCK.STOCKGRADE = 'STD'
+            AND ST_STOCK.OPENQTY <![CDATA[>]]> 0
+          GROUP BY ST_STOCK.DCCODE, ST_STOCK.STORERKEY, ST_STOCK.SKU, ST_STOCK.LOC
+          )
+        
+        SELECT  /* [stMKitService.sqlx][getMasterList02][키트처리 전자결재 목록 조회][고혜미][20251030] */    
+            ROWNUM                                                        
+          , (ST_KIT_PLAN.DCCODE || ST_KIT_PLAN.PLAN_DT || ST_KIT_PLAN.SKU)           AS ROW_DIST       /*세로 병합*/  
+          , ST_KIT_PLAN.DCCODE                                   AS DCCODE         /*센터코드*/
+          , ST_KIT_PLAN.PLAN_DT                                  AS PLAN_DT        /*계획일자*/
+          , ST_KIT_PLAN.SKU                                      AS KIT_SKU        /*KIT상품코드*/
+          , MS_KITSKU_DETAIL.KIT_NM                              AS KIT_NM         /*KIT상품명*/
+          , ST_KIT_PLANDETAIL.SKU_USEBYDATE                          AS MIN_EXPIREDT        /*키트품목 소비기한*/
+          , ST_KIT_PLANDETAIL.BOM_SKU_USEBYDATE                                          AS EXPIREDT            /*자품목 소비기한*/
+          , NVL(ST_KIT_PLAN.OPENQTY, 0)                             AS OPENQTY             /*KIT계획수량*/
+          , NVL(ST_KIT_PLAN.CONFIRMQTY, 0)                          AS CONFIRMQTY          /*KIT생산수량*/
+          , MS_SKU_DETAIL.SKU                                       AS SKU                 /*상품코드*/
+          , MS_SKU_DETAIL.DESCRIPTION                               AS SKU_NM              /*상품명*/
+          , NVL(STOCK.QTY, 0)                                   AS STOCKQTY            /*재고량*/
+          , NVL(NVL(MS_KITSKU_DETAIL.QTY, 0) * ST_KIT_PLAN.CONFIRMQTY, 0)   AS REQ_QTY             /*요청량*/
+          , NVL(ST_KIT_PLANDETAIL.STOCKID, STOCK.STOCKID)           AS STOCKID             /*재고구분ID*/
+          , NVL(ST_KIT_PLANDETAIL.STOCKGRADE, STOCK.STOCKGRADE)     AS STOCKGRADE          /*재고속성*/
+          , CD1.BASEDESCR                                           AS STOCKGRADE_NM       /*재고속성명*/
+          -- , NVL(ST_SNINFO.SERIALNO,'STD')                        AS SERIALNO            /*시리얼번호*/
+          , NVL(MS_KITSKU_DETAIL.UOMQTY, 0)                         AS QTY                 /*KIT구성수량*/
+          
+          , ST_KIT_PLANDETAIL.STATUS                             AS STATUS 
+          , ST_KIT_PLANDETAIL.DOCNO                              AS DOCNO
+          , ST_KIT_PLANDETAIL.RESP_DEPT_CD                       AS COSTCD
+          , ( SELECT DESCRIPTION
+                   FROM MS_COST
+                  WHERE MS_COST.STORERKEY = ST_KIT_PLANDETAIL.STORERKEY
+                    AND MS_COST.COSTCODE  = ST_KIT_PLANDETAIL.RESP_DEPT_CD
+                    AND MS_COST.FROMDATE  <![CDATA[<=]]>  ST_KIT_PLANDETAIL.PLAN_DT
+                    AND MS_COST.TODATE    <![CDATA[>=]]>  ST_KIT_PLANDETAIL.PLAN_DT
+                  FETCH FIRST 1 ROWS ONLY )                   AS COSTCDNAME
+          , ST_KIT_PLANDETAIL.CUSTKEY                         AS CUSTKEY  
+          , ( SELECT DESCRIPTION
+                   FROM MS_CUST
+                  WHERE MS_CUST.STORERKEY = ST_KIT_PLANDETAIL.STORERKEY
+                    AND MS_CUST.CUSTKEY   = ST_KIT_PLANDETAIL.CUSTKEY
+                    AND ROWNUM = 1 )                          AS CUSTNAME
+          , MS_SKU.BASEUOM                                    AS KIT_UOM
+          , MS_SKU_DETAIL.BASEUOM                             AS SKU_UOM
+          , ST_KIT_PLANDETAIL.LOC 
+          , STOCK.LOT 
+          , ST_SNINFO_KIT.SERIALNO   
+          , ST_KIT_PLANDETAIL.FACTORY_DISASSEM_FLAG   
+          , AJ_INPLAN.STORERKEY                               AS STORERKEY
+          , AJ_INPLAN.ORGANIZE                                AS ORGANIZE
+          , AJ_INPLAN.AREA                                    AS AREA
+          , AJ_INPLAN.DOCDT                                   AS DOCDT
+          , AJ_INPLAN.DOCLINE                                 AS DOCLINE
+          , AJ_INPLAN.SLIPDT                                  AS SLIPDT
+          , AJ_INPLAN.SLIPNO                                  AS SLIPNO
+          , AJ_INPLAN.SLIPLINE                                AS SLIPLINE
+          , AJ_INPLAN.SLIPTYPE                                AS SLIPTYPE
+          , AJ_INPLAN.LOC                                     AS KIT_LOC
+          , AJ_INPLAN.LOT                                     AS KIT_LOT
+          , AJ_INPLAN.STOCKGRADE                              AS KIT_STOCKGRADE
+          , AJ_INPLAN.STOCKID                                 AS KIT_STOCKID
+          , AJ_INPLAN.IOTYPE                                  AS IOTYPE
+          , AJ_INPLAN.ORDERTYPE                               AS ORDERTYPE
+          , AJ_INPLAN.ORDERQTY                                AS TRANQTY
+       FROM ST_KIT_PLAN 
+      JOIN MS_SKU    MS_SKU
+        ON MS_SKU.STORERKEY = ST_KIT_PLAN.STORERKEY
+       AND MS_SKU.SKU       = ST_KIT_PLAN.SKU  
+       
+      JOIN ST_KIT_PLANDETAIL
+        ON ST_KIT_PLANDETAIL.STORERKEY = ST_KIT_PLAN.STORERKEY
+       AND ST_KIT_PLANDETAIL.DCCODE    = ST_KIT_PLAN.DCCODE
+       AND ST_KIT_PLANDETAIL.SKU       = ST_KIT_PLAN.SKU
+       AND ST_KIT_PLANDETAIL.PLAN_DT   = ST_KIT_PLAN.PLAN_DT
+       AND ST_KIT_PLANDETAIL.STATUS    = '30' 
+      JOIN MS_KITSKU MS_KITSKU_DETAIL
+        ON MS_KITSKU_DETAIL.DCCODE    = ST_KIT_PLANDETAIL.DCCODE
+       AND MS_KITSKU_DETAIL.STORERKEY = ST_KIT_PLANDETAIL.STORERKEY
+       AND MS_KITSKU_DETAIL.KIT_SKU   = ST_KIT_PLANDETAIL.SKU
+       AND MS_KITSKU_DETAIL.SKU       = ST_KIT_PLANDETAIL.BOM_SKU
+       AND MS_KITSKU_DETAIL.TODATE    <![CDATA[>]]>  TO_CHAR(SYSDATE, 'YYYYMMDD') /*중단여부*/
+       AND MS_KITSKU_DETAIL.DEL_YN    = 'N'   /*중단여부*/
+      JOIN MS_SKU  MS_SKU_DETAIL 
+         ON MS_SKU_DETAIL.STORERKEY = MS_KITSKU_DETAIL.STORERKEY
+        AND MS_SKU_DETAIL.SKU       = MS_KITSKU_DETAIL.SKU
+      LEFT JOIN AJ_INPLAN 
+        ON AJ_INPLAN.DCCODE  = ST_KIT_PLANDETAIL.DCCODE 
+       AND AJ_INPLAN.DOCDT   = ST_KIT_PLANDETAIL.PLAN_DT
+       AND AJ_INPLAN.DOCNO   = ST_KIT_PLANDETAIL.DOCNO    
+       AND AJ_INPLAN.DEL_YN  = 'N' 
+      LEFT JOIN STOCK 
+        ON STOCK.STORERKEY = ST_KIT_PLANDETAIL.STORERKEY
+       AND STOCK.DCCODE    = ST_KIT_PLANDETAIL.DCCODE
+       AND STOCK.SKU       = ST_KIT_PLANDETAIL.BOM_SKU
+       AND STOCK.LOC       = ST_KIT_PLANDETAIL.LOC
+       
+     LEFT JOIN STOCK STOCK_KIT 
+        ON STOCK_KIT.STORERKEY = ST_KIT_PLAN.STORERKEY
+       AND STOCK_KIT.DCCODE    = ST_KIT_PLAN.DCCODE
+       AND STOCK_KIT.SKU       = ST_KIT_PLAN.SKU     
+       AND STOCK_KIT.LOC       = 'STAGE'
+/*       
+      LEFT JOIN CM_LOT   
+        ON CM_LOT.STORERKEY = ST_STOCK.STORERKEY
+       AND CM_LOT.LOT       = ST_STOCK.LOT
+       AND CM_LOT.DEL_YN    = 'N'
+*/       
+     LEFT JOIN ST_SNINFO ST_SNINFO_KIT
+        ON ST_SNINFO_KIT.STORERKEY = STOCK_KIT.STORERKEY
+       AND ST_SNINFO_KIT.SKU       = STOCK_KIT.SKU
+       AND ST_SNINFO_KIT.STOCKID   = STOCK_KIT.STOCKID
+              
+      LEFT JOIN CM_CODE_STORER CD1
+        ON CD1.STORERKEY = STOCK.STORERKEY 
+       AND CD1.CODELIST  = 'STOCKGRADE'  
+       AND CD1.BASECODE  = NVL(ST_KIT_PLANDETAIL.STOCKGRADE, STOCK.STOCKGRADE) 
+     
+      WHERE 1 = 1
+          AND ST_KIT_PLAN.PLAN_DT BETWEEN #{fromDate} AND #{toDate}
+          AND SUBSTR(ST_KIT_PLAN.PLAN_DT,7,2) != '00'
+          AND ST_KIT_PLAN.OPENQTY <![CDATA[>]]> 0
+          AND ST_KIT_PLAN.DCCODE            = #{fixdccode}
+          AND ( MS_KITSKU_DETAIL.PRTN_YN    = 'N'
+             OR MS_KITSKU_DETAIL.PRTN_YN    IS NULL 
+              )                          
+          <if test="kitSku != null and kitSku != ''">
+            AND ST_KIT_PLAN.SKU                = #{kitSku}
+          </if>
+          <if test="storagetype != null and storagetype != ''">
+            AND MS_SKU.STORAGETYPE       = #{storagetype}
+          </if>
+          AND NOT EXISTS (
+            SELECT 1 FROM AJ_APPRREQUEST 
+                WHERE AJ_APPRREQUEST.DCCODE    = ST_KIT_PLAN.DCCODE 
+                  AND AJ_APPRREQUEST.STORERKEY = ST_KIT_PLAN.STORERKEY 
+                  AND AJ_APPRREQUEST.DOCDT     = ST_KIT_PLAN.PLAN_DT 
+                  AND AJ_APPRREQUEST.DOCNO     = ST_KIT_PLAN.SKU
+                  AND AJ_APPRREQUEST.DOCTYPE   = 'KIT'
+                  AND AJ_APPRREQUEST.APPROVALSTATUS <![CDATA[<>]]> '9'
+            )
+
+       ORDER BY ST_KIT_PLAN.PLAN_DT
+              , MS_KITSKU_DETAIL.KIT_SKU
+              , MS_KITSKU_DETAIL.SKU
+    </select>
+    
+    <select id="getMasterList05" resultType="cjfw.wms.st.dto.StMKitResT1Dto">
+        SELECT  /* [stMKitService.sqlx][getMasterList05][키트처리 전자결재 목록(해제) 조회][공두경][20260115] */    
+            ROWNUM                                                        
+          , (ST_KIT_PLANDETAIL.DCCODE || ST_KIT_PLANDETAIL.PLAN_DT || ST_KIT_PLANDETAIL.SKU || ST_KIT_PLANDETAIL.FACTORY_DISASSEM_FLAG)           AS ROW_DIST       /*세로 병합*/  
+          , ST_KIT_PLANDETAIL.DCCODE                                    AS DCCODE         /*센터코드*/
+          , ST_KIT_PLANDETAIL.PLAN_DT                                   AS PLAN_DT        /*계획일자*/
+          , ST_KIT_PLANDETAIL.SKU                                       AS KIT_SKU        /*KIT상품코드*/
+          , MS_KITSKU_DETAIL.KIT_NM                                     AS KIT_NM         /*KIT상품명*/
+          , ST_KIT_PLANDETAIL.SKU_USEBYDATE                             AS MIN_EXPIREDT        /*키트품목 소비기한*/
+          , ST_KIT_PLANDETAIL.BOM_SKU_USEBYDATE                         AS EXPIREDT            /*자품목 소비기한*/
+          , NVL(ST_KIT_PLANDETAIL.OPENQTY, 0)                           AS OPENQTY             /*KIT계획수량*/
+          , NVL(ST_KIT_PLANDETAIL.CONFIRMQTY, 0)                        AS CONFIRMQTY          /*KIT생산수량*/
+          , MS_SKU_DETAIL.SKU                                           AS SKU                 /*상품코드*/
+          , MS_SKU_DETAIL.DESCRIPTION                                   AS SKU_NM              /*상품명*/
+          , NVL(ST_STOCK.QTY, 0)                                        AS STOCKQTY            /*재고량*/
+          , NVL(NVL(MS_KITSKU_DETAIL.UOMQTY, 0) * ST_KIT_PLANDETAIL.CONFIRMQTY, 0)   AS REQ_QTY             /*요청량*/
+          , NVL(ST_KIT_PLANDETAIL.STOCKID, ST_STOCK.STOCKID)            AS STOCKID             /*재고구분ID*/
+          , NVL(ST_KIT_PLANDETAIL.STOCKGRADE, ST_STOCK.STOCKGRADE)      AS STOCKGRADE          /*재고속성*/
+          , CD1.BASEDESCR                                               AS STOCKGRADE_NM       /*재고속성명*/
+          , NVL(MS_KITSKU_DETAIL.UOMQTY, 0)                             AS QTY                 /*KIT구성수량*/
+          , ST_KIT_PLANDETAIL.STATUS                                    AS STATUS 
+          , ST_KIT_PLANDETAIL.DOCNO                                     AS DOCNO
+          , ST_KIT_PLANDETAIL.RESP_DEPT_CD                              AS COSTCD
+          , ( SELECT DESCRIPTION
+                   FROM MS_COST
+                  WHERE MS_COST.STORERKEY = ST_KIT_PLANDETAIL.STORERKEY
+                    AND MS_COST.COSTCODE  = ST_KIT_PLANDETAIL.RESP_DEPT_CD
+                    AND MS_COST.FROMDATE   <![CDATA[<=]]>  ST_KIT_PLANDETAIL.PLAN_DT
+                    AND MS_COST.TODATE     <![CDATA[>=]]>   ST_KIT_PLANDETAIL.PLAN_DT
+                  FETCH FIRST 1 ROWS ONLY )                             AS COSTCDNAME
+          , ST_KIT_PLANDETAIL.CUSTKEY                                   AS CUSTKEY  
+          , ( SELECT DESCRIPTION
+                   FROM MS_CUST
+                  WHERE MS_CUST.STORERKEY = ST_KIT_PLANDETAIL.STORERKEY
+                    AND MS_CUST.CUSTKEY   = ST_KIT_PLANDETAIL.CUSTKEY
+                    AND ROWNUM = 1 )                                    AS CUSTNAME
+          , MS_SKU.BASEUOM                                              AS KIT_UOM
+          , MS_SKU_DETAIL.BASEUOM                                       AS SKU_UOM
+          , ST_STOCK.LOC                                                AS LOC
+          , ST_STOCK.LOT                                                AS LOT
+          , ST_SNINFO_KIT.SERIALNO                                      AS SERIALNO
+          , ST_KIT_PLANDETAIL.FACTORY_DISASSEM_FLAG                     AS FACTORY_DISASSEM_FLAG
+       FROM ST_KIT_PLANDETAIL 
+      JOIN MS_SKU    MS_SKU
+        ON MS_SKU.STORERKEY = ST_KIT_PLANDETAIL.STORERKEY
+       AND MS_SKU.SKU       = ST_KIT_PLANDETAIL.SKU  
+      JOIN MS_KITSKU MS_KITSKU_DETAIL
+        ON MS_KITSKU_DETAIL.DCCODE    = ST_KIT_PLANDETAIL.DCCODE
+       AND MS_KITSKU_DETAIL.STORERKEY = ST_KIT_PLANDETAIL.STORERKEY
+       AND MS_KITSKU_DETAIL.KIT_SKU   = ST_KIT_PLANDETAIL.SKU
+       AND MS_KITSKU_DETAIL.SKU       = ST_KIT_PLANDETAIL.BOM_SKU
+       AND MS_KITSKU_DETAIL.TODATE    <![CDATA[>]]>  TO_CHAR(SYSDATE, 'YYYYMMDD') /*중단여부*/
+       AND MS_KITSKU_DETAIL.DEL_YN    = 'N'   /*중단여부*/
+      JOIN MS_SKU  MS_SKU_DETAIL 
+         ON MS_SKU_DETAIL.STORERKEY = MS_KITSKU_DETAIL.STORERKEY
+        AND MS_SKU_DETAIL.SKU       = MS_KITSKU_DETAIL.SKU
+      LEFT JOIN ST_STOCK  
+        ON ST_STOCK.STORERKEY = ST_KIT_PLANDETAIL.STORERKEY
+       AND ST_STOCK.DCCODE    = ST_KIT_PLANDETAIL.DCCODE
+       AND ST_STOCK.SKU       = ST_KIT_PLANDETAIL.BOM_SKU
+       AND ST_STOCK.LOC       = ST_KIT_PLANDETAIL.LOC
+       AND ST_STOCK.LOT       = (SELECT MIN(S1.LOT) 
+                                 FROM   ST_STOCK S1
+                                 WHERE  S1.DCCODE = ST_KIT_PLANDETAIL.DCCODE
+                                 AND    S1.STORERKEY = ST_KIT_PLANDETAIL.STORERKEY
+                                 AND    S1.SKU = ST_KIT_PLANDETAIL.SKU
+                                 AND    S1.LOC = ST_KIT_PLANDETAIL.LOC
+                                 AND    S1.STOCKID = ST_KIT_PLANDETAIL.STOCKID)  
+     LEFT JOIN ST_SNINFO ST_SNINFO_KIT
+        ON ST_SNINFO_KIT.STORERKEY = ST_KIT_PLANDETAIL.STORERKEY
+       AND ST_SNINFO_KIT.SKU       = ST_KIT_PLANDETAIL.SKU
+       AND ST_SNINFO_KIT.STOCKID   = ST_KIT_PLANDETAIL.STOCKID
+      LEFT JOIN CM_CODE_STORER CD1
+        ON CD1.STORERKEY = ST_STOCK.STORERKEY 
+       AND CD1.CODELIST  = 'STOCKGRADE'  
+       AND CD1.BASECODE  = NVL(ST_KIT_PLANDETAIL.STOCKGRADE, ST_STOCK.STOCKGRADE)
+      WHERE 1 = 1          
+          AND ST_KIT_PLANDETAIL.PLAN_DT BETWEEN #{fromDate} AND #{toDate}
+          AND ST_KIT_PLANDETAIL.OPENQTY != 0
+          AND ST_KIT_PLANDETAIL.DCCODE            = #{fixdccode}
+          AND ST_KIT_PLANDETAIL.STATUS    = '30' 
+          <if test="kitSku != null and kitSku != ''">
+            AND ST_KIT_PLANDETAIL.SKU                = #{kitSku}
+          </if>
+          <if test="storagetype != null and storagetype != ''">
+            AND MS_SKU.STORAGETYPE       = #{storagetype}
+          </if>
+          AND NOT EXISTS (
+            SELECT 1 FROM AJ_APPRREQUEST 
+                WHERE AJ_APPRREQUEST.DCCODE    = ST_KIT_PLANDETAIL.DCCODE 
+                  AND AJ_APPRREQUEST.STORERKEY = ST_KIT_PLANDETAIL.STORERKEY 
+                  AND AJ_APPRREQUEST.DOCDT     = ST_KIT_PLANDETAIL.PLAN_DT 
+                  AND AJ_APPRREQUEST.DOCNO     = ST_KIT_PLANDETAIL.SKU
+                  AND AJ_APPRREQUEST.DOCTYPE   = 'KIT'
+                  AND AJ_APPRREQUEST.APPROVALSTATUS <![CDATA[<>]]> '9'
+            )
+       ORDER BY ST_KIT_PLANDETAIL.PLAN_DT
+              , MS_KITSKU_DETAIL.KIT_SKU
+              , MS_KITSKU_DETAIL.SKU
+    </select>
+    
+    <select id="getMasterList03" resultType="cjfw.wms.st.dto.StMKitResT1Dto">
+        WITH STOCK AS (
+          SELECT 
+                 ST_STOCK.DCCODE
+                , ST_STOCK.STORERKEY
+                , ST_STOCK.SKU
+                , SUM(ST_STOCK.QTY)   QTY
+                , SUM(ST_STOCK.QTY) - SUM(ST_STOCK.QTYALLOCATED) - SUM(ST_STOCK.QTYPICKED)  - SUM(ST_STOCK.QTYRESERVE)   USEQTY
+                , MAX(ST_STOCK.STOCKGRADE) AS STOCKGRADE
+                , MAX(ST_STOCK.STOCKID) KEEP (DENSE_RANK LAST ORDER BY CM_LOT.LOTTABLE01) AS STOCKID
+                , MAX(ST_STOCK.LOC) KEEP (DENSE_RANK LAST ORDER BY CM_LOT.LOTTABLE01)  AS LOC
+                , MAX(ST_STOCK.LOT) KEEP (DENSE_RANK LAST ORDER BY CM_LOT.LOTTABLE01)  AS LOT           
+                , CASE WHEN MAX(CM_LOT.LOTTABLE01) = 'STD' THEN 'STD' 
+                       WHEN VALIDATE_CONVERSION(MAX(CM_LOT.LOTTABLE01) AS DATE, 'YYYYMMDD') = 1  
+                              THEN (CASE WHEN MAX(MS_SKU.DURATIONTYPE) = '1' 
+                                         THEN TO_CHAR(TO_DATE(REPLACE(MAX(CM_LOT.LOTTABLE01),'-',''),'YYYYMMDD'),'YYYYMMDD')
+                                         WHEN MAX(MS_SKU.DURATIONTYPE) = '2'
+                                         THEN TO_CHAR(TO_DATE(REPLACE(MAX(CM_LOT.LOTTABLE01),'-',''),'YYYYMMDD') + MAX(MS_SKU.DURATION) -1,'YYYYMMDD')
+                                         ELSE '' END)
+                              ELSE '' END                 AS EXPIREDT
+          FROM ST_STOCK
+          LEFT OUTER JOIN CM_LOT 
+             ON CM_LOT.STORERKEY  = ST_STOCK.STORERKEY
+            AND CM_LOT.LOT        = ST_STOCK.LOT            
+          LEFT OUTER JOIN MS_SKU
+             ON MS_SKU.STORERKEY  = ST_STOCK.STORERKEY
+            AND MS_SKU.SKU        = ST_STOCK.SKU  
+          WHERE ST_STOCK.DCCODE     = #{fixdccode}
+            AND ST_STOCK.STOCKGRADE = 'STD'
+            AND ST_STOCK.QTY - ST_STOCK.QTYALLOCATED - ST_STOCK.QTYPICKED - ST_STOCK.QTYRESERVE > 0
+          GROUP BY ST_STOCK.DCCODE, ST_STOCK.STORERKEY, ST_STOCK.SKU, ST_STOCK.LOC,ST_STOCK.STOCKID
+          )
+          
+        SELECT  /* [stMKitService.sqlx][getMasterList03][키트처리 처리 목록 조회][고혜미][20251030] */     
+            ROWNUM                                                        
+          , (ST_KIT_PLAN.DCCODE || ST_KIT_PLAN.PLAN_DT || ST_KIT_PLAN.SKU)           AS ROW_DIST       /*세로 병합*/
+          , AJ_APPRREQUEST.APPROVALREQNO                         AS APPROVALREQNO
+          , AJ_APPRREQUEST.APPROVALSTATUS                        AS APPROVALSTATUS  
+          , CD1.BASEDESCR                                        AS APPROVALSTATUSNAME
+          , ST_KIT_PLAN.DCCODE                                   AS DCCODE                  /*센터코드*/
+          , ST_KIT_PLAN.PLAN_DT                                  AS PLAN_DT                 /*계획일자*/
+          , ST_KIT_PLAN.SKU                                      AS KIT_SKU                 /*KIT상품코드*/
+          , MS_KITSKU_DETAIL.KIT_NM                              AS KIT_NM                  /*KIT상품명*/
+          , NVL(ST_KIT_PLAN.OPENQTY,0)                           AS OPENQTY                 /*KIT계획수량*/
+          , NVL(ST_KIT_PLAN.CONFIRMQTY,0)                        AS CONFIRMQTY              /*KIT생산수량*/
+          , MS_SKU_DETAIL.SKU                                    AS SKU                     /*상품코드*/
+          , MS_SKU_DETAIL.DESCRIPTION                            AS SKU_NM                  /*상품명*/
+          , ST_KIT_PLANDETAIL.SKU_USEBYDATE                      AS MIN_EXPIREDT            /*키트품목 소비기한*/  
+          , NVL(ST_KIT_PLANDETAIL.BOM_SKU_USEBYDATE, STOCK.EXPIREDT)    AS EXPIREDT         /*자품목 소비기한*/
+          , NVL(STOCK.QTY, 0)                                    AS STOCKQTY                /*재고량*/
+          , NVL(MS_KITSKU_DETAIL.QTY * ST_KIT_PLAN.CONFIRMQTY,0) AS REQ_QTY                  /*요청량*/
+          , ST_KIT_PLANDETAIL.LOC                               AS LOC                      /*로케이션*/
+          , ST_KIT_PLANDETAIL.STOCKID                           AS STOCKID                  /*재고구분ID*/
+          , ST_KIT_PLANDETAIL.STOCKGRADE                        AS STOCKGRADE               /*재고속성*/
+          , CD2.BASEDESCR                                       AS STOCKGRADE_NM            /*재고속성명*/
+          --, NVL(ST_SNINFO.SERIALNO,'STD')                     AS SERIALNO                 /*시리얼번호*/
+          , NVL(MS_KITSKU_DETAIL.QTY, 0)                        AS QTY                      /*KIT구성수량*/   
+          , ST_KIT_PLANDETAIL.STATUS                            AS STATUS                   /*진행상태*/ 
+          , ST_KIT_PLANDETAIL.DOCNO                             AS DOCNO                    /*문서번호*/
+          , ST_KIT_PLANDETAIL.RESP_DEPT_CD                      AS COSTCD                   /*귀속부서*/
+          , ( SELECT DESCRIPTION
+                   FROM MS_COST
+                  WHERE MS_COST.STORERKEY = ST_KIT_PLANDETAIL.STORERKEY
+                    AND MS_COST.COSTCODE  = ST_KIT_PLANDETAIL.RESP_DEPT_CD
+                    AND MS_COST.FROMDATE  <![CDATA[<=]]>  ST_KIT_PLANDETAIL.PLAN_DT
+                    AND MS_COST.TODATE    <![CDATA[>=]]>  ST_KIT_PLANDETAIL.PLAN_DT
+                  FETCH FIRST 1 ROWS ONLY )                   AS COSTCDNAME
+          , ST_KIT_PLANDETAIL.CUSTKEY                         AS CUSTKEY  
+          , ( SELECT DESCRIPTION
+                   FROM MS_CUST
+                  WHERE MS_CUST.STORERKEY = ST_KIT_PLANDETAIL.STORERKEY
+                    AND MS_CUST.CUSTKEY   = ST_KIT_PLANDETAIL.CUSTKEY
+                    AND ROWNUM = 1 )                          AS CUSTNAME
+          , MS_SKU.BASEUOM                                    AS KIT_UOM
+          , MS_SKU_DETAIL.BASEUOM                             AS SKU_UOM   
+          , AJ_INPLAN.SLIPDT                                  AS SLIPDT
+          , AJ_INPLAN.SLIPNO                                  AS SLIPNO
+          , ST_KIT_PLANDETAIL.FACTORY_DISASSEM_FLAG                     AS FACTORY_DISASSEM_FLAG
+       FROM ST_KIT_PLAN 
+      JOIN MS_SKU 
+        ON MS_SKU.STORERKEY = ST_KIT_PLAN.STORERKEY
+       AND MS_SKU.SKU       = ST_KIT_PLAN.SKU  
+      JOIN ST_KIT_PLANDETAIL
+        ON ST_KIT_PLANDETAIL.STORERKEY = ST_KIT_PLAN.STORERKEY
+       AND ST_KIT_PLANDETAIL.DCCODE    = ST_KIT_PLAN.DCCODE
+       AND ST_KIT_PLANDETAIL.SKU       = ST_KIT_PLAN.SKU
+       AND ST_KIT_PLANDETAIL.PLAN_DT   = ST_KIT_PLAN.PLAN_DT
+       AND ST_KIT_PLANDETAIL.STATUS    != '10' 
+      JOIN MS_KITSKU  MS_KITSKU_DETAIL
+        ON MS_KITSKU_DETAIL.DCCODE    = ST_KIT_PLANDETAIL.DCCODE
+       AND MS_KITSKU_DETAIL.STORERKEY = ST_KIT_PLANDETAIL.STORERKEY
+       AND MS_KITSKU_DETAIL.KIT_SKU   = ST_KIT_PLANDETAIL.SKU
+       AND MS_KITSKU_DETAIL.SKU       = ST_KIT_PLANDETAIL.BOM_SKU
+       AND MS_KITSKU_DETAIL.TODATE    <![CDATA[>]]>  TO_CHAR(SYSDATE, 'YYYYMMDD') /*중단여부*/
+       AND MS_KITSKU_DETAIL.DEL_YN    = 'N'   /*중단여부*/
+      JOIN MS_SKU  MS_SKU_DETAIL 
+         ON MS_SKU_DETAIL.STORERKEY = MS_KITSKU_DETAIL.STORERKEY
+        AND MS_SKU_DETAIL.SKU       = MS_KITSKU_DETAIL.SKU
+      
+      LEFT JOIN STOCK 
+        ON STOCK.STORERKEY = MS_KITSKU_DETAIL.STORERKEY
+       AND STOCK.DCCODE    = MS_KITSKU_DETAIL.DCCODE
+       AND STOCK.SKU       = MS_KITSKU_DETAIL.SKU
+       AND STOCK.LOC       = ST_KIT_PLANDETAIL.LOC
+       
+      LEFT JOIN AJ_INPLAN 
+        ON AJ_INPLAN.DCCODE  = ST_KIT_PLANDETAIL.DCCODE 
+       AND AJ_INPLAN.DOCDT   = ST_KIT_PLANDETAIL.PLAN_DT
+       AND AJ_INPLAN.DOCNO   = ST_KIT_PLANDETAIL.DOCNO    
+       AND AJ_INPLAN.DEL_YN  = 'N' 
+     
+     JOIN AJ_APPRREQUEST
+        ON AJ_APPRREQUEST.DCCODE         = ST_KIT_PLANDETAIL.DCCODE
+       AND AJ_APPRREQUEST.DOCNO          = ST_KIT_PLANDETAIL.SKU
+       AND AJ_APPRREQUEST.DOCDT          = ST_KIT_PLANDETAIL.PLAN_DT
+       AND AJ_APPRREQUEST.APPROVALSTATUS != '9'
+       AND AJ_APPRREQUEST.DOCTYPE        = 'KIT'       
+       AND AJ_APPRREQUEST.DEL_YN         = 'N'
+       
+     LEFT OUTER JOIN CM_CODE_STORER CD1
+        ON CD1.STORERKEY  = AJ_APPRREQUEST.STORERKEY  
+       AND CD1.CODELIST   = 'APPROVALSTATUS'    
+       AND CD1.BASECODE   = AJ_APPRREQUEST.APPROVALSTATUS     
+         
+     LEFT JOIN CM_CODE_STORER CD2
+        ON CD2.STORERKEY = ST_KIT_PLANDETAIL.STORERKEY 
+       AND CD2.CODELIST  = 'STOCKGRADE'  
+       AND CD2.BASECODE  = ST_KIT_PLANDETAIL.STOCKGRADE 
+     
+        WHERE 1 = 1
+          AND SUBSTR(ST_KIT_PLAN.PLAN_DT,7,2) != '00'
+          AND ST_KIT_PLAN.OPENQTY <![CDATA[>]]> 0
+          AND ST_KIT_PLAN.DCCODE            = #{fixdccode}
+          AND ( MS_KITSKU_DETAIL.PRTN_YN    = 'N'
+             OR MS_KITSKU_DETAIL.PRTN_YN    IS NULL
+              )
+          AND NOT EXISTS (
+              SELECT 1
+              FROM  AJ_INPLAN 
+              WHERE AJ_INPLAN.DCCODE  = ST_KIT_PLANDETAIL.DCCODE 
+                AND AJ_INPLAN.SLIPDT  = ST_KIT_PLANDETAIL.PLAN_DT
+                AND AJ_INPLAN.SLIPNO  = ST_KIT_PLANDETAIL.DOCNO
+                AND AJ_INPLAN.SKU     = ST_KIT_PLANDETAIL.BOM_SKU
+                AND AJ_INPLAN.STATUS  = '90'
+                AND AJ_INPLAN.DEL_YN  = 'N' 
+          )
+          
+       ORDER BY ST_KIT_PLAN.PLAN_DT
+              , MS_KITSKU_DETAIL.KIT_SKU
+              , MS_KITSKU_DETAIL.SKU
+    </select>
+    
+    
+    <select id="getMasterList06" resultType="cjfw.wms.st.dto.StMKitResT1Dto">          
+        SELECT  /* [stMKitService.sqlx][getMasterList06][키트처리 처리 목록(해제) 조회][공두경][20260115] */    
+            ROWNUM                                                        
+          , (ST_KIT_PLANDETAIL.DCCODE || ST_KIT_PLANDETAIL.PLAN_DT || ST_KIT_PLANDETAIL.SKU || ST_KIT_PLANDETAIL.FACTORY_DISASSEM_FLAG)           AS ROW_DIST       /*세로 병합*/
+--          , AJ_APPRREQUEST.APPROVALREQNO                         AS APPROVALREQNO
+--          , AJ_APPRREQUEST.APPROVALSTATUS                        AS APPROVALSTATUS  
+--          , CD1.BASEDESCR                                        AS APPROVALSTATUSNAME
+          , '1'                         AS APPROVALREQNO
+          , '9'                        AS APPROVALSTATUS  
+          , '결재완료'                                       AS APPROVALSTATUSNAME
+          , ST_KIT_PLANDETAIL.DCCODE                             AS DCCODE                  /*센터코드*/
+          , ST_KIT_PLANDETAIL.PLAN_DT                            AS PLAN_DT                 /*계획일자*/
+          , ST_KIT_PLANDETAIL.SKU                                AS KIT_SKU                 /*KIT상품코드*/
+          , MS_KITSKU_DETAIL.KIT_NM                              AS KIT_NM                  /*KIT상품명*/
+         -- , MAX(ST_STOCK.STOCKID) KEEP (DENSE_RANK LAST ORDER BY STOCK.LOTTABLE01) AS MIN_EXPIREDT    /*KIT 소비일자*/
+          , NVL(ST_KIT_PLANDETAIL.OPENQTY,0)                     AS OPENQTY                 /*KIT계획수량*/
+          , NVL(ST_KIT_PLANDETAIL.CONFIRMQTY,0)                  AS CONFIRMQTY              /*KIT생산수량*/
+          , MS_SKU_DETAIL.SKU                                    AS SKU                     /*상품코드*/
+          , MS_SKU_DETAIL.DESCRIPTION                            AS SKU_NM                  /*상품명*/
+          , ST_KIT_PLANDETAIL.SKU_USEBYDATE                      AS MIN_EXPIREDT            /*키트품목 소비기한*/  
+          , ST_KIT_PLANDETAIL.BOM_SKU_USEBYDATE                  AS EXPIREDT         /*자품목 소비기한*/
+          , NVL(ST_STOCK.QTY, 0)                                 AS STOCKQTY                /*재고량*/
+          , NVL(MS_KITSKU_DETAIL.QTY * ST_KIT_PLANDETAIL.CONFIRMQTY,0) AS REQ_QTY                  /*요청량*/
+          , ST_KIT_PLANDETAIL.LOC                                AS LOC                      /*로케이션*/
+          , ST_KIT_PLANDETAIL.STOCKID                            AS STOCKID                  /*재고구분ID*/
+          , ST_KIT_PLANDETAIL.STOCKGRADE                         AS STOCKGRADE               /*재고속성*/
+          , CD2.BASEDESCR                                        AS STOCKGRADE_NM            /*재고속성명*/
+          --, NVL(ST_SNINFO.SERIALNO,'STD')                     AS SERIALNO                 /*시리얼번호*/
+          , NVL(MS_KITSKU_DETAIL.QTY, 0)                         AS QTY                      /*KIT구성수량*/   
+          , ST_KIT_PLANDETAIL.STATUS                             AS STATUS                   /*진행상태*/ 
+          , ST_KIT_PLANDETAIL.DOCNO                              AS DOCNO                    /*문서번호*/
+          , ST_KIT_PLANDETAIL.RESP_DEPT_CD                       AS COSTCD                   /*귀속부서*/
+          , ( SELECT DESCRIPTION
+                   FROM MS_COST
+                  WHERE MS_COST.STORERKEY = ST_KIT_PLANDETAIL.STORERKEY
+                    AND MS_COST.COSTCODE  = ST_KIT_PLANDETAIL.RESP_DEPT_CD
+                    AND MS_COST.FROMDATE  <![CDATA[<=]]>  ST_KIT_PLANDETAIL.PLAN_DT
+                    AND MS_COST.TODATE    <![CDATA[>=]]>  ST_KIT_PLANDETAIL.PLAN_DT
+                  FETCH FIRST 1 ROWS ONLY )                      AS COSTCDNAME
+          , ST_KIT_PLANDETAIL.CUSTKEY                            AS CUSTKEY  
+          , ( SELECT DESCRIPTION
+                   FROM MS_CUST
+                  WHERE MS_CUST.STORERKEY = ST_KIT_PLANDETAIL.STORERKEY
+                    AND MS_CUST.CUSTKEY   = ST_KIT_PLANDETAIL.CUSTKEY
+                    AND ROWNUM = 1 )                             AS CUSTNAME
+          , MS_SKU.BASEUOM                                       AS KIT_UOM
+          , MS_SKU_DETAIL.BASEUOM                                AS SKU_UOM   
+          , AJ_INPLAN.SLIPDT                                     AS SLIPDT
+          , AJ_INPLAN.SLIPNO                                     AS SLIPNO
+          , ST_KIT_PLANDETAIL.FACTORY_DISASSEM_FLAG              AS FACTORY_DISASSEM_FLAG
+       FROM ST_KIT_PLANDETAIL 
+      JOIN MS_SKU 
+        ON MS_SKU.STORERKEY = ST_KIT_PLANDETAIL.STORERKEY
+       AND MS_SKU.SKU       = ST_KIT_PLANDETAIL.SKU  
+      JOIN MS_KITSKU  MS_KITSKU_DETAIL
+        ON MS_KITSKU_DETAIL.DCCODE    = ST_KIT_PLANDETAIL.DCCODE
+       AND MS_KITSKU_DETAIL.STORERKEY = ST_KIT_PLANDETAIL.STORERKEY
+       AND MS_KITSKU_DETAIL.KIT_SKU   = ST_KIT_PLANDETAIL.SKU
+       AND MS_KITSKU_DETAIL.SKU       = ST_KIT_PLANDETAIL.BOM_SKU
+       AND MS_KITSKU_DETAIL.TODATE    <![CDATA[>]]>  TO_CHAR(SYSDATE, 'YYYYMMDD') /*중단여부*/
+       AND MS_KITSKU_DETAIL.DEL_YN    = 'N'   /*중단여부*/
+      JOIN MS_SKU  MS_SKU_DETAIL 
+         ON MS_SKU_DETAIL.STORERKEY = MS_KITSKU_DETAIL.STORERKEY
+        AND MS_SKU_DETAIL.SKU       = MS_KITSKU_DETAIL.SKU
+      LEFT JOIN ST_STOCK 
+        ON ST_STOCK.STORERKEY = ST_KIT_PLANDETAIL.STORERKEY
+       AND ST_STOCK.DCCODE    = ST_KIT_PLANDETAIL.DCCODE
+       AND ST_STOCK.SKU       = ST_KIT_PLANDETAIL.SKU
+       AND ST_STOCK.LOC       = ST_KIT_PLANDETAIL.LOC
+       AND ST_STOCK.STOCKID = ST_KIT_PLANDETAIL.STOCKID
+      LEFT JOIN AJ_INPLAN 
+        ON AJ_INPLAN.DCCODE  = ST_KIT_PLANDETAIL.DCCODE 
+       AND AJ_INPLAN.DOCDT   = ST_KIT_PLANDETAIL.PLAN_DT
+       AND AJ_INPLAN.DOCNO   = ST_KIT_PLANDETAIL.DOCNO    
+       AND AJ_INPLAN.DEL_YN  = 'N' 
+     
+--     JOIN AJ_APPRREQUEST
+--        ON AJ_APPRREQUEST.DCCODE         = ST_KIT_PLANDETAIL.DCCODE
+--       AND AJ_APPRREQUEST.DOCNO          = ST_KIT_PLANDETAIL.DOCNO
+--       AND AJ_APPRREQUEST.DOCDT          = ST_KIT_PLANDETAIL.PLAN_DT
+--       AND AJ_APPRREQUEST.APPROVALSTATUS != '9'
+--       AND AJ_APPRREQUEST.DOCTYPE        = 'KIT'       
+--       AND AJ_APPRREQUEST.DEL_YN         = 'N'
+       
+--     LEFT OUTER JOIN CM_CODE_STORER CD1
+--        ON CD1.STORERKEY  = AJ_APPRREQUEST.STORERKEY  
+--       AND CD1.CODELIST   = 'APPROVALSTATUS'    
+--       AND CD1.BASECODE   = AJ_APPRREQUEST.APPROVALSTATUS     
+         
+     LEFT JOIN CM_CODE_STORER CD2
+        ON CD2.STORERKEY = ST_KIT_PLANDETAIL.STORERKEY 
+       AND CD2.CODELIST  = 'STOCKGRADE'  
+       AND CD2.BASECODE  = ST_KIT_PLANDETAIL.STOCKGRADE
+        WHERE 1 = 1
+          AND ST_KIT_PLANDETAIL.OPENQTY   != 0
+          AND ST_KIT_PLANDETAIL.DCCODE            = #{fixdccode}
+          AND ST_KIT_PLANDETAIL.STATUS    != '10'
+          AND NOT EXISTS (
+              SELECT 1
+              FROM  AJ_INPLAN 
+              WHERE AJ_INPLAN.DCCODE  = ST_KIT_PLANDETAIL.DCCODE 
+                AND AJ_INPLAN.SLIPDT  = ST_KIT_PLANDETAIL.PLAN_DT
+                AND AJ_INPLAN.SLIPNO  = ST_KIT_PLANDETAIL.DOCNO
+                AND AJ_INPLAN.SKU     = ST_KIT_PLANDETAIL.BOM_SKU
+                AND AJ_INPLAN.STATUS  = '90'
+                AND AJ_INPLAN.DEL_YN  = 'N' 
+          )
+       ORDER BY ST_KIT_PLANDETAIL.PLAN_DT
+              , MS_KITSKU_DETAIL.KIT_SKU
+              , MS_KITSKU_DETAIL.SKU
+    </select>
+    
+    <insert id="insertIF_ST_KIT_PLANDETAIL" parameterType="cjfw.wms.st.entity.StMKitIFEntity">
+          INSERT INTO IF_ST_KIT_PLANDETAIL (
+              IF_SEQ
+            , DCCODE
+            , AREA
+            , PLANDT
+            , MOVEMENTTYPE
+            , DOCNO
+            , SKU
+            , CONFIRMQTY
+            , UOM
+            , RESP_DEPT_CD
+            , CUSTKEY
+            , IF_FLAG
+            , ADDDATE
+            , EDITDATE
+            , ADDWHO
+            , EDITWHO
+            , IF_ID
+            , I_REWK
+          )
+            SELECT
+              (SELECT NVL(MAX(IF_SEQ), 0) + 1 
+                 FROM IF_ST_KIT_PLANDETAIL 
+                 WHERE PLANDT = TO_CHAR(SYSDATE, 'YYYYMMDD'))  AS IF_SEQ
+            , #{dccode}  AS DCCODE
+            , #{gArea}  AS AREA
+            , #{planDt}  AS PLANDT
+            , '948'  AS MOVEMENTTYPE
+            , #{slipno}  AS SLIPNO
+            , #{kitSku}  AS SKU
+            , #{confirmqty}  AS CONFIRMQTY
+            , #{kitUom}  AS UOM
+            , #{costcd}  AS RESP_DEPT_CD
+            , #{custkey}  AS CUSTKEY
+            , 'N'  AS IF_FLAG
+            , SYSDATE AS ADDDATE
+            , SYSDATE AS EDITDATE
+            , #{gUserId} AS ADDWHO
+            , #{gUserId} AS EDITWHO
+            , 'SCM0960' AS IF_ID
+            , '3' AS I_REWK      /*감모/역감모 (SAP용 구분자) 948일때 3번, 947일때 4번*/
+            FROM DUAL
+    </insert>
+  
+</mapper>

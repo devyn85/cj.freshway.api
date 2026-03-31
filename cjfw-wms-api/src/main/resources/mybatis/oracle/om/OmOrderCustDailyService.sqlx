@@ -1,0 +1,471 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="omOrderCustDailyService">
+
+
+	<select id="getMasterList" resultType="OmOrderCustDailyResDto">		
+		SELECT /* [OmOrderCustDailyService.sqlx][getMasterList][일배협력사별주문현황 목록 조회][공두경][2025.06.20] */				 
+		        FROM_CUSTKEY			AS FROM_CUSTKEY			/*협력사코드*/
+		  	   ,FROM_CUSTNAME			AS FROM_CUSTNAME		/*협력사명*/
+		       ,COUNT(FROM_CUSTKEY) 	AS ORDERCNT				/*오더건수*/
+		       ,SUM(DP_CONFIRMWEIGHT) 	AS DP_CONFIRMWEIGHT		/*주문중량(kg)*/
+		       ,SUM(WD_CONFIRMWEIGHT) 	AS WD_CONFIRMWEIGHT		/*출고중량(kg)*/
+		       ,SUM(CANCELCNT) 			AS CANCELCNT 			/*결품건수*/
+		  FROM(
+		  SELECT
+			 DM_DOCUMENT_H_PO.FROM_CUSTKEY             									AS FROM_CUSTKEY          
+        	,DM_DOCUMENT_H_PO.FROM_CUSTNAME             								AS FROM_CUSTNAME
+        	,ROUND(SUM(NVL((NVL((DM_DOCUMENT_D.STOREROPENQTY * UOM11.BUNJA / UOM11.BUNMO),0) * UOM12.BUNMO / UOM12.BUNJA),0)), 1)	AS DP_CONFIRMWEIGHT
+        	,ROUND(SUM(NVL((NVL((DM_DOCUMENT_D.CONFIRMQTY * UOM13.BUNJA / UOM13.BUNMO),0) * UOM14.BUNMO / UOM14.BUNJA),0)), 1)	AS WD_CONFIRMWEIGHT
+        	,SUM(CASE WHEN NVL((DM_DOCUMENT_D.CANCELQTY) * DM_DOCUMENT_D.BUNJA / DM_DOCUMENT_D.BUNMO,0) <![CDATA[>]]> 0 
+					  THEN 1 ELSE 0 END) 												AS CANCELCNT
+		  FROM   DM_DOCUMENT_H
+	      JOIN   DM_DOCUMENT_D
+	      ON     DM_DOCUMENT_D.DCCODE = DM_DOCUMENT_H.DCCODE
+			AND DM_DOCUMENT_D.DOCTYPE = DM_DOCUMENT_H.DOCTYPE
+			AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+			AND DM_DOCUMENT_D.DOCNO = DM_DOCUMENT_H.DOCNO
+<!--	      JOIN   DM_DOCUMENT_D DM_DOCUMENT_D_PO   -->
+<!--	      ON     DM_DOCUMENT_D_PO.DCCODE         = DM_DOCUMENT_D.DCCODE   -->
+<!--	      AND    DM_DOCUMENT_D_PO.STORERKEY      = DM_DOCUMENT_D.STORERKEY   -->
+<!--	      AND    DM_DOCUMENT_D_PO.ORGANIZE       = DM_DOCUMENT_D.ORGANIZE   -->
+<!--	      AND    DM_DOCUMENT_D_PO.AREA           = DM_DOCUMENT_D.AREA   -->
+<!--	      AND    DM_DOCUMENT_D_PO.DOCTYPE        = 'DP'   -->
+<!--	      AND    DM_DOCUMENT_D_PO.DOCNO          = DM_DOCUMENT_D.POKEY   -->
+<!--	      AND    DM_DOCUMENT_D_PO.DOCLINE        = DM_DOCUMENT_D.POLINE   -->
+		JOIN   DP_INPLAN
+		        ON     DP_INPLAN.DCCODE         = DM_DOCUMENT_D.DCCODE
+		        AND    DP_INPLAN.STORERKEY      = DM_DOCUMENT_D.STORERKEY
+		        AND    DP_INPLAN.ORGANIZE       = DM_DOCUMENT_D.ORGANIZE
+		        AND    DP_INPLAN.AREA           = DM_DOCUMENT_D.AREA
+		        AND    DP_INPLAN.DOCTYPE        = 'DP'
+		        AND    DP_INPLAN.DOCNO          = DM_DOCUMENT_D.POKEY
+		        AND    DP_INPLAN.DOCLINE        = DM_DOCUMENT_D.POLINE
+		        AND    DP_INPLAN.SLIPDT        = DM_DOCUMENT_D.DELIVERYDATE
+		  <if test="delYn == 'N'.toString()"> AND DP_INPLAN.DEL_YN = 			 'N' </if>
+		  <if test="delYn == 'Y'.toString()"> AND DP_INPLAN.DEL_YN <![CDATA[<>]]> 'N' </if>
+		JOIN   DM_DOCUMENT_H DM_DOCUMENT_H_PO
+		        ON     DP_INPLAN.DCCODE      = DM_DOCUMENT_H_PO.DCCODE
+		        AND    DP_INPLAN.DOCTYPE       = DM_DOCUMENT_H_PO.DOCTYPE
+		        AND    DP_INPLAN.DELIVERYDATE  = DM_DOCUMENT_H_PO.DELIVERYDATE
+		        AND    DP_INPLAN.DOCNO         = DM_DOCUMENT_H_PO.DOCNO
+	      JOIN   MS_SKU   
+	      ON     MS_SKU.STORERKEY                = DM_DOCUMENT_D.STORERKEY   
+	      AND    MS_SKU.SKU                      = DM_DOCUMENT_D.SKU   
+	      AND    MS_SKU.DEL_YN                   = 'N'
+	      <!-- 상품 다중선택 -->
+			<if test="skuMulti != null and skuMulti != '' ">
+				<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+					<foreach collection="skuMulti" item="item">
+						OR MS_SKU.SKU IN
+						<foreach collection="item" item="code" open="(" close=")" separator=",">
+							#{code}
+						</foreach>
+					</foreach>
+				</trim>
+			</if>
+		  <if test="storagetype != null and storagetype != ''">			AND    MS_SKU.STORAGETYPE	=	#{storagetype} 		</if>
+		  LEFT JOIN MS_UOM UOM11  	  ON UOM11.STORERKEY = DM_DOCUMENT_D.STORERKEY AND UOM11.SKU  = DM_DOCUMENT_D.SKU AND UOM11.UOM = DM_DOCUMENT_D.STORERUOM
+          LEFT JOIN MS_UOM UOM12	  ON UOM12.STORERKEY = DM_DOCUMENT_D.STORERKEY AND UOM12.SKU  = DM_DOCUMENT_D.SKU AND UOM12.UOM = 'KG'
+		  LEFT JOIN MS_UOM UOM13  	  ON UOM13.STORERKEY = DM_DOCUMENT_D.STORERKEY AND UOM13.SKU  = DM_DOCUMENT_D.SKU AND UOM13.UOM = DM_DOCUMENT_D.UOM
+          LEFT JOIN MS_UOM UOM14	  ON UOM14.STORERKEY = DM_DOCUMENT_D.STORERKEY AND UOM14.SKU  = DM_DOCUMENT_D.SKU AND UOM14.UOM = 'KG'
+	      WHERE  DM_DOCUMENT_D.CHANNEL IN ('2','3')                   
+	      AND    DM_DOCUMENT_D.DOCTYPE = 'WD'
+	      AND    DM_DOCUMENT_D.IF_SEND_TYPE <![CDATA[<>]]> 'WMSPO'
+	      AND    DM_DOCUMENT_D.WORKPROCESSCODE IN ('SO','PO')
+	      AND    NOT ( DM_DOCUMENT_D.DOCTYPE='WD' AND DM_DOCUMENT_D.WORKPROCESSCODE = 'PO')  /*협력사반품출고는 제외한다.*/
+		  AND    DM_DOCUMENT_H.STORERKEY = #{gStorerkey}
+     	  AND    DM_DOCUMENT_H.DCCODE    = #{fixdccode}
+		  <if test="delYn == 'N'.toString()"> AND DM_DOCUMENT_D.DEL_YN = 			  'N' </if>
+		  <if test="delYn == 'Y'.toString()"> AND DM_DOCUMENT_D.DEL_YN <![CDATA[<>]]> 'N' </if>
+		  <if test="fromSlipdt != null and fromSlipdt != ''">   AND DM_DOCUMENT_D.DELIVERYDATE	<![CDATA[>=]]> 	#{fromSlipdt} 	</if>
+	      <if test="toSlipdt != null and toSlipdt != ''">	    AND DM_DOCUMENT_D.DELIVERYDATE	<![CDATA[<=]]> 	#{toSlipdt} 	</if>
+			<if test="tocustkeyMulti != null and tocustkeyMulti != '' ">
+				<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+					<foreach collection="tocustkeyMulti" item="item">
+						OR DM_DOCUMENT_H.TO_CUSTKEY IN
+						<foreach collection="item" item="code" open="(" close=")" separator=",">
+							#{code}
+						</foreach>
+					</foreach>
+				</trim>
+			</if>
+			<if test="fromcustkeyMulti != null and fromcustkeyMulti != '' ">
+				<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+					<foreach collection="fromcustkeyMulti" item="item">
+						OR DM_DOCUMENT_H_PO.FROM_CUSTKEY IN
+						<foreach collection="item" item="code" open="(" close=")" separator=",">
+							#{code}
+						</foreach>
+					</foreach>
+				</trim>
+			</if>
+		  <if test="status != null and status != ''">			AND DM_DOCUMENT_H_PO.STATUS			= #{status} 				</if>
+   		<!-- 문서번호 다중선택 -->
+		<if test="docnoMulti != null and docnoMulti != ''">
+            AND DM_DOCUMENT_H.DOCNO IN
+            <foreach collection="docnoMulti" item="code" open="(" close=")" separator=",">
+                #{code}
+            </foreach>
+        </if>
+		<if test="serialCheck != null and serialCheck != ''">
+		AND EXISTS (SELECT 1
+				      FROM DM_DOCUMENT_D 
+					  JOIN WD_INPLAN 	
+					  ON   WD_INPLAN.DCCODE = DM_DOCUMENT_D.DCCODE
+						AND WD_INPLAN.DOCTYPE = DM_DOCUMENT_D.DOCTYPE
+						AND WD_INPLAN.SLIPDT = DM_DOCUMENT_D.DELIVERYDATE
+						AND WD_INPLAN.DOCNO = DM_DOCUMENT_D.DOCNO
+						AND WD_INPLAN.DOCLINE = DM_DOCUMENT_D.DOCLINE
+					  JOIN ST_SNINFOSLIP ST_SERIALINFO  
+					  ON   ST_SERIALINFO.DCCODE         = WD_INPLAN.DCCODE            
+					  AND  ST_SERIALINFO.STORERKEY      = WD_INPLAN.STORERKEY 
+					  AND  ST_SERIALINFO.ORGANIZE       = WD_INPLAN.ORGANIZE            
+					  AND  ST_SERIALINFO.SKU            = WD_INPLAN.SKU
+					  AND  ST_SERIALINFO.DOCTYPE        = WD_INPLAN.DOCTYPE
+					  AND  ST_SERIALINFO.SLIPDT         = WD_INPLAN.SLIPDT
+					  AND  ST_SERIALINFO.SLIPNO         = WD_INPLAN.SLIPNO
+					  AND  ST_SERIALINFO.SLIPLINE       = WD_INPLAN.SLIPLINE
+					  AND  ST_SERIALINFO.DOCTYPE 	    = 'WD'
+					  AND  ST_SERIALINFO.DEL_YN         = 'N'
+					<if test="serialnoMulti != null and serialnoMulti != ''">
+						AND ST_SERIALINFO.SERIALNO      IN
+						<foreach collection="serialnoMulti" item="item" open="(" separator="," close=")">
+							#{item}
+						</foreach>
+					</if>
+					<if test="blnoMulti != null and blnoMulti != ''">
+						AND ST_SERIALINFO.CONVSERIALNO      IN
+						<foreach collection="blnoMulti" item="item" open="(" separator="," close=")">
+							#{item}
+						</foreach>
+					</if>
+					 <if test="contractcompany != null and contractcompany != ''">	AND ST_SERIALINFO.CONTRACTCUSTKEY	=	#{contractcompany} 	</if>
+				    WHERE DM_DOCUMENT_D.DCCODE = DM_DOCUMENT_H.DCCODE
+		            AND   DM_DOCUMENT_D.DOCTYPE = DM_DOCUMENT_H.DOCTYPE
+		            AND   DM_DOCUMENT_D.DOCNO   = DM_DOCUMENT_H.DOCNO )    
+		</if>
+   		GROUP BY DM_DOCUMENT_D.STORERKEY
+				  ,DM_DOCUMENT_D.CHANNEL
+				  ,DM_DOCUMENT_D.DELIVERYDATE
+				  ,DM_DOCUMENT_H_PO.FROM_CUSTKEY
+				  ,DM_DOCUMENT_H_PO.FROM_CUSTNAME
+				  ,DM_DOCUMENT_H.TO_CUSTKEY
+				  ,DM_DOCUMENT_H.TO_CUSTNAME
+				  ,DM_DOCUMENT_D.SKU
+				  ,DM_DOCUMENT_D.STORERUOM
+				  ,DM_DOCUMENT_D.STOREROPENQTY
+				  ,DM_DOCUMENT_D.BUNMO
+			      ,DM_DOCUMENT_D.BUNJA
+			      ,DM_DOCUMENT_D.CONFIRMQTY
+			      ,DM_DOCUMENT_D.CANCELQTY
+			      ,DM_DOCUMENT_D.UOM  
+    	ORDER BY DM_DOCUMENT_H_PO.FROM_CUSTNAME)
+    	GROUP BY FROM_CUSTKEY
+    	        ,FROM_CUSTNAME  
+    </select>
+    
+    <select id="getDetailList" resultType="OmOrderCustDailyDetailResDto">		
+		  SELECT /* [OmOrderCustDailyService.sqlx][getDetailList][일배협력사별주문현황 상세 조회][공두경][2025.06.20] */
+		  		 DM_DOCUMENT_D.DELIVERYDATE														AS DELIVERYDATE		/*출고일자*/
+				,DM_DOCUMENT_H_PO.FROM_CUSTKEY													AS FROM_CUSTKEY		/*협력사코드*/
+				,DM_DOCUMENT_H_PO.FROM_CUSTNAME													AS FROM_CUSTNAME	/*협력사명*/
+				,DM_DOCUMENT_H.TO_CUSTKEY														AS TO_CUSTKEY		/*관리처코드*/
+				,DM_DOCUMENT_H.TO_CUSTNAME														AS TO_CUSTNAME		/*관리처명*/
+				,DM_DOCUMENT_D.SKU																AS SKU				/*상품코드*/
+				,MAX(MS_SKU.DESCRIPTION)  														AS SKUNAME			/*상품명칭*/
+				,MIN(NVL(CD1.BASEDESCR,CD1.BASECODE)) 											AS PUTAWAYTYPE		/*저장유무*/
+				,MIN(NVL(CD2.BASEDESCR,CD2.BASECODE)) 											AS STORAGETYPE		/*저장조건*/
+				,MAX(MS_SKU.QTYPERBOX) 															AS QTYPERBOX		/*입수*/
+				,DM_DOCUMENT_D.STORERUOM														AS STORERUOM		/*판매단위*/
+				,DM_DOCUMENT_D.STOREROPENQTY													AS STOREROPENQTY	/*주문수량*/
+				,MIN(ROUND(NVL((NVL((DM_DOCUMENT_D.STOREROPENQTY * UOM11.BUNJA / UOM11.BUNMO),0) * UOM12.BUNMO / UOM12.BUNJA),0), 1))	AS STOREROPENWEIGHT	/*주문중량*/
+				,MIN(NVL((DM_DOCUMENT_D.CONFIRMQTY) * DM_DOCUMENT_D.BUNJA / DM_DOCUMENT_D.BUNMO,0))	AS CONFIRMQTY		/*출고수량*/
+				,MIN(ROUND(NVL((NVL((DM_DOCUMENT_D.CONFIRMQTY * UOM13.BUNJA / UOM13.BUNMO),0) * UOM14.BUNMO / UOM14.BUNJA),0), 1))		AS CONFIRMWEIGHT	/*출고중량*/
+				,MIN(NVL((DM_DOCUMENT_D.CANCELQTY) * DM_DOCUMENT_D.BUNJA / DM_DOCUMENT_D.BUNMO,0))	AS CANCELQTY		/*취소량*/
+			FROM   DM_DOCUMENT_H
+			JOIN   DM_DOCUMENT_D
+			ON    DM_DOCUMENT_D.DCCODE = DM_DOCUMENT_H.DCCODE
+				AND DM_DOCUMENT_D.DOCTYPE = DM_DOCUMENT_H.DOCTYPE
+				AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+				AND DM_DOCUMENT_D.DOCNO = DM_DOCUMENT_H.DOCNO
+<!--		JOIN   DM_DOCUMENT_D DM_DOCUMENT_D_PO   -->
+<!--					ON     DM_DOCUMENT_D_PO.DCCODE         = DM_DOCUMENT_D.DCCODE   -->
+<!--					AND    DM_DOCUMENT_D_PO.STORERKEY      = DM_DOCUMENT_D.STORERKEY   -->
+<!--					AND    DM_DOCUMENT_D_PO.ORGANIZE       = DM_DOCUMENT_D.ORGANIZE   -->
+<!--					AND    DM_DOCUMENT_D_PO.AREA           = DM_DOCUMENT_D.AREA   -->
+<!--					AND    DM_DOCUMENT_D_PO.DOCTYPE        = 'DP'   -->
+<!--					AND    DM_DOCUMENT_D_PO.DOCNO          = DM_DOCUMENT_D.POKEY   -->
+<!--					AND    DM_DOCUMENT_D_PO.DOCLINE        = DM_DOCUMENT_D.POLINE   -->
+		JOIN   DP_INPLAN
+		            ON     DP_INPLAN.DCCODE         = DM_DOCUMENT_D.DCCODE
+		            AND    DP_INPLAN.STORERKEY      = DM_DOCUMENT_D.STORERKEY
+		            AND    DP_INPLAN.ORGANIZE       = DM_DOCUMENT_D.ORGANIZE
+		            AND    DP_INPLAN.AREA           = DM_DOCUMENT_D.AREA
+		            AND    DP_INPLAN.DOCTYPE        = 'DP'
+		            AND    DP_INPLAN.DOCNO          = DM_DOCUMENT_D.POKEY
+		            AND    DP_INPLAN.DOCLINE        = DM_DOCUMENT_D.POLINE
+		            AND    DP_INPLAN.SLIPDT         = DM_DOCUMENT_D.DELIVERYDATE
+			<if test="delYn == 'N'.toString()"> AND DP_INPLAN.DEL_YN = 			   'N' </if>
+		    <if test="delYn == 'Y'.toString()"> AND DP_INPLAN.DEL_YN <![CDATA[<>]]> 'N' </if>
+			JOIN   DM_DOCUMENT_H DM_DOCUMENT_H_PO
+			ON     DP_INPLAN.DCCODE = DM_DOCUMENT_H_PO.DCCODE
+			   AND    DP_INPLAN.DOCTYPE = DM_DOCUMENT_H_PO.DOCTYPE
+			   AND    DP_INPLAN.DELIVERYDATE = DM_DOCUMENT_H_PO.DELIVERYDATE
+			   AND    DP_INPLAN.DOCNO = DM_DOCUMENT_H_PO.DOCNO
+			<if test="fromcustkey != null and fromcustkey != ''">	AND DM_DOCUMENT_H_PO.FROM_CUSTKEY   = #{fromcustkey} 			</if>
+			<if test="status != null and status != ''">				AND DM_DOCUMENT_H_PO.STATUS			= #{status} 				</if>
+			JOIN   MS_SKU   
+			ON     MS_SKU.STORERKEY                = DM_DOCUMENT_D.STORERKEY   
+			AND    MS_SKU.SKU                      = DM_DOCUMENT_D.SKU   
+			AND    MS_SKU.DEL_YN                   = 'N'
+			<!-- 상품 다중선택 -->
+			<if test="sku != null and sku != ''">
+					AND MS_SKU.SKU IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+										 FROM (SELECT #{sku} AS VAL FROM DUAL) A
+									  CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0) 
+			</if>   
+			<if test="storagetype != null and storagetype != ''"> AND MS_SKU.STORAGETYPE = #{storagetype} 		</if>
+			LEFT JOIN CM_CODE_STORER CD1  ON CD1.STORERKEY  = DM_DOCUMENT_D.STORERKEY AND CD1.CODELIST  = 'PUTAWAYTYPE'	AND CD1.BASECODE = DM_DOCUMENT_D.CHANNEL
+        	LEFT JOIN CM_CODE_STORER CD2  ON CD2.STORERKEY  = MS_SKU.STORERKEY 	 	  AND CD2.CODELIST  = 'STORAGETYPE'	AND CD2.BASECODE = MS_SKU.STORAGETYPE
+			LEFT JOIN MS_UOM UOM11  	  ON UOM11.STORERKEY = DM_DOCUMENT_D.STORERKEY AND UOM11.SKU  = DM_DOCUMENT_D.SKU AND UOM11.UOM = DM_DOCUMENT_D.STORERUOM
+			LEFT JOIN MS_UOM UOM12	  	  ON UOM12.STORERKEY = DM_DOCUMENT_D.STORERKEY AND UOM12.SKU  = DM_DOCUMENT_D.SKU AND UOM12.UOM = 'KG'
+			LEFT JOIN MS_UOM UOM13  	  ON UOM13.STORERKEY = DM_DOCUMENT_D.STORERKEY AND UOM13.SKU  = DM_DOCUMENT_D.SKU AND UOM13.UOM = DM_DOCUMENT_D.UOM
+			LEFT JOIN MS_UOM UOM14	  	  ON UOM14.STORERKEY = DM_DOCUMENT_D.STORERKEY AND UOM14.SKU  = DM_DOCUMENT_D.SKU AND UOM14.UOM = 'KG'
+			WHERE  DM_DOCUMENT_D.CHANNEL IN ('2','3')                   
+			AND    DM_DOCUMENT_D.DOCTYPE = 'WD' 
+			AND    DM_DOCUMENT_D.IF_SEND_TYPE <![CDATA[<>]]> 'WMSPO'
+			AND    DM_DOCUMENT_D.WORKPROCESSCODE IN ('SO','PO')
+			AND    NOT ( DM_DOCUMENT_D.DOCTYPE='WD' AND DM_DOCUMENT_D.WORKPROCESSCODE = 'PO')  /*협력사반품출고는 제외한다.*/
+			AND    DM_DOCUMENT_H.STORERKEY = #{gStorerkey}
+			AND    DM_DOCUMENT_H.DCCODE    = #{fixdccode}
+			<if test="delYn == 'N'.toString()"> AND DM_DOCUMENT_D.DEL_YN = 			  'N' </if>
+			<if test="delYn == 'Y'.toString()"> AND DM_DOCUMENT_D.DEL_YN <![CDATA[<>]]> 'N' </if>
+			<if test="fromSlipdt != null and fromSlipdt != ''">   	AND DM_DOCUMENT_D.DELIVERYDATE	<![CDATA[>=]]> 	#{fromSlipdt} 	</if>
+			<if test="toSlipdt != null and toSlipdt != ''">	    	AND DM_DOCUMENT_D.DELIVERYDATE	<![CDATA[<=]]> 	#{toSlipdt} 	</if>
+			<if test="tocustkeyMulti != null and tocustkeyMulti != '' ">
+				<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+					<foreach collection="tocustkeyMulti" item="item">
+						OR DM_DOCUMENT_H.TO_CUSTKEY IN
+						<foreach collection="item" item="code" open="(" close=")" separator=",">
+							#{code}
+						</foreach>
+					</foreach>
+				</trim>
+			</if>
+			<!-- 문서번호 다중선택 -->
+			<if test="docno != null and docno != ''">
+				AND DM_DOCUMENT_H.DOCNO IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+											FROM (SELECT #{docno} AS VAL FROM DUAL) A
+											CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0) 
+			</if>  
+			<if test="serialCheck != null and serialCheck != ''">
+				AND EXISTS (SELECT 1
+				      FROM DM_DOCUMENT_D 
+					  JOIN WD_INPLAN 	
+					  ON   WD_INPLAN.DCCODE = DM_DOCUMENT_D.DCCODE
+						AND WD_INPLAN.DOCTYPE = DM_DOCUMENT_D.DOCTYPE
+						AND WD_INPLAN.SLIPDT = DM_DOCUMENT_D.DELIVERYDATE
+						AND WD_INPLAN.DOCNO = DM_DOCUMENT_D.DOCNO
+						AND WD_INPLAN.DOCLINE = DM_DOCUMENT_D.DOCLINE
+					  JOIN ST_SNINFOSLIP ST_SERIALINFO  
+					  ON   ST_SERIALINFO.DCCODE         = WD_INPLAN.DCCODE            
+					  AND  ST_SERIALINFO.STORERKEY      = WD_INPLAN.STORERKEY 
+					  AND  ST_SERIALINFO.ORGANIZE       = WD_INPLAN.ORGANIZE            
+					  AND  ST_SERIALINFO.SKU            = WD_INPLAN.SKU
+					  AND  ST_SERIALINFO.DOCTYPE        = WD_INPLAN.DOCTYPE
+					  AND  ST_SERIALINFO.SLIPDT         = WD_INPLAN.SLIPDT
+					  AND  ST_SERIALINFO.SLIPNO         = WD_INPLAN.SLIPNO
+					  AND  ST_SERIALINFO.SLIPLINE       = WD_INPLAN.SLIPLINE
+					  AND  ST_SERIALINFO.DOCTYPE 	    = 'WD'
+					  AND  ST_SERIALINFO.DEL_YN         = 'N'
+					<if test="serialnoMulti != null and serialnoMulti != ''">
+						AND ST_SERIALINFO.SERIALNO      IN
+						<foreach collection="serialnoMulti" item="item" open="(" separator="," close=")">
+							#{item}
+						</foreach>
+					</if>
+					<if test="blnoMulti != null and blnoMulti != ''">
+						AND ST_SERIALINFO.CONVSERIALNO      IN
+						<foreach collection="blnoMulti" item="item" open="(" separator="," close=")">
+							#{item}
+						</foreach>
+					</if>
+					 <if test="contractcompany != null and contractcompany != ''">	AND ST_SERIALINFO.CONTRACTCUSTKEY	=	#{contractcompany} 	</if>
+				    WHERE DM_DOCUMENT_D.DCCODE = DM_DOCUMENT_H.DCCODE
+		            AND   DM_DOCUMENT_D.DOCTYPE = DM_DOCUMENT_H.DOCTYPE
+		            AND   DM_DOCUMENT_D.DOCNO   = DM_DOCUMENT_H.DOCNO )
+			</if>  
+			GROUP BY DM_DOCUMENT_D.STORERKEY
+					,DM_DOCUMENT_D.CHANNEL
+					,DM_DOCUMENT_D.DELIVERYDATE
+					,DM_DOCUMENT_H_PO.FROM_CUSTKEY
+					,DM_DOCUMENT_H_PO.FROM_CUSTNAME
+					,DM_DOCUMENT_H.TO_CUSTKEY
+					,DM_DOCUMENT_H.TO_CUSTNAME
+					,DM_DOCUMENT_D.SKU
+					,DM_DOCUMENT_D.STORERUOM
+					,DM_DOCUMENT_D.STOREROPENQTY
+					,DM_DOCUMENT_D.BUNMO
+					,DM_DOCUMENT_D.BUNJA
+					,DM_DOCUMENT_D.CONFIRMQTY
+					,DM_DOCUMENT_D.CANCELQTY
+					,DM_DOCUMENT_D.UOM   
+			ORDER BY DM_DOCUMENT_D.DELIVERYDATE
+					,DM_DOCUMENT_D.SKU
+					,DM_DOCUMENT_H.TO_CUSTNAME	
+    
+    </select>
+    
+    <select id="getDataPrintList" resultType="OmOrderCustDailyPrintResDto">
+		SELECT /* [OmOrderCustDailyService.sqlx][getDataPrintList][일배협력사별주문현황 프린트 조회][공두경][2025.06.20] */   
+			    DM_DOCUMENT_D.DELIVERYDATE														AS DELIVERYDATE		/*출고일자*/
+		       ,DM_DOCUMENT_H_PO.FROM_CUSTKEY													AS FROM_CUSTKEY		/*협력사코드*/
+		       ,DM_DOCUMENT_H_PO.FROM_CUSTNAME													AS FROM_CUSTNAME	/*협력사명*/
+		       ,DM_DOCUMENT_H.TO_CUSTKEY														AS TO_CUSTKEY		/*관리처코드*/
+		       ,DM_DOCUMENT_H.TO_CUSTNAME														AS TO_CUSTNAME		/*관리처명*/
+		       ,DM_DOCUMENT_D.SKU																AS SKU				/*상품코드*/
+		       ,MAX(MS_SKU.DESCRIPTION)  														AS SKUNAME			/*상품명칭*/
+		       ,MIN(NVL(CD1.BASEDESCR,CD1.BASECODE))  											AS PUTAWAYTYPE		/*저장유무*/
+		       ,MIN(NVL(CD2.BASEDESCR,CD2.BASECODE))  											AS STORAGETYPE		/*저장조건*/
+		       ,MAX(MS_SKU.QTYPERBOX) 															AS QTYPERBOX		/*입수*/
+		       ,DM_DOCUMENT_D.STORERUOM															AS STORERUOM		/*판매단위*/
+		       ,DM_DOCUMENT_D.STOREROPENQTY														AS STOREROPENQTY	/*주문수량*/
+		       ,MIN(ROUND(NVL((NVL((DM_DOCUMENT_D.STOREROPENQTY * UOM11.BUNJA / UOM11.BUNMO),0) * UOM12.BUNMO / UOM12.BUNJA),0), 1))	AS STOREROPENWEIGHT	/*주문중량*/
+			   ,MIN(NVL((DM_DOCUMENT_D.CONFIRMQTY) * DM_DOCUMENT_D.BUNJA / DM_DOCUMENT_D.BUNMO,0))	AS CONFIRMQTY		/*출고수량*/
+			   ,MIN(ROUND(NVL((NVL((DM_DOCUMENT_D.CONFIRMQTY * UOM13.BUNJA / UOM13.BUNMO),0) * UOM14.BUNMO / UOM14.BUNJA),0), 1))		AS CONFIRMWEIGHT	/*출고중량*/
+			   ,MIN(NVL((DM_DOCUMENT_D.CANCELQTY) * DM_DOCUMENT_D.BUNJA / DM_DOCUMENT_D.BUNMO,0))	AS CANCELQTY		/*취소량*/
+	      FROM   DM_DOCUMENT_H
+	      JOIN   DM_DOCUMENT_D
+	      ON     DM_DOCUMENT_D.DCCODE = DM_DOCUMENT_H.DCCODE
+			AND DM_DOCUMENT_D.DOCTYPE = DM_DOCUMENT_H.DOCTYPE
+			AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+			AND DM_DOCUMENT_D.DOCNO = DM_DOCUMENT_H.DOCNO
+<!--	      JOIN   DM_DOCUMENT_D DM_DOCUMENT_D_PO   -->
+<!--	      ON     DM_DOCUMENT_D_PO.DCCODE         = DM_DOCUMENT_D.DCCODE   -->
+<!--	      AND    DM_DOCUMENT_D_PO.STORERKEY      = DM_DOCUMENT_D.STORERKEY   -->
+<!--	      AND    DM_DOCUMENT_D_PO.ORGANIZE       = DM_DOCUMENT_D.ORGANIZE   -->
+<!--	      AND    DM_DOCUMENT_D_PO.AREA           = DM_DOCUMENT_D.AREA   -->
+<!--	      AND    DM_DOCUMENT_D_PO.DOCTYPE        = 'DP'   -->
+<!--	      AND    DM_DOCUMENT_D_PO.DOCNO          = DM_DOCUMENT_D.POKEY   -->
+<!--	      AND    DM_DOCUMENT_D_PO.DOCLINE        = DM_DOCUMENT_D.POLINE   -->
+		JOIN   DP_INPLAN
+		            ON     DP_INPLAN.DCCODE         = DM_DOCUMENT_D.DCCODE
+		            AND    DP_INPLAN.STORERKEY      = DM_DOCUMENT_D.STORERKEY
+		            AND    DP_INPLAN.ORGANIZE       = DM_DOCUMENT_D.ORGANIZE
+		            AND    DP_INPLAN.AREA           = DM_DOCUMENT_D.AREA
+		            AND    DP_INPLAN.DOCTYPE        = 'DP'
+		            AND    DP_INPLAN.DOCNO          = DM_DOCUMENT_D.POKEY
+		            AND    DP_INPLAN.DOCLINE        = DM_DOCUMENT_D.POLINE
+		            AND    DP_INPLAN.SLIPDT         = DM_DOCUMENT_D.DELIVERYDATE
+		  <if test="delYn == 'N'.toString()"> AND DP_INPLAN.DEL_YN = 			   'N' </if>
+		  <if test="delYn == 'Y'.toString()"> AND DP_INPLAN.DEL_YN <![CDATA[<>]]> 'N' </if>
+			JOIN   DM_DOCUMENT_H DM_DOCUMENT_H_PO
+				ON     DP_INPLAN.DCCODE = DM_DOCUMENT_H_PO.DCCODE
+				AND    DP_INPLAN.DOCTYPE = DM_DOCUMENT_H_PO.DOCTYPE
+				AND    DP_INPLAN.DELIVERYDATE = DM_DOCUMENT_H_PO.DELIVERYDATE
+				AND    DP_INPLAN.DOCNO = DM_DOCUMENT_H_PO.DOCNO
+		  <if test="fromcustkey != null and fromcustkey != ''">	AND DM_DOCUMENT_H_PO.FROM_CUSTKEY   = #{fromcustkey} 			</if>
+		  <if test="status != null and status != ''">			AND DM_DOCUMENT_H_PO.STATUS			= #{status} 				</if>
+	      JOIN   MS_SKU   
+	      ON     MS_SKU.STORERKEY                = DM_DOCUMENT_D.STORERKEY   
+	      AND    MS_SKU.SKU                      = DM_DOCUMENT_D.SKU   
+	      AND    MS_SKU.DEL_YN                   = 'N'
+	      <!-- 상품 다중선택 -->
+		  <if test="sku != null and sku != ''">
+				AND MS_SKU.SKU IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+									FROM (SELECT #{sku} AS VAL FROM DUAL) A
+								CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0) 
+		  </if>   
+		  <if test="storagetype != null and storagetype != ''"> AND MS_SKU.STORAGETYPE = #{storagetype} 		</if>
+		LEFT JOIN CM_CODE_STORER CD1  ON CD1.STORERKEY  = DM_DOCUMENT_D.STORERKEY AND CD1.CODELIST  = 'PUTAWAYTYPE'	AND CD1.BASECODE = DM_DOCUMENT_D.CHANNEL
+		LEFT JOIN CM_CODE_STORER CD2  ON CD2.STORERKEY  = MS_SKU.STORERKEY 	 	  AND CD2.CODELIST  = 'STORAGETYPE'	AND CD2.BASECODE = MS_SKU.STORAGETYPE
+		LEFT JOIN MS_UOM UOM11  	  ON UOM11.STORERKEY = DM_DOCUMENT_D.STORERKEY AND UOM11.SKU  = DM_DOCUMENT_D.SKU AND UOM11.UOM = DM_DOCUMENT_D.STORERUOM
+		LEFT JOIN MS_UOM UOM12	  	  ON UOM12.STORERKEY = DM_DOCUMENT_D.STORERKEY AND UOM12.SKU  = DM_DOCUMENT_D.SKU AND UOM12.UOM = 'KG'
+		LEFT JOIN MS_UOM UOM13  	  ON UOM13.STORERKEY = DM_DOCUMENT_D.STORERKEY AND UOM13.SKU  = DM_DOCUMENT_D.SKU AND UOM13.UOM = DM_DOCUMENT_D.UOM
+		LEFT JOIN MS_UOM UOM14	  	  ON UOM14.STORERKEY = DM_DOCUMENT_D.STORERKEY AND UOM14.SKU  = DM_DOCUMENT_D.SKU AND UOM14.UOM = 'KG'
+	    WHERE  DM_DOCUMENT_D.CHANNEL IN ('2','3')                   
+	    AND    DM_DOCUMENT_D.DOCTYPE = 'WD'
+	    AND    DM_DOCUMENT_D.IF_SEND_TYPE <![CDATA[<>]]> 'WMSPO'
+	    AND    DM_DOCUMENT_D.WORKPROCESSCODE IN ('SO','PO')
+	    AND    NOT ( DM_DOCUMENT_D.DOCTYPE='WD' AND DM_DOCUMENT_D.WORKPROCESSCODE = 'PO')  /*협력사반품출고는 제외한다.*/
+		AND    DM_DOCUMENT_H.STORERKEY = #{gStorerkey}
+		AND    DM_DOCUMENT_H.DCCODE    = #{fixdccode}
+		<if test="delYn == 'N'.toString()"> AND DM_DOCUMENT_D.DEL_YN = 			  'N' </if>
+		<if test="delYn == 'Y'.toString()"> AND DM_DOCUMENT_D.DEL_YN <![CDATA[<>]]> 'N' </if>
+		<if test="fromSlipdt != null and fromSlipdt != ''">   	AND DM_DOCUMENT_D.DELIVERYDATE	<![CDATA[>=]]> 	#{fromSlipdt} 	</if>
+		<if test="toSlipdt != null and toSlipdt != ''">	    	AND DM_DOCUMENT_D.DELIVERYDATE	<![CDATA[<=]]> 	#{toSlipdt} 	</if>
+		<if test="tocustkeyMulti != null and tocustkeyMulti != '' ">
+			<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+				<foreach collection="tocustkeyMulti" item="item">
+					OR DM_DOCUMENT_H.TO_CUSTKEY IN
+					<foreach collection="item" item="code" open="(" close=")" separator=",">
+						#{code}
+					</foreach>
+				</foreach>
+			</trim>
+		</if>
+		<!-- 문서번호 다중선택 -->
+		<if test="docno != null and docno != ''">
+			AND DM_DOCUMENT_H.DOCNO IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+										FROM (SELECT #{docno} AS VAL FROM DUAL) A
+										CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0) 
+		</if>  
+		<if test="serialCheck != null and serialCheck != ''">
+			AND EXISTS (SELECT 1
+				      FROM DM_DOCUMENT_D 
+					  JOIN WD_INPLAN 	
+					  ON   WD_INPLAN.DCCODE = DM_DOCUMENT_D.DCCODE
+						AND WD_INPLAN.DOCTYPE = DM_DOCUMENT_D.DOCTYPE
+						AND WD_INPLAN.SLIPDT = DM_DOCUMENT_D.DELIVERYDATE
+						AND WD_INPLAN.DOCNO = DM_DOCUMENT_D.DOCNO
+						AND WD_INPLAN.DOCLINE = DM_DOCUMENT_D.DOCLINE
+					  JOIN ST_SNINFOSLIP ST_SERIALINFO  
+					  ON   ST_SERIALINFO.DCCODE         = WD_INPLAN.DCCODE            
+					  AND  ST_SERIALINFO.STORERKEY      = WD_INPLAN.STORERKEY 
+					  AND  ST_SERIALINFO.ORGANIZE       = WD_INPLAN.ORGANIZE            
+					  AND  ST_SERIALINFO.SKU            = WD_INPLAN.SKU
+					  AND  ST_SERIALINFO.DOCTYPE        = WD_INPLAN.DOCTYPE
+					  AND  ST_SERIALINFO.SLIPDT         = WD_INPLAN.SLIPDT
+					  AND  ST_SERIALINFO.SLIPNO         = WD_INPLAN.SLIPNO
+					  AND  ST_SERIALINFO.SLIPLINE       = WD_INPLAN.SLIPLINE
+					  AND  ST_SERIALINFO.DOCTYPE 	    = 'WD'
+					  AND  ST_SERIALINFO.DEL_YN         = 'N'
+					<if test="serialnoMulti != null and serialnoMulti != ''">
+						AND ST_SERIALINFO.SERIALNO      IN
+						<foreach collection="serialnoMulti" item="item" open="(" separator="," close=")">
+							#{item}
+						</foreach>
+					</if>
+					<if test="blnoMulti != null and blnoMulti != ''">
+						AND ST_SERIALINFO.CONVSERIALNO      IN
+						<foreach collection="blnoMulti" item="item" open="(" separator="," close=")">
+							#{item}
+						</foreach>
+					</if>
+					 <if test="contractcompany != null and contractcompany != ''">	AND ST_SERIALINFO.CONTRACTCUSTKEY	=	#{contractcompany} 	</if>
+				    WHERE DM_DOCUMENT_D.DCCODE = DM_DOCUMENT_H.DCCODE
+		            AND   DM_DOCUMENT_D.DOCTYPE = DM_DOCUMENT_H.DOCTYPE
+		            AND   DM_DOCUMENT_D.DOCNO   = DM_DOCUMENT_H.DOCNO )
+			</if>  
+		  GROUP BY DM_DOCUMENT_D.STORERKEY
+				  ,DM_DOCUMENT_D.CHANNEL
+				  ,DM_DOCUMENT_D.DELIVERYDATE
+				  ,DM_DOCUMENT_H_PO.FROM_CUSTKEY
+				  ,DM_DOCUMENT_H_PO.FROM_CUSTNAME
+				  ,DM_DOCUMENT_H.TO_CUSTKEY
+				  ,DM_DOCUMENT_H.TO_CUSTNAME
+				  ,DM_DOCUMENT_D.SKU
+				  ,DM_DOCUMENT_D.STORERUOM
+				  ,DM_DOCUMENT_D.STOREROPENQTY
+				  ,DM_DOCUMENT_D.BUNMO
+			      ,DM_DOCUMENT_D.BUNJA
+			      ,DM_DOCUMENT_D.CONFIRMQTY
+			      ,DM_DOCUMENT_D.CANCELQTY
+			      ,DM_DOCUMENT_D.UOM   
+	      ORDER BY DM_DOCUMENT_D.DELIVERYDATE
+	              ,DM_DOCUMENT_D.SKU
+	              ,DM_DOCUMENT_H.TO_CUSTNAME
+		
+	</select>
+</mapper>

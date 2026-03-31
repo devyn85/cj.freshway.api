@@ -1,0 +1,499 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+  PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="msLocation">
+	<!-- 로케이션 정보(목록) 조회 -->
+	<select id="getMasterList" parameterType="cjfw.wms.ms.dto.MsLocationReqDto" resultType="cjfw.wms.ms.dto.MsLocationResDto">
+    	SELECT /* [MsLocationService.sqlx][getMasterList][로케이션 목록 조회][YeoSeungCheol][2025.06.19] */
+			ML.SERIALKEY
+	        ,ML.DCCODE                                          AS DCCODE
+	        ,ML.LOC                                             AS LOC                 /* 로케이션 */
+	        ,ML.DESCRIPTION                                     AS DESCRIPTION         /* 로케이션명 */
+	        ,NVL(CM_FLOOR.BASEDESCR, CM_FLOOR.BASECODE)         AS WHAREAFLOOR         /* 창고층 */
+	        ,ML.ZONE                                            AS ZONE                /* 소속존 */
+	        ,NVL(CM_TYPE.BASEDESCR , CM_TYPE.BASECODE )         AS LOCTYPE             /* 로케이션유형 */
+	        ,NVL(CM_CAT.BASEDESCR  , CM_CAT.BASECODE  )         AS LOCCATEGORY         /* 로케이션종류 */
+	        ,NVL(CM_LEVEL.BASEDESCR, CM_LEVEL.BASECODE)         AS LOCLEVEL            /* 저고단구분 */
+	        ,NVL(CM_FLAG.BASEDESCR , CM_FLAG.BASECODE )         AS LOCFLAG             /* 로케이션상태 */
+	        ,ML.LOGICALLOC_H                                    AS LOGICALLOC_H
+	        ,ML.LOGICALLOC_V                                    AS LOGICALLOC_V
+	        ,ML.DEL_YN                                          AS DEL_YN              /* 삭제여부 */
+	        ,NVL(USER1.USER_NM, ML.ADDWHO)						AS ADDWHO
+	        ,ML.ADDWHO                                           AS ADDWHOID
+			,NVL(USER2.USER_NM, ML.EDITWHO)						AS EDITWHO
+			, ML.EDITWHO                                         AS EDITWHOID
+	        ,TO_CHAR(ML.ADDDATE , 'YYYY-MM-DD HH24:MI:SS')      AS ADDDATE
+			,TO_CHAR(ML.EDITDATE, 'YYYY-MM-DD HH24:MI:SS')      AS EDITDATE
+		FROM MS_LOCATION ML
+
+		/* 코드(창고층) – STORERKEY 우선순위: gStorerkey → 'STD' → '%' 한 행만 매칭 */
+		LEFT JOIN (
+			SELECT CODELIST, BASECODE, BASEDESCR,
+				ROW_NUMBER() OVER (
+					PARTITION BY CODELIST, BASECODE
+             		ORDER BY DECODE(
+						STORERKEY,
+						#{gStorerkey},  1,
+						'STD', 			2,
+						'%', 			2,
+						'', 			2,
+						9
+					)
+           ) AS RN
+           
+		FROM  CM_CODE_STORER
+    	WHERE CODELIST = 'WHAREAFLOOR'
+		  AND STORERKEY IN ('%', 'STD', '', #{gStorerkey})
+  		) CM_FLOOR
+  		
+	   	ON  CM_FLOOR.BASECODE = ML.WHAREAFLOOR
+	  	AND CM_FLOOR.RN = 1
+
+		/* 코드(로케이션유형) */
+  		LEFT JOIN (
+    		SELECT CODELIST, BASECODE, BASEDESCR,
+				ROW_NUMBER() OVER (
+					PARTITION BY CODELIST, BASECODE
+					ORDER 	  BY DECODE (
+						STORERKEY,
+						#{gStorerkey}, 	1,
+						'%', 			2,
+						'STD', 			2,
+						'', 			2,
+						9
+			        )
+           ) AS RN
+		FROM CM_CODE_STORER
+		
+    	WHERE CODELIST = 'LOCTYPE'
+		  AND STORERKEY IN ('%', 'STD', '', #{gStorerkey})
+  		) CM_TYPE
+  		
+    	ON  CM_TYPE.BASECODE = ML.LOCTYPE
+   		AND CM_TYPE.RN = 1
+
+  		/* 코드(로케이션종류) */
+  		LEFT JOIN (
+    		SELECT CODELIST, BASECODE, BASEDESCR,
+           	ROW_NUMBER() OVER (
+             	PARTITION 	BY CODELIST, BASECODE
+             	ORDER 		BY DECODE(
+             		STORERKEY,
+             		#{gStorerkey}, 	1,
+             		'%', 			2,
+             		'STD', 			2,
+             		'', 			2,
+             		9
+			)
+		) AS RN
+		
+	    FROM CM_CODE_STORER
+	    WHERE CODELIST = 'LOCCATEGORY'
+			AND STORERKEY IN ('%', 'STD', '', #{gStorerkey})
+		) CM_CAT
+		
+	    ON  CM_CAT.BASECODE = ML.LOCCATEGORY
+	    AND CM_CAT.RN 		= 1
+
+		/* 코드(저고단구분) */
+  		LEFT JOIN (
+    		SELECT CODELIST, BASECODE, BASEDESCR,
+           			ROW_NUMBER() OVER (
+             			PARTITION 	BY CODELIST, BASECODE
+             			ORDER 		BY DECODE(
+             				STORERKEY,
+             				#{gStorerkey}, 	1,
+             				'%', 			2, 
+             				'STD', 			2,
+             				'', 			2,
+             				9
+						)
+           	) AS RN
+    	FROM CM_CODE_STORER
+    	WHERE CODELIST = 'LOCLEVEL'
+      	  AND STORERKEY IN ('%', 'STD', '', #{gStorerkey})
+  		) CM_LEVEL
+  		
+    	ON  CM_LEVEL.BASECODE = ML.LOCLEVEL
+   		AND CM_LEVEL.RN = 1
+
+  		/* 코드(로케이션상태) */
+  		LEFT JOIN (
+    		SELECT CODELIST, BASECODE, BASEDESCR,
+				ROW_NUMBER() OVER (
+             		PARTITION 	BY CODELIST, BASECODE
+             		ORDER		BY DECODE(
+             			STORERKEY,
+             			#{gStorerkey}, 	1,
+             			'%', 			2,
+             			'STD', 			2,
+             			'', 			2,
+             			9
+             		)
+		) AS RN
+           	
+    	FROM CM_CODE_STORER
+    	
+    		WHERE CODELIST = 'LOCFLAG'
+      	  	  AND STORERKEY IN ('%', 'STD', '', #{gStorerkey})
+  		) CM_FLAG
+    
+		ON  CM_FLAG.BASECODE = ML.LOCFLAG
+   		AND CM_FLAG.RN = 1
+
+  		LEFT JOIN FRAMEONE_USER USER1
+      		ON USER1.USER_ID = ML.ADDWHO   /* 등록자명 */
+    	LEFT JOIN FRAMEONE_USER USER2
+      		ON USER2.USER_ID = ML.EDITWHO  /* 수정자명 */
+
+
+		<where>
+	    	<!-- 권한: 동일 DCCODE 보유 시에만 조회 (중복 방지용 EXISTS) -->
+	    	<!--
+	    	AND EXISTS (
+	      		SELECT 1
+	        		FROM CM_USER_AUTHORITY_DC UAD
+	        		
+	       		WHERE UAD.USERID = #{gUserId}
+	         	AND   UAD.DCCODE = ML.DCCODE
+	    	)
+	    	 -->
+
+			<!--
+			<if test="gDccode != null and gDccode != ''">
+				AND ML.DCCODE IN (
+					SELECT TRIM(REGEXP_SUBSTR(A.VAL, '[^,]+', 1, LEVEL))
+        				FROM (SELECT #{gDccode} AS VAL FROM DUAL) A
+      				CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0
+				)
+			</if>
+			 -->
+			<if test="dccode != null and dccode != ''">
+			                AND ML.DCCODE = #{dccode}
+			                            </if>
+			
+		    <if test="loc != null and loc != ''">
+		      AND ML.LOC LIKE '%' || #{loc} || '%'
+		    </if>
+		
+		    <if test="description != null and description != ''">
+		      AND ML.DESCRIPTION LIKE '%' || #{description} || '%'
+		    </if>
+		
+		    <if test="whAreaFloor != null and whAreaFloor != ''">
+		      AND ML.WHAREAFLOOR = #{whAreaFloor}
+		    </if>
+		
+		    <if test="zone != null and zone != ''">
+		      AND ML.ZONE = #{zone}
+		    </if>
+		
+		    <if test="locType != null and locType != ''">
+		      AND ML.LOCTYPE = #{locType}
+		    </if>
+		
+		    <if test="locCategory != null and locCategory != ''">
+		      AND ML.LOCCATEGORY = #{locCategory}
+		    </if>
+		
+		    <if test="locLevel != null and locLevel != ''">
+		      AND ML.LOCLEVEL = #{locLevel}
+		    </if>
+		
+		    <if test="locFlag != null and locFlag != ''">
+		      AND ML.LOCFLAG = #{locFlag}
+		    </if>
+		
+			<if test="delYn != null and delYn != ''">
+		      AND ML.DEL_YN = #{delYn}
+		    </if>
+		</where>
+	
+		ORDER BY ML.DCCODE, ML.LOC
+	</select>
+  
+	<!-- 로케이션 정보(단건) 조회 -->
+	<select id="getMaster" parameterType="cjfw.wms.ms.dto.MsLocationDetailReqDto" resultType="cjfw.wms.ms.dto.MsLocationDetailResDto">
+    	SELECT /* [msLocationService.sqlx][msLocationService.getMaster][로케이션 정보(단건) 조회][YeoSeungCheol][2025.07.01] */
+			ML.SERIALKEY                         		AS SERIALKEY
+			,ML.DCCODE                            		AS DCCODE
+			,ML.LOC                               		AS LOC
+			,ML.DESCRIPTION                       		AS DESCRIPTION
+			,ML.WHAREA                            		AS WHAREA
+			,ML.WHAREAFLOOR                       		AS WHAREAFLOOR
+			,ML.ZONE                              		AS ZONE
+			,ML.RACK                              		AS RACK
+			,ML.RACKLINE                          		AS RACKLINE
+			,ML.RACKCOLUMN                        		AS RACKCOLUMN
+			,ML.LOCTYPE                           		AS LOCTYPE
+			,ML.LOCCATEGORY                       		AS LOCCATEGORY
+			,ML.LOCFLAG                           		AS LOCFLAG
+			,ML.LOCLEVEL                          		AS LOCLEVEL
+			,ML.STOCKTYPE                         		AS STOCKTYPE
+			,ML.LOGICALLOC_H                      		AS LOGICALLOC_H
+			,ML.LOGICALLOC_V                      		AS LOGICALLOC_V
+			,ML.LOCWEIGHT                         		AS LOCWEIGHT
+			,ML.LOCCUBE                           		AS LOCCUBE
+			,ML.LOCCUBE_W                         		AS LOCCUBE_W
+			,ML.LOCCUBE_H                         		AS LOCCUBE_H
+			,ML.LOCCUBE_L                         		AS LOCCUBE_L
+			,ML.INSTRATEGY                        		AS INSTRATEGY
+			,ML.OUTSTRATEGY                       		AS OUTSTRATEGY
+			,ML.IN_YN                             		AS IN_YN
+			,ML.OUT_YN                            		AS OUT_YN
+			,ML.SKUMIX_YN                         		AS SKUMIX_YN
+			,ML.LOTMIX_YN                         		AS LOTMIX_YN
+			,ML.STATUS                            		AS STATUS
+			,ML.DEL_YN                            		AS DEL_YN
+			,TO_CHAR(ML.ADDDATE,  'YYYYMMDDHH24MISS') 	AS ADDDATE
+			,TO_CHAR(ML.EDITDATE, 'YYYYMMDDHH24MISS') 	AS EDITDATE
+			,NVL(USER1.USER_NM, ML.ADDWHO)				AS ADDWHO
+			,NVL(USER2.USER_NM, ML.EDITWHO)				AS EDITWHO
+			,ML.MOVE_YN                           		AS MOVE_YN
+			,ML.STORAGETYPE                       		AS STORAGETYPE
+			,ML.MIXTGT_TYPE								AS MIXTGT_TYPE
+			,ML.SORTKEY                           		AS SORTKEY
+			,ML.DPS_YN                            		AS DPS_YN
+			,ML.PLT_FLG                           		AS PLT_FLG
+			,ML.CAPA_YN                           		AS CAPA_YN
+			,ML.CAPA_LOCTYPE                      		AS CAPA_LOCTYPE
+			,ML.MULTI_LOC_YN                       		AS MULTI_LOC_YN
+		FROM MS_LOCATION ML
+		
+		LEFT JOIN FRAMEONE_USER USER1
+      		ON USER1.USER_ID = ML.ADDWHO   /* 등록자명 */
+    	LEFT JOIN FRAMEONE_USER USER2
+      		ON USER2.USER_ID = ML.EDITWHO  /* 수정자명 */
+
+		<where>
+      		<if test="gDccode != null and gDccode != ''">
+        		AND ML.DCCODE = #{dccode}
+      		</if>
+      		
+      		<if test="loc != null and loc != ''">
+        		AND ML.LOC = #{loc}
+      		</if>
+    	</where>
+</select>
+
+<!-- 로케이션 정보 INSERT -->
+<insert id="insertMasterList" parameterType="cjfw.wms.ms.entity.MsLocationEntity">
+		INSERT /* [msLocationService.sqlx][msLocationService.saveMasterList][로케이션정보 INSERT][YeoSeungCheol][2025.07.03] */
+		INTO MS_LOCATION
+			(SERIALKEY
+			,DCCODE
+			,LOC
+			,DESCRIPTION
+			,WHAREA
+			,WHAREAFLOOR
+			,ZONE
+			,RACK
+			,RACKLINE
+			,RACKCOLUMN
+			,LOCTYPE
+			,LOCCATEGORY
+			,LOCFLAG
+			,LOCLEVEL
+			,STOCKTYPE
+			,LOGICALLOC_H
+			,LOGICALLOC_V
+			,LOCCUBE
+			,LOCCUBE_W
+			,LOCCUBE_H
+			,LOCCUBE_L
+			,IN_YN
+			,OUT_YN
+			,SKUMIX_YN
+			,LOTMIX_YN
+			,MOVE_YN
+			,DEL_YN
+			,STORAGETYPE
+			,DPS_YN
+			,PLT_FLG
+			,CAPA_YN
+			,CAPA_LOCTYPE
+			,MULTI_LOC_YN
+			,ADDWHO
+			,EDITWHO
+			)
+		VALUES
+			(LOGISONESVC.SEQ_MS_LOCATION.NEXTVAL
+			,#{dccode}
+			,UPPER(#{loc})
+			,#{description}
+			,#{whArea}
+			,#{whAreaFloor}
+			,UPPER(#{zone})
+			,#{rack}
+			,#{rackLine}
+			,#{rackColumn}
+			,#{locType}
+			,#{locCategory}
+			,'GOOD'
+			,'LOW'
+			
+			,#{stockType}
+			,#{logicalLocH}
+			,#{logicalLocV}
+			,#{locCube}
+			,#{locCubeW}
+			,#{locCubeH}
+			,#{locCubeL}
+			,#{inYn}
+			,#{outYn}
+			,#{skuMixYn}
+			,#{lotMixYn}
+			,#{moveYn}
+			,#{delYn}
+			,#{storageType}
+			,#{dpsYn}
+			,#{pltFlg}
+			,#{capaYn}
+			,#{capaLocType}
+			,#{multiLocYn}
+			,#{gUserId}
+			,#{gUserId}
+      		)
+	</insert>
+	
+	<!-- 로케이션 정보 UPDATE -->
+	<update id="updateMaster" parameterType="cjfw.wms.ms.entity.MsLocationEntity">
+		UPDATE /* [MsLocationService.sqlx][MsLocationService.updateLocation][로케이션정보 UPDATE][YeoSeungCheol] */
+			MS_LOCATION
+			SET	LOC					= UPPER(#{loc})	 
+				,DESCRIPTION 		= #{description}
+				,WHAREA        		= #{whArea}
+				,WHAREAFLOOR   		= #{whAreaFloor}
+				,ZONE          		= UPPER(#{zone})
+				,RACK          		= #{rack}
+				,RACKLINE      		= #{rackLine}
+				,RACKCOLUMN    		= #{rackColumn}
+				,LOCTYPE       		= #{locType}
+				,LOCCATEGORY   		= #{locCategory}
+
+				,STOCKTYPE     		= #{stockType}
+				,LOGICALLOC_H  		= #{logicalLocH}
+				,LOGICALLOC_V  		= #{logicalLocV}
+				,LOCCUBE       		= #{locCube}
+				,LOCCUBE_W     		= #{locCubeW}
+				,LOCCUBE_H     		= #{locCubeH}
+				,LOCCUBE_L     		= #{locCubeL}
+				,IN_YN         		= #{inYn}
+				,OUT_YN        		= #{outYn}
+				,SKUMIX_YN     		= #{skuMixYn}
+				,LOTMIX_YN     		= #{lotMixYn}
+				,MOVE_YN       		= #{moveYn}
+				,DEL_YN        		= #{delYn}
+				,STORAGETYPE   		= #{storageType}
+				,DPS_YN        		= #{dpsYn}
+				,PLT_FLG       		= #{pltFlg}
+				,CAPA_YN       		= #{capaYn}
+				,CAPA_LOCTYPE  		= #{capaLocType}
+				,MULTI_LOC_YN  		= #{multiLocYn}
+				,EDITDATE      		= SYSDATE
+				,EDITWHO       		= #{gUserId}
+			WHERE SERIALKEY 		= #{serialKey}
+</update>
+
+	<!-- 로케이션 정보 UPSERT (MERGE) -->
+	<update id="upsertMaster" parameterType="cjfw.wms.ms.entity.MsLocationEntity">
+		MERGE /* [MsLocationService.sqlx][msLocationService.upsertMaster][로케이션 정보 UPSERT][YeoSeungCheol] */
+		INTO MS_LOCATION T
+		USING (
+			SELECT 
+				#{serialKey}   AS SERIALKEY,
+				#{dccode}      AS DCCODE,
+				UPPER(#{loc})  AS LOC,
+				#{description} AS DESCRIPTION,
+				#{whArea}      AS WHAREA,
+				#{whAreaFloor} AS WHAREAFLOOR,
+				UPPER(#{zone}) AS ZONE,
+				#{rack}        AS RACK,
+				#{rackLine}    AS RACKLINE,
+				#{rackColumn}  AS RACKCOLUMN,
+				#{locType}     AS LOCTYPE,
+				#{locCategory} AS LOCCATEGORY,
+				#{stockType}   AS STOCKTYPE,
+				#{logicalLocH} AS LOGICALLOC_H,
+				#{logicalLocV} AS LOGICALLOC_V,
+				#{locCube}     AS LOCCUBE,
+				#{locCubeW}    AS LOCCUBE_W,
+				#{locCubeH}    AS LOCCUBE_H,
+				#{locCubeL}    AS LOCCUBE_L,
+				#{inYn}        AS IN_YN,
+				#{outYn}       AS OUT_YN,
+				#{skuMixYn}    AS SKUMIX_YN,
+				#{lotMixYn}    AS LOTMIX_YN,
+				#{moveYn}      AS MOVE_YN,
+				#{delYn}       AS DEL_YN,
+				#{storageType} AS STORAGETYPE,
+				#{mixtgtType}  AS MIXTGT_TYPE,
+				#{dpsYn}       AS DPS_YN,
+				#{pltFlg}      AS PLT_FLG,
+				#{capaYn}      AS CAPA_YN,
+				#{capaLocType} AS CAPA_LOCTYPE,
+				#{multiLocYn}  AS MULTI_LOC_YN,
+				#{gUserId}     AS ADDWHO,
+				#{gUserId}     AS EDITWHO,
+				#{locFlag} AS LOCFLAG,
+				#{locLevel} AS LOCLEVEL
+			FROM DUAL
+		) S
+		ON (T.SERIALKEY = S.SERIALKEY)
+		WHEN MATCHED THEN
+			UPDATE SET
+				T.DCCODE        = S.DCCODE,
+				T.LOC           = S.LOC,
+				T.DESCRIPTION   = S.DESCRIPTION,
+				T.WHAREA        = S.WHAREA,
+				T.WHAREAFLOOR   = S.WHAREAFLOOR,
+				T.ZONE          = S.ZONE,
+				T.RACK          = S.RACK,
+				T.RACKLINE      = S.RACKLINE,
+				T.RACKCOLUMN    = S.RACKCOLUMN,
+				T.LOCTYPE       = S.LOCTYPE,
+				T.LOCCATEGORY   = S.LOCCATEGORY,
+				T.STOCKTYPE     = S.STOCKTYPE,
+				T.LOGICALLOC_H  = S.LOGICALLOC_H,
+				T.LOGICALLOC_V  = S.LOGICALLOC_V,
+				T.LOCCUBE       = S.LOCCUBE,
+				T.LOCCUBE_W     = S.LOCCUBE_W,
+				T.LOCCUBE_H     = S.LOCCUBE_H,
+				T.LOCCUBE_L     = S.LOCCUBE_L,
+				T.IN_YN         = S.IN_YN,
+				T.OUT_YN        = S.OUT_YN,
+				T.SKUMIX_YN     = S.SKUMIX_YN,
+				T.LOTMIX_YN     = S.LOTMIX_YN,
+				T.MOVE_YN       = S.MOVE_YN,
+				T.DEL_YN        = S.DEL_YN,
+				T.STORAGETYPE   = S.STORAGETYPE,
+				T.MIXTGT_TYPE	= S.MIXTGT_TYPE,
+				T.DPS_YN        = S.DPS_YN,
+				T.PLT_FLG       = S.PLT_FLG,
+				T.CAPA_YN       = S.CAPA_YN,
+				T.CAPA_LOCTYPE  = S.CAPA_LOCTYPE,
+				T.MULTI_LOC_YN  = S.MULTI_LOC_YN,
+				T.EDITWHO       = S.EDITWHO,
+				T.EDITDATE      = SYSDATE,
+				T.LOCFLAG       = S.LOCFLAG,
+				T.LOCLEVEL      = S.LOCLEVEL
+		WHEN NOT MATCHED THEN
+			INSERT (
+				SERIALKEY, DCCODE, LOC, DESCRIPTION, WHAREA, WHAREAFLOOR, ZONE,
+				RACK, RACKLINE, RACKCOLUMN, LOCTYPE, LOCCATEGORY, 
+				LOCFLAG, LOCLEVEL,
+				STOCKTYPE, LOGICALLOC_H, LOGICALLOC_V, LOCCUBE, LOCCUBE_W, LOCCUBE_H, LOCCUBE_L,
+				IN_YN, OUT_YN, SKUMIX_YN, LOTMIX_YN, MOVE_YN, DEL_YN, STORAGETYPE, MIXTGT_TYPE, DPS_YN, PLT_FLG,
+				CAPA_YN, CAPA_LOCTYPE, MULTI_LOC_YN, ADDWHO, ADDDATE, EDITWHO, EDITDATE
+			)
+			VALUES (
+				LOGISONESVC.SEQ_MS_LOCATION.NEXTVAL, S.DCCODE, S.LOC, S.DESCRIPTION, S.WHAREA, S.WHAREAFLOOR, S.ZONE,
+				S.RACK, S.RACKLINE, S.RACKCOLUMN, S.LOCTYPE, S.LOCCATEGORY,
+				S.LOCFLAG, S.LOCLEVEL,
+				S.STOCKTYPE, S.LOGICALLOC_H, S.LOGICALLOC_V, S.LOCCUBE, S.LOCCUBE_W, S.LOCCUBE_H, S.LOCCUBE_L,
+				S.IN_YN, S.OUT_YN, S.SKUMIX_YN, S.LOTMIX_YN, S.MOVE_YN, S.DEL_YN, S.STORAGETYPE, S.MIXTGT_TYPE, S.DPS_YN, S.PLT_FLG,
+				S.CAPA_YN, S.CAPA_LOCTYPE, S.MULTI_LOC_YN, S.ADDWHO, SYSDATE, S.EDITWHO, SYSDATE
+			)
+	</update>
+</mapper>

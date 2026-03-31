@@ -1,0 +1,403 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="tmMultiPopAllocationService">
+
+    <select id="getMultiPopAllocationList" resultType="TmMultiPopAllocationResDto">    	
+        SELECT  /* [TmMultiPopAllocationService.sqlx][getMultiPopAllocationList][거래처별이중 POP 배차 현황 조회][sunho.kim][2025.06.23] */
+               TMINPLAN.DCCODE                                  AS DCCODE /* 센터코드 */
+              ,DM_DOCUMENT_H.SHPTO_ID                           AS SHPTO_ID /* 관리처코드 */
+              ,MAX(TMINPLAN.STORERKEY)                          AS STORERKEY /* 고객사" */
+              ,MAX(DM_DOCUMENT_D.DCCODE)                        AS DCCODE /* 물류센터" */
+              ,MAX(DM_DOCUMENT_D.ORGANIZE)                      AS ORGANIZE /* 창고" */
+              ,MAX(DM_DOCUMENT_D.AREA)                          AS AREA /* AREA" */
+              ,TMINPLAN.DELIVERYDT                              AS DELIVERYDT /* 배송일자 */
+              ,MAX(DM_DOCUMENT_H.DOCTYPE)                       AS DOCTYPE /* 문서번호 */
+              ,MAX(TMINPLAN.SLIPNO)                             AS SLIPNO /* 전표번호 */
+              ,SHPTO_ID.DESCRIPTION                             AS SHPTO_ID_NAME /* 관리처명 */
+              ,DM_DOCUMENT_H.MNGPLC_ID                          AS MNGPLC_ID /* 분할관리처코드 */
+              ,MNGPLC_ID.DESCRIPTION                            AS MNGPLC_ID_NAME /* 분할관리처명 */
+              ,MAX(TMINPLAN.PREDELIVERYGROUP)                   AS PREDELIVERYGROUP /* 선배차POP */
+              ,MAX(CUSTXPOP.POPNO)                              AS DELIVERYGROUP /* 배차POP */
+              ,TMINPLAN.CARNO                                   AS CARNO /* 차량번호 */
+              ,DM_DOCUMENT_D.SKU                                AS SKU /* 상품코드 */
+              ,MAX(MS_SKU.DESCRIPTION)                          AS SKUNAME /* 상품명 */
+              ,DM_DOCUMENT_D.STORERUOM                          AS STORERUOM /* 주문단위 */
+              ,SUM(DM_DOCUMENT_D.STOREROPENQTY)                 AS STOREROPENQTY /* 주문수량 */
+              ,SUM(TMINPLAN.WEIGHT)                             AS WEIGHTKG /* 중량 */
+             , SUM(TMINPLAN.CUBE)                               AS CUBE /* 체적 */
+          FROM (
+               SELECT 
+                   STORERKEY
+                  , DCCODE
+                  , DELIVERYDT
+                  , CARNO
+                  , CUSTTYPE
+                  , CUSTKEY
+                  , DOCNO
+                  , SLIPDT
+                  , DOCTYPE
+                  , TM_DELIVERYTYPE
+                  , SLIPNO 
+                  , NULL AS SLIPLINE
+                  , WEIGHT 
+                  , CUBE 
+                  , PREDELIVERYGROUP
+               FROM  TM_INPLAN
+               WHERE TM_INPLAN.STORERKEY  = #{gStorerkey}
+                 AND TM_INPLAN.DCCODE     = #{fixdccode}
+                 AND TM_INPLAN.DELIVERYDT = #{deliverydate}
+                 AND TM_INPLAN.DEL_YN     = 'N'
+                 AND TM_INPLAN.STATUS     = '90'
+                 AND TM_INPLAN.TM_DELIVERYTYPE      IN ('1')
+                 AND TM_INPLAN.SPLIT_DELIVERY_YN = 'N'
+                 
+               UNION ALL 
+                 
+               SELECT 
+                   STORERKEY
+                  , DCCODE
+                  , DELIVERYDT
+                  , CARNO
+                  , CUSTTYPE
+                  , CUSTKEY
+                  , DOCNO
+                  , SLIPDT
+                  , DOCTYPE
+                  , TM_DELIVERYTYPE
+                  , SLIPNO 
+                  , SLIPLINE
+                  , WEIGHT 
+                  , CUBE 
+                  , PREDELIVERYGROUP
+               FROM  TM_INPLAN_SPLIT
+               WHERE TM_INPLAN_SPLIT.STORERKEY  = #{gStorerkey}
+                 AND TM_INPLAN_SPLIT.DCCODE     = #{fixdccode}
+                 AND TM_INPLAN_SPLIT.DELIVERYDT = #{deliverydate}
+                 AND TM_INPLAN_SPLIT.DEL_YN     = 'N'
+                 AND TM_INPLAN_SPLIT.STATUS     = '90'
+                 AND TM_INPLAN_SPLIT.TM_DELIVERYTYPE      IN ('1')
+          )  TMINPLAN
+          JOIN DM_DOCUMENT_H
+            ON DM_DOCUMENT_H.DOCTYPE      = TMINPLAN.DOCTYPE
+           AND DM_DOCUMENT_H.STORERKEY    = TMINPLAN.STORERKEY
+           AND DM_DOCUMENT_H.DCCODE       = TMINPLAN.DCCODE
+           AND DM_DOCUMENT_H.DELIVERYDATE = TMINPLAN.SLIPDT
+           AND DM_DOCUMENT_H.DOCNO        = TMINPLAN.DOCNO
+           AND DM_DOCUMENT_H.STORERKEY    = #{gStorerkey}
+           AND DM_DOCUMENT_H.DCCODE       = #{fixdccode}
+           AND DM_DOCUMENT_H.DOCTYPE      = 'WD'
+           AND DM_DOCUMENT_H.DELIVERYDATE = #{deliverydate}
+         <if test="custkeyMulti != null and custkeyMulti != ''">
+           AND DM_DOCUMENT_H.TO_CUSTKEY    IN
+             <foreach collection="custkeyMulti" item="item" open="(" separator="," close=")">
+               #{item}
+             </foreach> 
+         </if>
+          JOIN MS_CUST SHPTO_ID
+            ON SHPTO_ID.STORERKEY = DM_DOCUMENT_H.STORERKEY
+           AND SHPTO_ID.CUSTTYPE  = DM_DOCUMENT_H.TO_CUSTTYPE
+           AND SHPTO_ID.CUSTKEY   = DM_DOCUMENT_H.SHPTO_ID
+          JOIN MS_CUST MNGPLC_ID
+            ON MNGPLC_ID.STORERKEY = DM_DOCUMENT_H.STORERKEY
+           AND MNGPLC_ID.CUSTTYPE  = DM_DOCUMENT_H.TO_CUSTTYPE
+           AND MNGPLC_ID.CUSTKEY   = DM_DOCUMENT_H.MNGPLC_ID
+          JOIN DM_DOCUMENT_D
+            ON DM_DOCUMENT_H.STORERKEY    = #{gStorerkey}
+           AND DM_DOCUMENT_H.DCCODE       = #{fixdccode}
+           AND DM_DOCUMENT_H.DOCTYPE      = 'WD'
+           AND DM_DOCUMENT_D.DOCTYPE      = DM_DOCUMENT_H.DOCTYPE
+           AND DM_DOCUMENT_D.STORERKEY    = DM_DOCUMENT_H.STORERKEY
+           AND DM_DOCUMENT_D.DCCODE       = DM_DOCUMENT_H.DCCODE
+           AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+           AND DM_DOCUMENT_D.DOCNO        = DM_DOCUMENT_H.DOCNO
+           AND DM_DOCUMENT_D.DOCNO        = TMINPLAN.SLIPNO
+           AND (DM_DOCUMENT_D.DOCLINE    = TMINPLAN.SLIPLINE 
+                OR TMINPLAN.SLIPLINE  IS NULL
+               )
+           AND DM_DOCUMENT_D.DEL_YN       = 'N'
+          JOIN MS_SKU
+            ON MS_SKU.STORERKEY           = DM_DOCUMENT_D.STORERKEY
+           AND MS_SKU.SKU                 = DM_DOCUMENT_D.SKU 
+         
+          LEFT OUTER JOIN (
+            SELECT 
+                     MS_CUSTXPOP.DCCODE
+                   , MS_CUSTXPOP.STORERKEY
+                   , MS_CUSTXPOP.CUSTTYPE
+                   , MAX(MS_CUSTXPOP.CUSTKEY) KEEP (DENSE_RANK LAST ORDER BY FROMDATE) AS CUSTKEY 
+                   , MS_CUSTXPOP.POPNO
+                   , MAX(FROMDATE) AS FROMDATE
+            FROM MS_CUSTXPOP
+            WHERE MS_CUSTXPOP.DCCODE = #{fixdccode}
+             AND  MS_CUSTXPOP.DEL_YN = 'N'
+            GROUP BY MS_CUSTXPOP.DCCODE
+                   , MS_CUSTXPOP.STORERKEY
+                   , MS_CUSTXPOP.CUSTTYPE
+                   , MS_CUSTXPOP.CUSTKEY 
+                   , MS_CUSTXPOP.POPNO
+          ) CUSTXPOP     
+            ON  CUSTXPOP.CUSTTYPE = TMINPLAN.CUSTTYPE 
+           AND  CUSTXPOP.CUSTKEY  = TMINPLAN.CUSTKEY
+           AND  CUSTXPOP.DCCODE   = TMINPLAN.DCCODE 
+         
+         WHERE TMINPLAN.STORERKEY  = #{gStorerkey}
+           AND TMINPLAN.DCCODE     = #{fixdccode}
+         <if test="custkeyMulti != null and custkeyMulti != ''">
+           AND TMINPLAN.CUSTKEY    IN
+             <foreach collection="custkeyMulti" item="item" open="(" separator="," close=")">
+               #{item}
+             </foreach> 
+         </if>
+           AND EXISTS (SELECT USERID 
+                       FROM CM_USER_AUTHORITY
+                       WHERE STORERKEY = #{gStorerkey}
+                         AND DCCODE    = #{fixdccode}
+                         AND USERID    = #{gUserId})         
+           AND (  TMINPLAN.DCCODE
+                , TMINPLAN.DELIVERYDT
+                , TMINPLAN.CUSTTYPE
+                , TMINPLAN.CUSTKEY) IN (
+                     SELECT 
+                         T.DCCODE
+                        ,T.DELIVERYDT
+                        ,T.CUSTTYPE
+                        ,T.CUSTKEY
+                     FROM (
+                        SELECT 
+                             DCCODE
+                            ,DELIVERYDT
+                            ,CUSTTYPE
+                            ,CUSTKEY
+                            ,CARNO
+                        FROM TM_INPLAN
+                        WHERE TM_INPLAN.STORERKEY  = #{gStorerkey}
+                          AND TM_INPLAN.DCCODE     = #{fixdccode}
+                          AND TM_INPLAN.DELIVERYDT = #{deliverydate}
+                          AND TM_INPLAN.DEL_YN     = 'N'
+                          AND TM_INPLAN.STATUS     = '90'
+                          AND TM_INPLAN.TM_DELIVERYTYPE   IN ('1')
+                          AND TM_INPLAN.SPLIT_DELIVERY_YN = 'N'
+                    <if test="custkeyMulti != null and custkeyMulti != ''">
+                          AND TM_INPLAN.CUSTKEY    IN
+                        <foreach collection="custkeyMulti" item="item" open="(" separator="," close=")">
+                        #{item}
+                        </foreach> 
+                    </if>
+                        UNION ALL
+                        SELECT 
+                             DCCODE
+                            ,DELIVERYDT
+                            ,CUSTTYPE
+                            ,CUSTKEY
+                            ,CARNO
+                        FROM TM_INPLAN_SPLIT
+                        WHERE TM_INPLAN_SPLIT.STORERKEY  = #{gStorerkey}
+                          AND TM_INPLAN_SPLIT.DCCODE     = #{fixdccode}
+                          AND TM_INPLAN_SPLIT.DELIVERYDT = #{deliverydate}
+                          AND TM_INPLAN_SPLIT.DEL_YN     = 'N'
+                          AND TM_INPLAN_SPLIT.STATUS     = '90'
+                          AND TM_INPLAN_SPLIT.TM_DELIVERYTYPE   IN ('1')
+                    <if test="custkeyMulti != null and custkeyMulti != ''">
+                          AND TM_INPLAN_SPLIT.CUSTKEY    IN
+                        <foreach collection="custkeyMulti" item="item" open="(" separator="," close=")">
+                        #{item}
+                        </foreach> 
+                    </if>
+	                 ) T
+	                GROUP BY T.DCCODE
+	                         ,T.DELIVERYDT
+	                         ,T.CUSTTYPE
+	                         ,T.CUSTKEY
+	                HAVING COUNT(DISTINCT T.CARNO) > 1
+                )
+         GROUP BY TMINPLAN.DCCODE
+                 ,TMINPLAN.STORERKEY
+                 ,TMINPLAN.DELIVERYDT
+                 ,TMINPLAN.CARNO
+                 ,DM_DOCUMENT_H.SHPTO_ID
+                 ,DM_DOCUMENT_H.MNGPLC_ID
+                 ,DM_DOCUMENT_D.SKU
+                 ,DM_DOCUMENT_D.STORERUOM
+                 ,SHPTO_ID.DESCRIPTION  
+                 ,MNGPLC_ID.DESCRIPTION
+         ORDER BY TMINPLAN.DCCODE
+                 ,TMINPLAN.STORERKEY
+                 ,TMINPLAN.DELIVERYDT
+                 ,DM_DOCUMENT_H.SHPTO_ID
+                 ,SHPTO_ID.DESCRIPTION
+                 ,DM_DOCUMENT_H.MNGPLC_ID
+                 ,MNGPLC_ID.DESCRIPTION
+                 ,TMINPLAN.CARNO
+                 ,DM_DOCUMENT_D.SKU
+                 ,DM_DOCUMENT_D.STORERUOM   
+    </select>
+    
+    <select id="updateDlvInfo" statementType="CALLABLE" resultType="HMAP">
+        <![CDATA[
+        {CALL  /* [TmMultiPopAllocationService.sqlx][updateDlvInfo][배차예정 UPDATE][sunho.kim][2025.06.23] */
+            DECLARE
+                V_AFTER     TM_INPLAN%rowtype;
+                O_SUCCESS   NUMBER         :=  1;      /* 성공여부(1이면 성공) */
+                O_ERRCODE   NUMBER         :=  0;      /* 오류 코드 */
+                O_ERRMSG    VARCHAR2(4000) := '';      /* 오류 메세지 */
+            BEGIN
+                FOR KEY_LIST IN (
+                    SELECT
+                            SERIALKEY
+                    FROM    TM_INPLAN
+                   WHERE    SERIALKEY    = #{serialkey}
+                )
+                LOOP
+                    BEGIN
+                        SELECT  *
+                        INTO    V_AFTER
+                        FROM    TM_INPLAN
+                        WHERE   SERIALKEY    =    KEY_LIST.SERIALKEY
+                        ;
+                    
+                       V_AFTER.DELIVERYGROUP     := NVL(#{newDeliverygroup}, V_AFTER.DELIVERYGROUP);  /* POP번호 */ 
+                       V_AFTER.CARNO             := NVL(#{newCarno}, V_AFTER.CARNO);                  /* 차량번호 */
+                       V_AFTER.PRIORITY          := NVL(#{newPriority}, V_AFTER.PRIORITY);            /* 회차 */
+                       V_AFTER.EDITDATE          := SYSDATE;                                          /* 최종변경시간 */
+                       V_AFTER.EDITWHO           := #{gUserId};                                       /* 최종변경자 */
+
+                       TRTM_INPLAN.TR_UPDATE(
+                                V_AFTER
+                            ,   O_SUCCESS
+                            ,   O_ERRCODE
+                            ,   O_ERRMSG
+                        );                     
+    
+                        EXIT    WHEN O_SUCCESS < 1;
+    
+                    END;
+                      
+                END    LOOP;    
+                
+                #{success, mode=OUT, jdbcType=INTEGER, javaType=int}    :=  O_SUCCESS;
+                #{errCode, mode=OUT, jdbcType=INTEGER, javaType=int}    :=  O_ERRCODE;
+                #{errMsg,  mode=OUT, jdbcType=VARCHAR, javaType=String} :=  O_ERRMSG;
+    
+            END
+        }
+        ]]>        
+    </select>
+    
+    <select id="updateDmDocumentHDocNo" statementType="CALLABLE" resultType="HMAP">
+        <![CDATA[
+        {CALL  /* [TmMultiPopAllocationService.sqlx][updateDmDocumentHDocNo][문서정보헤더 UPDATE][sunho.kim][2025.06.23] */
+            DECLARE
+                V_AFTER     DM_DOCUMENT_H%rowtype;
+                O_SUCCESS   NUMBER         :=  1;      /* 성공여부(1이면 성공) */
+                O_ERRCODE   NUMBER         :=  0;      /* 오류 코드 */
+                O_ERRMSG    VARCHAR2(4000) := '';      /* 오류 메세지 */
+            BEGIN
+                FOR KEY_LIST IN (
+                    SELECT
+                            SERIALKEY
+                    FROM    DM_DOCUMENT_H
+                   WHERE    SERIALKEY    = #{serialkey}
+                )
+                LOOP
+                    BEGIN
+                        SELECT  *
+                        INTO    V_AFTER
+                        FROM    DM_DOCUMENT_H
+                        WHERE   SERIALKEY    =    KEY_LIST.SERIALKEY
+                        ;
+
+                       V_AFTER.REFERENCE02       := '<CARNO>' || #{carno} || '</CARNO>';              /* 참조데이터2 */
+                       V_AFTER.EDITDATE          := SYSDATE;                                          /* 최종변경시간 */
+                       V_AFTER.EDITWHO           := #{gUserId};                                       /* 최종변경자 */
+
+                       TRDM_DOCUMENT_H.TR_UPDATE(
+                                V_AFTER
+                            ,   O_SUCCESS
+                            ,   O_ERRCODE
+                            ,   O_ERRMSG
+                        );
+    
+                        EXIT    WHEN O_SUCCESS < 1;
+    
+                    END;
+                END    LOOP;
+    
+                #{success, mode=OUT, jdbcType=INTEGER, javaType=int}    :=  O_SUCCESS;
+                #{errCode, mode=OUT, jdbcType=INTEGER, javaType=int}    :=  O_ERRCODE;
+                #{errMsg,  mode=OUT, jdbcType=VARCHAR, javaType=String} :=  O_ERRMSG;
+    
+            END
+        }
+        ]]>        
+    </select>
+    
+    <insert id="insertIfTmResultDocNo">
+        INSERT  /* [TmMultiPopAllocationService.sqlx][insertIfTmResultDocNo][배차확정송신IF INSERT][sunho.kim][2025.06.23] */ 
+            INTO IF_TM_RESULT( 
+                 DCCODE
+                ,DOCTYPE
+                ,DOCDT
+                ,DOCNO
+                ,SLIPNO
+                ,STORERKEY
+                ,DELIVERYDT
+                ,CARNO
+                ,DRIVERID
+                ,DRIVERNAME
+                ,DRIVERPHONE1
+                ,CARAGENTKEY
+                ,CARAGENTNAME
+                ,CARAGENTPHONE
+                ,POPNO
+                ,DISTRICTCODE
+                ,DELIVERYGROUP
+                ,CONTRACTTYPE
+                ,CUSTKEY
+                ,ADDWHO
+                ,EDITWHO
+                ,ADDDATE
+                ,EDITDATE
+                ,IF_ID
+                ,IF_FLAG
+                ,IF_DESTINATION
+        )
+        SELECT   TM_INPLAN.DCCODE
+                ,TM_INPLAN.DOCTYPE
+                ,TM_INPLAN.DOCDT
+                ,TM_INPLAN.DOCNO
+                ,TM_INPLAN.SLIPNO
+                ,TM_INPLAN.STORERKEY
+                ,TM_INPLAN.SLIPDT
+                ,TM_INPLAN.CARNO
+                ,CM_DRIVER.DRIVERID
+                ,CM_DRIVER.DRIVERNAME
+                ,DECODE(NVL(CM_DRIVER.PHONE1,''),'',CM_DRIVER.PHONE2,CM_DRIVER.PHONE1)
+                ,CM_CAR.CARAGENTKEY
+                ,CM_CAR.CARAGENTNAME
+                ,CM_CAR.CARAGENTPHONE
+                ,TM_INPLAN.DELIVERYGROUP AS POPNO
+                ,TM_INPLAN.DISTRICTCODE
+                ,TM_INPLAN.DELIVERYGROUP
+                ,CM_CAR.CONTRACTTYPE
+                ,TM_INPLAN.CUSTKEY
+                ,TM_INPLAN.ADDWHO
+                ,TM_INPLAN.EDITWHO
+                ,SYSDATE
+                ,SYSDATE
+                ,'SCM0290'  AS IF_ID
+                ,'N'        AS IF_FLAG
+                ,'CS'       AS IF_DESTINATION   
+        FROM     TM_INPLAN
+        JOIN     CM_CAR
+        ON       CM_CAR.CARNO            = TM_INPLAN.CARNO
+        LEFT OUTER JOIN  
+                 CM_DRIVER
+        ON       CM_DRIVER.DRIVERID      = CM_CAR.DRIVER1
+        WHERE    TM_INPLAN.DCCODE        = #{dccode}
+        AND      TM_INPLAN.SLIPDT        = #{deliverydt}
+        AND      TM_INPLAN.DOCTYPE       = #{doctype}
+        AND      TM_INPLAN.SLIPNO        = #{slipno}
+        AND      TM_INPLAN.STATUS        = '90'
+    </insert>
+    
+</mapper>

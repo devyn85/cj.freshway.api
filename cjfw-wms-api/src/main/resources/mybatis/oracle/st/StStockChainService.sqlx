@@ -1,0 +1,368 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="stStockChainService">
+
+    <select id="getMasterList" resultType="cjfw.wms.st.dto.StStockChainResDto">
+        SELECT /* [stStockChainService.sqlx][getMasterList][상품별현재고(PLT)현황][jangjaehyun][20250923] */
+               ST_STOCK.DCCODE                                                           AS DCCODE,
+	           FN_DESCR_DC(ST_STOCK.DCCODE)                                              AS DCNAME,
+	           ST_STOCK.ORGANIZE                                                         AS ORGANIZE,
+	           FN_CODEDESCR(ST_STOCK.STORERKEY, 'STOCKTYPE', ST_STOCK.STOCKTYPE)         AS STOCKTYPE,
+	           FN_CODEDESCR(ST_STOCK.STORERKEY, 'STOCKGRADE', ST_STOCK.STOCKGRADE)       AS STOCKGRADE,
+	           MS_LOCATION.PLT_FLG                                                       AS PLT_FLG,
+	           ST_STOCK.SKU,
+	           MS_SKU.DESCRIPTION                                                        AS SKUNAME,
+	           FN_CODEDESCR(MS_SKU.STORERKEY, 'STORAGETYPE', MS_SKU.STORAGETYPE)         AS STORAGETYPE,
+	           ST_STOCK.UOM                                                              AS UOM,
+	           ST_STOCK.QTY                                                              AS QTY,
+	           MS_SKU.QTYPERBOX                                                          AS QTYPERBOX,
+	           MS_DC_PLT_LOAD.BOXPERLAYER * MS_DC_PLT_LOAD.LAYERPERPLT                   AS BOXPERPLT,     -- 팔렛당박스수 02/10
+	           MS_SKU.REFERENCE15                                                        AS REFERENCE15,
+	           MS_SKUCHAIN_MOQ.MOQ_SKU                                                   AS MOQ_SKU,
+	           MS_SKUCHAIN_MOQ.LEADTIME                                                  AS LEADTIME,
+               CASE WHEN MS_LOCATION.PLT_FLG = 'S' THEN 
+                   1
+               WHEN MS_DC_PLT_LOAD.BOXPERLAYER IS NOT NULL AND MS_DC_PLT_LOAD.LAYERPERPLT IS NOT NULL THEN
+                   CEIL(ST_STOCK.QTY / NULLIF(MS_SKU.QTYPERBOX,0) / NULLIF((MS_DC_PLT_LOAD.BOXPERLAYER * MS_DC_PLT_LOAD.LAYERPERPLT),0))
+               ELSE 
+                   --CEIL(ST_STOCK.QTY / NULLIF(MS_SKU.QTYPERBOX,0) / MS_SKUCHAIN.BOXPERPLT)
+                   NULL --20260211@기준값이 없으면 계산하지 않도록 수정 요청 BY SSS
+               END                                                                       AS BOXPERPLTQTY
+	      FROM MS_SKUCHAIN
+	      
+	      JOIN
+		        (   SELECT NVL(B.DCCODE, '공통')      AS JOIN_DCCODE
+		                 , NVL(B.PLANT , '공통')      AS JOIN_PLANT
+		                 , A.*
+		              FROM ST_STOCK             A
+		              LEFT
+		              JOIN MS_DC_PLT_LOAD       B
+		                ON B.DCCODE         = A.DCCODE
+		               AND B.PLANT          = A.ORGANIZE
+		               AND B.SKU            = A.SKU
+		               AND B.STORERKEY      = A.STORERKEY
+		             WHERE A.QTY            >  0		               
+		             	<if test="gStorerkey != null and gStorerkey != ''">
+					    	AND A.STORERKEY = #{gStorerkey}
+					 	</if>
+					   	<if test='multiDcCode != null and multiDcCode.length > 0'>
+							AND A.DCCODE IN
+					    	<foreach collection="multiDcCode" item="dccodeItem" open="(" separator="," close=")">
+					        	#{dccodeItem}
+					       	</foreach>
+						</if>
+						<if test='multiSku != null and multiSku !=""'>
+				        	AND A.SKU IN
+				        	(SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+				               FROM (SELECT #{multiSku} AS VAL FROM DUAL) A
+				             CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+				        </if>
+		        ) ST_STOCK
+	        ON MS_SKUCHAIN.STORERKEY 	= ST_STOCK.STORERKEY
+	       AND MS_SKUCHAIN.SKU 			= ST_STOCK.SKU
+	      JOIN MS_SKU
+	        ON MS_SKU.STORERKEY = MS_SKUCHAIN.STORERKEY
+	       AND MS_SKU.SKU = MS_SKUCHAIN.SKU
+	      JOIN MS_LOCATION
+	        ON MS_LOCATION.DCCODE = ST_STOCK.DCCODE
+	       AND MS_LOCATION.LOC = ST_STOCK.LOC
+	       AND MS_LOCATION.LOCTYPE IN ('STAGE', 'PICK', 'KEEP', 'CROSS', 'FIRSTOUT', 'LONGSTAY', 'CANCEL')
+	       AND ((MS_LOCATION.LOCCATEGORY IN ('RACK', 'YARD') AND ST_STOCK.DCCODE <![CDATA[!=]]> '2690') OR (MS_LOCATION.LOCCATEGORY IN ('RACK', 'YARD', 'AUTO') AND ST_STOCK.DCCODE IN ('2620', '2690')))
+	       AND MS_LOCATION.LOCFLAG = 'GOOD'
+	       AND CASE WHEN MS_LOCATION.DCCODE = '2690' AND MS_LOCATION.LOCTYPE = 'STAGE' THEN 'Y'
+	                WHEN MS_LOCATION.DCCODE = '2600' AND MS_LOCATION.LOCTYPE = 'STAGE' THEN 'Y'
+	                ELSE MS_LOCATION.OUT_YN
+	           END = 'Y'
+	       AND MS_LOCATION.DEL_YN = 'N'
+	       AND MS_LOCATION.STOCKTYPE = 'GOOD'
+	      JOIN CM_LOT
+	        ON CM_LOT.STORERKEY = ST_STOCK.STORERKEY
+	       AND CM_LOT.LOT = ST_STOCK.LOT
+	       AND 'TRUE' = CASE
+	                        WHEN CM_LOT.LOTTABLE01 = 'STD' OR MS_SKU.DURATIONTYPE = 'N' THEN 'TRUE'
+	                        WHEN MS_SKU.DURATIONTYPE = '1' AND FN_ISDATE(CM_LOT.LOTTABLE01) = 1
+	                         AND TO_DATE(CM_LOT.LOTTABLE01, 'YYYYMMDD') <![CDATA[<]]> TRUNC(SYSDATE) THEN 'FALSE'
+	                        WHEN MS_SKU.DURATIONTYPE IN ('2', '3') AND FN_ISDATE(CM_LOT.LOTTABLE01) = 1
+	                         AND TO_DATE(CM_LOT.LOTTABLE01, 'YYYYMMDD') + MS_SKU.DURATION - 1 <![CDATA[<]]> TRUNC(SYSDATE) THEN 'FALSE'
+	                        ELSE 'TRUE'
+	                    END
+	      LEFT OUTER JOIN MS_SKUCHAIN_MOQ
+	        ON MS_SKU.SKU = MS_SKUCHAIN_MOQ.SKU
+	       AND MS_SKU.STORERKEY = MS_SKUCHAIN_MOQ.STORERKEY
+	       AND MS_LOCATION.DCCODE = MS_SKUCHAIN_MOQ.DCCODE
+	      LEFT OUTER JOIN MS_DC_PLT_LOAD
+            ON MS_DC_PLT_LOAD.DCCODE         = ST_STOCK.JOIN_DCCODE   -- 02/10
+	       AND MS_DC_PLT_LOAD.PLANT          = ST_STOCK.JOIN_PLANT    -- 02/10
+	       AND MS_DC_PLT_LOAD.STORERKEY      = ST_STOCK.STORERKEY     -- 02/10
+	       AND MS_DC_PLT_LOAD.SKU            = ST_STOCK.SKU           -- 02/10
+	     WHERE 1=1
+	       AND MS_SKU.SERIALYN = 'N'
+	       AND (MS_LOCATION.PLT_FLG = 'P' OR MS_LOCATION.PLT_FLG IS NULL)
+	       AND ST_STOCK.QTY <![CDATA[>]]> 0
+	       AND MS_LOCATION.LOC NOT IN ('CROSS', 'DAILYCROSS', 'STAGE')
+	    <if test="gStorerkey != null and gStorerkey != ''">
+	       AND ST_STOCK.STORERKEY = #{gStorerkey}
+	    </if>
+	    <if test='multiDcCode != null and multiDcCode.length > 0'>
+		   AND ST_STOCK.DCCODE IN
+	        <foreach collection="multiDcCode" item="dccodeItem" open="(" separator="," close=")">
+	            #{dccodeItem}
+	        </foreach>
+		</if>
+	    <if test='multiSku != null and multiSku !=""'>
+          AND MS_SKU.SKU IN
+          (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                        FROM (SELECT #{multiSku} AS VAL FROM DUAL) A
+                     CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+        </if>
+	    <if test="reference15 != null and reference15 != ''">
+	       AND MS_SKU.REFERENCE15 = #{reference15}
+	    </if>
+	    <if test="stockType != null and stockType != ''">
+	       AND ST_STOCK.STOCKTYPE = #{stockType}
+	    </if>
+	    <if test="stockGrade != null and stockGrade != ''">
+	       AND ST_STOCK.STOCKGRADE = #{stockGrade}
+	    </if>	
+	    UNION ALL	
+	    SELECT ST_STOCK.DCCODE,
+	           FN_DESCR_DC(ST_STOCK.DCCODE) AS DCNAME,
+	           MAX(ST_STOCK.ORGANIZE) AS ORGANIZE,
+	           MAX(FN_CODEDESCR(ST_STOCK.STORERKEY, 'STOCKTYPE', ST_STOCK.STOCKTYPE)) AS STOCKTYPE,
+	           MAX(FN_CODEDESCR(ST_STOCK.STORERKEY, 'STOCKGRADE', ST_STOCK.STOCKGRADE)) AS STOCKGRADE,
+	           MAX(MS_LOCATION.PLT_FLG) AS PLT_FLG,
+	           ST_STOCK.SKU,
+	           MAX(MS_SKU.DESCRIPTION) AS SKUNAME,
+	           MAX(FN_CODEDESCR(MS_SKU.STORERKEY, 'STORAGETYPE', MS_SKU.STORAGETYPE)) AS STORAGETYPE,
+	           MAX(ST_STOCK.UOM) AS UOM,
+	           SUM(ST_STOCK.QTY) AS QTY,
+	           MAX(MS_SKU.QTYPERBOX) AS QTYPERBOX,
+	           MAX(MS_DC_PLT_LOAD.BOXPERLAYER * MS_DC_PLT_LOAD.LAYERPERPLT) AS BOXPERPLT,
+	           MAX(MS_SKU.REFERENCE15) AS REFERENCE15,
+	           MAX(MS_SKUCHAIN_MOQ.MOQ_SKU) AS MOQ_SKU,
+	           MAX(MS_SKUCHAIN_MOQ.LEADTIME) AS LEADTIME,
+	           CASE WHEN MAX(MS_LOCATION.PLT_FLG) = 'S' THEN 
+	               1
+	           WHEN MAX(MS_DC_PLT_LOAD.BOXPERLAYER) IS NOT NULL AND MAX(MS_DC_PLT_LOAD.LAYERPERPLT) IS NOT NULL THEN
+                   CEIL(SUM(ST_STOCK.QTY) / NULLIF(MAX(MS_SKU.QTYPERBOX),0) / NULLIF(MAX(MS_DC_PLT_LOAD.BOXPERLAYER * MS_DC_PLT_LOAD.LAYERPERPLT),0))
+	           ELSE 
+	               --CEIL(SUM(ST_STOCK.QTY) / NULLIF(MAX(MS_SKU.QTYPERBOX),0) / NULLIF(MAX(MS_SKUCHAIN.BOXPERPLT),0))
+	               NULL --20260211@기준값이 없으면 계산하지 않도록 수정 요청 BY SSS
+	           END AS BOXPERPLTQTY
+	      FROM MS_SKUCHAIN
+	      JOIN (   SELECT  NVL(B.DCCODE, '공통')      AS JOIN_DCCODE
+		                 , NVL(B.PLANT , '공통')      AS JOIN_PLANT
+		                 , A.*
+		              FROM ST_STOCK             A
+		              LEFT
+		              JOIN MS_DC_PLT_LOAD       B
+		                ON B.DCCODE         = A.DCCODE
+		               AND B.PLANT          = A.ORGANIZE
+		               AND B.SKU            = A.SKU
+		               AND B.STORERKEY      = A.STORERKEY
+		             WHERE A.QTY            >  0
+		             	<if test="gStorerkey != null and gStorerkey != ''">
+					    	AND A.STORERKEY = #{gStorerkey}
+					 	</if>
+					   	<if test='multiDcCode != null and multiDcCode.length > 0'>
+							AND A.DCCODE IN
+					    	<foreach collection="multiDcCode" item="dccodeItem" open="(" separator="," close=")">
+					        	#{dccodeItem}
+					       	</foreach>
+						</if>
+						<if test='multiSku != null and multiSku !=""'>
+				        	AND A.SKU IN
+				        	(SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+				               FROM (SELECT #{multiSku} AS VAL FROM DUAL) A
+				             CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+				        </if>
+		        )               ST_STOCK
+	        ON MS_SKUCHAIN.STORERKEY = ST_STOCK.STORERKEY
+	       AND MS_SKUCHAIN.SKU = ST_STOCK.SKU
+	      JOIN MS_SKU
+	        ON MS_SKU.STORERKEY = MS_SKUCHAIN.STORERKEY
+	       AND MS_SKU.SKU = MS_SKUCHAIN.SKU
+	      JOIN MS_LOCATION
+	        ON MS_LOCATION.DCCODE = ST_STOCK.DCCODE
+	       AND MS_LOCATION.LOC = ST_STOCK.LOC
+	       AND MS_LOCATION.LOCTYPE IN ('STAGE', 'PICK', 'KEEP', 'CROSS', 'FIRSTOUT', 'LONGSTAY', 'CANCEL')
+	       AND ((MS_LOCATION.LOCCATEGORY IN ('RACK', 'YARD') AND ST_STOCK.DCCODE <![CDATA[!=]]> '2690') OR (MS_LOCATION.LOCCATEGORY IN ('RACK', 'YARD', 'AUTO') AND ST_STOCK.DCCODE IN ('2620', '2690')))
+	       AND MS_LOCATION.LOCFLAG = 'GOOD'
+	       AND CASE WHEN MS_LOCATION.DCCODE = '2690' AND MS_LOCATION.LOCTYPE = 'STAGE' THEN 'Y'
+	                WHEN MS_LOCATION.DCCODE = '2600' AND MS_LOCATION.LOCTYPE = 'STAGE' THEN 'Y'
+	                ELSE MS_LOCATION.OUT_YN
+	           END = 'Y'
+	       AND MS_LOCATION.DEL_YN = 'N'
+	       AND MS_LOCATION.STOCKTYPE = 'GOOD'
+	      JOIN CM_LOT
+	        ON CM_LOT.STORERKEY = ST_STOCK.STORERKEY
+	       AND CM_LOT.LOT = ST_STOCK.LOT
+	       AND 'TRUE' = CASE
+	                        WHEN CM_LOT.LOTTABLE01 = 'STD' OR MS_SKU.DURATIONTYPE = 'N' THEN 'TRUE'
+	                        WHEN MS_SKU.DURATIONTYPE = '1' AND FN_ISDATE(CM_LOT.LOTTABLE01) = 1
+	                         AND TO_DATE(CM_LOT.LOTTABLE01, 'YYYYMMDD') <![CDATA[<]]> TRUNC(SYSDATE) THEN 'FALSE'
+	                        WHEN MS_SKU.DURATIONTYPE IN ('2', '3') AND FN_ISDATE(CM_LOT.LOTTABLE01) = 1
+	                         AND TO_DATE(CM_LOT.LOTTABLE01, 'YYYYMMDD') + MS_SKU.DURATION - 1 <![CDATA[<]]> TRUNC(SYSDATE) THEN 'FALSE'
+	                        ELSE 'TRUE'
+	                    END
+	      LEFT OUTER JOIN MS_SKUCHAIN_MOQ
+	        ON MS_SKU.SKU = MS_SKUCHAIN_MOQ.SKU
+	       AND MS_SKU.STORERKEY = MS_SKUCHAIN_MOQ.STORERKEY
+	       AND MS_LOCATION.DCCODE = MS_SKUCHAIN_MOQ.DCCODE
+	      LEFT OUTER JOIN MS_DC_PLT_LOAD
+            ON MS_DC_PLT_LOAD.DCCODE         = ST_STOCK.JOIN_DCCODE      -- 02/10
+	       AND MS_DC_PLT_LOAD.PLANT          = ST_STOCK.JOIN_PLANT       -- 02/10
+	       AND MS_DC_PLT_LOAD.STORERKEY      = ST_STOCK.STORERKEY        -- 02/10
+	       AND MS_DC_PLT_LOAD.SKU            = ST_STOCK.SKU              -- 02/10
+	     WHERE 1=1
+	       AND MS_SKU.SERIALYN = 'Y'
+	       AND (MS_LOCATION.PLT_FLG = 'P' OR MS_LOCATION.PLT_FLG IS NULL)
+	       AND ST_STOCK.QTY <![CDATA[>]]> 0
+	       AND MS_LOCATION.LOC NOT IN ('CROSS', 'DAILYCROSS', 'STAGE')
+	    <if test="gStorerkey != null and gStorerkey != ''">
+	       AND ST_STOCK.STORERKEY = #{gStorerkey}
+	    </if>
+	    <if test='multiDcCode != null and multiDcCode.length > 0'>
+		   AND ST_STOCK.DCCODE IN
+	        <foreach collection="multiDcCode" item="dccodeItem" open="(" separator="," close=")">
+	            #{dccodeItem}
+	        </foreach>
+		</if>
+	    <if test='multiSku != null and multiSku !=""'>
+          AND MS_SKU.SKU IN
+          (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                        FROM (SELECT #{multiSku} AS VAL FROM DUAL) A
+                     CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+        </if>
+	    <if test="reference15 != null and reference15 != ''">
+	       AND MS_SKU.REFERENCE15 = #{reference15}
+	    </if>
+	    <if test="stockType != null and stockType != ''">
+	       AND ST_STOCK.STOCKTYPE = #{stockType}
+	    </if>
+	    <if test="stockGrade != null and stockGrade != ''">
+	       AND ST_STOCK.STOCKGRADE = #{stockGrade}
+	    </if>
+	     GROUP BY ST_STOCK.DCCODE, ST_STOCK.SKU	
+	    UNION ALL	
+	    SELECT ST_STOCK.DCCODE,
+	           FN_DESCR_DC(ST_STOCK.DCCODE) AS DCNAME,
+	           MAX(ST_STOCK.ORGANIZE) AS ORGANIZE,
+	           MAX(FN_CODEDESCR(ST_STOCK.STORERKEY, 'STOCKTYPE', ST_STOCK.STOCKTYPE)) AS STOCKTYPE,
+	           MAX(FN_CODEDESCR(ST_STOCK.STORERKEY, 'STOCKGRADE', ST_STOCK.STOCKGRADE)) AS STOCKGRADE,
+	           MAX(MS_LOCATION.PLT_FLG) AS PLT_FLG,
+	           ST_STOCK.SKU,
+	           MAX(MS_SKU.DESCRIPTION) AS SKUNAME,
+	           MAX(FN_CODEDESCR(MS_SKU.STORERKEY, 'STORAGETYPE', MS_SKU.STORAGETYPE)) AS STORAGETYPE,
+	           MAX(ST_STOCK.UOM) AS UOM,
+	           SUM(ST_STOCK.QTY) AS QTY,
+	           MAX(MS_SKU.QTYPERBOX) AS QTYPERBOX,
+	           MAX(MS_DC_PLT_LOAD.BOXPERLAYER * MS_DC_PLT_LOAD.LAYERPERPLT) AS BOXPERPLT,
+	           MAX(MS_SKU.REFERENCE15) AS REFERENCE15,
+	           MAX(MS_SKUCHAIN_MOQ.MOQ_SKU) AS MOQ_SKU,
+	           MAX(MS_SKUCHAIN_MOQ.LEADTIME) AS LEADTIME,
+	           CASE WHEN MAX(MS_LOCATION.PLT_FLG) = 'S' THEN 
+	               1
+	           WHEN MAX(MS_DC_PLT_LOAD.BOXPERLAYER) IS NOT NULL AND MAX(MS_DC_PLT_LOAD.LAYERPERPLT) IS NOT NULL THEN
+                   CEIL(SUM(ST_STOCK.QTY) / NULLIF(MAX(MS_SKU.QTYPERBOX),0) / NULLIF(MAX(MS_DC_PLT_LOAD.BOXPERLAYER) * MAX(MS_DC_PLT_LOAD.LAYERPERPLT),0))
+	           ELSE 
+	               --CEIL(SUM(ST_STOCK.QTY) / NULLIF(MAX(MS_SKU.QTYPERBOX),0) / NULLIF(MAX(MS_SKUCHAIN.BOXPERPLT),0))
+	               NULL --20260211@기준값이 없으면 계산하지 않도록 수정 요청 BY SSS
+	           END AS BOXPERPLTQTY
+	      FROM MS_SKUCHAIN
+	      JOIN (   SELECT  NVL(B.DCCODE, '공통')      AS JOIN_DCCODE
+		                 , NVL(B.PLANT , '공통')      AS JOIN_PLANT
+		                 , A.*
+		              FROM ST_STOCK             A
+		              LEFT
+		              JOIN MS_DC_PLT_LOAD       B
+		                ON B.DCCODE         = A.DCCODE
+		               AND B.PLANT          = A.ORGANIZE
+		               AND B.SKU            = A.SKU
+		               AND B.STORERKEY      = A.STORERKEY
+		             WHERE A.QTY            >  0
+		             	<if test="gStorerkey != null and gStorerkey != ''">
+					    	AND A.STORERKEY = #{gStorerkey}
+					 	</if>
+					   	<if test='multiDcCode != null and multiDcCode.length > 0'>
+							AND A.DCCODE IN
+					    	<foreach collection="multiDcCode" item="dccodeItem" open="(" separator="," close=")">
+					        	#{dccodeItem}
+					       	</foreach>
+						</if>
+						<if test='multiSku != null and multiSku !=""'>
+				        	AND A.SKU IN
+				        	(SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+				               FROM (SELECT #{multiSku} AS VAL FROM DUAL) A
+				             CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+				        </if>
+		        )               ST_STOCK
+	        ON MS_SKUCHAIN.STORERKEY = ST_STOCK.STORERKEY
+	       AND MS_SKUCHAIN.SKU = ST_STOCK.SKU
+	      JOIN MS_SKU
+	        ON MS_SKU.STORERKEY = MS_SKUCHAIN.STORERKEY
+	       AND MS_SKU.SKU = MS_SKUCHAIN.SKU
+	      JOIN MS_LOCATION
+	        ON MS_LOCATION.DCCODE = ST_STOCK.DCCODE
+	       AND MS_LOCATION.LOC = ST_STOCK.LOC
+	       AND MS_LOCATION.LOCTYPE IN ('STAGE', 'PICK', 'KEEP', 'CROSS', 'FIRSTOUT', 'LONGSTAY', 'CANCEL')
+	       AND ((MS_LOCATION.LOCCATEGORY IN ('RACK', 'YARD') AND ST_STOCK.DCCODE <![CDATA[!=]]> '2690') OR (MS_LOCATION.LOCCATEGORY IN ('RACK', 'YARD', 'AUTO') AND ST_STOCK.DCCODE IN ('2620', '2690')))
+	       AND MS_LOCATION.LOCFLAG = 'GOOD'
+	       AND CASE WHEN MS_LOCATION.DCCODE = '2690' AND MS_LOCATION.LOCTYPE = 'STAGE' THEN 'Y'
+	                WHEN MS_LOCATION.DCCODE = '2600' AND MS_LOCATION.LOCTYPE = 'STAGE' THEN 'Y'
+	                ELSE MS_LOCATION.OUT_YN
+	           END = 'Y'
+	       AND MS_LOCATION.DEL_YN = 'N'
+	       AND MS_LOCATION.STOCKTYPE = 'GOOD'
+	      JOIN CM_LOT
+	        ON CM_LOT.STORERKEY = ST_STOCK.STORERKEY
+	       AND CM_LOT.LOT = ST_STOCK.LOT
+	       AND 'TRUE' = CASE
+	                        WHEN CM_LOT.LOTTABLE01 = 'STD' OR MS_SKU.DURATIONTYPE = 'N' THEN 'TRUE'
+	                        WHEN MS_SKU.DURATIONTYPE = '1' AND FN_ISDATE(CM_LOT.LOTTABLE01) = 1
+	                         AND TO_DATE(CM_LOT.LOTTABLE01, 'YYYYMMDD') <![CDATA[<]]> TRUNC(SYSDATE) THEN 'FALSE'
+	                        WHEN MS_SKU.DURATIONTYPE IN ('2', '3') AND FN_ISDATE(CM_LOT.LOTTABLE01) = 1
+	                         AND TO_DATE(CM_LOT.LOTTABLE01, 'YYYYMMDD') + MS_SKU.DURATION - 1 <![CDATA[<]]> TRUNC(SYSDATE) THEN 'FALSE'
+	                        ELSE 'TRUE'
+	                    END
+	      LEFT OUTER JOIN MS_SKUCHAIN_MOQ
+	        ON MS_SKU.SKU = MS_SKUCHAIN_MOQ.SKU
+	       AND MS_SKU.STORERKEY = MS_SKUCHAIN_MOQ.STORERKEY
+	       AND MS_LOCATION.DCCODE = MS_SKUCHAIN_MOQ.DCCODE
+	      LEFT OUTER JOIN MS_DC_PLT_LOAD
+            ON MS_DC_PLT_LOAD.DCCODE         = ST_STOCK.JOIN_DCCODE      -- 02/10
+	       AND MS_DC_PLT_LOAD.PLANT          = ST_STOCK.JOIN_PLANT       -- 02/10
+	       AND MS_DC_PLT_LOAD.STORERKEY      = ST_STOCK.STORERKEY        -- 02/10
+	       AND MS_DC_PLT_LOAD.SKU            = ST_STOCK.SKU              -- 02/10
+	     WHERE 1=1
+	       AND MS_LOCATION.PLT_FLG = 'S'
+	       AND ST_STOCK.QTY <![CDATA[>]]> 0
+	       AND MS_LOCATION.LOC NOT IN ('CROSS', 'DAILYCROSS', 'STAGE')
+	    <if test="gStorerkey != null and gStorerkey != ''">
+	       AND ST_STOCK.STORERKEY = #{gStorerkey}
+	    </if>
+	    <if test='multiDcCode != null and multiDcCode.length > 0'>
+		   AND ST_STOCK.DCCODE IN
+	        <foreach collection="multiDcCode" item="dccodeItem" open="(" separator="," close=")">
+	            #{dccodeItem}
+	        </foreach>
+		</if>
+	    <if test='multiSku != null and multiSku !=""'>
+          AND MS_SKU.SKU IN
+          (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                        FROM (SELECT #{multiSku} AS VAL FROM DUAL) A
+                     CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+        </if>
+	    <if test="reference15 != null and reference15 != ''">
+	       AND MS_SKU.REFERENCE15 = #{reference15}
+	    </if>
+	    <if test="stockType != null and stockType != ''">
+	       AND ST_STOCK.STOCKTYPE = #{stockType}
+	    </if>
+	    <if test="stockGrade != null and stockGrade != ''">
+	       AND ST_STOCK.STOCKGRADE = #{stockGrade}
+	    </if>
+	     GROUP BY ST_STOCK.DCCODE, ST_STOCK.SKU, ST_STOCK.LOC
+    </select>
+
+</mapper>

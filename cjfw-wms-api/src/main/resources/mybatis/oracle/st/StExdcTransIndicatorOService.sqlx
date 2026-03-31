@@ -1,0 +1,263 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="stExdcTransIndicatorOService">
+ 	<select id="getHeaderList"  resultType="StExdcTransIndicatorOListResDto">
+			/* [wdDeliveryMapper.xml][selectYearlySettlementReport][년도별 정산 장표 조회(운송료/출고량/KG당)][20260202] */
+			WITH BASE AS (
+			    SELECT
+			           SUBSTR(C.DELIVERYDATE, 1, 4)                                                     AS YY               /* 년도 */
+			         , SUBSTR(C.DELIVERYDATE, 1, 6)                                                     AS YM               /* 년월(YYYYMM) */
+			         , C.WORKPROCESSCODE                                                                AS WORKPROCESSCODE  /* 작업구분(SO/STO) */
+			         , C.REFERENCE10                                                                    AS FREIGHT           /* 운송료(원) */
+			         , NVL(
+			               FN_CONV_UOM(
+			                   A.STORERKEY,
+			                   A.SKU,
+			                   SKU.BASEUOM,
+			                   A.UOM,
+			                   FN_UOMCAL(C.BUNMO, C.BUNJA, A.CONFIRMQTY)
+			               ) * SKU.NETWEIGHT
+			           , 0)                                                                             AS NETWEIGHT         /* 출고중량(kg) */
+			      FROM WD_INPLAN A
+			      JOIN DM_DOCUMENT_H B
+			        ON <![CDATA[ A.DCCODE  = B.DCCODE       ]]>
+			       AND <![CDATA[ A.SLIPDT  = B.DELIVERYDATE ]]>
+			       AND <![CDATA[ A.DOCNO   = B.DOCNO        ]]>
+			       AND <![CDATA[ A.STATUS  = '90'           ]]>
+			       AND <![CDATA[ B.DOCTYPE = 'WD'           ]]>
+			       AND <![CDATA[ B.DEL_YN  = 'N'            ]]>
+			      JOIN DM_DOCUMENT_D C
+			        ON <![CDATA[ A.DCCODE   = C.DCCODE       ]]>
+			       AND <![CDATA[ A.SLIPDT   = C.DELIVERYDATE ]]>
+			       AND <![CDATA[ A.DOCNO    = C.DOCNO        ]]>
+			       AND <![CDATA[ C.DOCLINE  = A.DOCLINE      ]]>
+			       AND <![CDATA[ C.DOCTYPE  = A.DOCTYPE      ]]>
+			       AND <![CDATA[ C.DEL_YN   = 'N'            ]]>
+			       AND <![CDATA[ C.STATUS   = '90'           ]]>
+			       AND <![CDATA[ C.WORKPROCESSCODE IN ('SO','STO') ]]>
+			 LEFT JOIN MS_SKU SKU
+			        ON <![CDATA[ SKU.SKU       = A.SKU       ]]>
+			       AND <![CDATA[ SKU.STORERKEY = A.STORERKEY ]]>
+			       AND <![CDATA[ SKU.DEL_YN    = 'N'         ]]>
+			     WHERE 1 = 1
+			       AND <![CDATA[ A.DCCODE    = #{dcCode}     ]]>
+			       AND <![CDATA[ A.STORERKEY = 'FW00'        ]]>
+			       AND <![CDATA[ C.CHANNEL IN ('1','2','3')  ]]>
+			       AND <![CDATA[ C.STATUS IN ( 
+			                SELECT BASECODE
+			                  FROM CM_CODE_STORER
+			                 WHERE STORERKEY = A.STORERKEY
+			                   AND CODELIST  = 'STATUS_WD'
+			                   AND DATA2     = 'EX'
+			           ) ]]>
+			       AND <![CDATA[ C.DELIVERYDATE BETWEEN TO_CHAR(TO_NUMBER(#{year}) - 1) || '0101'
+			                                        AND #{year} || '1231' ]]>
+			<if test="storageType != null and storageType != ''">
+			  AND SKU.STORAGETYPE = #{storageType}
+			</if>
+			),
+			MTH AS (
+			    SELECT
+			           YY                                                                                AS YY               /* 년도 */
+			         , YM                                                                                AS YM               /* 년월(YYYYMM) */
+			         , SUBSTR(YM, 5, 2)                                                                  AS MM               /* 월(MM) */
+			         , WORKPROCESSCODE                                                                   AS WORKPROCESSCODE  /* 작업구분(SO/STO) */
+			         , SUM(FREIGHT)                                                                      AS FREIGHT_SUM       /* 월 운송료합(원) */
+			         , SUM(NETWEIGHT)                                                                    AS NETWEIGHT_SUM     /* 월 중량합(kg) */
+			      FROM BASE
+			     GROUP BY YY, YM, SUBSTR(YM, 5, 2), WORKPROCESSCODE
+			),
+			MTH_TOT AS (
+			    SELECT
+			           YY                                                                                AS YY               /* 년도 */
+			         , YM                                                                                AS YM               /* 년월(YYYYMM) */
+			         , MM                                                                                AS MM               /* 월(MM) */
+			         , 'TOT'                                                                             AS WORKPROCESSCODE  /* 작업구분(TOT) */
+			         , SUM(FREIGHT_SUM)                                                                  AS FREIGHT_SUM       /* 월 운송료합(원) */
+			         , SUM(NETWEIGHT_SUM)                                                                AS NETWEIGHT_SUM     /* 월 중량합(kg) */
+			      FROM MTH
+			     GROUP BY YY, YM, MM
+			),
+			MTH_ITEM AS (
+			    SELECT
+			           YY                                                                                AS YY               /* 년도 */
+			         , MM                                                                                AS MM               /* 월(MM) */
+			         , WORKPROCESSCODE                                                                   AS WORKPROCESSCODE  /* 작업구분 */
+			         , '년도별운송료(억원)'                                                               AS ITEM             /* 항목 */
+			         , (FREIGHT_SUM / 1E8)                                                               AS VAL              /* 월값 */
+			      FROM (
+			            SELECT * FROM MTH
+			            UNION ALL
+			            SELECT * FROM MTH_TOT
+			           )
+			
+			    UNION ALL
+			
+			    SELECT
+			           YY                                                                                AS YY               /* 년도 */
+			         , MM                                                                                AS MM               /* 월(MM) */
+			         , WORKPROCESSCODE                                                                   AS WORKPROCESSCODE  /* 작업구분 */
+			         , '출고량(톤)'                                                                      AS ITEM             /* 항목 */
+			         , (NETWEIGHT_SUM / 1000)                                                            AS VAL              /* 월값 */
+			      FROM (
+			            SELECT * FROM MTH
+			            UNION ALL
+			            SELECT * FROM MTH_TOT
+			           )
+			
+			    UNION ALL
+			
+			    SELECT
+			           YY                                                                                AS YY               /* 년도 */
+			         , MM                                                                                AS MM               /* 월(MM) */
+			         , WORKPROCESSCODE                                                                   AS WORKPROCESSCODE  /* 작업구분 */
+			         , 'KG당운송료(원)'                                                                  AS ITEM             /* 항목 */
+			         , (FREIGHT_SUM / NULLIF(NETWEIGHT_SUM, 0))                                          AS VAL              /* 월값 */
+			      FROM (
+			            SELECT * FROM MTH
+			            UNION ALL
+			            SELECT * FROM MTH_TOT
+			           )
+			),
+			CUR AS (
+			    SELECT
+			           ITEM                                                                              AS ITEM             /* 항목 */
+			         , WORKPROCESSCODE                                                                   AS WORKPROCESSCODE  /* 작업구분 */
+			         , AVG(VAL)                                                                          AS AVG_VAL          /* 평균값 */
+			         , SUM(VAL)                                                                          AS SUM_VAL          /* 누계값 */
+			         , SUM(CASE WHEN MM = '01' THEN VAL END)                                             AS M01              /* 1월 */
+			         , SUM(CASE WHEN MM = '02' THEN VAL END)                                             AS M02              /* 2월 */
+			         , SUM(CASE WHEN MM = '03' THEN VAL END)                                             AS M03              /* 3월 */
+			         , SUM(CASE WHEN MM = '04' THEN VAL END)                                             AS M04              /* 4월 */
+			         , SUM(CASE WHEN MM = '05' THEN VAL END)                                             AS M05              /* 5월 */
+			         , SUM(CASE WHEN MM = '06' THEN VAL END)                                             AS M06              /* 6월 */
+			         , SUM(CASE WHEN MM = '07' THEN VAL END)                                             AS M07              /* 7월 */
+			         , SUM(CASE WHEN MM = '08' THEN VAL END)                                             AS M08              /* 8월 */
+			         , SUM(CASE WHEN MM = '09' THEN VAL END)                                             AS M09              /* 9월 */
+			         , SUM(CASE WHEN MM = '10' THEN VAL END)                                             AS M10              /* 10월 */
+			         , SUM(CASE WHEN MM = '11' THEN VAL END)                                             AS M11              /* 11월 */
+			         , SUM(CASE WHEN MM = '12' THEN VAL END)                                             AS M12              /* 12월 */
+			      FROM MTH_ITEM
+			     WHERE <![CDATA[ YY = #{year} ]]>
+			     GROUP BY ITEM, WORKPROCESSCODE
+			),
+			PRE AS (
+			    SELECT
+			           ITEM                                                                              AS ITEM             /* 항목 */
+			         , WORKPROCESSCODE                                                                   AS WORKPROCESSCODE  /* 작업구분 */
+			         , AVG(VAL)                                                                          AS AVG_VAL          /* 평균값 */
+			         , SUM(VAL)                                                                          AS SUM_VAL          /* 누계값 */
+			         , SUM(CASE WHEN MM = '01' THEN VAL END)                                             AS M01              /* 1월 */
+			         , SUM(CASE WHEN MM = '02' THEN VAL END)                                             AS M02              /* 2월 */
+			         , SUM(CASE WHEN MM = '03' THEN VAL END)                                             AS M03              /* 3월 */
+			         , SUM(CASE WHEN MM = '04' THEN VAL END)                                             AS M04              /* 4월 */
+			         , SUM(CASE WHEN MM = '05' THEN VAL END)                                             AS M05              /* 5월 */
+			         , SUM(CASE WHEN MM = '06' THEN VAL END)                                             AS M06              /* 6월 */
+			         , SUM(CASE WHEN MM = '07' THEN VAL END)                                             AS M07              /* 7월 */
+			         , SUM(CASE WHEN MM = '08' THEN VAL END)                                             AS M08              /* 8월 */
+			         , SUM(CASE WHEN MM = '09' THEN VAL END)                                             AS M09              /* 9월 */
+			         , SUM(CASE WHEN MM = '10' THEN VAL END)                                             AS M10              /* 10월 */
+			         , SUM(CASE WHEN MM = '11' THEN VAL END)                                             AS M11              /* 11월 */
+			         , SUM(CASE WHEN MM = '12' THEN VAL END)                                             AS M12              /* 12월 */
+			      FROM MTH_ITEM
+			     WHERE <![CDATA[ YY = TO_CHAR(TO_NUMBER(#{year}) - 1) ]]>
+			     GROUP BY ITEM, WORKPROCESSCODE
+			)
+			SELECT
+			       X.ITEM                                                                                AS ITEM             /* 항목 */
+			     , X.GUBUN                                                                               AS GUBUN            /* 구분(전년도대비/STO/SO) */
+			     , ROUND(X.AVG_COL, 3)                                                                   AS AVG              /* 평균 */
+			     , ROUND(X.SUM_COL, 3)                                                                   AS ACC              /* 누계 */
+			     , ROUND(X.M01, 3)                                                                       AS M01              /* 1월 */
+			     , ROUND(X.M02, 3)                                                                       AS M02              /* 2월 */
+			     , ROUND(X.M03, 3)                                                                       AS M03              /* 3월 */
+			     , ROUND(X.M04, 3)                                                                       AS M04              /* 4월 */
+			     , ROUND(X.M05, 3)                                                                       AS M05              /* 5월 */
+			     , ROUND(X.M06, 3)                                                                       AS M06              /* 6월 */
+			     , ROUND(X.M07, 3)                                                                       AS M07              /* 7월 */
+			     , ROUND(X.M08, 3)                                                                       AS M08              /* 8월 */
+			     , ROUND(X.M09, 3)                                                                       AS M09              /* 9월 */
+			     , ROUND(X.M10, 3)                                                                       AS M10              /* 10월 */
+			     , ROUND(X.M11, 3)                                                                       AS M11              /* 11월 */
+			     , ROUND(X.M12, 3)                                                                       AS M12              /* 12월 */
+			  FROM (
+			        SELECT
+                   C.ITEM                                                                       AS ITEM             /* 항목 */
+                 , '전년도대비'                                                                     AS GUBUN            /* 구분 */
+                 , NVL(ROUND((C.AVG_VAL - P.AVG_VAL) / NULLIF(P.AVG_VAL, 0) * 100, 3), 0)       AS AVG_COL          /* 평균(%) */
+                 , NVL(ROUND((C.SUM_VAL - P.SUM_VAL) / NULLIF(P.SUM_VAL, 0) * 100, 3), 0)       AS SUM_COL          /* 누계(%) */
+                 , NVL(ROUND((C.M01     - P.M01)     / NULLIF(P.M01,     0) * 100, 3), 0)       AS M01              /* 1월(%) */
+                 , NVL(ROUND((C.M02     - P.M02)     / NULLIF(P.M02,     0) * 100, 3), 0)       AS M02              /* 2월(%) */
+                 , NVL(ROUND((C.M03     - P.M03)     / NULLIF(P.M03,     0) * 100, 3), 0)       AS M03              /* 3월(%) */
+                 , NVL(ROUND((C.M04     - P.M04)     / NULLIF(P.M04,     0) * 100, 3), 0)       AS M04              /* 4월(%) */
+                 , NVL(ROUND((C.M05     - P.M05)     / NULLIF(P.M05,     0) * 100, 3), 0)       AS M05              /* 5월(%) */
+                 , NVL(ROUND((C.M06     - P.M06)     / NULLIF(P.M06,     0) * 100, 3), 0)       AS M06              /* 6월(%) */
+                 , NVL(ROUND((C.M07     - P.M07)     / NULLIF(P.M07,     0) * 100, 3), 0)       AS M07              /* 7월(%) */
+                 , NVL(ROUND((C.M08     - P.M08)     / NULLIF(P.M08,     0) * 100, 3), 0)       AS M08              /* 8월(%) */
+                 , NVL(ROUND((C.M09     - P.M09)     / NULLIF(P.M09,     0) * 100, 3), 0)       AS M09              /* 9월(%) */
+                 , NVL(ROUND((C.M10     - P.M10)     / NULLIF(P.M10,     0) * 100, 3), 0)       AS M10              /* 10월(%) */
+                 , NVL(ROUND((C.M11     - P.M11)     / NULLIF(P.M11,     0) * 100, 3), 0)       AS M11              /* 11월(%) */
+                 , NVL(ROUND((C.M12     - P.M12)     / NULLIF(P.M12,     0) * 100, 3), 0)       AS M12              /* 12월(%) */
+                 , 1                                                                            AS SORT_G           /* 정렬 */
+			          FROM CUR C
+			          JOIN PRE P
+			            ON <![CDATA[ P.ITEM = C.ITEM ]]>
+			           AND <![CDATA[ P.WORKPROCESSCODE = 'TOT' ]]>
+			         WHERE <![CDATA[ C.WORKPROCESSCODE = 'TOT' ]]>
+			
+			        UNION ALL
+			
+			        SELECT
+			               ITEM                                                                          AS ITEM             /* 항목 */
+			             , 'STO'                                                                         AS GUBUN            /* 구분 */
+			             , ROUND(AVG_VAL, 3)                                                             AS AVG_COL          /* 평균 */
+			             , ROUND(SUM_VAL, 3)                                                             AS SUM_COL          /* 누계 */
+			             , ROUND(NVL(M01,0), 3)                                                          AS M01              /* 1월 */
+			             , ROUND(NVL(M02,0), 3)                                                          AS M02              /* 2월 */
+			             , ROUND(NVL(M03,0), 3)                                                          AS M03              /* 3월 */
+			             , ROUND(NVL(M04,0), 3)                                                          AS M04              /* 4월 */
+			             , ROUND(NVL(M05,0), 3)                                                          AS M05              /* 5월 */
+			             , ROUND(NVL(M06,0), 3)                                                          AS M06              /* 6월 */
+			             , ROUND(NVL(M07,0), 3)                                                          AS M07              /* 7월 */
+			             , ROUND(NVL(M08,0), 3)                                                          AS M08              /* 8월 */
+			             , ROUND(NVL(M09,0), 3)                                                          AS M09              /* 9월 */
+			             , ROUND(NVL(M10,0), 3)                                                          AS M10              /* 10월 */
+			             , ROUND(NVL(M11,0), 3)                                                          AS M11              /* 11월 */
+			             , ROUND(NVL(M12,0), 3)                                                          AS M12              /* 12월 */
+			             , 2                                                                              AS SORT_G           /* 정렬 */
+			          FROM CUR
+			         WHERE <![CDATA[ WORKPROCESSCODE = 'STO' ]]>
+			
+			        UNION ALL
+			
+			        SELECT
+			               ITEM                                                                          AS ITEM             /* 항목 */
+			             , 'SO'                                                                          AS GUBUN            /* 구분 */
+			             , ROUND(AVG_VAL, 3)                                                             AS AVG_COL          /* 평균 */
+			             , ROUND(SUM_VAL, 3)                                                             AS SUM_COL          /* 누계 */
+			             , ROUND(NVL(M01,0), 3)                                                          AS M01              /* 1월 */
+			             , ROUND(NVL(M02,0), 3)                                                          AS M02              /* 2월 */
+			             , ROUND(NVL(M03,0), 3)                                                          AS M03              /* 3월 */
+			             , ROUND(NVL(M04,0), 3)                                                          AS M04              /* 4월 */
+			             , ROUND(NVL(M05,0), 3)                                                          AS M05              /* 5월 */
+			             , ROUND(NVL(M06,0), 3)                                                          AS M06              /* 6월 */
+			             , ROUND(NVL(M07,0), 3)                                                          AS M07              /* 7월 */
+			             , ROUND(NVL(M08,0), 3)                                                          AS M08              /* 8월 */
+			             , ROUND(NVL(M09,0), 3)                                                          AS M09              /* 9월 */
+			             , ROUND(NVL(M10,0), 3)                                                          AS M10              /* 10월 */
+			             , ROUND(NVL(M11,0), 3)                                                          AS M11              /* 11월 */
+			             , ROUND(NVL(M12,0), 3)                                                          AS M12              /* 12월 */
+			             , 3                                                                              AS SORT_G           /* 정렬 */
+			          FROM CUR
+			         WHERE <![CDATA[ WORKPROCESSCODE = 'SO' ]]>
+			       ) X
+			 ORDER BY
+			       CASE X.ITEM
+			            WHEN '년도별운송료(억원)' THEN 1
+			            WHEN '출고량(톤)'        THEN 2
+			            WHEN 'KG당운송료(원)'    THEN 3
+			            ELSE 9
+			       END
+			     , X.SORT_G
+	</select>
+</mapper>

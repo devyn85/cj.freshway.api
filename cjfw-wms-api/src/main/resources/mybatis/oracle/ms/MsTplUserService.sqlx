@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="msTplUserService">
+
+    <!-- 화주관리 사용자 조회 -->
+    <select id="getUserList" resultType="MsTplUserResDto">
+       SELECT /* [msTplUserService.sqlx][getUserList][화주 그룹 사용자 조회][ParkYoSep][2025..21] */
+  			  FRAMEONE_USER.USER_ID                                       AS USER_ID                
+             ,FRAMEONE_USER.USER_ID   || ' | ' ||  FRAMEONE_USER.USER_NM  AS USER_NM_LIST
+             , FRAMEONE_USER.USER_NM									  AS USER_NM
+             ,FRAMEONE_USER.DEF_ORGANIZE                                  AS ORGANIZE
+             ,FRAMEONE_USER.CUSTKEY                                       AS CUSTKEY
+             ,FRAMEONE_USER.DEF_DCCODE                                    AS DCCODE
+             ,MS_CUST.DESCRIPTION                                         AS CUST_NM
+        FROM FRAMEONE_USER
+        LEFT OUTER JOIN FRAMEONE_AUTH_USER ON FRAMEONE_AUTH_USER.USER_ID = FRAMEONE_USER.USER_ID
+            AND FRAMEONE_AUTH_USER.AUTH_CD = 'LOGISONE_0504'
+        LEFT JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = FRAMEONE_AUTH_USER.REG_ID  /*등록자명*/
+        LEFT JOIN FRAMEONE_USER USER2 ON USER2.USER_ID = FRAMEONE_AUTH_USER.UPD_ID  /*수정자명*/
+        LEFT JOIN MS_CUST
+               ON MS_CUST.STORERKEY = 'FW00'
+              AND MS_CUST.CUSTKEY = FRAMEONE_USER.CUSTKEY 
+        WHERE 1 = 1
+            AND FRAMEONE_USER.EMPTYPE NOT IN ('01', '02', '03')
+            AND FRAMEONE_USER.EMPTYPE = 'A01'
+             
+             
+        ORDER BY FRAMEONE_USER.USER_ID
+    </select>
+
+    <!-- 화주관리 조회(목록) -->
+    <select id="getMasterList" resultType="MsTplUserResDto">
+        SELECT    /* [msTplUserService.sqlx][msTplUserService.getMasterList][화주관리 조회][ParkYoSep] */
+               MS_CLIENT.SERIALKEY  AS SERIALKEY   /*데이터번호*/
+             , MS_CLIENT.USER_ID    AS FRAMEONE_USER_ID     /*사용자ID*/
+             , MS_CLIENT.USER_ID    AS USER_ID     /*사용자ID*/
+             , USER3.USER_NM        AS USER_NM     /* 사용자명*/
+             , MS_CLIENT.CUSTKEY    AS CUSTKEY     /* 거래처코드*/
+             , CUST.DESCRIPTION     AS CUST_NM     /* 거래처명*/
+             , MS_CLIENT.VENDOR     AS PARTNER_CD  /* 협력사코드 */
+             , PARTNER.DESCRIPTION  AS PARTNER_NM  /* 협력사명*/
+             , MS_CLIENT.DCCODE     AS DCCODE      /* 물류센터*/
+             , MS_CLIENT.ORGANIZE   AS ORGANIZE    /* 창고 */
+             , ORGANIZE.DESCRIPTION AS ORGANIZE_NM /* 창고명*/
+             , MS_CLIENT.RMK        AS RMK         /* 비고 */
+             , MS_CLIENT.FROMDATE   AS FROMDATE    /* 적용시작일자*/
+             , MS_CLIENT.TODATE     AS TODATE      /* 적용종료일자*/
+             , MS_CLIENT.ADDDATE    AS ADDDATE     /* 최초등록시간*/
+             , MS_CLIENT.EDITDATE   AS EDITDATE    /* 최종변경시간*/
+             , MS_CLIENT.ADDWHO     AS ADDWHO      /* 최초등록자*/
+             , MS_CLIENT.EDITWHO    AS EDITWHO     /* 최종변경자*/
+             , USER1.USER_NM        AS ADDWHONAME  /* 등록자명 */
+             , USER2.USER_NM        AS EDITWHONAME /* 수정자명 */
+          FROM MS_CLIENT
+          LEFT JOIN FRAMEONE_USER USER1 
+            ON USER1.USER_ID = MS_CLIENT.ADDWHO    /*등록자명*/
+          LEFT JOIN FRAMEONE_USER USER2 
+            ON USER2.USER_ID = MS_CLIENT.EDITWHO   /*수정자명*/
+          LEFT JOIN MS_CUST CUST                   
+            ON MS_CLIENT.CUSTKEY = CUST.CUSTKEY
+           AND CUST.STORERKEY   =  'FW00'
+           AND CUST.CUSTTYPE    ='C'              /*협력사명 */
+         LEFT JOIN MS_CUST PARTNER
+           ON MS_CLIENT.VENDOR = PARTNER.CUSTKEY
+          AND PARTNER.STORERKEY   =  'FW00'
+          AND PARTNER.CUSTTYPE    ='P'            /*거래처명*/
+         LEFT JOIN FRAMEONE_USER USER3
+           ON MS_CLIENT.USER_ID = USER3.USER_ID   /*화주명*/
+         LEFT JOIN CM_DCXORGANIZE ORGANIZE
+             ON ORGANIZE.ORGANIZE = MS_CLIENT.ORGANIZE /* 창고명 */
+        WHERE 1=1
+         <![CDATA[
+            AND MS_CLIENT.TODATE >= #{fromDate}
+            AND MS_CLIENT.FROMDATE <= #{toDate}  
+            ]]>
+        <if test='dcCode != null and dcCode !=""'>
+            AND MS_CLIENT.DCCODE = #{dcCode}
+        </if>
+         <if test='dcCode != null and dcCode !=""'>
+            AND MS_CLIENT.DCCODE = #{dcCode}
+        </if>
+    </select>
+     <insert id="clientInsert">
+        INSERT /* [msTplUserService.xml][clientInsert][화주 정보 입력][ParkYoSep][20251028] */
+        INTO MS_CLIENT (
+                               SERIALKEY           /* 데이터번호 */
+                              , USER_ID   /* 화주id */
+                              , CUSTKEY /*거래처*/
+                              , VENDOR /*협력사*/
+                              ,DCCODE         /* 물류센터 */
+                              , ORGANIZE       /* 창고 */
+                              , RMK                 /* 비고 */
+                              , FROMDATE            /* 시작일자 */
+                              , TODATE              /* 종료일자 */
+                              , ADDDATE             /* 최초등록시간 */
+                              , EDITDATE            /* 최종변경시간 */
+                              , ADDWHO              /* 최초등록자 */
+                              , EDITWHO             /* 최종변경자 */
+                           )
+                    SELECT
+                            ( NVL((SELECT MAX(SERIALKEY) FROM MS_CLIENT), 0) + 1) AS SERIALKEY
+                            
+                            , #{userId}
+                            , #{custKey}
+                            , #{partnerCd}
+                            , #{dcCode}
+                            , #{organize}
+                            , #{rmk}
+                            , #{fromDate}
+                            , #{toDate}
+                            , SYSDATE
+                            , SYSDATE
+                            , #{gUserId}
+                            , #{gUserId}
+                        FROM DUAL
+                       WHERE NOT EXISTS (
+                                         SELECT 1
+                                           FROM MS_CLIENT
+                                          WHERE(USER_ID    = #{userId} OR CUSTKEY = #{custKey} OR VENDOR = #{partnerCd} )
+                                         
+                                            AND FROMDATE  <![CDATA[ <= ]]> #{toDate}
+                                            AND TODATE    <![CDATA[ >= ]]> #{fromDate}
+                                          )
+    </insert>
+        
+    <update id="clientUpdate">
+        UPDATE /* [msTplUserService.xml][clientUpdate][화주 정보 정보 수정][ParkYoSep][20251017] */
+               MS_CLIENT
+           SET
+           <if test='rmk != null and rmk !=""'>
+               RMK            = #{rmk},
+             </if>
+               FROMDATE       = #{fromDate},
+               TODATE         = #{toDate},
+               EDITDATE       = SYSDATE,
+               EDITWHO        = #{gUserId}
+         WHERE SERIALKEY      = #{serialKey}
+           AND NOT EXISTS (
+                            SELECT 1
+                              FROM MS_CLIENT
+                             WHERE (USER_ID    = #{userId} OR CUSTKEY = #{custKey} OR VENDOR = #{partnerCd} )
+                              
+                               AND FROMDATE  <![CDATA[ <= ]]> #{toDate}
+                               AND TODATE    <![CDATA[ >= ]]> #{fromDate}
+                               AND SERIALKEY != #{serialKey}
+                          )
+    </update>
+</mapper>

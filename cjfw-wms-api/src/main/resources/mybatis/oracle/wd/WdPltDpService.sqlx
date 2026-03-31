@@ -1,0 +1,170 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+ * Copyright 2025. CJ OliveNetworks Co. all rights reserved.
+ *
+ * @author      : KimDongHan (liop0123@cj.net)
+ * @date        : 2025.09.22
+ * @description : 재고 > 공용기 관리업 > PLT 수불 관리 SQL
+ * @issues      :
+-->
+<mapper namespace="wdPltDpService">
+
+    <select id="getMasterList" resultType="cjfw.wms.wd.dto.WdPltDpResDto">
+		SELECT /* [WdPltDpService.sqlx][WdPltDpService.getMasterList][재고 > 공용기 관리업 > PLT 수불 관리 조회][KimDongHan][2025-09-22] */ 
+		       WD_PLT_INOUT.SERIALKEY                                              AS SERIALKEY           /* 00. 데이터번호 */
+		     , WD_PLT_INOUT.DCCODE                                                 AS DCCODE              /* 01. 물류센터 */
+		     , FN_GETDCNAME(WD_PLT_INOUT.DCCODE)                                   AS DCNAME              /* 01. 물류센터 */
+		     , WD_PLT_INOUT.DELIVERYDATE                                           AS DELIVERYDATE        /* 02. 출고일자 */
+		     , WD_PLT_INOUT.PLT_COM_DV                                             AS PLT_COM_DV          /* 03. 파렛트 구분(공통코드 : PLT_COMPANY) */
+		     , WD_PLT_INOUT.INOUT_DV                                               AS INOUT_DV            /* 04. 입/출 구분(공통코드 : DOCTYPE_VESSEL) */
+		     , WD_PLT_INOUT.QTY                                                    AS QTY                 /* 05. 수량 */
+		     , WD_PLT_INOUT.CUSTKEY                                                AS CUSTKEY             /* 06. 거래처코드 */
+		     , MS_CUST.DESCRIPTION						                           AS CUSTKEYNAME         /* 07. 거래처명*/
+		     , WD_PLT_INOUT.PLT_SLIPNO                                             AS PLT_SLIPNO          /* 08. 파렛트 전표번호 */
+		     , WD_PLT_INOUT.RMK                                                    AS RMK                 /* 09. 비고 */
+		     , USER1.USER_NM                                                       AS ADDWHO              /* 10. 등록자 */
+		     , TO_CHAR(WD_PLT_INOUT.ADDDATE,'YYYY-MM-DD HH24:MI:SS')               AS ADDDATE	          /* 11. 등록일시 */
+		     , USER2.USER_NM                                                       AS EDITWHO             /* 12. 수정자 */
+		     , TO_CHAR(WD_PLT_INOUT.EDITDATE,'YYYY-MM-DD HH24:MI:SS')              AS EDITDATE            /* 13. 수정일시 */
+		     , 'A'                                                                 AS GUBUN               /* 14. 상태 */ 
+		     , USER1.USER_ID                                                       AS ADD_ID              /* 등록자ID */
+		     , USER2.USER_ID                                                       AS UPD_ID              /* 수정자ID */
+		  FROM WD_PLT_INOUT
+          LEFT OUTER JOIN MS_CUST ON MS_CUST.STORERKEY = #{gStorerkey}
+           AND MS_CUST.CUSTKEY                         =  WD_PLT_INOUT.CUSTKEY
+           AND MS_CUST.CUSTTYPE                        = 'P'
+          LEFT OUTER JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = WD_PLT_INOUT.ADDWHO   /*등록자명*/
+          LEFT OUTER JOIN FRAMEONE_USER USER2 ON USER2.USER_ID = WD_PLT_INOUT.EDITWHO  /*수정자명*/
+		 WHERE 1=1
+		<if test="dccode != null and dccode != ''">
+		   AND WD_PLT_INOUT.DCCODE              = #{dccode} 
+		</if>
+		<if test="deliverydtFrom != null and deliverydtFrom != ''">    		
+		  AND WD_PLT_INOUT.DELIVERYDATE <![CDATA[>=]]> #{deliverydtFrom}   
+		</if>
+		<if test="deliverydtTo != null and deliverydtTo != ''">      		
+		  AND WD_PLT_INOUT.DELIVERYDATE <![CDATA[<=]]> #{deliverydtTo}     
+		</if>	
+		<if test="pltComDv != null and pltComDv != ''">
+		   AND WD_PLT_INOUT.PLT_COM_DV              = #{pltComDv} 
+		</if>
+		<!-- START.상품멀티 -->
+		<if test="custkeyMulti != null and custkeyMulti != '' ">
+			<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+				<foreach collection="custkeyMulti" item="item">
+            OR WD_PLT_INOUT.CUSTKEY IN
+					<foreach collection="item" item="code" open="(" close=")" separator=",">
+						#{code} 	 
+					</foreach>
+				</foreach>
+			</trim>
+		</if>
+		<!-- END.상품멀티 -->		
+		 ORDER BY WD_PLT_INOUT.DCCODE
+		        , WD_PLT_INOUT.DELIVERYDATE
+    </select>
+    
+    <select id="getStock" resultType="cjfw.wms.wd.dto.WdPltDpResDto">
+		SELECT /* [WdPltDpService.sqlx][WdPltDpService.getStock][재고 > 공용기 관리업 > PLT 수불 관리 조회][KimDongHan][2025-11-05] */ 
+		       DCCODE     AS DCCODE
+		     , NVL(QTY,0) AS QTY
+			 , FLAG       AS FLAG
+		  FROM ( SELECT #{dccode}                                                                                                                AS DCCODE
+		              , SUM(CASE WHEN WD_PLT_INOUT.INOUT_DV = 'DP' THEN WD_PLT_INOUT.QTY WHEN WD_PLT_INOUT.INOUT_DV = 'WD' THEN -QTY ELSE 0 END) AS QTY
+			          , 'A'                                                                                                                      AS FLAG
+		           FROM WD_PLT_INOUT 
+		          WHERE 1=1
+		            AND WD_PLT_INOUT.DCCODE                 = #{dccode} 
+		            AND WD_PLT_INOUT.PLT_COM_DV             = #{pltComDv} 
+		            AND WD_PLT_INOUT.DELIVERYDATE <![CDATA[>=]]> (SELECT MIN(DELIVERYDATE) FROM WD_PLT_INOUT)
+		            AND WD_PLT_INOUT.DELIVERYDATE <![CDATA[<=]]>  #{deliverydtFrom} 
+		          UNION ALL
+		         SELECT #{dccode}                                                                                                                AS DCCODE
+		              , SUM(CASE WHEN WD_PLT_INOUT.INOUT_DV = 'DP' THEN WD_PLT_INOUT.QTY WHEN WD_PLT_INOUT.INOUT_DV = 'WD' THEN -QTY ELSE 0 END) AS QTY
+			          , 'B'                                                                                                                      AS FLAG
+		           FROM WD_PLT_INOUT 
+		          WHERE 1=1
+		            AND WD_PLT_INOUT.DCCODE                 = #{dccode} 
+		            AND WD_PLT_INOUT.PLT_COM_DV             = #{pltComDv} 
+		            AND WD_PLT_INOUT.DELIVERYDATE <![CDATA[>=]]> #{deliverydtFrom}
+		            AND WD_PLT_INOUT.DELIVERYDATE <![CDATA[<=]]> #{deliverydtTo}
+		            )
+		 ORDER BY FLAG 
+    </select>
+        
+    <insert id="insertMaster">
+		INSERT /* [WdPltDpService.sqlx][WdPltDpService.insertMaster][재고 > 공용기 관리업 > PLT 수불 관리 저장(신규)][KimDongHan][2025-09-22] */ 
+		  INTO WD_PLT_INOUT
+		     ( SERIALKEY         /* 01. 데이터번호 */
+		     , DCCODE            /* 02. 물류센터 */
+		     , DELIVERYDATE      /* 03. 출고일자 */
+		     , PLT_COM_DV        /* 04. 파렛트 구분 */
+		     , INOUT_DV          /* 05. 입/출 구분 */
+		     , QTY               /* 06. 수량 */
+			<if test="custkey != null and custkey != ''">
+		     , CUSTKEY           /* 07. 거래처코드 */
+			</if>
+			<if test="rmk != null and rmk != ''">
+		     , RMK               /* 08. 비고 */
+			</if>
+		     , ADDWHO            /* 09. 등록일시 */
+		     , ADDDATE           /* 10. 등록일시 */
+		     , EDITWHO           /* 11. 수정자 */
+		     , EDITDATE          /* 12. 수정일시 */
+		     ) VALUES (
+		       SEQ_WD_PLT_INOUT_01.NEXTVAL          /* 01. 데이터번호 */
+		     , #{dccode}                            /* 02. 물류센터 */
+		     , #{deliverydate}                      /* 03. 출고일자 */
+		     , #{pltComDv}                          /* 04. 파렛트 구분 */
+		     , #{inoutDv}                           /* 05. 입/출 구분 */
+		     , #{qty}                               /* 06. 수량 */
+			<if test="custkey != null and custkey != ''">
+		     , #{custkey}                           /* 07. 거래처코드 */
+			</if>                                       
+			<if test="rmk != null and rmk != ''">
+		     , #{rmk}                               /* 08. 비고 */
+			</if>                                       
+		     , #{gUserId}                           /* 09. 등록자 */
+		     , SYSDATE                              /* 10. 등록일시 */
+		     , #{gUserId}                           /* 11. 수정자 */
+		     , SYSDATE                              /* 12. 수정일시 */
+		     )    
+    </insert>
+    
+    <update id="updateMaster">
+		UPDATE /* [WdPltDpService.sqlx][WdPltDpService.updateMaster][재고 > 공용기 관리업 > PLT 수불 관리 저장(수정)][KimDongHan][2025-09-22] */  
+		       WD_PLT_INOUT
+		   SET EDITWHO         = #{gUserId}
+			 , EDITDATE        = SYSDATE
+			<if test="deliverydate != null and deliverydate != ''">
+             , DELIVERYDATE    = #{deliverydate}
+			</if>
+			<if test="pltComDv != null and pltComDv != ''">
+             , PLT_COM_DV      = #{pltComDv}
+			</if>		
+			<if test="inoutDv != null and inoutDv != ''">
+             , INOUT_DV        = #{inoutDv}
+			</if>
+			<if test="qty != null and qty != ''">
+             , QTY             = #{qty}
+			</if>		
+			<if test="custkey != null and custkey != ''">
+             , CUSTKEY         = #{custkey}
+			</if>
+			<if test="rmk != null and rmk != ''">
+             , RMK             = #{rmk}
+			</if>		
+		 WHERE 1=1
+		   AND SERIALKEY       = #{serialkey}
+	</update>   
+	
+	<delete id="deleteMaster">
+		DELETE /* [WdPltDpService.sqlx][WdPltDpService.deleteMaster][재고 > 공용기 관리업 > PLT 수불 관리 저장(삭제)][KimDongHan][2025-11-21] */  
+		  FROM WD_PLT_INOUT	 
+		 WHERE 1=1
+		   AND DCCODE       = #{dccode} 
+		   AND SERIALKEY    = #{serialkey}
+	</delete> 	 
+	
+</mapper>

@@ -1,0 +1,590 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+  PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+  "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="stInoutResultService">
+	
+	<select id="getMasterList" resultType="cjfw.wms.st.dto.StInoutResultResDto">
+		SELECT /* [stInoutResultService.sqlx][getMasterList][수불현황 조회][sss][2025.07.11] */
+		       ST_DAILYINOUT.DCCODE                                    AS DCCODE                /* 센터코드 */
+		     , ST_DAILYINOUT.STORERKEY                                 AS STORERKEY             /* 화주코드 */
+		     , ST_DAILYINOUT.ORGANIZE                                  AS ORGANIZE              /* 조직코드 */
+		     , ST_DAILYINOUT.UOM                                       AS UOM                   /* 단위 */
+		     , ST_DAILYINOUT.SKU                                       AS SKU                   /* 상품코드 */
+		     , MAX(MS_SKU.DESCRIPTION)                                 AS SKUNAME               /* 상품명 */
+		     , FN_DESCR_SKUSPEC(ST_DAILYINOUT.STORERKEY, 'SKUGROUP', SUBSTR(MAX(MS_SKU.SKUGROUP),1,6)) AS MC /* 상품범주 */
+		     , ST_DAILYINOUT.UOM                                       AS BASEUOM               /* 기준단위 */
+		     , NVL((SELECT SUM(BASEQTY) FROM ST_DAILYINOUT A
+		            WHERE A.STORERKEY=ST_DAILYINOUT.STORERKEY
+		              AND A.ORGANIZE=ST_DAILYINOUT.ORGANIZE
+		              AND A.DCCODE=ST_DAILYINOUT.DCCODE
+		              AND A.SKU=ST_DAILYINOUT.SKU
+		              AND A.UOM=ST_DAILYINOUT.UOM
+		              AND A.INOUTDT=#{dt1}),0)                 AS BASEQTY               /* 기초재고수 */
+		     , SUM(ST_DAILYINOUT.RECEIPT_PO)                           AS RECEIPTQTY            /* 입고 */
+		     , SUM(ST_DAILYINOUT.RETURNQTY)                            AS RETURNQTY             /* 고객반품 */
+		     , SUM(ST_DAILYINOUT.RECEIPT_STO)                          AS TRANSFERQTY_DP        /* 이체입고 */
+		     , SUM(ST_DAILYINOUT.ADJUSTQTY_DP)                         AS SURPLUSQTY            /* 역감모 */
+		     , SUM(ST_DAILYINOUT.RECEIPT_PO)
+		       + SUM(ST_DAILYINOUT.RETURNQTY)
+		       + SUM(ST_DAILYINOUT.RECEIPT_STO)
+		       + SUM(ST_DAILYINOUT.ADJUSTQTY_DP)                       AS TOTAL_DP              /* 입고합계 */
+		     , SUM(ST_DAILYINOUT.ORDERQTY_SO)                          AS ORDERQTY              /* 출고 */
+		     , SUM(ST_DAILYINOUT.ORDERQTY_PO)                          AS VENDORRETURNQTY       /* 협력사반품 */
+		     , SUM(ST_DAILYINOUT.ORDERQTY_STO)                         AS TRANSFERQTY_WD        /* 이체출고 */
+		     , SUM(ST_DAILYINOUT.ADJUSTQTY_WD)                         AS DECREASEQTY           /* 감모 */
+		     , SUM(ST_DAILYINOUT.ADJUSTQTY_DISUSE)                     AS DISUSEQTY             /* 폐기수량 */
+		     , SUM(ST_DAILYINOUT.ORDERQTY_SO)
+		       + SUM(ST_DAILYINOUT.ORDERQTY_PO)
+		       + SUM(ST_DAILYINOUT.ORDERQTY_STO)
+		       + SUM(ST_DAILYINOUT.ADJUSTQTY_WD)
+		       + SUM(ST_DAILYINOUT.ADJUSTQTY_DISUSE)                   AS TOTAL_WD              /* 출고합계 */
+		     , NVL((SELECT SUM(BASEQTY) FROM ST_DAILYINOUT A
+		            WHERE A.STORERKEY=ST_DAILYINOUT.STORERKEY
+		              AND A.ORGANIZE=ST_DAILYINOUT.ORGANIZE
+		              AND A.DCCODE=ST_DAILYINOUT.DCCODE
+		              AND A.SKU=ST_DAILYINOUT.SKU
+		              AND A.UOM=ST_DAILYINOUT.UOM
+		              AND A.INOUTDT=#{dt1}),0)
+		       + SUM(ST_DAILYINOUT.RECEIPT_PO)
+		       + SUM(ST_DAILYINOUT.RETURNQTY)
+		       + SUM(ST_DAILYINOUT.RECEIPT_STO)
+		       + SUM(ST_DAILYINOUT.ADJUSTQTY_DP)
+		       - SUM(ST_DAILYINOUT.ORDERQTY_SO)
+		       - SUM(ST_DAILYINOUT.ORDERQTY_PO)
+		       - SUM(ST_DAILYINOUT.ORDERQTY_STO)
+		       - SUM(ST_DAILYINOUT.ADJUSTQTY_WD)
+		       - SUM(ST_DAILYINOUT.ADJUSTQTY_DISUSE)                   AS STOCKQTY              /* 재고수 */
+		     , SUM(RECEIPTQTY_CHANNEL1)                                AS RECEIPTQTY_CHANNEL1   /* 저장품입고 */
+		     , SUM(RECEIPTQTY_CHANNEL2)                                AS RECEIPTQTY_CHANNEL2   /* 일배입고 */
+		     , SUM(RECEIPTQTY_CHANNEL3)                                AS RECEIPTQTY_CHANNEL3   /* 광역일배입고 */
+		     , SUM(ORDERQTY_CHANNEL1)                                  AS ORDERQTY_CHANNEL1     /* 저장품출고 */
+		     , SUM(ORDERQTY_CHANNEL2)                                  AS ORDERQTY_CHANNEL2     /* 일배출고 */
+		     , SUM(ORDERQTY_CHANNEL3)                                  AS ORDERQTY_CHANNEL3     /* 광역일배출고 */
+		     , SUM(RETURNQTY_CHANNEL1)                                 AS RETURNQTY_CHANNEL1    /* 저장품반품 */
+		     , SUM(RETURNQTY_CHANNEL2)                                 AS RETURNQTY_CHANNEL2    /* 일배반품 */
+		     , SUM(RETURNQTY_CHANNEL3)                                 AS RETURNQTY_CHANNEL3    /* 광역일배반품 */
+		     , MAX(CASE WHEN NVL(MS_SKU.REFERENCE03, 'N') = 'HAW4' THEN '020' ELSE '' END)   AS TPL_TYPE /*3자물류 주문 유형 */
+	    FROM ST_DAILYINOUT
+	    JOIN MS_SKU
+	      ON ST_DAILYINOUT.STORERKEY = MS_SKU.STORERKEY
+	     AND ST_DAILYINOUT.SKU = MS_SKU.SKU
+	    WHERE 1=1 
+	      AND ST_DAILYINOUT.STORERKEY = #{gStorerkey} /*고객사*/
+	      AND ST_DAILYINOUT.DCCODE    = #{fixdccode}  /*센터*/
+	    <!-- START.권한센터 -->
+	    AND EXISTS (SELECT 1
+                      FROM CM_USER_AUTHORITY 
+                     WHERE CM_USER_AUTHORITY.DCCODE    = ST_DAILYINOUT.DCCODE       
+                       AND CM_USER_AUTHORITY.STORERKEY = ST_DAILYINOUT.STORERKEY    
+                       AND CM_USER_AUTHORITY.ORGANIZE  = ST_DAILYINOUT.ORGANIZE     
+                       AND CM_USER_AUTHORITY.AREA      = ST_DAILYINOUT.AREA         
+                       AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey}
+                       AND CM_USER_AUTHORITY.USERID    = #{gUserId}
+                       AND CM_USER_AUTHORITY.DCCODE    = #{fixdccode}
+                       AND CM_USER_AUTHORITY.AREA      = #{gArea}   
+			           <!-- 창고.다중검색 -->
+			           <if test='gOrganizeMulti != null and gOrganizeMulti.length > 0'>
+				           AND CM_USER_AUTHORITY.ORGANIZE IN
+				           <foreach collection="gOrganizeMulti" item="code" open="(" close=")" separator=",">
+				             #{code}
+				           </foreach>
+			           </if>                       
+                   )
+	    <!-- END.권한센터	-->  
+	    	      
+	    <if test="dt1 != null and dt1 != ''"> AND ST_DAILYINOUT.INOUTDT <![CDATA[>=]]> #{dt1} </if>
+	    <if test="dt2 != null and dt2 != ''"> AND ST_DAILYINOUT.INOUTDT <![CDATA[<=]]> #{dt2} </if>
+	    <if test="dccode != null and dccode != ''"> AND ST_DAILYINOUT.DCCODE = #{dccode} </if>
+	    <if test="stocktype != null and stocktype != ''"> AND ST_DAILYINOUT.STOCKTYPE = #{stocktype} </if>
+	    <if test="storagetype != null and storagetype != ''"> AND MS_SKU.STORAGETYPE = #{storagetype} </if>
+        
+        <!-- START.상품.다중OR검색 -->
+        <if test="skuMulti != null and skuMulti != '' ">
+			<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+				<foreach collection="skuMulti" item="item">
+					OR MS_SKU.SKU IN
+					<foreach collection="item" item="code" open="(" close=")" separator=",">
+						#{code} 	 
+		      		</foreach>
+		    	</foreach>
+		  	</trim>			                                    
+        </if>
+        <!-- END.상품.다중OR검색 -->	
+        
+        <!-- 통합배송상품 -->	
+		<if test="tplType != null and tplType != ''">	
+		    AND MS_SKU.REFERENCE03 = (CASE WHEN #{tplType}='020' THEN 'HAW4' ELSE '' END)
+		</if>
+		<!-- 위탁물류 제외 -->	          
+		<if test="logisticsExcept != null and logisticsExcept == 1">
+			AND MS_SKU.SKUGROUP <![CDATA[<>]]> FN_TPL_SKUGROUP() 
+		</if>        
+		<!-- 통합배송 제외 -->	
+		<if test="deliveryExcept != null and deliveryExcept == 1">
+			AND MS_SKU.REFERENCE03 <![CDATA[<>]]> 'HAW4' 
+		</if>        	
+	    GROUP BY
+	        ST_DAILYINOUT.DCCODE,
+	        ST_DAILYINOUT.STORERKEY,
+	        ST_DAILYINOUT.ORGANIZE,
+	        ST_DAILYINOUT.SKU,
+	        ST_DAILYINOUT.UOM
+	    ORDER BY
+	        ST_DAILYINOUT.DCCODE,
+	        ST_DAILYINOUT.STORERKEY,
+	        ST_DAILYINOUT.ORGANIZE,
+	        ST_DAILYINOUT.SKU,
+	        ST_DAILYINOUT.UOM
+	</select>
+
+    <select id="getDetailList" resultType="cjfw.wms.st.dto.StInoutResultResDetailDto">
+        SELECT
+                ST_TRANSACTION.SERIALKEY AS SERIALKEY,   /* SERIALKEY */
+                ST_TRANSACTION.TRANDATE  AS TRANDATE,    /* 거래일자 */
+                ST_TRANSACTION.DCCODE    AS DCCODE,      /* 센터코드 */
+                ST_TRANSACTION.TRANTYPE  AS TRANTYPE,    /* 거래유형 */
+                (SELECT FN_CODEDESCR(ST_TRANSACTION.STORERKEY,'TRANTYPE', ST_TRANSACTION.TRANTYPE) FROM DUAL) AS TRANTYPENAME, /* 거래유형명 */
+                ST_TRANSACTION.STORERKEY AS STORERKEY,   /* 거래처코드 */
+                ST_TRANSACTION.ORGANIZE  AS ORGANIZE,    /* 조직코드 */
+                MS_SKU.SERIALYN          AS SERIALYN,    /* 시리얼여부 */
+                (SELECT FN_CODEDESCR(MS_SKU.STORERKEY,'SERIALYN', MS_SKU.SERIALYN) FROM DUAL) AS SERIALYNNAME, /* 시리얼여부명 */
+                ST_TRANSACTION.AREA      AS AREA,        /* 구역코드 */
+                ST_TRANSACTION.SKU       AS SKU,         /* 품목코드 */
+                MS_SKU.DESCRIPTION       AS SKUNAME,     /* 품목명 */
+                ST_TRANSACTION.UOM       AS UOM,         /* 단위 */
+                CASE WHEN ST_TRANSACTION.DCCODE='2170' AND NVL(MS_SKU.LINE01,'N') = 'Y' AND TO_NUMBER(NVL(MS_SKU.LINE02,0))  <![CDATA[<>]]>  0 THEN TO_NUMBER(NVL(MS_SKU.LINE02,0)) ELSE 0 END AS AVGWEIGHT, /* 평균중량 */
+                ROUND(CASE WHEN ST_TRANSACTION.DCCODE='2170' AND NVL(MS_SKU.LINE01,'N') = 'Y' AND TO_NUMBER(NVL(MS_SKU.LINE02,0))  <![CDATA[<>]]>  0 AND ST_TRANSACTION.UOM = 'KG'
+                    THEN ST_TRANSACTION.QTY / TO_NUMBER(NVL(MS_SKU.LINE02,0))
+                    ELSE 0
+                END, 2) AS CALBOX, /* BOX */
+                CASE WHEN ST_TRANSACTION.DCCODE='2170' AND NVL(MS_SKU.LINE01,'N') = 'Y' THEN ROUND(ST_TRANSACTION.ETCQTY1,2) ELSE 0 END AS REALORDERBOX,  /* 주문BOX */     
+                CASE WHEN ST_TRANSACTION.DCCODE='2170' AND NVL(MS_SKU.LINE01,'N') = 'Y' THEN ROUND(ST_TRANSACTION.ETCQTY2,2) ELSE 0 END AS REALCFMBOX,    /* CFMBOX */      
+
+                ST_TRANSACTION.FROM_STOCKQTY AS FROM_STOCKQTY,   /* 출고재고수량 */
+                ST_TRANSACTION.TO_STOCKQTY   AS TO_STOCKQTY,     /* 입고재고수량 */
+                ST_TRANSACTION.QTY           AS QTY,             /* 수량 */
+                ST_TRANSACTION.FROM_LOC      AS FROM_LOC,        /* 출고위치 */
+                ST_TRANSACTION.FROM_LOT      AS FROM_LOT,        /* 출고로트 */
+                FROM_CM_LOT.LOTTABLE01       AS FROM_LOTTABLE01, /* 출고로트테이블01 */
+                ST_TRANSACTION.FROM_STOCKID  AS FROM_STOCKID,    /* 출고재고ID */
+                (SELECT FN_CODEDESCR(ST_TRANSACTION.STORERKEY,'STOCKTYPE', ST_TRANSACTION.FROM_STOCKTYPE) FROM DUAL) AS FROM_STOCKTYPE,
+                (SELECT FN_CODEDESCR(ST_TRANSACTION.STORERKEY,'STOCKGRADE', ST_TRANSACTION.FROM_STOCKGRADE) FROM DUAL) AS FROM_STOCKGRADE,
+                ST_TRANSACTION.TO_LOC        AS TO_LOC,          /* 입고위치 */
+                ST_TRANSACTION.TO_LOT        AS TO_LOT,          /* 입고로트 */
+                TO_CM_LOT.LOTTABLE01         AS TO_LOTTABLE01,   /* 입고로트테이블01 */
+                ST_TRANSACTION.TO_STOCKID    AS TO_STOCKID,      /* 입고재고ID */
+                (SELECT FN_CODEDESCR(ST_TRANSACTION.STORERKEY,'STOCKTYPE', ST_TRANSACTION.TO_STOCKTYPE) FROM DUAL) AS TO_STOCKTYPE,
+                (SELECT FN_CODEDESCR(ST_TRANSACTION.STORERKEY,'STOCKGRADE', ST_TRANSACTION.TO_STOCKGRADE) FROM DUAL) AS TO_STOCKGRADE,
+                ST_TRANSACTION.DOCNO         AS DOCNO,          /* 문서번호 */
+                ST_TRANSACTION.DOCLINE       AS DOCLINE,        /* 문서라인 */
+                ST_TRANSACTION.ADDDATE       AS ADDDATE,        /* 등록일시 */
+                ST_TRANSACTION.ADDWHO        AS ADDWHO,         /* 등록자 */
+                CM_USER.USERNAME             AS USERNAME        /* 등록자명 */
+            FROM ST_TRANSACTION
+            JOIN MS_SKU
+                ON MS_SKU.STORERKEY = ST_TRANSACTION.STORERKEY
+                AND MS_SKU.SKU = ST_TRANSACTION.SKU
+            LEFT OUTER JOIN CM_USER
+                ON CM_USER.USERID = ST_TRANSACTION.ADDWHO
+            LEFT OUTER JOIN CM_LOT FROM_CM_LOT
+                ON FROM_CM_LOT.STORERKEY = ST_TRANSACTION.STORERKEY
+                AND FROM_CM_LOT.LOT = ST_TRANSACTION.FROM_LOT
+                AND FROM_CM_LOT.DEL_YN = 'N'
+            LEFT OUTER JOIN CM_LOT TO_CM_LOT
+                ON TO_CM_LOT.STORERKEY = ST_TRANSACTION.STORERKEY
+                AND TO_CM_LOT.LOT = ST_TRANSACTION.TO_LOT
+                AND TO_CM_LOT.DEL_YN = 'N'
+            WHERE 1=1
+              AND ST_TRANSACTION.TRANDATE  <![CDATA[>=]]>  #{dt1}
+              AND ST_TRANSACTION.TRANDATE  <![CDATA[<=]]>  #{dt2}
+	        <if test="storerkey != ''"> AND ST_TRANSACTION.STORERKEY = #{storerkey}</if>
+	        <if test="dccode != ''">    AND ST_TRANSACTION.DCCODE    = #{dccode}</if>
+	        <if test="organize != ''">  AND ST_TRANSACTION.ORGANIZE  = #{organize}</if>
+              AND MS_SKU.SKU = #{sku}
+            ORDER BY ST_TRANSACTION.SERIALKEY, ST_TRANSACTION.TRANDATE
+    </select>    
+
+
+
+	    
+	<select id="printMasterList" resultType="cjfw.wms.st.dto.StInoutResultResPrintDto">
+    WITH /* [stInoutResultService.sqlx][printMasterList][수불현황 출력][sss][2025.07.11] */
+        MSPCUST AS (
+    -- 1) 기존 쿼리 주석처리    
+    --    SELECT
+    --        MS_PURCHASECUST.STORERKEY,
+    --        MS_PURCHASECUST.DCCODE,
+    --        MS_PURCHASECUST.ROUTE,
+    --        MS_PURCHASECUST.SKU,
+    --        MS_PURCHASECUST.PURCHASETYPE,
+    --        MS_PURCHASECUST.ROUTEORGANIZE
+    --    FROM MS_PURCHASECUST
+    --    WHERE MS_PURCHASECUST.SERIALKEY IN (
+    --        SELECT /*+ FULL(DD)*/ MIN(DD.SERIALKEY) KEEP (DENSE_RANK FIRST
+    --            ORDER BY DD.FROMDATE DESC, DD.TODATE ASC)
+    --        FROM MS_PURCHASECUST DD
+    --        WHERE DD.DCCODE = MS_PURCHASECUST.DCCODE
+    --          AND DD.STORERKEY = MS_PURCHASECUST.STORERKEY
+    --          AND DD.SKU = MS_PURCHASECUST.SKU
+    --          AND DD.CUSTTYPE = MS_PURCHASECUST.CUSTTYPE
+    --          AND DD.CHANNEL = '1'
+    --          AND DD.DEL_YN = 'N'
+    --          AND DD.CUSTTYPE = 'P'
+    --          AND TO_CHAR(SYSDATE,'YYYYMMDD') BETWEEN DD.FROMDATE AND DD.TODATE
+    --        GROUP BY DD.SKU, DD.CUSTTYPE
+    --    )
+    --    GROUP BY
+    --        MS_PURCHASECUST.STORERKEY,
+    --        MS_PURCHASECUST.DCCODE,
+    --        MS_PURCHASECUST.ROUTE,
+    --        MS_PURCHASECUST.SKU,
+    --        MS_PURCHASECUST.PURCHASETYPE,
+    --        MS_PURCHASECUST.ROUTEORGANIZE
+-- ■ 2) 2025.12.26 변경 부분 
+        SELECT MS_PURCHASECUST.STORERKEY,
+               MS_PURCHASECUST.DCCODE,
+               MS_PURCHASECUST.ROUTE,
+               MS_PURCHASECUST.SKU,
+               MS_PURCHASECUST.PURCHASETYPE,
+               MS_PURCHASECUST.ROUTEORGANIZE
+          FROM (
+                SELECT
+                    MS_PURCHASECUST.STORERKEY,
+                    MS_PURCHASECUST.DCCODE,
+                    MS_PURCHASECUST.ROUTE,
+                    MS_PURCHASECUST.SKU,
+                    MS_PURCHASECUST.PURCHASETYPE,
+                    MS_PURCHASECUST.ROUTEORGANIZE,
+                    ROW_NUMBER() OVER(PARTITION BY DCCODE, STORERKEY, SKU, CUSTTYPE ORDER BY FROMDATE DESC, TODATE ASC, SERIALKEY) RN 
+                FROM MS_PURCHASECUST
+               WHERE 1=1
+                 AND CHANNEL = '1'
+                 AND DEL_YN = 'N'
+                 AND CUSTTYPE = 'P'
+                 AND TO_CHAR(SYSDATE,'YYYYMMDD') BETWEEN FROMDATE AND TODATE
+                 ) MS_PURCHASECUST
+                 WHERE RN =1 
+                GROUP BY
+                    MS_PURCHASECUST.STORERKEY,
+                    MS_PURCHASECUST.DCCODE,
+                    MS_PURCHASECUST.ROUTE,
+                    MS_PURCHASECUST.SKU,
+                    MS_PURCHASECUST.PURCHASETYPE,
+                    MS_PURCHASECUST.ROUTEORGANIZE
+-- ■ 2) 2025.12.26 변경 부분 끝    
+    )
+    SELECT 
+        SKU,
+        SKUNAME,
+        STORAGETYPE,
+        NVL(LOC, 'STD') AS LOC,
+        NVL(
+            DECODE(
+                TO_NUMBER(
+                    <if test="dt2 != null and dt2 != ''">#{dt2}</if>
+                    -
+                    <if test="dt1 != null and dt1 != ''">#{dt1}</if>
+                ),
+                0, SUM(BASEQTY),
+                ROUND(SUM(BASEQTY) / TO_NUMBER(
+                    <if test="dt2 != null and dt2 != ''">#{dt2}</if>
+                    -
+                    <if test="dt1 != null and dt1 != ''">#{dt1}</if>
+                ))
+            ),
+            0
+        ) AS AVGQTY,
+        SUM(ORDERQTY_SO) + SUM(ORDERQTY_PO) + SUM(ORDERQTY_STO) + SUM(ADJUSTQTY_WD) + SUM(ADJUSTQTY_DISUSE) AS TOTAL_WD,
+        DECODE(
+            TO_NUMBER(
+                <if test="dt2 != null and dt2 != ''">#{dt2}</if>
+                -
+                <if test="dt1 != null and dt1 != ''">#{dt1}</if>
+            ),
+            0,
+            SUM(ORDERQTY_SO) + SUM(ORDERQTY_PO) + SUM(ORDERQTY_STO) + SUM(ADJUSTQTY_WD) + SUM(ADJUSTQTY_DISUSE),
+            ROUND(
+                (SUM(ORDERQTY_SO) + SUM(ORDERQTY_PO) + SUM(ORDERQTY_STO) + SUM(ADJUSTQTY_WD) + SUM(ADJUSTQTY_DISUSE))
+                / TO_NUMBER(
+                    <if test="dt2 != null and dt2 != ''">#{dt2}</if>
+                    -
+                    <if test="dt1 != null and dt1 != ''">#{dt1}</if>
+                )
+            )
+        ) AS AVGTOTAL_WD,
+        ROUND(
+            DECODE(
+                NVL(
+                    DECODE(
+                        TO_NUMBER(
+                            <if test="dt2 != null and dt2 != ''">#{dt2}</if>
+                            -
+                            <if test="dt1 != null and dt1 != ''">#{dt1}</if>
+                        ),
+                        0, SUM(BASEQTY),
+                        ROUND(SUM(BASEQTY) / TO_NUMBER(
+                            <if test="dt2 != null and dt2 != ''">#{dt2}</if>
+                            -
+                            <if test="dt1 != null and dt1 != ''">#{dt1}</if>
+                        ))
+                    ),
+                    0
+                ),
+                0, 0,
+                DECODE(
+                    DECODE(
+                        TO_NUMBER(
+                            <if test="dt2 != null and dt2 != ''">#{dt2}</if>
+                            -
+                            <if test="dt1 != null and dt1 != ''">#{dt1}</if>
+                        ),
+                        0,
+                        SUM(ORDERQTY_SO) + SUM(ORDERQTY_PO) + SUM(ORDERQTY_STO) + SUM(ADJUSTQTY_WD) + SUM(ADJUSTQTY_DISUSE),
+                        ROUND(
+                            (SUM(ORDERQTY_SO) + SUM(ORDERQTY_PO) + SUM(ORDERQTY_STO) + SUM(ADJUSTQTY_WD) + SUM(ADJUSTQTY_DISUSE))
+                            / TO_NUMBER(
+                                <if test="dt2 != null and dt2 != ''">#{dt2}</if>
+                                -
+                                <if test="dt1 != null and dt1 != ''">#{dt1}</if>
+                            )
+                        )
+                    ),
+                    0, 0,
+                    NVL(
+                        DECODE(
+                            TO_NUMBER(
+                                <if test="dt2 != null and dt2 != ''">#{dt2}</if>
+                                -
+                                <if test="dt1 != null and dt1 != ''">#{dt1}</if>
+                            ),
+                            0, SUM(BASEQTY),
+                            ROUND(SUM(BASEQTY) / TO_NUMBER(
+                                <if test="dt2 != null and dt2 != ''">#{dt2}</if>
+                                -
+                                <if test="dt1 != null and dt1 != ''">#{dt1}</if>
+                            ))
+                        ),
+                        0
+                    )
+                    /
+                    DECODE(
+                        TO_NUMBER(
+                            <if test="dt2 != null and dt2 != ''">#{dt2}</if>
+                            -
+                            <if test="dt1 != null and dt1 != ''">#{dt1}</if>
+                        ),
+                        0,
+                        SUM(ORDERQTY_SO) + SUM(ORDERQTY_PO) + SUM(ORDERQTY_STO) + SUM(ADJUSTQTY_WD) + SUM(ADJUSTQTY_DISUSE),
+                        ROUND(
+                            (SUM(ORDERQTY_SO) + SUM(ORDERQTY_PO) + SUM(ORDERQTY_STO) + SUM(ADJUSTQTY_WD) + SUM(ADJUSTQTY_DISUSE))
+                            / TO_NUMBER(
+                                <if test="dt2 != null and dt2 != ''">#{dt2}</if>
+                                -
+                                <if test="dt1 != null and dt1 != ''">#{dt1}</if>
+                            )
+                        )
+                    )
+                )
+            ),
+            1
+        ) AS TURNOVERDAY,
+        CASE
+            WHEN PURCHASETYPE > 0 THEN '직입고'
+            WHEN PURCHASETYPE = 0 THEN DESCRIPTION
+        END AS PROVIDER
+    FROM (
+        SELECT /*+ LEADING(MSPCUST ST_DAILYINOUT MS_SKU) FULL(ST_DAILYINOUT)  NO_MERGE(MSPCUST) SWAP_JOIN_INPUTS(MSPCUST) FULL(MS_SKU) FULL(MS_SKUDCSET)  */ -- ■ 3) 힌트 추가 
+            ST_DAILYINOUT.DCCODE,
+            ST_DAILYINOUT.STORERKEY,
+            ST_DAILYINOUT.ORGANIZE,
+            ST_DAILYINOUT.SKU,
+            ST_DAILYINOUT.UOM,
+            MS_SKU.DESCRIPTION AS SKUNAME,
+            FN_CODEDESCR(ST_DAILYINOUT.STORERKEY, 'STORAGETYPE', MS_SKU.STORAGETYPE) AS STORAGETYPE,
+            MS_SKUDCSET.LOC AS LOC,
+            SUM(ST_DAILYINOUT.BASEQTY) AS BASEQTY,
+            SUM(ST_DAILYINOUT.ORDERQTY_SO) AS ORDERQTY_SO,
+            SUM(ST_DAILYINOUT.ORDERQTY_PO) AS ORDERQTY_PO,
+            SUM(ST_DAILYINOUT.ORDERQTY_STO) AS ORDERQTY_STO,
+            SUM(ST_DAILYINOUT.ADJUSTQTY_WD) AS ADJUSTQTY_WD,
+            SUM(ST_DAILYINOUT.ADJUSTQTY_DISUSE) AS ADJUSTQTY_DISUSE,
+            INSTR(MSPCUST.PURCHASETYPE, 'PO') AS PURCHASETYPE,
+            TO_CHAR(DCXORGNVL.DESCRIPTION) AS DESCRIPTION
+        FROM ST_DAILYINOUT
+        LEFT OUTER JOIN MSPCUST
+          ON ST_DAILYINOUT.STORERKEY = MSPCUST.STORERKEY
+         AND ST_DAILYINOUT.DCCODE = MSPCUST.DCCODE
+         AND ST_DAILYINOUT.SKU = MSPCUST.SKU
+        LEFT OUTER JOIN CM_DCXORGANIZE DCXORGNVL
+          ON MSPCUST.ROUTEORGANIZE = DCXORGNVL.ORGANIZE
+         AND MSPCUST.ROUTE = DCXORGNVL.DCCODE
+        JOIN MS_SKU
+          ON ST_DAILYINOUT.STORERKEY = MS_SKU.STORERKEY
+         AND ST_DAILYINOUT.SKU = MS_SKU.SKU
+        LEFT OUTER JOIN MS_SKUDCSET
+          ON ST_DAILYINOUT.STORERKEY = MS_SKUDCSET.STORERKEY
+         AND ST_DAILYINOUT.DCCODE = MS_SKUDCSET.DCCODE
+         AND ST_DAILYINOUT.SKU = MS_SKUDCSET.SKU
+        WHERE 1=1
+          AND ST_DAILYINOUT.STORERKEY = #{gStorerkey}
+          AND ST_DAILYINOUT.DCCODE    = #{fixdccode}  /*센터*/
+	    <!-- START.권한센터 -->
+	    AND EXISTS (SELECT 1
+                      FROM CM_USER_AUTHORITY 
+                     WHERE CM_USER_AUTHORITY.DCCODE    = ST_DAILYINOUT.DCCODE       
+                       AND CM_USER_AUTHORITY.STORERKEY = ST_DAILYINOUT.STORERKEY    
+                       AND CM_USER_AUTHORITY.ORGANIZE  = ST_DAILYINOUT.ORGANIZE     
+                       AND CM_USER_AUTHORITY.AREA      = ST_DAILYINOUT.AREA         
+                       AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey}
+                       AND CM_USER_AUTHORITY.USERID    = #{gUserId}
+                       AND CM_USER_AUTHORITY.DCCODE    = #{fixdccode}
+                       AND CM_USER_AUTHORITY.AREA      = #{gArea}   
+			           <!-- 창고.다중검색 -->
+			           <if test='gOrganizeMulti != null and gOrganizeMulti.length > 0'>
+				           AND CM_USER_AUTHORITY.ORGANIZE IN
+				           <foreach collection="gOrganizeMulti" item="code" open="(" close=")" separator=",">
+				             #{code}
+				           </foreach>
+			           </if>                       
+                   )
+	    <!-- END.권한센터	-->            
+        <if test="dt1 != null and dt1 != ''"> AND ST_DAILYINOUT.INOUTDT <![CDATA[>=]]> #{dt1} </if>
+        <if test="dt2 != null and dt2 != ''"> AND ST_DAILYINOUT.INOUTDT <![CDATA[<=]]> #{dt2} </if>
+        <if test="dccode != null and dccode != ''"> AND ST_DAILYINOUT.DCCODE = #{dccode} </if>
+        <if test="stocktype != null and stocktype != ''"> AND ST_DAILYINOUT.STOCKTYPE = #{stocktype} </if>
+        <if test="storagetype != null and storagetype != ''"> AND MS_SKU.STORAGETYPE = #{storagetype} </if>
+        <!-- START.상품.다중OR검색 -->
+        <if test="skuMulti != null and skuMulti != '' ">
+			<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+				<foreach collection="skuMulti" item="item">
+					OR MS_SKU.SKU IN
+					<foreach collection="item" item="code" open="(" close=")" separator=",">
+						#{code} 	 
+		      		</foreach>
+		    	</foreach>
+		  	</trim>			                                    
+        </if>
+        <!-- END.상품.다중OR검색 -->	
+        GROUP BY
+            ST_DAILYINOUT.DCCODE,
+            ST_DAILYINOUT.STORERKEY,
+            ST_DAILYINOUT.ORGANIZE,
+            ST_DAILYINOUT.SKU,
+            ST_DAILYINOUT.UOM,
+            MS_SKU.DESCRIPTION,
+            MS_SKU.STORAGETYPE,
+            MS_SKUDCSET.LOC,
+            MSPCUST.PURCHASETYPE,
+            DCXORGNVL.DESCRIPTION
+    )
+    GROUP BY
+        SKU,
+        SKUNAME,
+        STORAGETYPE,
+        LOC,
+        PURCHASETYPE,
+        DESCRIPTION
+    HAVING NVL(
+        DECODE(
+            TO_NUMBER(
+                <if test="dt2 != null and dt2 != ''">#{dt2}</if>
+                -
+                <if test="dt1 != null and dt1 != ''">#{dt1}</if>
+            ),
+            0, SUM(BASEQTY),
+            ROUND(SUM(BASEQTY) / TO_NUMBER(
+                <if test="dt2 != null and dt2 != ''">#{dt2}</if>
+                -
+                <if test="dt1 != null and dt1 != ''">#{dt1}</if>
+            ))
+        ),
+        0
+    ) <![CDATA[>]]> 0
+    ORDER BY SKU
+	</select>
+    
+    
+    
+
+
+
+    <!--
+        [20250814]재고처리현황 쿼리로 변경됨@sss 에 따른 미사용
+    -->
+    <select id="getDetailList_old" resultType="cjfw.wms.st.dto.StInoutResultResDetailDto">
+		SELECT /* [stInoutResultService.sqlx][getDetailList][수불현황 상세 조회][sss][2025.07.11] */
+		       ST_DAILYINOUT.INOUTDT                                 AS INOUTDT              /* 입출고일자 */
+		     , ST_DAILYINOUT.DCCODE                                  AS DCCODE               /* 센터코드 */
+		     , ST_DAILYINOUT.STORERKEY                               AS STORERKEY            /* 화주코드 */
+		     , ST_DAILYINOUT.ORGANIZE                                AS ORGANIZE             /* 조직코드 */
+		     , FN_CODEDESCR(ST_DAILYINOUT.STORERKEY, 'STOCKTYPE', ST_DAILYINOUT.STOCKTYPE)
+		                                                          AS STOCKTYPE              /* 재고유형 */
+		     , ST_DAILYINOUT.STOCKGRADE                              AS STOCKGRADE           /* 재고등급 */
+		     , ST_DAILYINOUT.UOM                                     AS UOM                  /* 단위 */
+		     , ST_DAILYINOUT.SKU                                     AS SKU                  /* 상품코드 */
+		     , MS_SKU.DESCRIPTION                                    AS SKUNAME              /* 상품명 */
+		     , FN_DESCR_SKUSPEC(ST_DAILYINOUT.STORERKEY, 'SKUGROUP', SUBSTR(MS_SKU.SKUGROUP,1,6))
+		                                                          AS MC                     /* 상품범주 */
+		     , ST_DAILYINOUT.UOM                                     AS BASEUOM              /* 기준단위 */
+		     , ST_DAILYINOUT.BASEQTY                                 AS BASEQTY              /* 기초재고수 */
+		     , ST_DAILYINOUT.RECEIPT_PO                              AS RECEIPTQTY           /* 입고 */
+		     , ST_DAILYINOUT.RETURNQTY                               AS RETURNQTY            /* 고객반품 */
+		     , ST_DAILYINOUT.RECEIPT_STO                             AS TRANSFERQTY_DP       /* 이체입고 */
+		     , ST_DAILYINOUT.ADJUSTQTY_DP                            AS SURPLUSQTY           /* 역감모 */
+		     , (ST_DAILYINOUT.RECEIPT_PO
+		        + ST_DAILYINOUT.RETURNQTY
+		        + ST_DAILYINOUT.RECEIPT_STO
+		        + ST_DAILYINOUT.ADJUSTQTY_DP)                        AS TOTAL_DP             /* 입고합계 */
+		     , ST_DAILYINOUT.ORDERQTY_SO                             AS ORDERQTY             /* 출고 */
+		     , ST_DAILYINOUT.ORDERQTY_PO                             AS VENDORRETURNQTY      /* 협력사반품 */
+		     , ST_DAILYINOUT.ORDERQTY_STO                            AS TRANSFERQTY_WD       /* 이체출고 */
+		     , ST_DAILYINOUT.ADJUSTQTY_WD                            AS DECREASEQTY          /* 감모 */
+		     , ST_DAILYINOUT.ADJUSTQTY_DISUSE                        AS DISUSEQTY            /* 폐기수량 */
+		     , (ST_DAILYINOUT.ORDERQTY_SO
+		        + ST_DAILYINOUT.ORDERQTY_PO
+		        + ST_DAILYINOUT.ORDERQTY_STO
+		        + ST_DAILYINOUT.ADJUSTQTY_WD
+		        + ST_DAILYINOUT.ADJUSTQTY_DISUSE)                    AS TOTAL_WD             /* 출고합계 */
+		     , ST_DAILYINOUT.STOCKQTY                                AS STOCKQTY             /* 재고수 */
+		     , ST_DAILYINOUT.DAMAGEQTY                               AS DAMAGEQTY            /* 파손수량 */
+		     , RECEIPTQTY_CHANNEL1                                   AS RECEIPTQTY_CHANNEL1  /* 저장품입고 */
+		     , RECEIPTQTY_CHANNEL2                                   AS RECEIPTQTY_CHANNEL2  /* 일배입고 */
+		     , RECEIPTQTY_CHANNEL3                                   AS RECEIPTQTY_CHANNEL3  /* 광역일배입고 */
+		     , ORDERQTY_CHANNEL1                                     AS ORDERQTY_CHANNEL1    /* 저장품출고 */
+		     , ORDERQTY_CHANNEL2                                     AS ORDERQTY_CHANNEL2    /* 일배출고 */
+		     , ORDERQTY_CHANNEL3                                     AS ORDERQTY_CHANNEL3    /* 광역일배출고 */
+		     , RETURNQTY_CHANNEL1                                    AS RETURNQTY_CHANNEL1   /* 저장품반품 */
+		     , RETURNQTY_CHANNEL2                                    AS RETURNQTY_CHANNEL2   /* 일배반품 */
+		     , RETURNQTY_CHANNEL3                                    AS RETURNQTY_CHANNEL3   /* 광역일배반품 */
+	    FROM ST_DAILYINOUT
+	    JOIN MS_SKU
+	      ON ST_DAILYINOUT.STORERKEY = MS_SKU.STORERKEY
+	     AND ST_DAILYINOUT.SKU = MS_SKU.SKU
+	    WHERE 1=1
+	      AND ST_DAILYINOUT.DCCODE = #{dccode}
+	      AND ST_DAILYINOUT.STORERKEY = #{storerkey}
+	      AND ST_DAILYINOUT.ORGANIZE = #{organize}
+	      AND ST_DAILYINOUT.SKU = #{sku}
+	      AND ST_DAILYINOUT.INOUTDT <![CDATA[>=]]> #{dt1}
+	      AND ST_DAILYINOUT.INOUTDT <![CDATA[<=]]> #{dt2}
+	    <if test="stocktype != null and stocktype != ''">
+	        AND ST_DAILYINOUT.STOCKTYPE = #{stocktype}
+	    </if>
+	    <if test="storagetype != null and storagetype != ''">
+	        AND MS_SKU.STORAGETYPE = #{storagetype}
+	    </if>
+	    ORDER BY
+	        ST_DAILYINOUT.DCCODE,
+	        ST_DAILYINOUT.STORERKEY,
+	        ST_DAILYINOUT.ORGANIZE,
+	        ST_DAILYINOUT.SKU,
+	        ST_DAILYINOUT.UOM,
+	        ST_DAILYINOUT.INOUTDT   
+
+    <!--
+        [20250814]재고처리현황 쿼리로 변경됨@sss 에 따른 미사용
+    -->	        
+    </select>    
+    
+</mapper>

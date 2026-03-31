@@ -1,0 +1,389 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="msDistrictService">
+	<!-- 권역별차량관리 정보 조회(목록) -->
+    <select id="getMasterList" resultType="MsDistrictResDto">
+    	SELECT /* [msDistrictService.sqlx][msDistrictService.getDataList][권역별차량관리 정보 조회(목록)][jangjaehyun][20250623] */
+    		  MS_DISTRICT.SERIALKEY
+		      ,MS_DISTRICT.DCCODE                                                             /*물류센터*/
+		      ,MS_DISTRICT.DISTRICTCODE                                                       /*POP번호*/
+		      ,MS_DISTRICT.CHUTENO                                                            /*슈트번호*/
+		      ,MS_DISTRICT.ROLLTAINER_MAX                                                     /*롤테이너최대개수*/
+		      ,MS_DISTRICT.STATUS                                                             /*진행상태*/
+		      ,MS_DISTRICT.DEL_YN                                                             /*삭제여부*/		      
+		      ,MS_DISTRICT.CARNO AS CARID                                                     /*차량ID*/
+		      ,CM_CAR.CARNO AS CARNO                                                          /*기본배송차량NO*/
+		      ,MS_DISTRICT.ROLLTAINER_START_NO                                                /*롤테이너시작번호*/
+		      ,MS_DISTRICT.ROLLTAINER_END_NO                                                  /*롤테이너종료번호*/
+		      ,MS_DISTRICT.WORKPOPNO                                                          /*배송권역*/
+		      ,DLV_DISTRICT.DLVDISTRICT_ID AS DLVDISTRICT_ID
+		      ,DLV_DISTRICT.DLVDISTRICT_NM AS DLVDISTRICT_NM
+		      ,CM_CAR1.CARNO AS SUBCARNO1                                                     /*서브차량번호1*/
+		      ,CM_CAR2.CARNO AS SUBCARNO2                                                     /*서브차량번호2*/
+		      ,CM_CAR3.CARNO AS SUBCARNO3                                                     /*서브차량번호3*/
+		      ,MS_DISTRICT.ADDDATE
+		      ,MS_DISTRICT.EDITDATE
+		      ,MS_DISTRICT.ADDWHO
+		      ,MS_DISTRICT.EDITWHO
+		      ,USER1.USER_NM AS ADDWHO_NM  /*등록자명*/
+			  ,USER2.USER_NM AS EDITWHO_NM  /*수정자명*/
+		  FROM MS_DISTRICT
+		  LEFT JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = MS_DISTRICT.ADDWHO  /*등록자명*/
+          LEFT JOIN FRAMEONE_USER USER2 ON USER2.USER_ID = MS_DISTRICT.EDITWHO  /*수정자명*/
+          LEFT OUTER JOIN CM_CAR ON (CM_CAR.CARID  = MS_DISTRICT.CARNO OR CM_CAR.CARNO  = MS_DISTRICT.CARNO) AND CM_CAR.DEL_YN = 'N'
+          LEFT OUTER JOIN CM_CAR CM_CAR1 ON CM_CAR1.CARID  = MS_DISTRICT.SUBCARNO1 AND CM_CAR1.DEL_YN = 'N'
+          LEFT OUTER JOIN CM_CAR CM_CAR2 ON CM_CAR2.CARID  = MS_DISTRICT.SUBCARNO2 AND CM_CAR2.DEL_YN = 'N'
+          LEFT OUTER JOIN CM_CAR CM_CAR3 ON CM_CAR3.CARID  = MS_DISTRICT.SUBCARNO3 AND CM_CAR3.DEL_YN = 'N'
+          LEFT OUTER JOIN MS_DLV_DISTRICT DLV_DISTRICT ON DLV_DISTRICT.DCCODE = MS_DISTRICT.DCCODE AND DLV_DISTRICT.DLVDISTRICT_ID = MS_DISTRICT.WORKPOPNO AND DLV_DISTRICT.DEL_YN = 'N'
+        WHERE  1=1
+          AND MS_DISTRICT.DISTRICTTYPE ='POP'
+        <if test="delYn != null and delYn.trim().length() > 0">
+          AND    MS_DISTRICT.DEL_YN = #{delYn}
+        </if>
+        <if test='districtCode != null and districtCode !=""'>
+          AND (MS_DISTRICT.DISTRICTCODE IN
+          (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                        FROM (SELECT #{districtCode} AS VAL FROM DUAL) A
+                     CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+           OR
+           MS_DISTRICT.CARNO IN
+          (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                        FROM (SELECT #{districtCode} AS VAL FROM DUAL) A
+                     CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0))
+        </if>
+        
+    
+        <if test="workPopNoMulti != null and workPopNoMulti != '' ">
+			<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+				<foreach collection="workPopNoMulti" item="item">
+		          OR MS_DISTRICT.WORKPOPNO IN
+					<foreach collection="item" item="code" open="(" close=")" separator=",">
+						#{code} 	 
+					</foreach>
+				</foreach>
+			</trim>
+		</if>
+        
+        
+        <if test='dcCode != null and dcCode.trim().length > 0'>
+		  AND    MS_DISTRICT.DCCODE = #{dcCode}
+		</if>
+		ORDER BY MS_DISTRICT.DCCODE, MS_DISTRICT.DISTRICTCODE
+    </select>    
+    
+    
+    <!-- 권역별차량관리 정보 INSERT -->
+    <select id="insertMaster" statementType="CALLABLE" resultType="HMAP">			 
+		<![CDATA[
+        {
+	        CALL  /* [msDistrictService.sqlx][update][권역별차량관리 정보 UPDATE][jangjaehyun][20250821] */
+	        DECLARE
+                V_AFTER     MS_DISTRICT%rowtype;
+                O_SUCCESS   NUMBER         :=  1;      /* 성공여부(1이면 성공) */
+                O_ERRCODE   NUMBER         :=  0;      /* 오류 코드 */
+                O_ERRMSG    VARCHAR2(4000) := '';      /* 오류 메세지 */
+                SQL_ERROR 	EXCEPTION;
+            BEGIN
+                BEGIN
+                   V_AFTER.DCCODE       := #{dcCode};
+                   V_AFTER.DISTRICTTYPE := 'POP';
+                   V_AFTER.DISTRICTGROUP:= null;
+                   V_AFTER.DISTRICTCODE := #{districtCode};
+                   V_AFTER.DISTRICTNAME := null;
+                   V_AFTER.PRIORITY     := null;
+                   V_AFTER.DISTANCETYPE := null;
+                   V_AFTER.CMDISTRICTTYPE  := null;
+                   V_AFTER.CMDISTRICTGROUP := null;
+                   V_AFTER.CMDISTRICTCODE  := null;
+                   V_AFTER.ZIPCODE      := null;
+                   V_AFTER.STORERKEY    := #{storerKey};
+                   V_AFTER.CUSTKEY      := null;
+                   V_AFTER.CARAGENTKEY  := null;
+                   V_AFTER.CARNO        := #{carNo};
+                   V_AFTER.DRIVER       := null;
+                   V_AFTER.SUBCARNO1    := #{subCarNo1};
+                   V_AFTER.SUBCARNO2    := #{subCarNo2};
+                   V_AFTER.SUBCARNO3    := #{subCarNo3};
+                   V_AFTER.GATENO       := null;
+                   V_AFTER.DOCKNO       := null;
+                   V_AFTER.WORKPOPNO    := #{workPopNo};
+                   V_AFTER.OTHER01      := #{other01};
+                   V_AFTER.OTHER02      := #{other02};
+                   V_AFTER.OTHER03      := #{other03};
+                   V_AFTER.MEMO         := null;
+                   V_AFTER.STATUS       := #{status};
+                   V_AFTER.DEL_YN       := #{delYn};
+                   V_AFTER.TRAFFICCOP   := null;
+                   V_AFTER.ARCHIVECOP   := null;
+                   V_AFTER.ADDWHO       := #{addWho};
+                   V_AFTER.ADDDATE      := SYSDATE;
+                   V_AFTER.EDITWHO       := #{editWho};
+                   V_AFTER.EDITDATE      := SYSDATE;                   
+                   V_AFTER.ROLLTAINER_MAX := #{rolltainerMax};
+                   V_AFTER.ROLLTAINER_START_NO := #{rolltainerStartNo};
+                   V_AFTER.ROLLTAINER_END_NO := #{rolltainerEndNo};
+                   V_AFTER.CHUTENO     := #{chuteNo};
+                   -- 프로시저 호출
+                   TRMS_DISTRICT.TR_INSERT(
+                            V_AFTER
+                        ,   O_SUCCESS
+                        ,   O_ERRCODE
+                        ,   O_ERRMSG
+                    );
+
+                    IF O_ERRCODE = -20001 THEN
+	                	RAISE_APPLICATION_ERROR (-20001, NVL(O_ERRMSG, SQLERRM));
+	                ELSIF O_ERRCODE != 0 THEN
+					    RAISE SQL_ERROR;
+		            END IF;
+			        
+			        EXCEPTION WHEN OTHERS THEN
+			        	O_ERRCODE := SQLCODE;
+						O_ERRMSG := NVL(O_ERRMSG, SQLERRM);
+
+                END;
+    
+                #{success, mode=OUT, jdbcType=INTEGER, javaType=int}    :=  O_SUCCESS;
+                #{errCode, mode=OUT, jdbcType=INTEGER, javaType=int}        :=  O_ERRCODE;
+                #{errMsg, mode=OUT, jdbcType=VARCHAR, javaType=String}  :=  O_ERRMSG;
+    
+            END
+        }
+        ]]>
+    </select>    
+    
+    <!-- 권역별차량관리 정보 UPDATE -->
+    <update id="updateMaster">		
+		UPDATE /* [msDistrictService.sqlx][msDistrictService.updateDistrict][권역별차량관리 정보 UPDATE][jangjaehyun][20250623] */
+		    MS_DISTRICT
+		SET
+		    BATCHGROUP   = #{batchGroup},
+		    DESCRIPTION  = #{description},
+		    STATUS       = #{status},
+		    DEL_YN       = #{delYn},
+		    EDITDATE     = SYSDATE,
+		    EDITWHO      = #{gUserId},
+		    ORGANIZE     = #{organize},
+		    AREA         = #{area},
+		    ORDERTYPE    = #{orderType},
+		    ETCCODE1     = #{etcCode1},
+		    ETCCODE2     = #{etcCode2},
+		    ETCCODE3     = #{etcCode3},
+		    ETCCODE4     = #{etcCode4},
+		    ALLO_UOM     = #{alloUom},
+		    CHUTENO      = #{chuteNo}
+		WHERE 1=1
+		  AND DCCODE = #{dcCode}
+		  AND PLANT = #{plant}
+		  AND STORAGETYPE = #{storageType}
+		  AND DISTANCETYPE = #{distanceType}
+	</update>
+	
+	<select id="update" statementType="CALLABLE" resultType="HMAP">
+		<![CDATA[
+        {
+	        CALL  /* [msDistrictService.sqlx][update][권역별차량관리 정보 UPDATE][jangjaehyun][20250821] */
+	        DECLARE
+                V_AFTER     MS_DISTRICT%rowtype;
+                O_SUCCESS   NUMBER         :=  1;      /* 성공여부(1이면 성공) */
+                O_ERRCODE   NUMBER         :=  0;      /* 오류 코드 */
+                O_ERRMSG    VARCHAR2(4000) := '';      /* 오류 메세지 */
+                SQL_ERROR 	EXCEPTION;
+            BEGIN
+                BEGIN
+                    SELECT  *
+                    INTO    V_AFTER
+                    FROM    MS_DISTRICT
+                    WHERE   SERIALKEY = #{serialKey};
+                   
+                   V_AFTER.DCCODE       := #{dcCode};
+                   V_AFTER.DISTRICTCODE := #{districtCode};
+                   V_AFTER.CARNO        := #{carNo};
+                   V_AFTER.SUBCARNO1    := #{subCarNo1};
+                   V_AFTER.SUBCARNO2    := #{subCarNo2};
+                   V_AFTER.SUBCARNO3    := #{subCarNo3};
+                   V_AFTER.WORKPOPNO    := #{workPopNo};
+                   V_AFTER.OTHER01      := #{other01};
+                   V_AFTER.OTHER02      := #{other02};
+                   V_AFTER.OTHER03      := #{other03};
+                   V_AFTER.STATUS       := #{status};
+                   V_AFTER.DEL_YN       := #{delYn};
+	               V_AFTER.EDITWHO       := #{editWho};
+                   V_AFTER.EDITDATE      := SYSDATE;
+                   V_AFTER.ROLLTAINER_MAX := #{rolltainerMax};
+                   V_AFTER.ROLLTAINER_START_NO := #{rolltainerStartNo};
+                   V_AFTER.ROLLTAINER_END_NO := #{rolltainerEndNo};
+                   V_AFTER.CHUTENO     := #{chuteNo};
+                   -- 프로시저 호출
+                   TRMS_DISTRICT.TR_UPDATE(
+                            V_AFTER
+                        ,   O_SUCCESS
+                        ,   O_ERRCODE
+                        ,   O_ERRMSG
+                    );
+
+                    IF O_ERRCODE = -20001 THEN
+	                	RAISE_APPLICATION_ERROR (-20001, NVL(O_ERRMSG, SQLERRM));
+	                ELSIF O_ERRCODE != 0 THEN
+					    RAISE SQL_ERROR;
+		            END IF;
+			        
+			        EXCEPTION WHEN OTHERS THEN
+			        	O_ERRCODE := SQLCODE;
+						O_ERRMSG := NVL(O_ERRMSG, SQLERRM);
+
+                END;
+    
+                #{success, mode=OUT, jdbcType=INTEGER, javaType=int}    :=  O_SUCCESS;
+                #{errCode, mode=OUT, jdbcType=INTEGER, javaType=int}        :=  O_ERRCODE;
+                #{errMsg, mode=OUT, jdbcType=VARCHAR, javaType=String}  :=  O_ERRMSG;
+    
+            END
+        }
+        ]]>
+    </select>
+    
+    <!-- 권역별차량관리 정보 삭제 -->
+    <delete id="deleteMaster">
+    	DELETE /* [msDistrictService.sqlx][msDistrictService.deleteDistrict][권역별차량관리 정보 삭제][jangjaehyun][20250623] */
+    		FROM MS_DISTRICT
+    	WHERE DCCODE = #{dcCode}
+    	  AND PLANT = #{plant}
+    	  AND STORAGETYPE = #{storageType}
+    	  AND DISTANCETYPE = #{distanceType}
+    </delete>
+    
+    <!-- 엑셀 업로드 유효성체크 (단건, V2) -->
+	<select id="getValidateExcelList2" resultType="MsDistrictResDto">
+		SELECT 
+		    #{dcCode}            AS dcCode,
+		    #{workPopNo}         AS workPopNo,
+		    #{districtCode}      AS districtCode,
+		    #{carNo}             AS carNo,
+		    #{rolltainerMax}     AS rolltainerMax,
+		    #{rolltainerStartNo} AS rolltainerStartNo,
+		    #{rolltainerEndNo}   AS rolltainerEndNo,
+		    -- 업데이트 여부 (POP 기준 존재)
+		    (SELECT CASE WHEN COUNT(1) > 0 THEN 'Y' ELSE 'N' END
+		       FROM MS_DISTRICT M
+		      WHERE M.DISTRICTTYPE = 'POP'
+		        AND M.DCCODE       = #{dcCode}
+		        AND M.DISTRICTCODE = #{districtCode}) AS updateYn,
+		    -- 최종 처리 가능 여부
+		    CASE 
+		        WHEN (SELECT CASE WHEN COUNT(1) > 0 THEN 'Y' ELSE 'N' END FROM CM_DC C WHERE C.DEL_YN='N' AND C.DCCODE=#{dcCode}) = 'N' THEN 'N'
+		        WHEN (#{workPopNo} IS NOT NULL AND TRIM(#{workPopNo}) <![CDATA[<>]]> '')
+		            AND (SELECT CASE WHEN COUNT(1) > 0 THEN 'Y' ELSE 'N' END
+		            	FROM MS_DLV_DISTRICT D
+		               WHERE D.DEL_YN='N'
+		               	 AND D.DCCODE=#{dcCode}
+		               	 AND D.DLVDISTRICT_ID=#{workPopNo}) = 'N' THEN 'N'
+		        WHEN (SELECT CASE WHEN COUNT(1) > 0 THEN 'Y' ELSE 'N' END FROM CM_CAR R WHERE R.DEL_YN='N' AND (R.CARNO=#{carNo} OR R.CARID=#{carNo})) = 'N' THEN 'N'
+		        WHEN NOT (REGEXP_LIKE(NVL(#{rolltainerMax},'0'),'^[0-9]+$') AND TO_NUMBER(#{rolltainerMax}) BETWEEN 0 AND 1000) THEN 'N'
+		        WHEN NOT (REGEXP_LIKE(NVL(#{rolltainerStartNo},'0'),'^[0-9]+$') AND TO_NUMBER(#{rolltainerStartNo}) >= 0) THEN 'N'
+		        WHEN NOT (REGEXP_LIKE(NVL(#{rolltainerEndNo},'0'),'^[0-9]+$') AND TO_NUMBER(#{rolltainerEndNo})   >= 0) THEN 'N'
+		        WHEN NOT (REGEXP_LIKE(NVL(#{rolltainerStartNo},'0'),'^[0-9]+$') AND REGEXP_LIKE(NVL(#{rolltainerEndNo},'0'),'^[0-9]+$') AND TO_NUMBER(#{rolltainerStartNo}) &lt; TO_NUMBER(#{rolltainerEndNo})) THEN 'N'
+		        WHEN NOT (REGEXP_LIKE(NVL(#{rolltainerMax},'0'),'^[0-9]+$') AND REGEXP_LIKE(NVL(#{rolltainerStartNo},'0'),'^[0-9]+$') AND REGEXP_LIKE(NVL(#{rolltainerEndNo},'0'),'^[0-9]+$')
+		                  AND TO_NUMBER(#{rolltainerStartNo}) <![CDATA[<=]]> TO_NUMBER(#{rolltainerMax}) AND TO_NUMBER(#{rolltainerEndNo}) <![CDATA[<=]]> TO_NUMBER(#{rolltainerMax})) THEN 'N'
+		        ELSE 'Y'
+		    END AS processYn,
+		    -- 메시지 우선순위
+		    CASE 
+		        WHEN (SELECT CASE WHEN COUNT(1) > 0 THEN 'Y' ELSE 'N' END FROM CM_DC C WHERE C.DEL_YN='N' AND C.DCCODE=#{dcCode}) = 'N' THEN '유효하지 않은 물류센터입니다.'
+		        WHEN (#{workPopNo} IS NOT NULL AND TRIM(#{workPopNo}) <![CDATA[<>]]> '')
+                    AND (
+                    	SELECT CASE WHEN COUNT(1) > 0 THEN 'Y' ELSE 'N' END
+                    	FROM MS_DLV_DISTRICT D WHERE D.DEL_YN='N' AND D.DCCODE=#{dcCode} AND D.DLVDISTRICT_ID=#{workPopNo}) = 'N' THEN '배송권역이 유효하지 않습니다.'
+		        WHEN (SELECT CASE WHEN COUNT(1) > 0 THEN 'Y' ELSE 'N' END FROM CM_CAR R WHERE R.DEL_YN='N' AND (R.CARNO=#{carNo} OR R.CARID=#{carNo})) = 'N' THEN '차량번호가 존재하지 않습니다.'
+		        WHEN NOT (REGEXP_LIKE(NVL(#{rolltainerMax},'0'),'^[0-9]+$') AND TO_NUMBER(#{rolltainerMax}) BETWEEN 0 AND 1000) THEN '롤테이너 Max는 0~1000 숫자만 입력 가능합니다.'
+		        WHEN NOT (REGEXP_LIKE(NVL(#{rolltainerStartNo},'0'),'^[0-9]+$') AND TO_NUMBER(#{rolltainerStartNo}) >= 0) THEN 'From은 0 이상의 숫자여야 합니다.'
+		        WHEN NOT (REGEXP_LIKE(NVL(#{rolltainerEndNo},'0'),'^[0-9]+$') AND TO_NUMBER(#{rolltainerEndNo})   >= 0) THEN 'To는 0 이상의 숫자여야 합니다.'
+		        WHEN NOT (REGEXP_LIKE(NVL(#{rolltainerStartNo},'0'),'^[0-9]+$') AND REGEXP_LIKE(NVL(#{rolltainerEndNo},'0'),'^[0-9]+$') AND TO_NUMBER(#{rolltainerStartNo}) &lt; TO_NUMBER(#{rolltainerEndNo})) THEN 'From은 To보다 작아야 합니다.'
+		        WHEN NOT (REGEXP_LIKE(NVL(#{rolltainerMax},'0'),'^[0-9]+$') AND REGEXP_LIKE(NVL(#{rolltainerStartNo},'0'),'^[0-9]+$') AND REGEXP_LIKE(NVL(#{rolltainerEndNo},'0'),'^[0-9]+$')
+		                  AND TO_NUMBER(#{rolltainerStartNo}) <![CDATA[<=]]> TO_NUMBER(#{rolltainerMax}) AND TO_NUMBER(#{rolltainerEndNo}) <![CDATA[<=]]> TO_NUMBER(#{rolltainerMax})) THEN 'From/To는 Max를 초과할 수 없습니다.'
+		        ELSE '정상'
+		    END AS processMsg
+		FROM DUAL
+    </select>
+    
+    <!-- 엑셀업로드 유효성체크-->
+	<select id="getValidateExcelList" resultType="MsDistrictResDto">
+		SELECT  /* [msDistrictService.sqlx][msDistrictService.getValidateExcelList][엑셀 업로드 유효성 체크][jangjaehyun][20251202] */
+	  		  #{serialKey} AS SERIALKEY
+			, #{dcCode} AS DCCODE
+			, #{districtCode} AS DISTRICTCODE
+			, #{carNo} AS CARNO
+			, (SELECT CASE WHEN COUNT(1) > 0 THEN 'N' ELSE 'Y' END
+							FROM   MS_DISTRICT
+							WHERE  MS_DISTRICT.DCCODE 	= #{dcCode}  
+							AND	   MS_DISTRICT.DISTRICTCODE = #{districtCode} 
+							AND	   MS_DISTRICT.CARNO 	= #{carNo}) 		AS PROCESS_YN
+		FROM DUAL
+    </select>
+    
+    <select id="selectValidateRolltainerByCarNoAndPopAndDcCode" resultType="int">
+        SELECT /* [msDistrictService.sqlx][msDistrictService.selectValidateRolltainerByCarNoAndPopAndDcCode][valid][jun][20260129] */ 
+              COUNT( cmCar.CARNO ) AS cnt
+          FROM MS_DISTRICT msDis
+    INNER JOIN ( SELECT a.CARNO
+                   FROM CM_CAR a
+                  WHERE a.DEL_YN = 'N'
+                    AND (a.CARID = #{carNo} OR a.CARNO = #{carNo} )
+               ) cmCar 
+             ON cmCar.CARNO = msDis.CARNO
+         WHERE msDis.DCCODE                 = #{dcCode}             /* 물류센터코드 */
+           AND msDis.DISTRICTTYPE           = 'POP'                 /* 권역구분 */
+           AND msDis.DISTRICTCODE           = #{districtCode}       /* pop번호 : 센터권역코드 */
+           AND cmCar.CARNO                  = #{carNo}              /* 차량번호 */
+           AND msDis.DEL_YN = 'N'
+        <if test="serialKey != null and serialKey != '' ">
+           AND NOT EXISTS ( SELECT 1 FROM DUAL
+                             WHERE msDis.SERIALKEY = #{serialKey}
+                          )         /* 수정시 자기자신 제외 */
+        </if>
+    </select>
+    
+    <select id="selectValidateRolltainerByPopAndDcCodeAndRolltainer" resultType="int">
+        SELECT /* [msDistrictService.sqlx][msDistrictService.selectValidateRolltainerByPopAndDcCodeAndRolltainer][valid][jun][20260129] */ 
+              COUNT( msDis.DCCODE ) AS cnt
+          FROM MS_DISTRICT msDis
+         WHERE msDis.DCCODE                 = #{dcCode}             /* 물류센터코드 */
+           AND msDis.DISTRICTTYPE           = 'POP'                 /* 권역구분 */
+           AND msDis.DEL_YN = 'N'
+           AND msDis.DISTRICTCODE           = #{districtCode}       /* pop번호 : 센터권역코드 */
+           AND msDis.ROLLTAINER_START_NO  = TO_NUMBER( NVL(#{rolltainerStartNo},'0'))
+           AND msDis.ROLLTAINER_END_NO = TO_NUMBER( NVL(#{rolltainerEndNo},'0'))
+    </select>
+    
+     <select id="selectValidateRolltainerByPopAndDcCodeAndRolltainer2" resultType="int">
+        SELECT /* [msDistrictService.sqlx][msDistrictService.selectValidateRolltainerByPopAndDcCodeAndRolltainer2][valid][jun][20260129] */ 
+              COUNT( msDis.DCCODE ) AS cnt
+          FROM MS_DISTRICT msDis
+         WHERE msDis.DCCODE                 = #{dcCode}             /* 물류센터코드 */
+           AND msDis.DISTRICTTYPE           = 'POP'                 /* 권역구분 */
+           AND msDis.DISTRICTCODE           = #{districtCode}       /* pop번호 : 센터권역코드 */
+           AND msDis.DEL_YN = 'N'
+           AND TO_NUMBER( NVL(#{rolltainerStartNo},'0')) BETWEEN  msDis.ROLLTAINER_START_NO AND msDis.ROLLTAINER_END_NO
+           <if test="serialKey != null and serialKey != '' ">
+           AND NOT EXISTS ( SELECT 1 FROM DUAL
+                             WHERE msDis.SERIALKEY = #{serialKey}
+                          )         /* 수정시 자기자신 제외 */
+        </if>
+    </select>
+         <select id="selectValidateRolltainerByPopAndDcCodeAndRolltainer3" resultType="int">
+        SELECT /* [msDistrictService.sqlx][msDistrictService.selectValidateRolltainerByPopAndDcCodeAndRolltainer3][valid][jun][20260129] */ 
+              COUNT( msDis.DCCODE ) AS cnt
+          FROM MS_DISTRICT msDis
+         WHERE msDis.DCCODE                 = #{dcCode}             /* 물류센터코드 */
+           AND msDis.DISTRICTTYPE           = 'POP'                 /* 권역구분 */
+           AND msDis.DISTRICTCODE           = #{districtCode}       /* pop번호 : 센터권역코드 */
+           AND msDis.DEL_YN = 'N'
+           AND TO_NUMBER( NVL(#{rolltainerEndNo},'0')) BETWEEN  msDis.ROLLTAINER_START_NO AND msDis.ROLLTAINER_END_NO
+           <if test="serialKey != null and serialKey != '' ">
+           AND NOT EXISTS ( SELECT 1 FROM DUAL
+                             WHERE msDis.SERIALKEY = #{serialKey}
+                          )         /* 수정시 자기자신 제외 */
+        </if>
+    </select>
+   
+</mapper>

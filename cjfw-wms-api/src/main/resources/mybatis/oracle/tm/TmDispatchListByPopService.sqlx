@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="tmDispatchListByPopService">
+
+    <select id="getDispatchListByPop" resultType="TmDispatchListByPopResDto">
+        SELECT /* [TmDispatchListByPopService.sqlx][getDispatchListByPop][배차목록(POP별) 조회][System][2025.01.15] */
+              TM_LIST.DCCODE
+            , FN_DESCR_DC(TM_LIST.DCCODE) AS DCNAME
+            , TM_LIST.DELIVERYDT
+            , MS_CUSTXPOP.POPNO
+            , CASE WHEN MS_CUSTXPOP.POPNO IS NOT NULL THEN NVL(MS_CUSTXPOP.ROLLTAINER_NO, 0) END AS ROLLTAINER_NO
+            , MS_CUSTXPOP.POPNAME AS CARNO
+            , COUNT(DISTINCT TM_LIST.TRUTHCUSTKEY) AS TRUTHCUST_COUNT
+            , SUM(CASE WHEN TM_LIST.DOCTYPE = 'RT' THEN 0 ELSE TM_LIST.WEIGHT END) AS WEIGHT
+            , SUM(CASE WHEN TM_LIST.DOCTYPE = 'RT' THEN 0 ELSE TM_LIST.CUBE   END) AS CUBE
+        FROM (
+            SELECT DCCODE, DELIVERYDT, DOCTYPE, DELIVERYGROUP, STORERKEY, CUSTTYPE, CUSTKEY, CARNO, CUBE, WEIGHT, STATUS, DEL_YN, TM_DELIVERYTYPE, TRUTHCUSTKEY
+            FROM TM_INPLAN
+            WHERE SPLIT_DELIVERY_YN = 'N'
+              AND DEL_YN = 'N'
+            UNION ALL
+            SELECT DCCODE, DELIVERYDT, DOCTYPE, DELIVERYGROUP, STORERKEY, CUSTTYPE, CUSTKEY, CARNO, CUBE, WEIGHT, STATUS, DEL_YN, TM_DELIVERYTYPE, TRUTHCUSTKEY
+            FROM TM_INPLAN_SPLIT
+            WHERE DEL_YN = 'N'
+        ) TM_LIST
+        LEFT OUTER JOIN (
+            SELECT MS_CUSTXPOP.*
+            FROM MS_CUSTXPOP
+            JOIN MS_CUST
+                ON  MS_CUSTXPOP.STORERKEY = MS_CUST.STORERKEY
+                AND MS_CUSTXPOP.CUSTKEY   = MS_CUST.CUSTKEY
+                AND MS_CUSTXPOP.CUSTTYPE  = MS_CUST.CUSTTYPE
+                AND MS_CUSTXPOP.DEL_YN = 'N'
+        ) MS_CUSTXPOP
+             ON MS_CUSTXPOP.DCCODE    = TM_LIST.DCCODE
+            AND MS_CUSTXPOP.CUSTKEY   = TM_LIST.TRUTHCUSTKEY
+            AND MS_CUSTXPOP.CUSTTYPE  = TM_LIST.CUSTTYPE
+            AND MS_CUSTXPOP.STORERKEY = TM_LIST.STORERKEY
+            AND MS_CUSTXPOP.SERIALKEY = (
+                SELECT MIN(X.SERIALKEY) KEEP (DENSE_RANK FIRST ORDER BY X.FROMDATE DESC, X.TODATE ASC)
+                FROM MS_CUSTXPOP X
+                WHERE X.DCCODE    = MS_CUSTXPOP.DCCODE
+                  AND X.STORERKEY = MS_CUSTXPOP.STORERKEY
+                  AND X.CUSTTYPE  = MS_CUSTXPOP.CUSTTYPE
+                  AND X.CUSTKEY   = MS_CUSTXPOP.CUSTKEY
+                  AND X.DEL_YN    = 'N'
+                  AND TM_LIST.DELIVERYDT BETWEEN X.FROMDATE AND X.TODATE
+                  AND X.DEL_YN = 'N'
+            )
+        WHERE TM_LIST.DCCODE = #{dccode}
+          AND TM_LIST.DOCTYPE IN ( 'WD', 'RT' )
+          AND TM_LIST.DELIVERYDT BETWEEN #{deliverydtFrom} AND #{deliverydtTo}
+          AND TM_LIST.TM_DELIVERYTYPE IN ( '1', '2', '6' )
+          AND TM_LIST.STATUS = '90'
+        <if test="carnoList != null and carnoList.size() > 0">
+            AND TM_LIST.CARNO IN
+            <foreach collection="carnoList" item="carno" open="(" separator="," close=")">
+                #{carno}
+            </foreach>
+        </if>
+        <if test="popnoMulti != null and popnoMulti.size() > 0">
+            AND TM_LIST.DELIVERYGROUP IN
+            <foreach collection="popnoMulti" item="popno" open="(" separator="," close=")">
+                #{popno}
+            </foreach>
+        </if>
+        GROUP BY
+              TM_LIST.DCCODE
+            , TM_LIST.DELIVERYDT
+            , MS_CUSTXPOP.POPNO
+            , CASE WHEN MS_CUSTXPOP.POPNO IS NOT NULL THEN NVL(MS_CUSTXPOP.ROLLTAINER_NO, 0) END
+            , MS_CUSTXPOP.POPNAME
+        ORDER BY
+              TM_LIST.DCCODE
+            , TM_LIST.DELIVERYDT
+            , MS_CUSTXPOP.POPNAME
+            , ROLLTAINER_NO
+    </select>
+</mapper>

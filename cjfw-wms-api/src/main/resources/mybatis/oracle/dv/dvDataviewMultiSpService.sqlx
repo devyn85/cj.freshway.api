@@ -1,0 +1,203 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+  PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+  "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="dvDataviewMultiSpService">
+
+    <!-- 일배입출차이현황 List-->
+    <select id="getDvDataviewMultiSpList" resultType="cjfw.wms.dv.dto.DvDataviewMultiSpResDto">
+		SELECT /* [dvDataviewMultiSpService.sqlx][dvDataviewMultiSpService.getDvDataviewSingleSpList][일배입출차이현황][공두경][2025-08-04] */
+			   DM_DOCUMENT_D.DCCODE					AS DCCODE				/*물류센터*/
+			  ,DC1.DCNAME 							AS DCCODE_NAME 			/*물류센터명*/
+		      ,DM_DOCUMENT_D.DELIVERYDATE			AS DELIVERYDATE			/*배송일자*/
+		      ,MAX(DECODE(DM_DOCUMENT_D.DOCTYPE,'DP',DM_DOCUMENT_H.FROM_CUSTKEY,''))  AS CUSTKEY
+		      ,MAX(DECODE(DM_DOCUMENT_D.DOCTYPE,'DP',DM_DOCUMENT_H.FROM_CUSTNAME,'')) AS CUSTNAME
+		      ,DM_DOCUMENT_D.SKU					AS SKU					/*상품코드*/
+		      ,MAX(MS_SKU.DESCRIPTION) 				AS SKUNAME				/*상품명칭*/
+		      ,DM_DOCUMENT_D.PLANT					AS PLANT				/**/
+		      ,MAX('['||DM_DOCUMENT_D.PLANT||']'||DECODE(TRIM(NVL(PLANT1.DESCRIPTION,'')),'',DM_DOCUMENT_D.PLANT,TRIM(NVL(PLANT1.DESCRIPTION,''))))						AS PLANT_DESCR		/*플랜트*/
+		      ,SUM(DM_DOCUMENT_D.OPENQTY+DM_DOCUMENT_D.OPENADJUSTQTY+DM_DOCUMENT_D.CANCELQTY) 		AS ORDERQTY_DAILY		/*주문(예정)수량*/
+		      ,SUM(DECODE(DM_DOCUMENT_D.DOCTYPE,'DP',DM_DOCUMENT_D.CONFIRMQTY,0)) AS QTY_DP		/*입고수량*/
+		      ,SUM(DECODE(DM_DOCUMENT_D.DOCTYPE,'WD',DM_DOCUMENT_D.CONFIRMQTY,0)) AS QTY_WD		/*출고수량*/	
+		      ,SUM(DECODE(DM_DOCUMENT_D.DOCTYPE,'DP',DM_DOCUMENT_D.CONFIRMQTY,0)) - SUM(DECODE(DM_DOCUMENT_D.DOCTYPE,'WD',DM_DOCUMENT_D.CONFIRMQTY,0)) AS QTY_DIFF	/*차이수량*/
+		      ,CD1.BASEDESCR 						AS PUTAWAYTYPE			/*일베구분*/
+		      ,MAX(DC2.DCNAME) 						AS CDELIVERYROUTE_NAME	/*경유센터*/
+		      ,SUM(DM_DOCUMENT_D.ROUTEINSPECTQTY) 	AS ROUTEINSPECTQTY		/*광역검수수량*/
+		      ,DM_DOCUMENT_D.CHANNEL				AS CHANNEL				/**/
+		      ,MAX(DM_DOCUMENT_D.ROUTE) 			AS ROUTE				/**/	
+		      ,MAX(DM_DOCUMENT_D.DOCTYPE)			AS DOCTYPE				/**/
+		FROM   DM_DOCUMENT_D
+		JOIN   DM_DOCUMENT_H
+		ON     DM_DOCUMENT_D.DELIVERYDATE     = DM_DOCUMENT_H.DELIVERYDATE    
+	    AND    DM_DOCUMENT_D.DOCNO     = DM_DOCUMENT_H.DOCNO    
+	    AND    DM_DOCUMENT_D.DCCODE    = DM_DOCUMENT_H.DCCODE   
+	    AND    DM_DOCUMENT_D.STORERKEY = DM_DOCUMENT_H.STORERKEY
+	    AND    DM_DOCUMENT_D.DOCTYPE   = DM_DOCUMENT_H.DOCTYPE		
+	    JOIN   MS_SKU
+		ON     MS_SKU.STORERKEY = DM_DOCUMENT_D.STORERKEY
+		AND    MS_SKU.SKU       = DM_DOCUMENT_D.SKU
+ 		LEFT JOIN CM_CODE_STORER CD1 ON (CD1.STORERKEY = DM_DOCUMENT_D.STORERKEY AND CD1.CODELIST = 'PUTAWAYTYPE' 		AND CD1.BASECODE = DM_DOCUMENT_D.CHANNEL)
+		LEFT JOIN CM_DC DC1  ON DC1.DCCODE = DM_DOCUMENT_D.DCCODE
+		LEFT JOIN CM_DC DC2  ON DC2.DCCODE = DM_DOCUMENT_D.ROUTE
+		LEFT JOIN MS_PLANT PLANT1 	  ON PLANT1.PLANT = DM_DOCUMENT_D.PLANT
+		WHERE  DM_DOCUMENT_D.CHANNEL IN ('2','3')
+		AND    DM_DOCUMENT_D.DOCTYPE IN ('DP','WD')
+		AND    DM_DOCUMENT_D.IF_SEND_TYPE <![CDATA[<>]]> 'WMSPO'
+		AND    DM_DOCUMENT_D.WORKPROCESSCODE IN ('SO','PO','JASO')
+		AND    NOT ( DM_DOCUMENT_D.DOCTYPE='WD' AND DM_DOCUMENT_D.WORKPROCESSCODE = 'PO')  /*--협력사반품출고는 제외한다.*/
+		AND    DM_DOCUMENT_D.DEL_YN ='N'
+		AND    DM_DOCUMENT_D.DCCODE    = #{fixdccode}
+		AND    DM_DOCUMENT_D.STORERKEY = #{gStorerkey}		
+	    
+	    <!-- START.권한센터 -->
+	    AND EXISTS (SELECT 1
+                      FROM CM_USER_AUTHORITY 
+                     WHERE CM_USER_AUTHORITY.DCCODE    = DM_DOCUMENT_D.DCCODE    
+                       AND CM_USER_AUTHORITY.STORERKEY = DM_DOCUMENT_D.STORERKEY 
+                       AND CM_USER_AUTHORITY.ORGANIZE  = DM_DOCUMENT_D.ORGANIZE  
+                       AND CM_USER_AUTHORITY.AREA      = DM_DOCUMENT_D.AREA  
+                       AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey}
+                       AND CM_USER_AUTHORITY.DCCODE    = #{fixdccode}
+                       AND CM_USER_AUTHORITY.USERID    = #{gUserId}
+                   )
+	    <!-- END.권한센터	--> 
+	    
+	    <!-- 창고.다중검색 -->  		
+        <if test="organizeMulti != null and organizeMulti != ''">
+           AND DM_DOCUMENT_D.ORGANIZE IN
+           <foreach collection="organizeMulti" item="code" open="(" close=")" separator=",">
+             #{code}
+           </foreach>
+        </if>    
+        
+		AND    DM_DOCUMENT_D.DELIVERYDATE <![CDATA[>=]]> #{fromSlipdt} 
+		AND    DM_DOCUMENT_D.DELIVERYDATE <![CDATA[<=]]> #{toSlipdt}
+		<if test="plant != null and plant != ''"> 				AND    DM_DOCUMENT_D.PLANT   = #{plant} 		</if>
+		<if test="putawaytype != null and putawaytype != ''"> 	AND    DM_DOCUMENT_D.CHANNEL = #{putawaytype} 	</if>
+		<if test="fromcustkeyMulti != null and fromcustkeyMulti != '' ">
+			AND DM_DOCUMENT_D.SKU IN  (SELECT B.SKU 
+									   FROM   DM_DOCUMENT_H A
+									   JOIN   DM_DOCUMENT_D B
+									   ON     B.DELIVERYDATE     = A.DELIVERYDATE    
+									   AND    B.DOCNO     = A.DOCNO    
+									   AND    B.DCCODE    = A.DCCODE   
+									   AND    B.STORERKEY = A.STORERKEY	
+									   AND    B.DOCTYPE = A.DOCTYPE			
+									   WHERE  A.DCCODE = DM_DOCUMENT_D.DCCODE
+									   AND    A.STORERKEY = DM_DOCUMENT_D.STORERKEY
+									   AND    A.DELIVERYDATE = DM_DOCUMENT_D.DELIVERYDATE
+										<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+								    		<foreach collection="fromcustkeyMulti" item="item">
+								    			OR A.FROM_CUSTKEY IN
+								    			<foreach collection="item" item="code" open="(" close=")" separator=",">
+								    				#{code} 	 
+								          		</foreach>
+								        	</foreach>
+								      	</trim>			
+								      	)
+		</if>		
+		<if test="sku != null and sku != '' ">
+				<if test="skuMulti != null and skuMulti.size() > 0">
+					<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+						<foreach collection="skuMulti" item="item">
+							OR DM_DOCUMENT_D.SKU IN
+							<foreach collection="item" item="code" open="(" close=")" separator=",">
+								#{code} 	 
+				      		</foreach>
+				    	</foreach>
+				  	</trim>			                                    
+		    	</if>
+	        </if>
+		GROUP BY DM_DOCUMENT_D.DCCODE
+		        ,DM_DOCUMENT_D.PLANT
+		        ,DM_DOCUMENT_D.DELIVERYDATE
+		        ,DM_DOCUMENT_D.SKU
+		        ,CD1.BASEDESCR
+		        ,DM_DOCUMENT_D.CHANNEL
+		        ,DC1.DCNAME
+		HAVING SUM(DECODE(DM_DOCUMENT_D.DOCTYPE,'DP',DM_DOCUMENT_D.CONFIRMQTY,0)) <![CDATA[<>]]> SUM(DECODE(DM_DOCUMENT_D.DOCTYPE,'WD',DM_DOCUMENT_D.CONFIRMQTY,0))
+		ORDER BY DM_DOCUMENT_D.DCCODE
+		        ,DM_DOCUMENT_D.DELIVERYDATE
+		        ,DM_DOCUMENT_D.SKU
+		        ,DM_DOCUMENT_D.PLANT
+		        ,CASE WHEN QTY_DIFF > 0 THEN 1
+		              WHEN QTY_DIFF <![CDATA[<]]> 0 THEN 2
+		              ELSE 3
+		         END
+    </select>
+    
+
+    <!-- 상세 내역 List -->
+    <select id="getDvDataviewMultiSpDetailList" resultType="DvDataviewMultiSpResGrid1Dto">
+	    SELECT /* [dvDataviewMultiSpService.sqlx][dvDataviewMultiSpService.getDvDataviewMultiSpDetailList][일배입출차이현황 상세 내역 List][ch.y][2025-06-13] */
+	    	   CD1.BASEDESCR   					AS DOCTYPE			/*문서유형*/
+	          ,DM_DOCUMENT_D.DOCNO				AS DOCNO			/*문서번호*/
+	          ,CD2.BASEDESCR 					AS ORDERTYPE		/*주문유형*/
+	          ,DECODE(DM_DOCUMENT_D.DOCTYPE,'DP',DM_DOCUMENT_H.FROM_CUSTKEY,DM_DOCUMENT_H.TO_CUSTKEY) 	AS TO_CUSTKEY	/*배송인도처코드*/
+	          ,DECODE(DM_DOCUMENT_D.DOCTYPE,'DP',DM_DOCUMENT_H.FROM_CUSTNAME,DM_DOCUMENT_H.TO_CUSTNAME) AS TO_CUSTNAME 	/*배송인도처명*/
+	          ,MAX('['||DM_DOCUMENT_D.PLANT||']'||DECODE(TRIM(NVL(PLANT1.DESCRIPTION,'')),'',DM_DOCUMENT_D.PLANT,TRIM(NVL(PLANT1.DESCRIPTION,''))))						AS PLANT_DESCR		/*플랜트*/
+	          ,DM_DOCUMENT_D.UOM				AS UOM				/*단위*/
+	          ,SUM(DM_DOCUMENT_D.OPENQTY+DM_DOCUMENT_D.OPENADJUSTQTY+DM_DOCUMENT_D.CANCELQTY) 		AS ORDERQTY_DAILY		/*주문(예정)수량*/
+	          ,SUM(DECODE(DM_DOCUMENT_D.DOCTYPE,'DP',DM_DOCUMENT_D.CONFIRMQTY,0)) 						AS QTY_DP		/*입고수량*/
+	          ,SUM(DECODE(DM_DOCUMENT_D.DOCTYPE,'WD',DM_DOCUMENT_D.CONFIRMQTY,0)) 						AS QTY_WD		/*출고수량*/
+	          ,SUM(DM_DOCUMENT_D.CANCELQTY) 	AS SHORTAGEQTY		/*결품수량*/
+	          ,CD3.BASEDESCR  					AS REASONCODE_RT	/*결품사유*/
+	          ,DM_DOCUMENT_D.PLANT				AS PLANT			/**/
+	    FROM   DM_DOCUMENT_H
+	    JOIN   DM_DOCUMENT_D
+	    ON     DM_DOCUMENT_D.DELIVERYDATE     = DM_DOCUMENT_H.DELIVERYDATE    
+	    AND    DM_DOCUMENT_D.DOCNO     = DM_DOCUMENT_H.DOCNO    
+	    AND    DM_DOCUMENT_D.DCCODE    = DM_DOCUMENT_H.DCCODE   
+	    AND    DM_DOCUMENT_D.STORERKEY = DM_DOCUMENT_H.STORERKEY
+	    AND    DM_DOCUMENT_D.DOCTYPE   = DM_DOCUMENT_H.DOCTYPE
+	    LEFT JOIN   WD_INPLAN
+	    ON	   WD_INPLAN.DCCODE    = DM_DOCUMENT_D.DCCODE
+        AND    WD_INPLAN.DOCTYPE   = DM_DOCUMENT_D.DOCTYPE
+        AND    WD_INPLAN.SLIPDT    = DM_DOCUMENT_D.DELIVERYDATE
+        AND    WD_INPLAN.DOCNO     = DM_DOCUMENT_D.DOCNO
+        AND    WD_INPLAN.DOCLINE   = DM_DOCUMENT_D.DOCLINE
+        AND    WD_INPLAN.DEL_YN = 'N' 
+		LEFT JOIN CM_CODE_STORER CD1 ON (CD1.STORERKEY = DM_DOCUMENT_D.STORERKEY AND CD1.CODELIST = 'DOCTYPE'   AND CD1.BASECODE = DM_DOCUMENT_D.DOCTYPE)
+		LEFT JOIN CM_CODE_STORER CD2
+			ON CD2.STORERKEY = DM_DOCUMENT_D.STORERKEY
+			AND CD2.CODELIST = DECODE(DM_DOCUMENT_D.DOCTYPE, 'DP', 'ORDERTYPE_DP', 'WD', 'ORDERTYPE_WD')
+			AND CD2.BASECODE = DM_DOCUMENT_D.ORDERTYPE
+		LEFT JOIN CM_CODE_STORER CD3 ON (CD3.STORERKEY = WD_INPLAN.STORERKEY AND CD3.CODELIST = 'REASONCODE_WD'   AND CD3.BASECODE = WD_INPLAN.REASONCODE)
+		LEFT JOIN MS_PLANT PLANT1 	  ON PLANT1.PLANT = DM_DOCUMENT_D.PLANT
+	    WHERE  DM_DOCUMENT_D.CHANNEL IN ('2','3')
+	    AND    DM_DOCUMENT_D.DOCTYPE IN ('DP','WD')
+	    AND    DM_DOCUMENT_D.IF_SEND_TYPE <![CDATA[<>]]> 'WMSPO'
+	    AND    DM_DOCUMENT_D.WORKPROCESSCODE IN ('SO','PO','JASO')
+	    AND    NOT ( DM_DOCUMENT_D.DOCTYPE='WD' AND DM_DOCUMENT_D.WORKPROCESSCODE = 'PO')  /*--협력사반품출고는 제외한다.*/
+	    AND    DM_DOCUMENT_D.DEL_YN ='N'
+	    AND    DM_DOCUMENT_H.DCCODE    = #{dccode}
+	    AND    DM_DOCUMENT_H.STORERKEY = #{gStorerkey}
+	    AND    DM_DOCUMENT_D.PLANT = 	#{plant}
+	    AND    DM_DOCUMENT_D.DELIVERYDATE = #{slipdt}
+	    AND    DM_DOCUMENT_D.SKU        = #{sku}
+	    <!-- START.권한센터 -->
+	    AND EXISTS (SELECT 1
+                      FROM CM_USER_AUTHORITY 
+                     WHERE CM_USER_AUTHORITY.DCCODE    = DM_DOCUMENT_D.DCCODE    
+                       AND CM_USER_AUTHORITY.STORERKEY = DM_DOCUMENT_D.STORERKEY 
+                       AND CM_USER_AUTHORITY.ORGANIZE  = DM_DOCUMENT_D.ORGANIZE  
+                       AND CM_USER_AUTHORITY.AREA      = DM_DOCUMENT_D.AREA  
+                       AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey}
+                       AND CM_USER_AUTHORITY.DCCODE    = #{dccode}
+                       AND CM_USER_AUTHORITY.USERID    = #{gUserId}
+                   )
+	    <!-- END.권한센터	--> 	    
+	    GROUP BY 
+	    		CD1.BASEDESCR
+				,CD2.BASEDESCR
+				,CD3.BASEDESCR
+	            ,DM_DOCUMENT_D.PLANT
+	            ,DM_DOCUMENT_D.DOCNO
+	            ,DM_DOCUMENT_D.UOM
+	            ,DECODE(DM_DOCUMENT_D.DOCTYPE,'DP',DM_DOCUMENT_H.FROM_CUSTKEY,DM_DOCUMENT_H.TO_CUSTKEY)
+	            ,DECODE(DM_DOCUMENT_D.DOCTYPE,'DP',DM_DOCUMENT_H.FROM_CUSTNAME,DM_DOCUMENT_H.TO_CUSTNAME)
+	    ORDER BY DOCTYPE
+	            ,DM_DOCUMENT_D.PLANT
+    </select>
+
+</mapper>

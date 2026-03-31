@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="tmDispatchListByCarService">
+
+    <select id="getDispatchListByCar" resultType="TmDispatchListByCarResDto">
+        SELECT /* [TmDispatchListByCarService.sqlx][getDispatchListByCar][배차목록(차량별) 조회][System][2025.01.15] */
+              TM_LIST.DCCODE
+            , FN_DESCR_DC(TM_LIST.DCCODE) AS DCNAME
+            , TO_CHAR(TO_DATE(TM_LIST.DELIVERYDT, 'YYYYMMDD'), 'YYYY-MM-DD') AS DELIVERYDT
+            , TM_LIST.CARNO
+            , CM_DRIVER.DRIVERNAME
+            , TM_LIST.CONTRACTTYPE
+            , FN_CODEDESCR('FW00', 'CONTRACTTYPE', TM_LIST.CONTRACTTYPE) AS CONTRACTNAME
+            , TM_LIST.TM_DELIVERYTYPE
+            , FN_CODEDESCR('FW00', 'TM_DELIVERYTYPE', TM_LIST.TM_DELIVERYTYPE) AS DELIVERYTYPENAME
+            , CM_CAR.CARCAPACITY
+            , FN_CODEDESCR('FW00', 'CARCAPACITY', CM_CAR.CARCAPACITY) AS CARCAPACITYNAME
+            , TM_LIST.PRIORITY
+            , TM_LIST.COURIER
+            , MC_COURIER.DESCRIPTION AS COURIERNAME
+            , TM_LIST.CARAGENTKEY
+            , MC_CARRIER.DESCRIPTION AS CARRIERNAME
+            , TM_LIST.TOTALPOPCOUNT
+            , TM_LIST.TOTALDISTRICTCOUNT
+            , TM_LIST.TOTALTRUTHCUSTCOUNT
+            , TM_LIST.TOTALMAJORCUSTCOUNT
+            , TM_LIST.TOTALWEIGHT
+            , TM_LIST.TOTALCUBE
+            , TM_LIST.RETURN_YN
+        FROM (
+            SELECT
+                  TM_LIST.STORERKEY
+                , TM_LIST.DCCODE
+                , TM_LIST.DELIVERYDT
+                , TM_LIST.CARNO
+                , TM_LIST.COURIER
+                , TM_LIST.CARAGENTKEY
+                , TM_LIST.CONTRACTTYPE
+                , TM_LIST.PRIORITY
+                , MIN(TM_LIST.TM_DELIVERYTYPE) AS TM_DELIVERYTYPE
+                , COUNT(DISTINCT TM_LIST.DELIVERYGROUP) AS TOTALPOPCOUNT
+                , COUNT(DISTINCT TM_LIST.DISTRICTCODE ) AS TOTALDISTRICTCOUNT
+                , COUNT(DISTINCT TM_LIST.TRUTHCUSTKEY ) AS TOTALTRUTHCUSTCOUNT
+                , COUNT(DISTINCT CASE WHEN (TM_LIST.FROM_DELIVERYREQDT IS NOT NULL OR TM_LIST.DELIVERYREQDT IS NOT NULL)
+                                        OR NVL(TM_LIST.DISTANT_YN, 'N') = 'Y'
+                                        OR NVL(TM_LIST.DLV_WAIT_YN, 'N') = 'Y'
+                                        OR NVL(TM_LIST.KIDS_CL_YN, 'N') = 'Y'
+                                        OR NVL(TM_LIST.LNG_DISTANT_YN, 'N') = 'Y'
+                                        OR NVL(TM_LIST.UNLOAD_LVL_CD, '00') != '00'
+                                        OR NVL(TM_LIST.FACEINSPECT_YN, 'N') = 'Y'
+                                      THEN TM_LIST.TRUTHCUSTKEY
+                                      ELSE NULL END) AS TOTALMAJORCUSTCOUNT
+                , SUM(CASE WHEN TM_LIST.DOCTYPE = 'RT' THEN 0   ELSE TM_LIST.WEIGHT END) AS TOTALWEIGHT
+                , SUM(CASE WHEN TM_LIST.DOCTYPE = 'RT' THEN 0   ELSE TM_LIST.CUBE   END) AS TOTALCUBE
+                , MAX(CASE WHEN TM_LIST.DOCTYPE = 'RT' THEN 'Y' ELSE 'N'            END) AS RETURN_YN
+            FROM (
+                SELECT STORERKEY, DCCODE, DELIVERYDT, DOCTYPE, DELIVERYGROUP, DISTRICTCODE, TRUTHCUSTKEY, CUSTTYPE, CUSTKEY
+                     , CARNO, CONTRACTTYPE, COURIER, CARAGENTKEY, TM_DELIVERYTYPE, PRIORITY, CUBE, WEIGHT, STATUS
+                     , DISTANT_YN, DLV_WAIT_YN, KIDS_CL_YN, LNG_DISTANT_YN, UNLOAD_LVL_CD, FACEINSPECT_YN, FROM_DELIVERYREQDT, DELIVERYREQDT
+                FROM TM_INPLAN
+                WHERE SPLIT_DELIVERY_YN = 'N'
+                  AND DEL_YN = 'N'
+                UNION ALL
+                SELECT STORERKEY, DCCODE, DELIVERYDT, DOCTYPE, DELIVERYGROUP, DISTRICTCODE, TRUTHCUSTKEY, CUSTTYPE, CUSTKEY
+                     , CARNO, CONTRACTTYPE, COURIER, CARAGENTKEY, TM_DELIVERYTYPE, PRIORITY, CUBE, WEIGHT, STATUS
+                     , DISTANT_YN, DLV_WAIT_YN, KIDS_CL_YN, LNG_DISTANT_YN, UNLOAD_LVL_CD, FACEINSPECT_YN, FROM_DELIVERYREQDT, DELIVERYREQDT
+                FROM TM_INPLAN_SPLIT
+                WHERE DEL_YN = 'N'
+            ) TM_LIST
+            <if test='carcapacity != null and carcapacity != ""'>
+            INNER JOIN CM_CAR CAR
+                ON  CAR.CARNO = TM_LIST.CARNO
+                AND CAR.CARCAPACITY = #{carcapacity}
+            </if>
+            WHERE TM_LIST.DCCODE = #{dccode}
+            <choose>
+                <when test='tmDeliverytype == "1"'>
+                    AND TM_LIST.DOCTYPE IN ('WD', 'RT')
+                    AND TM_LIST.TM_DELIVERYTYPE IN ('1', '2')
+                </when>
+                <when test='tmDeliverytype == "3"'>
+                    AND TM_LIST.DOCTYPE = 'DP'
+                    AND TM_LIST.TM_DELIVERYTYPE = '3'
+                </when>
+                <when test='tmDeliverytype == "4"'>
+                    AND TM_LIST.DOCTYPE = 'DP'
+                    AND TM_LIST.TM_DELIVERYTYPE = '4'
+                </when>
+                <when test='tmDeliverytype == "6"'>
+                    AND TM_LIST.DOCTYPE = 'WD'
+                    AND TM_LIST.TM_DELIVERYTYPE = '6'
+                </when>
+                <otherwise>
+                    AND TM_LIST.DOCTYPE IN ('WD', 'RT', 'DP')
+                    AND TM_LIST.TM_DELIVERYTYPE IN ('1', '2', '3', '4', '6')
+                </otherwise>
+            </choose>
+              AND TM_LIST.DELIVERYDT BETWEEN #{deliverydtFrom} AND #{deliverydtTo}
+              AND TM_LIST.STATUS = '90'
+              <if test="contracttype != null and contracttype != ''">
+              AND TM_LIST.CONTRACTTYPE = #{contracttype}
+              </if>
+              <if test="carnoList != null and carnoList.size() > 0">
+              AND TM_LIST.CARNO IN
+              <foreach collection="carnoList" item="carno" open="(" separator="," close=")">
+                  #{carno}
+              </foreach>
+              </if>
+            GROUP BY
+                  TM_LIST.STORERKEY
+                , TM_LIST.DCCODE
+                , TM_LIST.DELIVERYDT
+                , TM_LIST.CARNO
+                , TM_LIST.COURIER
+                , TM_LIST.CARAGENTKEY
+                , TM_LIST.CONTRACTTYPE
+                , TM_LIST.PRIORITY
+        ) TM_LIST
+        LEFT JOIN CM_CAR
+            ON CM_CAR.CARNO = TM_LIST.CARNO
+        LEFT JOIN CM_DRIVER
+            ON CM_CAR.DRIVER1 = CM_DRIVER.DRIVERID
+        LEFT JOIN MS_CARRIER MC_COURIER
+            ON  TM_LIST.STORERKEY      = MC_COURIER.STORERKEY
+            AND TM_LIST.COURIER        = MC_COURIER.CARRIERKEY
+            AND MC_COURIER.CARRIERTYPE = 'LOCAL'
+        LEFT JOIN MS_CARRIER MC_CARRIER
+            ON  TM_LIST.STORERKEY      = MC_CARRIER.STORERKEY
+            AND TM_LIST.CARAGENTKEY    = MC_CARRIER.CARRIERKEY
+            AND MC_CARRIER.CARRIERTYPE = 'SUBC'
+        ORDER BY
+              TM_LIST.DELIVERYDT
+            , TM_LIST.CARNO
+    </select>
+</mapper>

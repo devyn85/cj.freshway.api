@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cmLoginService">
+
+	<select id="getUserTmpDetail" resultType="CmLoginResDto">
+		SELECT /* [CmLoginService.sqlx][getUserTmpDetail][임시 사용자 상세 정보 조회][JangGwangSeok][2025.10.14] */
+			 SY_FRAMEONE_USER.SERIALKEY                             AS SERIALKEY    		/* 데이터번호 */   
+			,SY_FRAMEONE_USER.USER_ID                               AS USER_ID    			/* 사용자ID */   
+			,SY_FRAMEONE_USER.USER_NM                              	AS USER_NM        		/* 사용자명 */
+			,DAMO.DEC(FRAMEONE_EMP.HANDPHONE_NO)                    AS HANDPHONE_NO      	/* 핸드폰번호 */
+		FROM SY_FRAMEONE_USER
+		LEFT JOIN FRAMEONE_EMP ON FRAMEONE_EMP.EMP_NO = SY_FRAMEONE_USER.EMP_NO
+			AND FRAMEONE_EMP.COM_CD = SY_FRAMEONE_USER.CUSTKEY
+		WHERE 1 = 1
+			<if test='status != null and status != ""'>
+				AND SY_FRAMEONE_USER.STATUS = #{status}
+			</if>
+			<if test='userNm != null and userNm != ""'>
+				AND SY_FRAMEONE_USER.USER_NM = #{userNm}
+			</if>
+			<if test='handphoneNo != null and handphoneNo != ""'>
+				AND DAMO.DEC(FRAMEONE_EMP.HANDPHONE_NO) = #{handphoneNo}
+			</if>
+    </select>
+    
+    <insert id="insertVerificationCode">
+		INSERT /* [CmLoginService.sqlx][insertVerificationCode][인증번호 저장][JangGwangSeok][2025.10.14] */ INTO CM_VRFCTN_CD
+		(
+             USER_ID
+		    ,CEL_NO
+		    ,REQ_DATE
+		    ,SECURITYKEY
+		    ,LOGIN_DEVICE_ID
+        )
+        VALUES
+        (
+             #{userId}
+		    ,#{handphoneNo}
+		    ,SYSDATE
+		    ,#{securityKey}
+		    ,'WEB'
+        )
+	</insert>
+	
+	<select id="checkVerificationCode" resultType="CmLoginResDto">
+		SELECT /* [CmLoginService.sqlx][checkVerificationCode][인증번호 확인][JangGwangSeok][2025.10.14] */
+		    USER_ID
+		FROM CM_VRFCTN_CD
+		WHERE 1 = 1
+		    AND CEL_NO = #{handphoneNo}
+		    AND SECURITYKEY = #{securityKey}
+		    AND REQ_DATE >= SYSDATE - (5 / 24 / 60) /* 5분이내 체크 */
+    </select>
+    
+    <select id="getDuplicateUserIdCount" resultType="CmLoginResDto">
+		SELECT /* [CmLoginService.sqlx][getDuplicateUserIdCount][사용자ID 중복 count 조회][JangGwangSeok][2025.10.01] */
+			COUNT(*) AS DUP_CNT
+		FROM
+			(
+				SELECT 
+					1 
+				FROM FRAMEONE_USER
+				WHERE USER_ID = #{userId} || '_WAYLO'
+				
+				UNION ALL
+				
+				SELECT 
+					1 
+				FROM SY_FRAMEONE_USER
+				WHERE USER_ID = #{userId} || '_WAYLO'
+			)
+    </select>
+    
+    <update id="updateUserTmp">
+        UPDATE /* [CmLoginService.sqlx][updateUserTmp][임시 사용자정보 수정][JangGwangSeok][2025.10.14] */ SY_FRAMEONE_USER
+        SET 
+        	USER_ID          	= #{userId}          	/* 사용자ID */
+           ,PWD_NO         		= #{pwdNo}        		/* 패스워드 */
+           ,STATUS         		= #{status}        		/* 진행상태 */
+           ,EDITDATE         	= SYSDATE    	 		/* 최종변경시간 */
+           ,EDITWHO          	= 'SYSTEM'        		/* 최종변경자 */
+        WHERE USER_ID      		= #{userIdOld}
+    </update>
+    
+    <update id="updateUserConnect">
+        UPDATE /* [CmLoginService.sqlx][updateUserConnect][사용자 센터 권한 수정][JangGwangSeok][2025.10.14] */ CM_USER_CONNECT
+        SET 
+        	USERID           	= #{userId}          	/* 사용자ID */
+           ,EDITDATE         	= SYSDATE    	 		/* 최종변경시간 */
+           ,EDITWHO          	= 'SYSTEM'        		/* 최종변경자 */
+        WHERE USERID      		= #{userIdOld}
+    </update>
+    
+    <update id="updateUserAuthority">
+		UPDATE /* [CmLoginService.sqlx][updateUserAuthority][사용자 그룹권한 수정][JangGwangSeok][2025.10.14] */ FRAMEONE_AUTH_USER
+		SET
+			 USER_ID 			= #{userId}				/* 사용자ID */
+			,UPD_ID  			= 'SYSTEM'				/* 수정자ID */
+			,UPD_DTM 			= SYSDATE				/* 수정일시 */
+		WHERE USER_ID 			= #{userIdOld}
+    </update>
+    
+    <select id="getUserDetail" resultType="CmLoginResDto">
+		SELECT /* [CmLoginService.sqlx][getUserDetail][사용자 상세 정보 조회][JangGwangSeok][2025.10.14] */
+			 USER_ID									/* 사용자ID */
+		FROM FRAMEONE_USER
+		WHERE 1 = 1
+			AND USER_ID = #{userId}
+		    AND PWD_NO = #{curPwdNo}
+		    AND DEL_YN = 'N'
+		    AND STATUS = '90'
+		    AND TRUNC(PASSWDVALIDDATE) >= TRUNC(SYSDATE)
+		    AND TRUNC(USEVALIDDATE) >= TRUNC(SYSDATE)
+    </select>
+    
+    <select id="getUserPwdHst" resultType="CmLoginPwdHstResDto">
+		SELECT /* [CmLoginService.sqlx][getUserPwdHst][사용자 비밀번호 이력 조회][JangGwangSeok][2025.10.14] */
+		     USER_PWD
+		    ,REG_DT
+		FROM (
+		    SELECT 
+		         USER_PWD
+		        ,REG_DT
+		        ,ROW_NUMBER() OVER (PARTITION BY USER_ID ORDER BY REG_DT DESC) AS RN
+		    FROM TB_CF_PWD_HST
+		    WHERE USER_ID = #{userId}
+		)
+		WHERE RN <![CDATA[<=]]> 3
+    </select>
+    
+    <update id="updateUserPwdNo">
+		UPDATE /* [CmLoginService.sqlx][updateUserPwdNo][사용자 비밀번호 수정][JangGwangSeok][2025.10.14] */ FRAMEONE_USER
+		SET
+			 PWD_NO 			= #{pwdNo}											/* 패스워드 */
+			,TMP_PWD_YN			= '0'												/* 임시비밀번호발급여부 */
+			,FAIL_IN_CNT		= '0'												/* 연속로그인실패수 */
+			,PASSWDVALIDDATE	= TO_CHAR(ADD_MONTHS(SYSDATE, 6), 'YYYY-MM-DD')		/* 암호만료기간 */
+			,USEVALIDDATE		= TO_CHAR(ADD_MONTHS(SYSDATE, 6), 'YYYY-MM-DD')		/* 사용만료기간 */
+			,UPD_ID  			= #{userId}											/* 수정자ID */
+			,UPD_DTM 			= SYSDATE											/* 수정일시 */
+		WHERE 1 = 1
+			AND USER_ID = #{userId}
+			AND PWD_NO = #{curPwdNo}
+    </update>
+    
+    <insert id="insertUserPwdHst">
+		INSERT /* [CmLoginService.sqlx][insertUserPwdHst][사용자 비밀번호 이력 저장][JangGwangSeok][2025.10.14] */ INTO TB_CF_PWD_HST
+		(
+             USER_ID
+            ,USER_PWD_SEQ
+            ,USER_PWD
+            ,REG_ID
+            ,REG_DT
+            ,MOD_ID
+            ,MOD_DT
+        )
+        VALUES
+        (
+             #{userId}
+		    ,(SELECT NVL(MAX(USER_PWD_SEQ), 0) + 1 FROM TB_CF_PWD_HST WHERE USER_ID = #{userId})
+		    ,#{pwdNo}
+		    ,#{userId}
+		    ,SYSDATE
+		    ,#{userId}
+		    ,SYSDATE
+        )
+	</insert>
+	
+	<select id="getUserIdByUserNo" resultType="CmLoginResDto">
+		SELECT /* [CmLoginService.sqlx][getUserIdByUserNo][사용자ID 조회][JangGwangSeok][2025.11.13] */
+			 USER_ID									/* 사용자ID */
+		FROM FRAMEONE_USER
+		WHERE 1 = 1
+			AND USER_NO = #{userNo}
+    </select>
+    
+</mapper>

@@ -1,0 +1,223 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper   PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+  "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="stTransactionService">
+
+    <!-- 재고처리현황 조회 -->
+    <select id="getMasterList" resultType="cjfw.wms.st.dto.StTransactionResDto">
+	    SELECT /* [StTransactionService.sqlx][stTransactionService.getMasterList][재고처리현황][ch.y][2025-06-01] */
+	        ST_TRANSACTION.SERIALKEY AS SERIALKEY    /* SERIALKEY */
+	       ,ST_TRANSACTION.TRANDATE  AS TRANDATE     /* 거래일자 */
+	       ,ST_TRANSACTION.DCCODE    AS DCCODE       /* 센터코드 */
+	       ,ST_TRANSACTION.TRANTYPE  AS TRANTYPE     /* 거래유형 */
+	       ,NVL(CD8.BASEDESCR,ST_TRANSACTION.TRANTYPE) AS TRANTYPENAME      /* 처리유형명 */
+	       ,ST_TRANSACTION.STORERKEY AS STORERKEY   /* 거래처코드 */
+	       ,ST_TRANSACTION.ORGANIZE  AS ORGANIZE    /* 조직코드 */
+	       ,MS_SKU.SERIALYN          AS SERIALYN    /* 시리얼여부 */
+	       ,NVL(CD7.BASEDESCR,MS_SKU.SERIALYN) AS SERIALYNNAME           /* 시리얼여부명 */
+	       ,ST_TRANSACTION.AREA      AS AREA        /* 구역코드 */
+	       ,ST_TRANSACTION.SKU       AS SKU         /* 품목코드 */
+	       ,MS_SKU.DESCRIPTION       AS SKUNAME     /* 품목명 */
+	       ,ST_TRANSACTION.UOM       AS UOM         /* 단위 */ 
+	       ,CASE WHEN ST_TRANSACTION.DCCODE='2170' AND NVL(MS_SKU.LINE01,'N') = 'Y' AND TO_NUMBER(NVL(MS_SKU.LINE02,0)) <![CDATA[<>]]> 0 THEN TO_NUMBER(NVL(MS_SKU.LINE02,0)) ELSE 0 END AS AVGWEIGHT /* 평균중량 */
+	       ,ROUND(CASE WHEN ST_TRANSACTION.DCCODE='2170' AND NVL(MS_SKU.LINE01,'N') = 'Y' AND TO_NUMBER(NVL(MS_SKU.LINE02,0)) <![CDATA[<>]]> 0 AND ST_TRANSACTION.UOM = 'KG'
+	            THEN ST_TRANSACTION.QTY / TO_NUMBER(NVL(MS_SKU.LINE02,0))
+	            ELSE 0
+	        END, 2) AS CALBOX /* BOX */
+	       ,CASE WHEN ST_TRANSACTION.DCCODE='2170' AND NVL(MS_SKU.LINE01,'N') = 'Y' THEN ROUND(ST_TRANSACTION.ETCQTY1,2) ELSE 0 END AS REALORDERBOX  /* 주문BOX */    
+	       ,CASE WHEN ST_TRANSACTION.DCCODE='2170' AND NVL(MS_SKU.LINE01,'N') = 'Y' THEN ROUND(ST_TRANSACTION.ETCQTY2,2) ELSE 0 END AS REALCFMBOX    /* CFMBOX */        
+	       ,ST_TRANSACTION.FROM_STOCKQTY AS FROM_STOCKQTY   /* 출고재고수량 */                 
+	       ,ST_TRANSACTION.TO_STOCKQTY   AS TO_STOCKQTY     /* 입고재고수량 */          
+	       ,ST_TRANSACTION.QTY           AS QTY             /* 수량 */
+	       ,ST_TRANSACTION.FROM_LOC      AS FROM_LOC        /* 출고위치 */                   
+	       ,ST_TRANSACTION.FROM_LOT      AS FROM_LOT        /* 출고로트 */                  
+	       ,FROM_CM_LOT.LOTTABLE01       AS FROM_LOTTABLE01 /* 출고로트테이블01 */      
+	       ,ST_TRANSACTION.FROM_STOCKID  AS FROM_STOCKID    /* 출고재고ID */               
+	       ,(SELECT FN_CODEDESCR(ST_TRANSACTION.STORERKEY,'STOCKTYPE', ST_TRANSACTION.FROM_STOCKTYPE) FROM DUAL) AS FROM_STOCKTYPE
+	       ,(SELECT FN_CODEDESCR(ST_TRANSACTION.STORERKEY,'STOCKGRADE', ST_TRANSACTION.FROM_STOCKGRADE) FROM DUAL) AS FROM_STOCKGRADE
+	       ,ST_TRANSACTION.TO_LOC        AS TO_LOC          /* 입고위치 */
+	       ,ST_TRANSACTION.TO_LOT        AS TO_LOT          /* 입고로트 */
+	       ,TO_CM_LOT.LOTTABLE01         AS TO_LOTTABLE01   /* 입고로트테이블01 */
+	       ,ST_TRANSACTION.TO_STOCKID    AS TO_STOCKID      /* 입고재고ID */
+	       ,(SELECT FN_CODEDESCR(ST_TRANSACTION.STORERKEY,'STOCKTYPE', ST_TRANSACTION.TO_STOCKTYPE) FROM DUAL) AS TO_STOCKTYPE
+	       ,(SELECT FN_CODEDESCR(ST_TRANSACTION.STORERKEY,'STOCKGRADE', ST_TRANSACTION.TO_STOCKGRADE) FROM DUAL) AS TO_STOCKGRADE
+	       ,ST_TRANSACTION.DOCNO         AS DOCNO          /* 문서번호 */
+	       ,ST_TRANSACTION.DOCLINE       AS DOCLINE        /* 문서라인 */
+	       ,ST_TRANSACTION.ADDDATE       AS ADDDATE        /* 등록일시 */
+	       ,ST_TRANSACTION.ADDWHO        AS ADDWHO         /* 등록자 */
+	       ,CM_USER.USERNAME             AS USERNAME        /* 등록자명 */
+	    FROM ST_TRANSACTION
+	    JOIN MS_SKU
+	      ON MS_SKU.STORERKEY = ST_TRANSACTION.STORERKEY
+	     AND MS_SKU.SKU = ST_TRANSACTION.SKU
+	        <if test="serialyn != null and serialyn != ''">AND MS_SKU.SERIALYN LIKE #{serialyn}</if>
+        <!-- START.상품.다중OR검색 -->
+        <if test="skuMulti != null and skuMulti != '' ">
+			<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+				<foreach collection="skuMulti" item="item">
+					OR MS_SKU.SKU IN
+					<foreach collection="item" item="code" open="(" close=")" separator=",">
+						#{code} 	 
+		      		</foreach>
+		    	</foreach>
+		  	</trim>			                                    
+        </if>
+        <!-- END.상품.다중OR검색 -->	
+  LEFT JOIN CM_USER
+         ON CM_USER.USERID = ST_TRANSACTION.ADDWHO
+  LEFT JOIN CM_LOT FROM_CM_LOT
+         ON FROM_CM_LOT.STORERKEY = ST_TRANSACTION.STORERKEY
+        AND FROM_CM_LOT.LOT = ST_TRANSACTION.FROM_LOT
+        AND FROM_CM_LOT.DEL_YN = 'N'
+  LEFT JOIN CM_LOT TO_CM_LOT
+         ON TO_CM_LOT.STORERKEY = ST_TRANSACTION.STORERKEY
+        AND TO_CM_LOT.LOT = ST_TRANSACTION.TO_LOT
+        AND TO_CM_LOT.DEL_YN = 'N'
+  LEFT JOIN CM_CODE_STORER CD7 ON (CD7.STORERKEY = ST_TRANSACTION.STORERKEY AND CD7.CODELIST = 'SERIALYN'  AND CD7.BASECODE = MS_SKU.SERIALYN)
+  LEFT JOIN CM_CODE_STORER CD8 ON (CD8.STORERKEY = ST_TRANSACTION.STORERKEY AND CD8.CODELIST = 'TRANTYPE'  AND CD8.BASECODE = ST_TRANSACTION.TRANTYPE) /* 거래유형명 */
+	  WHERE ST_TRANSACTION.DCCODE    = #{fixdccode}  /*센터*/
+	    AND ST_TRANSACTION.STORERKEY = #{gStorerkey} /*고객사*/
+	    <!-- START.권한센터 -->
+	    AND EXISTS (SELECT 1
+                      FROM CM_USER_AUTHORITY 
+                     WHERE CM_USER_AUTHORITY.DCCODE    = ST_TRANSACTION.DCCODE       
+                       AND CM_USER_AUTHORITY.STORERKEY = ST_TRANSACTION.STORERKEY    
+                       AND CM_USER_AUTHORITY.ORGANIZE  = ST_TRANSACTION.ORGANIZE     
+                       AND CM_USER_AUTHORITY.AREA      = ST_TRANSACTION.AREA         
+                       AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey}
+                       AND CM_USER_AUTHORITY.USERID    = #{gUserId}
+                       AND CM_USER_AUTHORITY.DCCODE    = #{fixdccode}
+                       AND CM_USER_AUTHORITY.AREA      = #{gArea}   
+			           <!-- 창고.다중검색 -->
+			           <if test='gOrganizeMulti != null and gOrganizeMulti.length > 0'>
+				           AND CM_USER_AUTHORITY.ORGANIZE IN
+				           <foreach collection="gOrganizeMulti" item="code" open="(" close=")" separator=",">
+				             #{code}
+				           </foreach>
+			           </if>                       
+                   )
+	    <!-- END.권한센터	-->  	    
+	    AND ST_TRANSACTION.TRANDATE <![CDATA[>=]]> #{dt1}
+	    AND ST_TRANSACTION.TRANDATE <![CDATA[<=]]> #{dt2}
+	    <if test="trantype != null and trantype != ''">AND ST_TRANSACTION.TRANTYPE LIKE #{trantype}</if>
+	    <if test="loc != null and loc != ''">AND (ST_TRANSACTION.FROM_LOC LIKE #{loc} OR ST_TRANSACTION.TO_LOC LIKE #{loc})</if>
+	    <if test="docno != null and docno != ''">AND ST_TRANSACTION.DOCNO LIKE #{docno}</if>
+	    <if test="docdt != null and docdt != ''">AND ST_TRANSACTION.DOCDT LIKE #{docdt}</if>
+	    <!-- 세트여부 -->
+	    <if test="setYn == 'Y'.toString()">
+	    AND EXISTS (SELECT 1
+                      FROM AJ_INPLAN 
+                     WHERE AJ_INPLAN.DCCODE    = ST_TRANSACTION.DCCODE
+					   AND AJ_INPLAN.STORERKEY = ST_TRANSACTION.STORERKEY
+					   AND AJ_INPLAN.ORGANIZE  = ST_TRANSACTION.ORGANIZE
+					   AND AJ_INPLAN.DOCNO     = ST_TRANSACTION.DOCNO
+					   AND AJ_INPLAN.DOCLINE   = ST_TRANSACTION.DOCLINE
+					   AND AJ_INPLAN.SKU       = ST_TRANSACTION.SKU
+                       AND AJ_INPLAN.DCCODE    = #{fixdccode}
+                       AND AJ_INPLAN.STORERKEY = #{gStorerkey}
+                       AND AJ_INPLAN.AREA      = #{gArea}   				   
+					   AND AJ_INPLAN.SET_YN    = 'Y' /*세트여부*/
+                   )
+	    </if>
+	    ORDER BY ST_TRANSACTION.SERIALKEY, ST_TRANSACTION.TRANDATE
+	</select>
+	
+	<select id="getDataHeaderExDCList" resultType="map">
+	    SELECT
+	        /*+ LEADING(CM_USER_AUTHORITY  ST_TRANSACTION_VESSEL CM_LOT MS_SKU FRAMEONE_USER)
+	            USE_HASH(ST_TRANSACTION_VESSEL CM_LOT MS_SKU FRAMEONE_USER )
+	            FULL(ST_TRANSACTION_VESSEL)
+	            FULL(CM_LOT)
+	            FULL(MS_SKU)
+	            FULL(FRAMEONE_USER)
+	        */
+	        ST_TRANSACTION_VESSEL.SERIALKEY AS SERIALKEY,
+	        ST_TRANSACTION_VESSEL.TRANDATE AS TRANDATE,
+	        ST_TRANSACTION_VESSEL.DCCODE AS DCCODE,
+	        ST_TRANSACTION_VESSEL.DOCTYPE AS TRANTYPE,
+	        (SELECT FN_CODEDESCR(ST_TRANSACTION_VESSEL.STORERKEY,'DOCTYPE_VESSEL', ST_TRANSACTION_VESSEL.DOCTYPE) FROM DUAL) AS TRANTYPENAME,
+	        ST_TRANSACTION_VESSEL.STORERKEY AS STORERKEY,
+	        ST_TRANSACTION_VESSEL.ORGANIZE AS ORGANIZE,
+	        MS_SKU.SERIALYN AS SERIALYN,
+	        (SELECT FN_CODEDESCR(MS_SKU.STORERKEY,'SERIALYN', MS_SKU.SERIALYN) FROM DUAL) AS SERIALYNNAME,
+	        ST_TRANSACTION_VESSEL.AREA AS AREA,
+	        ST_TRANSACTION_VESSEL.SKU AS SKU,
+	        MS_SKU.DESCRIPTION AS SKUNAME,
+	        (SELECT FN_CODEDESCR(ST_TRANSACTION_VESSEL.STORERKEY,'IOTYPE', CASE WHEN ST_TRANSACTION_VESSEL.BOXQTY <![CDATA[>=]]> 0 THEN ST_TRANSACTION_VESSEL.IOTYPE ELSE DECODE(ST_TRANSACTION_VESSEL.IOTYPE,UNISTR('WD'),UNISTR('DP'),UNISTR('DP'),UNISTR('WD'),ST_TRANSACTION_VESSEL.IOTYPE) END) FROM DUAL) AS IOTYPE,
+	        CASE WHEN ST_TRANSACTION_VESSEL.DCCODE='2170' AND NVL(MS_SKU.LINE01,'N') = 'Y' THEN ROUND(CASE WHEN ST_TRANSACTION_VESSEL.IOTYPE IN ('WD','DP') THEN ABS(ST_TRANSACTION_VESSEL.BOXQTY) ELSE ST_TRANSACTION_VESSEL.BOXQTY END,2) ELSE 0 END AS REALCFMBOX,
+	        ST_TRANSACTION_VESSEL.LOC AS LOC,
+	        ST_TRANSACTION_VESSEL.LOT AS LOT,
+	        CM_LOT.LOTTABLE01 AS OTTABLE01,
+	        ST_STOCK_SERIALINFODETAIL.CONVSERIALNO AS CONVSERIALNO,
+	        ST_TRANSACTION_VESSEL.STOCKID AS STOCKID,
+	        (SELECT FN_CODEDESCR(ST_TRANSACTION_VESSEL.STORERKEY,'STOCKTYPE', ST_TRANSACTION_VESSEL.STOCKTYPE) FROM DUAL) AS STOCKTYPE,
+	        (SELECT FN_CODEDESCR(ST_TRANSACTION_VESSEL.STORERKEY,'STOCKGRADE', ST_TRANSACTION_VESSEL.STOCKGRADE) FROM DUAL) AS STOCKGRADE,
+	        ST_TRANSACTION_VESSEL.DOCNO AS DOCNO,
+	        ST_TRANSACTION_VESSEL.DOCLINE AS DOCLINE,
+	        '' AS SLIPNO,
+	        '' AS SLIPLINE,
+	        ST_TRANSACTION_VESSEL.ADDDATE AS ADDDATE,
+	        ST_TRANSACTION_VESSEL.ADDWHO AS ADDWHO,
+	        CM_USER.USERNAME AS USERNAME
+	    FROM ST_TRANSACTION_VESSEL
+	    JOIN MS_SKU
+	        ON MS_SKU.STORERKEY = ST_TRANSACTION_VESSEL.STORERKEY
+	        AND MS_SKU.SKU = ST_TRANSACTION_VESSEL.SKU
+	        <if test="serialyn != null and serialyn != ''">AND MS_SKU.SERIALYN LIKE #{serialyn}</if>
+        <!-- START.상품.다중OR검색 -->
+        <if test="skuMulti != null and skuMulti != '' ">
+			<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+				<foreach collection="skuMulti" item="item">
+					OR MS_SKU.SKU IN
+					<foreach collection="item" item="code" open="(" close=")" separator=",">
+						#{code} 	 
+		      		</foreach>
+		    	</foreach>
+		  	</trim>			                                    
+        </if>
+        <!-- END.상품.다중OR검색 -->
+	    LEFT OUTER JOIN CM_USER
+	        ON CM_USER.USERID = ST_TRANSACTION_VESSEL.ADDWHO
+	    LEFT OUTER JOIN CM_LOT
+	        ON CM_LOT.STORERKEY = ST_TRANSACTION_VESSEL.STORERKEY
+	        AND CM_LOT.LOT = ST_TRANSACTION_VESSEL.LOT
+	        AND CM_LOT.DEL_YN = 'N'
+	    LEFT OUTER JOIN ST_STOCK_SERIALINFODETAIL
+	        ON ST_TRANSACTION_VESSEL.STORERKEY = ST_STOCK_SERIALINFODETAIL.STORERKEY
+	        AND ST_TRANSACTION_VESSEL.SKU = ST_STOCK_SERIALINFODETAIL.SKU
+	        AND ST_TRANSACTION_VESSEL.STOCKID = ST_STOCK_SERIALINFODETAIL.STOCKID
+	    WHERE 1=1
+	      AND ST_TRANSACTION.DCCODE = #{fixdccode} /*센터*/
+	        AND ST_TRANSACTION_VESSEL.TRANDATE <![CDATA[>=]]> #{dt1}
+	        AND ST_TRANSACTION_VESSEL.TRANDATE <![CDATA[<=]]> #{dt2}
+	        <if test="trantype != null and trantype != ''">AND ST_TRANSACTION_VESSEL.DOCTYPE LIKE #{trantype}</if>
+	        <if test="loc != null and loc != ''">AND (ST_TRANSACTION_VESSEL.LOC LIKE #{loc} OR ST_TRANSACTION_VESSEL.TO_LOC LIKE #{loc})</if>
+	        <if test="docno != null and docno != ''">AND ST_TRANSACTION_VESSEL.DOCNO LIKE #{docno}</if>
+	        <if test="docdt != null and docdt != ''">AND ST_TRANSACTION_VESSEL.DOCDT LIKE #{docdt}</if>
+	    ORDER BY ST_TRANSACTION_VESSEL.SERIALKEY, ST_TRANSACTION_VESSEL.TRANDATE
+	</select>
+		
+	<insert id="insertStTransaction">
+	    INSERT INTO ST_TRANSACTION(
+	        TRANDATE, DCCODE, TRANTYPE, STORERKEY,
+	        ORGANIZE, AREA, SKU, FROM_LOC, FROM_LOT,
+	        FROM_STOCKID, FROM_STOCKGRADE, TO_LOC, TO_LOT, TO_STOCKID,
+	        TO_STOCKGRADE, QTY, UOM, STOCKUOM, STOCKUOMQTY,
+	        BUNJA, BUNMO, ETCQTY1, ETCQTY2, SLIPTYPE,
+	        SOURCETYPE, SOURCEDT, SOURCEKEY, SOURCELINE, ADDWHO,
+	        EDITWHO, DOCDT, DOCNO, DOCLINE, FROM_STOCKTYPE,
+	        TO_STOCKTYPE, DOCORDERTYPE, FROM_STOCKQTY, TO_STOCKQTY
+	    )
+	    VALUES (
+	        #{trandate}, #{dccode}, #{trantype}, #{storerkey},
+	        #{organize}, #{area}, #{sku}, #{fromLoc}, #{fromLot},
+	        #{fromStockid}, #{fromStockgrade}, #{toLoc}, #{toLot}, #{toStockid},
+	        #{toStockgrade}, ABS(#{qty}), #{uom}, #{stockuom}, ABS(#{stockuomqty}),
+	        #{bunja}, #{bunmo}, #{etcqty1}, #{etcqty2}, #{sliptype},
+	        #{sourcetype}, #{sourcedt}, #{sourcekey}, #{sourceline}, #{gUserId},
+	        #{gUserId}, #{docdt}, #{docno}, #{docline}, #{fromStocktype},
+	        #{toStocktype}, #{docordertype}, #{fromStockqty}, #{toStockqty}
+	    )
+	</insert>	
+
+</mapper>

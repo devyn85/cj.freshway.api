@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="stStockBrandService">
+
+    <select id="getMasterList" resultType="StStockBrandResDto">    	
+        SELECT  /* [stStockBrandService.sqlx][getMasterList][브랜드별재고추이 목록 조회][JeongHyeongCheol][2025.09.12] */              
+        		CUSTKEY															AS CUSTKEY      /* 본점코드 */
+			   ,DESCRIPTION                                                     AS DESCRIPTION  /* 본점명*/
+			   ,TO_CHAR(ADD_MONTHS(TO_DATE(INOUTDT, 'YYYYMMDD'),-1), 'YYYY-MM') AS INOUTDT    	/* 연월 */
+			   ,NVL(SUM(BOXPERPLT_QTY), 0) 										AS MONTHCNT   	/* 월별 재고량 */
+		  FROM (SELECT CASE 
+	                      WHEN MS_CUST.PARENTCUSTKEY IS NULL
+	                      THEN MS_CUST.CUSTKEY
+	                      ELSE MS_CUST.PARENTCUSTKEY
+	            	   END  AS CUSTKEY,
+		  			   CASE 
+		  			      WHEN MS_CUST.PARENTCUSTKEY IS NULL THEN MS_CUST.DESCRIPTION    
+			              ELSE (SELECT A.DESCRIPTION FROM MS_CUST A WHERE A.CUSTKEY = MS_CUST.PARENTCUSTKEY AND ROWNUM = 1)    
+			           END  AS DESCRIPTION,
+		  			   ST_DAILYINOUT.INOUTDT,
+	 				   CASE 
+				             WHEN MAX(MS_LOCATION.PLT_FLG) = 'S' THEN 1                    
+				             ELSE 
+				              CEIL(NVL((
+				                 	SELECT
+				                  		SUM(BASEQTY)                      
+				                	FROM
+				                    	ST_DAILYINOUT A                        
+				                	WHERE
+					                    STORERKEY = ST_DAILYINOUT.STORERKEY                          
+					                    AND SKU = ST_DAILYINOUT.SKU 
+					                    AND DCCODE = ST_DAILYINOUT.DCCODE                         
+					                    AND INOUTDT = ST_DAILYINOUT.INOUTDT), 0)/MAX( MS_SKU.QTYPERBOX)/ MAX( NVL(MS_SKUCHAIN.BOXPERPLT,40)))                                     
+	            		END     AS BOXPERPLT_QTY                            
+		        FROM LOGISONE.ST_DAILYINOUT              
+		        JOIN LOGISONE.MS_SKU               
+		                 ON     ST_DAILYINOUT.STORERKEY = MS_SKU.STORERKEY               
+		                 AND    ST_DAILYINOUT.SKU       = MS_SKU.SKU                         
+		        JOIN LOGISONE.MS_SKUDCSET                   
+		                 ON     ST_DAILYINOUT.DCCODE = MS_SKUDCSET.DCCODE   
+		                 AND     ST_DAILYINOUT.STORERKEY = MS_SKUDCSET.STORERKEY               
+		                 AND    ST_DAILYINOUT.SKU = MS_SKUDCSET.SKU                  
+		        JOIN LOGISONE.MS_LOCATION                 
+		                 ON     MS_LOCATION.DCCODE = MS_SKUDCSET.DCCODE                 
+		                 AND    MS_LOCATION.LOC = MS_SKUDCSET.LOC                            
+		        JOIN LOGISONE.MS_SKUCHAIN_CUST                
+		                 ON ST_DAILYINOUT.STORERKEY = MS_SKUCHAIN_CUST.STORERKEY               
+		                 AND ST_DAILYINOUT.SKU = MS_SKUCHAIN_CUST.SKU              
+		        JOIN LOGISONE.MS_CUST                
+		                 ON MS_SKUCHAIN_CUST.CUSTKEY = MS_CUST.CUSTKEY   
+		                 AND MS_CUST.CUSTTYPE = 'C'            
+		                 AND MS_CUST.STORERKEY =  'FW00' /**P*/               
+		                               
+		        JOIN LOGISONE.MS_SKUCHAIN                
+		                 ON MS_SKUCHAIN_CUST.SKU = MS_SKUCHAIN.SKU               
+		                 AND MS_SKUCHAIN_CUST.STORERKEY = MS_SKUCHAIN.STORERKEY
+		        JOIN LOGISONE.CM_CODE
+		                 ON     CM_CODE.STORERKEY  = ST_DAILYINOUT.STORERKEY                        
+		                 AND    CM_CODE.CODELIST  = 'CHAIN_TARGET_DC'
+		                 AND    CM_CODE.BASECODE  = ST_DAILYINOUT.DCCODE 
+		        WHERE 1 = 1
+			           AND    MS_SKU.REFERENCE15 = 'Y'  
+		               AND    CM_CODE.DEL_YN    = 'N' 
+		               AND    MS_CUST.DEL_YN = 'N'
+			           AND ST_DAILYINOUT.STORERKEY = #{gStorerkey}
+			           AND MS_SKUCHAIN_CUST.CUSTNO = (SELECT MIN(TO_NUMBER(CUSTNO)) FROM MS_SKUCHAIN_CUST WHERE SKU=MS_SKU.SKU)
+				        
+				        <if test='custkeyMulti != null and custkeyMulti.size() > 0'>				
+					        AND (
+						        <trim prefixOverrides="OR">
+						            <!-- CUSTKEY -->
+						            <foreach collection="custkeyMulti" item="item">
+						                OR MS_SKUCHAIN_CUST.CUSTKEY IN
+						                <foreach collection="item" item="code" open="(" close=")" separator=",">
+						                    #{code}
+						                </foreach>
+						            </foreach>
+						
+						            <!-- PARENTCUSTKEY -->
+						            <foreach collection="custkeyMulti" item="item">
+						                OR MS_CUST.PARENTCUSTKEY IN
+						                <foreach collection="item" item="code" open="(" close=")" separator=",">
+						                    #{code}
+						                </foreach>
+						            </foreach>
+						        </trim>
+					            )
+				    	</if>						
+			           AND ST_DAILYINOUT.INOUTDT IN
+			               (SELECT TO_CHAR(ADD_MONTHS(TO_DATE(#{fromdt}, 'YYYYMM'),
+			                                          (LEVEL)),
+			                               'YYYYMMDD') AS YMD
+			                  FROM DUAL
+			                CONNECT BY ADD_MONTHS(TO_DATE(#{todt}, 'YYYYMM'),
+			                                      (LEVEL - 1)) <![CDATA[<=]]>
+			                           ADD_MONTHS(TO_DATE(#{todt}, 'YYYYMM'), TRUNC(MONTHS_BETWEEN(TO_DATE(#{todt},'YYYYMM'),TO_DATE(#{fromdt}, 'YYYYMM')))))
+		        GROUP BY MS_CUST.CUSTKEY,
+		                 MS_CUST.PARENTCUSTKEY,
+		         		 MS_CUST.DESCRIPTION,
+		         		 ST_DAILYINOUT.STORERKEY,
+		                 ST_DAILYINOUT.SKU,
+		                 ST_DAILYINOUT.DCCODE,
+		                 ST_DAILYINOUT.INOUTDT
+		         )
+         GROUP BY CUSTKEY, DESCRIPTION, INOUTDT
+         ORDER BY INOUTDT
+    </select>    
+    
+</mapper>

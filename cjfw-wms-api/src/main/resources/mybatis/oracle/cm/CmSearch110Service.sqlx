@@ -1,0 +1,185 @@
+<?xml version="1.0" encoding="UTF-8"?><!--Converted at: Mon Feb 17 11:21:55 KST 2014-->
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cmSearch110Service">
+	<!-- 로케이션 정보 조회 -->
+	<select id="getLocationList" resultType="CmSearchLocationPopupResDto">
+		SELECT /* [CmSearch110Service.sqlx][getLocationList][jungyunkwon][20250513] */
+              MS_LOCATION.LOC AS CODE
+             ,NVL(DESCRIPTION,MS_LOCATION.LOC) AS NAME
+         FROM MS_LOCATION
+         WHERE MS_LOCATION.DCCODE = #{fixdccode}
+         
+        <choose>
+		      <!-- START.로케이션.다중검색 -->
+	        <when test="multiSelectMulti != null and multiSelectMulti != ''">    
+		       AND MS_LOCATION.LOC IN
+		       <foreach collection="multiSelectMulti" item="code" open="(" close=")" separator=",">
+		         #{code}
+		       </foreach>
+	        </when>   
+		      <!-- END.로케이션.다중검색 -->            
+        <otherwise>
+             <!-- 
+             1.스페이스 검색 -> 다시다 쇠고기
+               ->에라스틱 검색
+             2.단일검색 -> 다시다
+               ->%다시다%
+             3.4 FIX검색 -> %다시다 or 다시다%
+               ->%다시다 or 다시다%
+             5. %다중검색 -> %다시다%쇠고기%
+               -> %%다시다%쇠고기%%              
+             -->
+	        <choose>
+		        <when test="isEnter == 'Y'.toString()"> <!-- 엔터검색.input/돋보기 =검색(성능) -->
+			          AND (MS_LOCATION.LOC = #{name}  OR MS_LOCATION.DESCRIPTION = #{name}) /*엔터검색*/
+		        </when>
+	        <otherwise>
+		        <if test='name != null and name != "" and (multiSelect == null or multiSelect == "")'>
+			        <choose>
+			        	<when test="fixedSearchYn == '' and fixedSearchYn == null"> <!-- 일반검색 -->
+					       AND	(
+					       			MS_LOCATION.LOC 		 	LIKE '%'||#{code}||'%'
+					       		OR  MS_LOCATION.LOC 		 	LIKE '%'||#{name}||'%'
+					       		OR 	MS_LOCATION.DESCRIPTION 	LIKE '%'||#{name}||'%'
+					       )
+				        </when>
+			        
+				        <when test="fixedSearchYn == 'Y'.toString()"> <!-- FIX검색.%1개일 때(3/4) -->
+					          AND (MS_LOCATION.LOC LIKE #{name} OR MS_LOCATION.DESCRIPTION LIKE #{name} )
+				        </when>
+			        <otherwise><!-- 2.단일검색,5.%다중검색  -->
+				        AND (MS_LOCATION.LOC LIKE '%'||#{name}||'%' OR MS_LOCATION.DESCRIPTION LIKE '%'||#{name}||'%' )
+			        </otherwise>
+			        </choose>		            
+		                
+	                <!-- START.검색요건 -->
+                       <!-- 스페이스검색 (신라면 블랙 검색 시 신라면 or 블랙 모두 조회)-->
+                       <if test= 'name != null and name.indexOf(" ") gt 0 '>
+                           OR REGEXP_LIKE (UPPER(MS_LOCATION.DESCRIPTION), REGEXP_REPLACE (UPPER(#{keywordRegexp}), '[ ]+', '|'))
+                       </if>
+                    <!-- END.검색요건 -->     
+		        </if>
+	        </otherwise>
+	        </choose>
+
+        </otherwise>
+        </choose>
+        
+        <!-- START.검색요건 -->
+        <!-- 요건3.조합검색 시 정열순서(신라면 블랙 검색 시 신라면 블랙 10박스 가 맨 먼저 조회 -->
+        <choose>
+            <when test='name != null and name.indexOf(" ") gt 0 '><!-- 신라면 봉지 120g-->
+                ORDER BY
+                        REGEXP_COUNT(UPPER(MS_LOCATION.DESCRIPTION), REGEXP_REPLACE (UPPER(#{keywordRegexp}), '[ ]+', '|')) DESC, /*매치 검색 count*/
+                        UTL_MATCH.JARO_WINKLER_SIMILARITY(MS_LOCATION.DESCRIPTION, #{name}) DESC /*산라면 붕지 유사한 거*/
+                            
+            </when>
+            <otherwise>
+               /*ASIS처럼 정열 없음*/
+            </otherwise>
+        </choose>     
+        <!-- END.검색요건 -->  
+      
+	</select>
+
+	<select id="getDistrictList" resultType="CmSearchDistrictPopupResDto">
+	    SELECT	/* [cmSearchService.sqlx][getDistrictList][jungyunkwon][20250513] */
+        	   MS_DISTRICT.DISTRICTTYPE                                 AS DISTRICTTYPE
+        	  ,MS_DISTRICT.DISTRICTGROUP   								AS DISTRICTGROUP
+        	  ,MS_DISTRICT.DISTRICTCODE              					AS CODE
+        	  ,MS_DISTRICT.DISTRICTNAME              					AS NAME
+            FROM   MS_DISTRICT
+			WHERE  1=1
+        <choose>
+			<when test='multiSelect != null and multiSelect != ""'>
+				AND MS_DISTRICT.DISTRICTCODE IN
+				(SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                    FROM (SELECT #{multiSelect} AS VAL FROM DUAL) A
+                 CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+    	    </when>
+	        <otherwise>
+	        	<if test='name != null and name !=""'>
+			            AND   (
+			                MS_DISTRICT.DISTRICTCODE     LIKE  '%'||#{name}||'%'
+			                OR MS_DISTRICT.DISTRICTNAME     LIKE  '%'||#{name}||'%'
+			            )
+			    </if>
+	        </otherwise>
+	    </choose>
+	</select>
+
+	<select id="getSkuGroup1List" resultType="CmSearchSkuGroup1PopupResDto">
+    SELECT	/* [cmSearchService.sqlx][getSkuGroup1List][jungyunkwon][20250519] */
+    		MS_SKUSPEC.SPECCODE			AS CODE
+           ,MS_SKUSPEC.SPECDESCR		AS NAME
+	  FROM  MS_SKUSPEC
+	 WHERE  MS_SKUSPEC.STORERKEY 	LIKE #{storerkey}
+	   AND  MS_SKUSPEC.SPECCATEGORY = #{specCategory}
+	   AND  MS_SKUSPEC.SPECCLASS    = #{specClass}
+		<!-- 멀티선택: 999 청크 OR-IN -->
+		<if test="codeGroups != null and codeGroups.size() &gt; 0">
+			<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+				<foreach collection="codeGroups" item="grp">
+					OR MS_SKUSPEC.SPECCODE IN
+					<foreach collection="grp" item="code" open="(" close=")" separator=",">
+						#{code}
+		      		</foreach>
+		    	</foreach>
+		  	</trim>
+		</if>
+        <choose>
+        <when test='multiSelect != null and multiSelect != ""'>
+	        AND MS_SKUSPEC.SPECCODE IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+			                     FROM (SELECT #{multiSelect} AS VAL FROM DUAL) A
+			                  CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+        </when>		
+        
+        <otherwise>
+	        <choose>
+		        <when test="isEnter == 'Y'.toString()"> <!-- 엔터검색.input/돋보기 =검색(성능) -->
+			          AND (MS_SKUSPEC.SPECCODE = #{name}  OR MS_SKUSPEC.SPECDESCR = #{name}) /*엔터검색*/
+		        </when>
+	        <otherwise>
+		        <if test='name != null and name != ""'>
+			        <choose>
+			        	<when test="fixedSearchYn == '' and fixedSearchYn == null"> <!-- FIX검색.%1개일 때(3/4) -->
+					     AND (MS_SKUSPEC.SPECCODE  LIKE '%'||#{name}||'%' 
+                           OR MS_SKUSPEC.SPECDESCR LIKE '%'||#{name}||'%')
+				        </when>
+			        
+				        <when test="fixedSearchYn == 'Y'.toString()"> <!-- FIX검색.%1개일 때(3/4) -->
+					          AND (MS_SKUSPEC.SPECCODE LIKE #{name} OR MS_SKUSPEC.SPECDESCR LIKE #{name} )
+				        </when>
+			        <otherwise><!-- 2.단일검색,5.%다중검색  -->
+				        AND (MS_SKUSPEC.SPECCODE LIKE '%'||#{name}||'%' OR MS_SKUSPEC.SPECDESCR LIKE '%'||#{name}||'%' )
+			        </otherwise>
+			        </choose>		            
+		                
+	                <!-- START.검색요건 -->
+                       <if test= 'name != null and name.indexOf(" ") gt 0 '>
+                           OR REGEXP_LIKE (UPPER(MS_SKUSPEC.SPECDESCR), REGEXP_REPLACE (UPPER(#{keywordRegexp}), '[ ]+', '|'))
+                       </if>
+                    <!-- END.검색요건 -->     
+		        </if>
+	        </otherwise>
+	        </choose>
+
+        </otherwise>
+        </choose>
+        
+        <!-- START.검색요건 -->
+        <choose>
+            <when test='name != null and name.indexOf(" ") gt 0 '>
+                ORDER BY
+                        REGEXP_COUNT(UPPER(MS_SKUSPEC.SPECDESCR), REGEXP_REPLACE (UPPER(#{keywordRegexp}), '[ ]+', '|')) DESC, /*매치 검색 count*/
+                        UTL_MATCH.JARO_WINKLER_SIMILARITY(MS_SKUSPEC.SPECDESCR, #{name}) DESC 
+                            
+            </when>
+            <otherwise>
+               /*ASIS처럼 정열 없음*/
+            </otherwise>
+        </choose>     
+        <!-- END.검색요건 --> 
+	</select>
+</mapper>

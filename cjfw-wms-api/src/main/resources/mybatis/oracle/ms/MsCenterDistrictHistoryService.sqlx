@@ -1,0 +1,310 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="msCenterDistrictHistoryService">
+
+    <select id="getMasterList" resultType="MsCenterDistrictHistoryResDto">
+    	SELECT /* [msCenterDistrictHistoryService.sqlx][getMasterList] */
+    		 MS_DC_DISTRICT_HIS.DCCODE
+    		,CM_DC.DCNAME                          AS DCNAME
+    		,CM_CODE.BASEDESCR                     AS ORDGRPNM
+    		,MS_DC_DISTRICT_HIS.LOG_TIMESTAMP
+    		,MS_DC_DISTRICT_HIS.CTP_KOR_NM
+    		,MS_DC_DISTRICT_HIS.SIG_KOR_NM
+    		,MS_DC_DISTRICT_HIS.HJDONG_NM
+    		,MS_DC_DISTRICT_HIS.HJDONG_CD
+    		,MS_DC_DISTRICT_HIS.ORDGRP
+    		,MS_DC_DISTRICT_HIS.FROMDATE
+    		,MS_DC_DISTRICT_HIS.TODATE
+    		,MS_DC_DISTRICT_HIS.DEL_YN
+    		,MS_DC_DISTRICT_HIS.ADDDATE
+    		,MS_DC_DISTRICT_HIS.EDITDATE
+    		,MS_DC_DISTRICT_HIS.ADDWHO
+    		,MS_DC_DISTRICT_HIS.EDITWHO
+    	FROM MS_DC_DISTRICT_HIS
+    	LEFT OUTER JOIN CM_DC
+    	ON CM_DC.DCCODE = MS_DC_DISTRICT_HIS.DCCODE
+    	LEFT OUTER JOIN CM_CODE
+    	ON CM_CODE.BASECODE = MS_DC_DISTRICT_HIS.ORDGRP
+        AND CODELIST = 'ORDR_GROUP'
+        AND STORERKEY = 'FW00'
+    	WHERE MS_DC_DISTRICT_HIS.DCCODE = #{dccode}
+    	  <if test="effectiveDate != null and effectiveDate != ''">
+    	  	AND #{effectiveDate} BETWEEN MS_DC_DISTRICT_HIS.FROMDATE AND MS_DC_DISTRICT_HIS.TODATE
+    	  </if>
+    	  <if test="searchHjdongCd != null and searchHjdongCd.length() > 0">
+    	  	AND HJDONG_CD LIKE #{searchHjdongCd} || '%'
+    	  </if>
+      	  <if test="searchHjdongNm != null and searchHjdongNm != ''">
+    	  	AND CTP_KOR_NM || ' ' || SIG_KOR_NM || ' ' || HJDONG_NM LIKE '%' || #{searchHjdongNm} || '%'
+    	  </if>
+    </select>
+
+	<insert id="saveDcDistrictHis">
+		INSERT INTO MS_DC_DISTRICT_HIS /* [msCenterDistrictHistoryService.sqlx][saveDcDistrictHis][센터권역 변경이력 히스토리 저장][2025.11.17] */
+			(
+				DCCODE,
+				LOG_TIMESTAMP,
+				CTP_KOR_NM,
+				SIG_KOR_NM,
+				HJDONG_NM,
+				HJDONG_CD,
+				ORDGRP,
+				FROMDATE,
+				TODATE,
+				DEL_YN,
+				ADDDATE,
+				EDITDATE,
+				ADDWHO,
+				EDITWHO
+			)
+			VALUES
+			(
+				 #{dccode}
+				,SYSDATE
+				,#{ctpKorNm}
+				,#{sigKorNm}
+				,#{hjdongNm}
+				,#{hjdongCd}
+				,#{ordGrp}
+				,#{fromdate}
+				,#{todate}
+				,#{delYn}
+				,SYSDATE
+				,SYSDATE
+				,'SYSTEM'
+				,'SYSTEM'
+			)
+	</insert>
+
+	<insert id="saveMasterListByHjdong">
+		INSERT INTO MS_DC_DISTRICT_HIS /* [msCenterDistrictHistoryService.sqlx][saveMasterListByHjdong][행정동 저장시 센터권역 변경이력 히스토리 저장][2025.11.18] */
+			(
+				DCCODE,
+				LOG_TIMESTAMP,
+				CTP_KOR_NM,
+				SIG_KOR_NM,
+				HJDONG_NM,
+				HJDONG_CD,
+				ORDGRP,
+				FROMDATE,
+				TODATE,
+				DEL_YN,
+				ADDDATE,
+				EDITDATE,
+				ADDWHO,
+				EDITWHO
+			)
+			SELECT
+			   MS_DC_DISTRICT_HJDONG.DCCODE
+			  ,SYSDATE
+			  ,MS_HJDONG_POLYGON.CTP_KOR_NM
+			  ,MS_HJDONG_POLYGON.SIG_KOR_NM
+			  ,MS_HJDONG_POLYGON.HJDONG_NM
+			  ,MS_DC_DISTRICT_HJDONG.HJDONG_CD
+			  ,MS_DC_ORDGRP.ORDGRP
+			  ,MS_DC_DISTRICT_HJDONG.FROMDATE        AS FROMDATE
+			  ,MS_DC_DISTRICT_HJDONG.TODATE          AS TODATE
+			  ,#{delYn}                              AS DEL_YN
+			  ,SYSDATE
+			  ,SYSDATE
+			  ,'SYSTEM'
+			  ,'SYSTEM'
+			FROM MS_DC_DISTRICT_HJDONG
+			INNER JOIN MS_DC_ORDGRP
+			ON MS_DC_DISTRICT_HJDONG.FROMDATE <![CDATA[<=]]> MS_DC_ORDGRP.TODATE
+			AND MS_DC_ORDGRP.FROMDATE         <![CDATA[<=]]> MS_DC_DISTRICT_HJDONG.TODATE
+			LEFT OUTER JOIN MS_HJDONG_POLYGON
+			ON MS_HJDONG_POLYGON.HJDONG_CD = MS_DC_DISTRICT_HJDONG.HJDONG_CD
+			AND TO_CHAR(SYSDATE, 'YYYYMMDD') BETWEEN MS_HJDONG_POLYGON.FROMDATE AND MS_HJDONG_POLYGON.TODATE
+			WHERE 1 = 1
+			AND MS_DC_DISTRICT_HJDONG.HJDONG_CD = #{hjdongCd}
+			AND MS_DC_DISTRICT_HJDONG.DCCODE    = #{dccode}
+			AND MS_DC_DISTRICT_HJDONG.FROMDATE  = #{fromDate}
+	</insert>
+
+	<insert id="saveMasterListByDcOrdGrp">
+		INSERT INTO MS_DC_DISTRICT_HIS /* [msCenterDistrictHistoryService.sqlx][saveMasterListByDcOrdGrp][주문그룹 우선순위 저장시 센터권역 변경이력 히스토리 저장][2025.11.18] */
+			(
+				DCCODE,
+				LOG_TIMESTAMP,
+				CTP_KOR_NM,
+				SIG_KOR_NM,
+				HJDONG_NM,
+				HJDONG_CD,
+				ORDGRP,
+				FROMDATE,
+				TODATE,
+				DEL_YN,
+				ADDDATE,
+				EDITDATE,
+				ADDWHO,
+				EDITWHO
+			)
+			SELECT
+			   MS_DC_DISTRICT_HJDONG.DCCODE
+			  ,SYSDATE
+			  ,MS_HJDONG_POLYGON.CTP_KOR_NM
+			  ,MS_HJDONG_POLYGON.SIG_KOR_NM
+			  ,MS_HJDONG_POLYGON.HJDONG_NM
+			  ,MS_DC_DISTRICT_HJDONG.HJDONG_CD
+			  ,MS_DC_ORDGRP.ORDGRP
+			  ,MS_DC_DISTRICT_HJDONG.FROMDATE        AS FROMDATE
+			  ,MS_DC_DISTRICT_HJDONG.TODATE          AS TODATE
+			  ,#{delYn}                              AS DEL_YN
+			  ,SYSDATE
+			  ,SYSDATE
+			  ,'SYSTEM'
+			  ,'SYSTEM'
+		  FROM MS_DC_DISTRICT_HJDONG
+	      INNER JOIN MS_DC_ORDGRP
+	        ON MS_DC_ORDGRP.ORDGRP   = #{ordGrp}
+	       AND MS_DC_ORDGRP.FROMDATE = #{fromDate}
+	      LEFT OUTER JOIN MS_HJDONG_POLYGON
+			ON MS_HJDONG_POLYGON.HJDONG_CD = MS_DC_DISTRICT_HJDONG.HJDONG_CD
+			AND TO_CHAR(SYSDATE, 'YYYYMMDD') BETWEEN MS_HJDONG_POLYGON.FROMDATE AND MS_HJDONG_POLYGON.TODATE
+	      WHERE 1 = 1
+	        AND MS_DC_DISTRICT_HJDONG.TODATE <![CDATA[>=]]> TO_CHAR(SYSDATE, 'YYYYMMDD')
+	        AND MS_HJDONG_POLYGON.CTP_KOR_NM IS NOT NULL
+	</insert>
+
+	<insert id="saveDcDistrictHisByHjdongKeySet" parameterType="MsDistrictValidationReqDto">
+		<![CDATA[
+		INSERT INTO MS_DC_DISTRICT_HIS (/* [msCenterDistrictHistoryService.sqlx][saveDcDistrictHisByHjdongKeySet][센터권역관리행정동 변경이력 히스토리 저장] */
+            DCCODE, LOG_TIMESTAMP, CTP_KOR_NM, SIG_KOR_NM, HJDONG_NM,
+            HJDONG_CD, ORDGRP, FROMDATE, TODATE, DEL_YN,
+            ADDDATE, EDITDATE, ADDWHO, EDITWHO
+        )
+        SELECT
+		    h.DCCODE, SYSTIMESTAMP, a.CTP_KOR_NM, a.SIG_KOR_NM, a.HJDONG_NM,
+            h.HJDONG_CD, NULL, h.FROMDATE, h.TODATE, h.DEL_YN, SYSDATE,
+            SYSDATE, NVL(#{gUserId}, 'SYSTEM'), NVL(#{gUserId}, 'SYSTEM')
+        FROM MS_DC_DISTRICT_HJDONG h
+        JOIN MS_HJDONG_POLYGON a ON h.HJDONG_CD = a.HJDONG_CD AND h.FROMDATE <= a.TODATE AND h.TODATE >= a.FROMDATE
+        WHERE h.SERIALKEY IN
+        ]]>
+        <foreach collection="serialkeySet" item="key" open="(" separator="," close=")">
+            #{key}
+        </foreach>
+	</insert>
+
+	<insert id="saveDcDistrictHisByHjdongBatchKey" parameterType="MsDistrictValidationReqDto">
+		<![CDATA[
+		INSERT INTO MS_DC_DISTRICT_HIS (/* [msCenterDistrictHistoryService.sqlx][saveDcDistrictHisByHjdongBatchKey][센터권역관리행정동 변경이력 히스토리 저장] */
+            DCCODE, LOG_TIMESTAMP, CTP_KOR_NM, SIG_KOR_NM, HJDONG_NM,
+            HJDONG_CD, ORDGRP, FROMDATE, TODATE, DEL_YN,
+            ADDDATE, EDITDATE, ADDWHO, EDITWHO
+        )
+        SELECT
+		    h.DCCODE, SYSTIMESTAMP, a.CTP_KOR_NM, a.SIG_KOR_NM, a.HJDONG_NM,
+            h.HJDONG_CD, NULL, h.FROMDATE, h.TODATE, h.DEL_YN, SYSDATE,
+            SYSDATE, NVL(#{gUserId}, 'SYSTEM'), NVL(#{gUserId}, 'SYSTEM')
+        FROM MS_DC_DISTRICT_HJDONG h
+        JOIN MS_HJDONG_POLYGON a ON h.HJDONG_CD = a.HJDONG_CD AND h.FROMDATE <= a.TODATE AND h.TODATE >= a.FROMDATE
+        WHERE h.EDITDATE = TO_DATE(#{editDate}, 'YYYYMMDDHH24MISS') AND h.EDITWHO = #{editWho}
+		]]>
+	</insert>
+
+	<insert id="saveDcDistrictHisByKeySet" parameterType="MsDistrictValidationReqDto">
+		<![CDATA[
+		INSERT INTO MS_DC_DISTRICT_HIS (/* [msCenterDistrictHistoryService.sqlx][saveDcDistrictHisByKeySet][센터권역관리주문그룹 변경이력 히스토리 저장] */
+            DCCODE, LOG_TIMESTAMP, CTP_KOR_NM, SIG_KOR_NM, HJDONG_NM,
+            HJDONG_CD, ORDGRP, FROMDATE, TODATE,
+		    DEL_YN,
+            ADDDATE, EDITDATE, ADDWHO, EDITWHO
+        )
+        SELECT
+		    o.DCCODE, SYSTIMESTAMP, a.CTP_KOR_NM, a.SIG_KOR_NM, a.HJDONG_NM,
+            o.HJDONG_CD, o.ORDGRP, o.FROMDATE, o.TODATE,
+            o.DEL_YN,
+            SYSDATE, SYSDATE, NVL(#{gUserId}, 'SYSTEM'), NVL(#{gUserId}, 'SYSTEM')
+        FROM MS_DC_DISTRICT_ORDGRP o
+        JOIN MS_HJDONG_POLYGON a ON o.HJDONG_CD = a.HJDONG_CD  AND o.FROMDATE <= a.TODATE AND o.TODATE >= a.FROMDATE
+        WHERE o.SERIALKEY IN
+         ]]>
+        <foreach collection="serialkeySet" item="key" open="(" separator="," close=")">
+            #{key}
+        </foreach>
+	</insert>
+
+	<insert id="saveDcDistrictOrdgrpHisByKeySet" parameterType="MsDistrictValidationReqDto">
+		<![CDATA[
+		INSERT INTO MS_DC_DISTRICT_HIS (/* [msCenterDistrictHistoryService.sqlx][saveDcDistrictOrdgrpHisByKeySet][센터권역관리주문그룹 변경이력 히스토리 저장] */
+            DCCODE, LOG_TIMESTAMP, CTP_KOR_NM, SIG_KOR_NM, HJDONG_NM,
+            HJDONG_CD, ORDGRP, FROMDATE, TODATE,
+		    DEL_YN,
+            ADDDATE, EDITDATE, ADDWHO, EDITWHO
+        )
+        SELECT
+		    o.DCCODE, SYSTIMESTAMP, a.CTP_KOR_NM, a.SIG_KOR_NM, a.HJDONG_NM,
+            o.HJDONG_CD, o.ORDGRP, o.FROMDATE, o.TODATE,
+            o.DEL_YN,
+            SYSDATE, SYSDATE, NVL(#{gUserId}, 'SYSTEM'), NVL(#{gUserId}, 'SYSTEM')
+        FROM MS_DC_DISTRICT_ORDGRP o
+        JOIN MS_DC_ORDGRP og ON og.ORDGRP = o.ORDGRP AND og.FROMDATE <= o.TODATE AND og.TODATE >= o.FROMDATE
+        JOIN MS_HJDONG_POLYGON a ON o.HJDONG_CD = a.HJDONG_CD  AND o.FROMDATE <= a.TODATE AND o.TODATE >= a.FROMDATE
+        WHERE og.SERIALKEY IN
+         ]]>
+        <foreach collection="serialkeySet" item="key" open="(" separator="," close=")">
+            #{key}
+        </foreach>
+	</insert>
+
+	<insert id="saveDcDistrictOrdgrpHisByBatchKey" parameterType="MsDistrictValidationReqDto">
+		<![CDATA[
+		INSERT INTO MS_DC_DISTRICT_HIS (/* [msCenterDistrictHistoryService.sqlx][saveDcDistrictOrdgrpHisByBatchKey][센터권역관리주문그룹 변경이력 히스토리 저장] */
+            DCCODE, LOG_TIMESTAMP, CTP_KOR_NM, SIG_KOR_NM, HJDONG_NM,
+            HJDONG_CD, ORDGRP, FROMDATE, TODATE,
+		    DEL_YN,
+            ADDDATE, EDITDATE, ADDWHO, EDITWHO
+        )
+        SELECT
+		    o.DCCODE, SYSTIMESTAMP, a.CTP_KOR_NM, a.SIG_KOR_NM, a.HJDONG_NM,
+            o.HJDONG_CD, o.ORDGRP, o.FROMDATE, o.TODATE,
+            o.DEL_YN,
+            SYSDATE, SYSDATE, NVL(#{gUserId}, 'SYSTEM'), NVL(#{gUserId}, 'SYSTEM')
+        FROM MS_DC_DISTRICT_ORDGRP o
+        JOIN MS_HJDONG_POLYGON a ON o.HJDONG_CD = a.HJDONG_CD  AND o.FROMDATE <= a.TODATE AND o.TODATE >= a.FROMDATE
+        WHERE o.EDITDATE = TO_DATE(#{editDate}, 'YYYYMMDDHH24MISS') AND o.EDITWHO = #{editWho}
+         ]]>
+	</insert>
+
+	<insert id="saveDcOrdgrpHisByKeySet" parameterType="MsDistrictValidationReqDto">
+		<![CDATA[
+		INSERT INTO MS_DC_DISTRICT_HIS (/* [msCenterDistrictHistoryService.sqlx][saveDcOrdgrpHisByKeySet][센터_주문그룹 변경이력 히스토리 저장] */
+            DCCODE, LOG_TIMESTAMP, CTP_KOR_NM, SIG_KOR_NM, HJDONG_NM,
+            HJDONG_CD, ORDGRP, FROMDATE, TODATE,
+		    DEL_YN,
+            ADDDATE, EDITDATE, ADDWHO, EDITWHO
+        )
+        SELECT
+		    o.DELIVERY_DCCODE, SYSTIMESTAMP, NULL, NULL, NULL,
+            NULL, o.ORDGRP, o.FROMDATE, o.TODATE,
+            o.DEL_YN,
+            SYSDATE, SYSDATE, NVL(#{gUserId}, 'SYSTEM'), NVL(#{gUserId}, 'SYSTEM')
+        FROM MS_DC_ORDGRP o
+        WHERE o.SERIALKEY IN
+         ]]>
+        <foreach collection="serialkeySet" item="key" open="(" separator="," close=")">
+            #{key}
+        </foreach>
+	</insert>
+
+	<insert id="saveDcOrdgrpHisByBatchKey" parameterType="MsDistrictValidationReqDto">
+		<![CDATA[
+		INSERT INTO MS_DC_DISTRICT_HIS (/* [msCenterDistrictHistoryService.sqlx][saveDcOrdgrpHisByBatchKey][센터_주문그룹 변경이력 히스토리 저장] */
+            DCCODE, LOG_TIMESTAMP, CTP_KOR_NM, SIG_KOR_NM, HJDONG_NM,
+            HJDONG_CD, ORDGRP, FROMDATE, TODATE,
+		    DEL_YN,
+            ADDDATE, EDITDATE, ADDWHO, EDITWHO
+        )
+        SELECT
+		    o.DELIVERY_DCCODE, SYSTIMESTAMP, NULL, NULL, NULL,
+            NULL, o.ORDGRP, o.FROMDATE, o.TODATE,
+            o.DEL_YN,
+            SYSDATE, SYSDATE, NVL(#{gUserId}, 'SYSTEM'), NVL(#{gUserId}, 'SYSTEM')
+        FROM MS_DC_ORDGRP o
+        WHERE o.EDITDATE = TO_DATE(#{editDate}, 'YYYYMMDDHH24MISS') AND o.EDITWHO = #{editWho}
+         ]]>
+	</insert>
+
+</mapper>

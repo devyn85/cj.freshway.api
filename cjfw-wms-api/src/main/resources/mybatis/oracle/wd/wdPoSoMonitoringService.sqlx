@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+  PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+  "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="wdPoSoMonitoringService">
+
+    <!-- 일배PO/SO연결모니터링 LIST -->
+    <select id="getWdPoSoMonitoringList" resultType="cjfw.wms.wd.dto.WdPoSoMonitoringResDto">
+		SELECT /* [wdPoSoMonitoringService.sqlx][wdPoSoMonitoringService.getWdPoSoMonitoringList][일배PO/SO연결모니터링 LIST][YangChangHwan][20250623] */
+				DM_DOCUMENT_H.DCCODE
+			  , CM_DC.DCNAME
+			  ,MS_CUST.CUSTSTRATEGY4 MAGAMCODE
+			  ,FN_CODEDESCR(#{gStorerkey},'CUSTORDERCLOSETIME',NVL(MS_CUST.CUSTSTRATEGY4,'STD')) AS CLOSETIME
+			  ,MAX(CM_CODE.BASEDESCR) MAGAMNAME
+			  ,COUNT(1) SOCNT
+			  ,SUM(CASE WHEN (DM_DOCUMENT_D.POKEY IS NULL OR DM_DOCUMENT_D.POLINE IS NULL) THEN 0 ELSE 1 END) MAPCNT
+			  ,COUNT(1) - SUM(CASE WHEN (DM_DOCUMENT_D.POKEY IS NULL OR DM_DOCUMENT_D.POLINE IS NULL) THEN 0 ELSE 1 END) DIFFCNT
+			  ,TRUNC(CASE
+						 WHEN COUNT(1) = 0 OR
+							  SUM(CASE
+									  WHEN (DM_DOCUMENT_D.POKEY IS NULL OR
+										   DM_DOCUMENT_D.POLINE IS NULL) THEN
+									   0
+									  ELSE
+									   1
+								  END) = 0 THEN
+						  0
+						 ELSE
+						  SUM(CASE
+								  WHEN (DM_DOCUMENT_D.POKEY IS NULL OR
+									   DM_DOCUMENT_D.POLINE IS NULL) THEN
+								   0
+								  ELSE
+								   1
+							  END) / COUNT(1) * 100
+					 END) MAPRATE
+			  ,#{slipdt} SLIPDT
+		  FROM DM_DOCUMENT_H
+		  JOIN DM_DOCUMENT_D
+			ON DM_DOCUMENT_D.DCCODE 	= DM_DOCUMENT_H.DCCODE
+		   AND DM_DOCUMENT_D.DELIVERYDATE 		= DM_DOCUMENT_H.DELIVERYDATE
+		   AND DM_DOCUMENT_D.DOCNO 		= DM_DOCUMENT_H.DOCNO
+		   AND DM_DOCUMENT_D.STORERKEY 	= DM_DOCUMENT_H.STORERKEY
+		   AND DM_DOCUMENT_D.DOCTYPE 	= DM_DOCUMENT_H.DOCTYPE
+		   AND DM_DOCUMENT_D.CHANNEL IN ('2', '3')
+		   AND DM_DOCUMENT_D.OMS_FLAG 	= 'Y'
+		   AND DM_DOCUMENT_D.DEL_YN 	= 'N'
+		   AND DM_DOCUMENT_D.WORKPROCESSCODE IN ('SO', 'JASO')
+		  JOIN MS_CUST
+			ON MS_CUST.STORERKEY 		= DM_DOCUMENT_H.STORERKEY
+		   AND MS_CUST.CUSTTYPE 		= DM_DOCUMENT_H.TO_CUSTTYPE
+		   AND MS_CUST.CUSTKEY 			= DM_DOCUMENT_H.TO_CUSTKEY
+		  LEFT OUTER JOIN CM_CODE
+			ON CM_CODE.STORERKEY 		= DM_DOCUMENT_H.STORERKEY
+		   AND CM_CODE.CODELIST 		= 'CUSTORDERCLOSETYPE'
+		   AND CM_CODE.BASECODE 		= MS_CUST.CUSTSTRATEGY4
+		  LEFT JOIN CM_DC ON CM_DC.DCCODE = DM_DOCUMENT_H.DCCODE
+		 WHERE DM_DOCUMENT_H.DELIVERYDATE = #{slipdt}
+		   AND DM_DOCUMENT_H.DOCTYPE 	= 'WD'
+		   <if test="fixdccode != null and fixdccode != ''"> 	AND DM_DOCUMENT_H.DCCODE = #{fixdccode} </if>
+		 GROUP BY DM_DOCUMENT_H.DCCODE
+				 ,MS_CUST.CUSTSTRATEGY4
+				 ,CM_DC.DCNAME
+		 ORDER BY DM_DOCUMENT_H.DCCODE
+				 ,MS_CUST.CUSTSTRATEGY4
+
+    </select>
+
+    <!-- 일배PO/SO연결모니터링 Grid1 LIST -->
+    <select id="getWdPoSoMonitoringGrid1List" resultType="cjfw.wms.wd.dto.WdPoSoMonitoringGrid1ResDto">
+		SELECT /* [wdPoSoMonitoringService.sqlx][wdPoSoMonitoringService.getWdPoSoMonitoringGrid1List][일배PO/SO연결모니터링 Grid1 LIST][YangChangHwan][20250623] */
+			   DM_DOCUMENT_H.TO_CUSTKEY          AS TO_CUSTKEY           /*배송인도처코드*/
+		      ,DM_DOCUMENT_H.TO_CUSTNAME         AS TO_CUSTNAME          /*배송인도처명*/
+		      ,DM_DOCUMENT_D.DCCODE              AS DCCODE               /*물류센터*/
+		      ,DM_DOCUMENT_D.DOCNO               AS DOCNO                /*문서번호*/
+		      ,DM_DOCUMENT_D.DOCLINE             AS DOCLINE              /*품목번호*/
+		      ,DM_DOCUMENT_D.SKU                 AS SKU                  /*상품코드*/
+		      ,MS_SKU.DESCRIPTION                AS SKUNAME              /*상품명칭*/
+		      ,MS_SKU.SERIALYN                   AS SERIALYN             /*식별번호유무*/
+		      ,MS_SKU.LINE01                     AS SKUNOTFIXEDAMOUNTYN  /*비정량여부*/
+		      ,'[' || MS_SKU.SERIALTYPE || ']' || FN_DESCR_CODE('FW00', 'PRODUCT-DRTYN', MS_SKU.SERIALTYPE) AS SERIALTYPE_SN  /*유통이력신고기관*/
+		      ,DM_DOCUMENT_D.CANCELQTY           AS CANCELQTY            /*결품수량*/
+		      ,DM_DOCUMENT_D.OPENQTY             AS OPENQTY              /*주문수량*/
+              ,DM_DOCUMENT_D.CONFIRMQTY          AS CONFIRMQTY           /*출고수량*/
+		      ,MS_SKU.SOMDNAME                   AS MDCODE_KP            /*담당MD*/
+		  FROM DM_DOCUMENT_H
+		  JOIN DM_DOCUMENT_D
+		    ON DM_DOCUMENT_D.DCCODE 		= DM_DOCUMENT_H.DCCODE
+		   AND DM_DOCUMENT_D.DELIVERYDATE 			= DM_DOCUMENT_H.DELIVERYDATE
+		   AND DM_DOCUMENT_D.DOCNO 			= DM_DOCUMENT_H.DOCNO
+		   AND DM_DOCUMENT_D.STORERKEY 		= DM_DOCUMENT_H.STORERKEY
+		   AND DM_DOCUMENT_D.DOCTYPE 		= DM_DOCUMENT_H.DOCTYPE
+		   AND DM_DOCUMENT_D.CHANNEL IN ('2', '3')
+		   AND DM_DOCUMENT_D.OMS_FLAG 		= 'Y'
+		   AND DM_DOCUMENT_D.DEL_YN 		= 'N'
+		   AND (DM_DOCUMENT_D.POKEY IS NULL OR DM_DOCUMENT_D.POLINE IS NULL)
+		   AND DM_DOCUMENT_D.WORKPROCESSCODE IN ('SO', 'JASO')
+		  JOIN MS_CUST
+		    ON MS_CUST.STORERKEY 			= DM_DOCUMENT_H.STORERKEY
+		   AND MS_CUST.CUSTTYPE 			= DM_DOCUMENT_H.TO_CUSTTYPE
+		   AND MS_CUST.CUSTKEY 				= DM_DOCUMENT_H.TO_CUSTKEY
+		   AND MS_CUST.CUSTSTRATEGY4 		= #{magamcode}
+		  JOIN MS_SKU
+		    ON MS_SKU.STORERKEY = DM_DOCUMENT_D.STORERKEY
+		   AND MS_SKU.SKU = DM_DOCUMENT_D.SKU
+		 WHERE DM_DOCUMENT_H.DCCODE = #{dccode}
+		   AND DM_DOCUMENT_H.DELIVERYDATE = #{slipdt}
+		   AND DM_DOCUMENT_H.DOCTYPE = 'WD'
+
+    </select>
+
+</mapper>

@@ -1,0 +1,754 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="omPurchaseMonitoringService">
+    
+    <!-- PO 발주현황 조회 (목록) -->
+	<select id="getMasterList" resultType="OmPurchaseMonitoringResDto">
+		SELECT	 /* [omPurchaseMonitoringService.sqlx][omPurchaseMonitoringService.getMasterList][자동발주관리 마스터 조회 (목록)][JeongHyeongCheol][20251014] */ 
+				ROW_NUMBER() OVER (
+		        ORDER BY 
+		            CASE WHEN FINAL.LEV = '11111' THEN 1 ELSE 2 END, /* 총합을 최상단으로 */
+		            FINAL.RAWDT NULLS FIRST,
+		            FINAL.RAWDCCODE NULLS FIRST,
+		            FINAL.RAWBUYERKEY NULLS FIRST,
+		            FINAL.RAWCUSTKEY NULLS FIRST,
+		            FINAL.SKU NULLS FIRST
+			    ) AS ID
+			    ,CASE 
+		            WHEN FINAL.LEV = '11111' THEN FINAL.TYPE || ' 총합'
+		            WHEN FINAL.LEV = '01111' THEN FINAL.RAWDT
+		            ELSE '' 
+		        END AS REQUESTDT
+		        
+			    ,FINAL.*
+		FROM(
+			<if test='purchasetype == "" or purchasetype == null or purchasetype == "PO"'>
+				SELECT	
+						'PO'	AS TYPE
+						,CASE 
+				            WHEN T.LEV = '00111' THEN T.DCCODE 
+				            ELSE '' 
+				        END AS DCCODE
+				        ,CASE 
+				            WHEN T.LEV = '00011' THEN T.BUYERKEY 
+				            ELSE '' 
+				        END AS BUYERKEY
+				        ,CASE 
+				            WHEN T.LEV = '00011' THEN T.BUYERNAME 
+				            ELSE '' 
+				        END AS BUYERNAME
+				        ,CASE 
+				            WHEN T.LEV = '00001' THEN T.CUSTKEY 
+				            ELSE '' 
+				        END AS CUSTKEY
+				        ,CASE 
+				            WHEN T.LEV = '00001' THEN T.CUSTKEYNAME 
+				            ELSE '' 
+				        END AS CUSTKEYNAME
+				        ,CASE 
+				            WHEN T.LEV = '11111' THEN '합계'
+				            WHEN T.LEV = '01111' THEN '    ' || T.REQUESTDT
+				            WHEN T.LEV = '00111' THEN '      ' || T.DCCODE
+				            WHEN T.LEV = '00011' THEN '        ' || T.BUYERNAME
+				            WHEN T.LEV = '00001' THEN '        ' || T.CUSTKEYNAME
+				            ELSE '                ' || T.SKUNAME 
+				        END AS LEV_TEXT
+				        ,CASE 
+				            WHEN T.LEV = '11111' THEN '0'
+				            WHEN T.LEV = '01111' THEN '0'
+				            WHEN T.LEV = '00111' THEN '1'
+				            WHEN T.LEV = '00011' THEN '2'
+				            WHEN T.LEV = '00001' THEN '3'
+				            ELSE '4' 
+				        END AS TLEVEL 
+			            ,T.BULK_PO_MEMO
+		            	,T.CUSTKEY_CNT
+		            	,T.REQUESTDT	AS RAWDT
+			            ,T.DCCODE		AS RAWDCCODE
+			            ,T.BUYERKEY		AS RAWBUYERKEY
+			            ,T.CUSTKEY		AS RAWCUSTKEY
+		            	,T.SKU
+		            	,T.SKUNAME
+		            	,T.SKU_CNT
+		            	,T.ORDER_QTY
+		            	,T.WEIGHT
+		            	,T.WEIGHT2
+		            	,T.DP_CUSTKEY_CNT
+		            	,T.DP_SKU_CNT
+		            	,T.DP_WEIGHT
+		            	,T.DP_WEIGHT2
+		            	,T.PLT
+		            	,T.LEV
+		        FROM (SELECT
+		                 X.REQUESTDT
+		                ,X.DCCODE
+		                ,X.ORDERCREATOR AS BUYERKEY
+		                ,NVL(CD1.BASEDESCR, '미등록 수급담당') AS BUYERNAME
+		                ,X.CUSTKEY
+		                ,(SELECT P.DESCRIPTION FROM MS_CUST P WHERE P.STORERKEY = 'FW00' AND P.CUSTTYPE = 'P' AND P.CUSTKEY = X.CUSTKEY) AS CUSTKEYNAME
+		                ,X.CUSTKEY_CNT
+		                ,X.SKU
+		                ,(SELECT DESCRIPTION FROM MS_SKU WHERE MS_SKU.STORERKEY = 'FW00' AND MS_SKU.SKU = X.SKU) AS SKUNAME
+		                ,X.BULK_PO_MEMO
+		                ,X.SKU_CNT
+		                ,X.ORDER_QTY
+		                /* 수치 정합성을 위해 SUM 내부에서 이미 계산된 값을 사용 */
+                        ,X.SUM_WEIGHT  AS WEIGHT
+                        ,X.SUM_WEIGHT2 AS WEIGHT2
+		                <!-- ,CEIL((X.WEIGHT / 1000) * 10) / 10 AS WEIGHT
+		                ,CEIL((X.WEIGHT / 1000) * 100) / 100 AS WEIGHT2 -->
+		                ,0 AS DP_CUSTKEY_CNT
+		                ,0 AS DP_SKU_CNT
+		                ,0 AS DP_WEIGHT
+		                ,0 AS DP_WEIGHT2
+		                ,X.LEV
+		                ,X.PLT
+		            FROM (
+		                		                   
+		                ----------------------------------------------------------------------------------------------------
+	                    /* 2026-03-19 KSH 하위레벨(화면표시) 그대로 상위레벨 SUM */     
+                        SELECT 
+                              REQUESTDT
+                            , DCCODE
+                            , ORDERCREATOR
+                            , CUSTKEY
+                            , SKU
+                            , SUM(CUSTKEY_CNT)  CUSTKEY_CNT
+                            , SUM(SKU_CNT)      SKU_CNT
+                            , SUM(ORDER_QTY)    ORDER_QTY
+                            , SUM(SUM_WEIGHT)   SUM_WEIGHT
+                            , SUM(SUM_WEIGHT2)  SUM_WEIGHT2
+                            , SUM(PLT)          PLT
+                            , MIN(BULK_PO_MEMO) BULK_PO_MEMO
+                            , GROUPING(REQUESTDT)||GROUPING(DCCODE)||GROUPING(ORDERCREATOR)||GROUPING(CUSTKEY)||GROUPING(SKU) AS LEV
+		                
+		                 FROM
+		                (
+		                ----------------------------------------------------------------------------------------------------
+		                
+		                SELECT
+		                     MAX(TO_CHAR(TO_DATE(DP.REQUESTDT, 'YYYYMMDD'), 'YYYY-MM-DD')||' ('||TO_CHAR(TO_DATE(DP.REQUESTDT, 'YYYYMMDD'), 'DY', 'NLS_DATE_LANGUAGE=korean')||')') AS REQUESTDT
+		                    ,DP.DCCODE
+		                    ,DP.ORDERCREATOR
+		                    ,DP.CUSTKEY
+		                    ,DP.SKU
+		                    ,COUNT(DISTINCT DP.DCCODE || DP.ORDERCREATOR || DP.CUSTKEY) AS CUSTKEY_CNT
+		                    ,COUNT(DISTINCT DP.SKU) AS SKU_CNT
+		                    ,SUM(DP.ORDERQTY) AS ORDER_QTY
+		                    		                    
+		                    ,CEIL(SUM((DP.OPENQTY * MU1.BUNJA / MU1.BUNMO * MU2.BUNMO / MU2.BUNJA / 1000)) * 10) / 10 AS SUM_WEIGHT
+                            ,CEIL(SUM((DP.OPENQTY * MU1.BUNJA / MU1.BUNMO * MU2.BUNMO / MU2.BUNJA / 1000)) * 100) / 100 AS SUM_WEIGHT2
+                            ,CEIL(
+                                SUM(
+                                    DP.OPENQTY / NVL (NULLIF(MS_SKU.QTYPERBOX, 0), 1) / NULLIF(NVL(MDPL.BOXPERLAYER * MDPL.LAYERPERPLT,0),0)
+                                )
+                            ) AS PLT
+                            ,MAX(DP.BULK_PO_MEMO) AS BULK_PO_MEMO
+                            ,GROUPING(DP.REQUESTDT)||GROUPING(DP.DCCODE)||GROUPING(DP.ORDERCREATOR)||GROUPING(DP.CUSTKEY)||GROUPING(DP.SKU) AS LEV
+		                FROM -- DP_PURCHASE DP
+		                      (
+                                SELECT B.BOXPERLAYER            AS CHK_BOXPERLAYER
+                                     , B.LAYERPERPLT            AS CHK_LAYERPERPLT
+                                     , NVL(B.DCCODE, '공통')    AS JOIN_DCCODE
+                                     , NVL(B.PLANT , '공통')    AS JOIN_PLANT
+                                     , A.SKU                    AS JOIN_SKU
+                                     , A.STORERKEY              AS JOIN_STORERKEY
+                                     , A.*
+                                  FROM DP_PURCHASE      A
+                                  LEFT
+                                  JOIN MS_DC_PLT_LOAD   B
+                                    ON B.DCCODE         = A.DCCODE
+                                   AND B.PLANT          = A.ORGANIZE
+                                   AND B.SKU            = A.SKU
+                                   AND B.STORERKEY      = A.STORERKEY
+                                 WHERE A.REQUESTDT      <![CDATA[>=]]> #{fromDate}       -- TMUM. [PARAMTER]
+                                   AND A.REQUESTDT      <![CDATA[<=]]> #{toDate}       -- TMUM. [PARAMTER]
+                                   AND A.DEL_YN          = 'N'              -- 고정
+                            <if test='dccodeMulti != null and dccodeMulti != ""'>
+                                   AND A.DCCODE IN 
+                                <foreach collection="dccodeMulti" item="item" open="(" separator="," close=")">
+                                    #{item}
+                                </foreach> 
+                            </if>
+                                )      DP
+		                LEFT OUTER JOIN MS_SKU 
+		                			 ON MS_SKU.SKU = DP.SKU AND MS_SKU.STORERKEY = DP.STORERKEY
+		                
+               		   LEFT OUTER
+                            JOIN
+                              (
+                                SELECT A.*
+                                  FROM
+                                    (
+                                        SELECT ROW_NUMBER() OVER(PARTITION BY A.DCCODE, A.SKU ORDER BY A.PLANT) AS SEQ_IDX
+                                             , A.*
+                                          FROM MS_DC_PLT_LOAD           A
+                                         WHERE 1 = 1
+                                    )           A
+                                 WHERE A.SEQ_IDX    = 1
+                              )                     MDPL
+                             ON MDPL.DCCODE         = DP.JOIN_DCCODE
+                            AND MDPL.PLANT          = DP.JOIN_PLANT
+                            AND MDPL.SKU            = DP.JOIN_SKU
+                            AND MDPL.STORERKEY      = DP.JOIN_STORERKEY
+		                LEFT JOIN MS_UOM MU1
+		                	   ON MU1.STORERKEY = DP.STORERKEY
+		                	  AND MU1.SKU = DP.SKU
+		                	  AND MU1.UOM = DP.UOM
+		        	  	LEFT JOIN MS_UOM MU2
+						       ON MU2.STORERKEY = DP.STORERKEY
+						      AND MU2.SKU = DP.SKU
+						      AND MU2.UOM = 'KG'
+		                
+		                WHERE 1=1  
+		                     
+		                    <if test='dccodeMulti != null and dccodeMulti != ""'>
+		                        AND DP.DCCODE IN 
+		                        <foreach collection="dccodeMulti" item="item" open="(" separator="," close=")">
+					                #{item}
+					            </foreach> 
+		                    </if>
+		                    <if test='buyerkeyMulti != null and buyerkeyMulti != ""'>
+		                        AND DP.ORDERCREATOR IN 
+		                        <foreach collection="buyerkeyMulti" item="item" open="(" separator="," close=")">
+					                #{item}
+					            </foreach> 
+		                    </if>
+		                    <if test='custkeyMulti != null and custkeyMulti != ""'>
+								AND DP.CUSTKEY IN 
+								<foreach collection="custkeyMulti" item="item" open="(" separator="," close=")">
+					                #{item}
+					            </foreach> 
+							</if>
+		                    <if test='storagetypeMulti != null and storagetypeMulti != ""'>
+		                        AND EXISTS (
+		                            SELECT 1
+		                            FROM MS_SKU MS
+		                            WHERE MS.STORERKEY = DP.STORERKEY
+		                                AND MS.SKU = DP.SKU
+		                                AND MS.STORAGETYPE IN
+		                                <foreach collection="storagetypeMulti" item="item" open="(" separator="," close=")">
+							                #{item}
+							            </foreach>  
+		                        )
+		                    </if>
+		                    <if test='skuMulti != null and skuMulti != ""'>
+								AND DP.SKU IN
+								<foreach collection="skuMulti" item="item" open="(" separator="," close=")">
+					                #{item}
+					            </foreach> 
+							</if>
+		                    <if test='purchasetype != null and purchasetype != ""'>
+		                        AND DP.POTYPE LIKE '%'||#{purchasetype}||'%'
+		                    </if>
+		                       
+		                ----------------------------------------------------------------------------------------------------
+	                    /* 2026-03-19 KSH 하위레벨(화면표시) 그대로 상위레벨 SUM */     
+		                -- GROUP BY ROLLUP(DP.REQUESTDT, DP.DCCODE, DP.ORDERCREATOR, DP.CUSTKEY, DP.SKU)
+		                GROUP BY DP.REQUESTDT, DP.DCCODE, DP.ORDERCREATOR, DP.CUSTKEY, DP.SKU
+		                ) Y
+		                GROUP BY ROLLUP(REQUESTDT, DCCODE, ORDERCREATOR, CUSTKEY, SKU)
+		                ----------------------------------------------------------------------------------------------------
+		                
+		            ) X
+		            /* 2026-03-11 KSH 수급담당표시시 DEL_YN 체크안함 WNEXTWMS-7954 양준영 */
+		            -- LEFT JOIN CM_CODE_STORER CD1
+		            LEFT JOIN CM_CODE CD1
+		                	   ON CD1.STORERKEY = 'FW00'
+		                	  AND CD1.CODELIST  = 'BUYERKEY'
+		                	  AND CD1.BASECODE  = X.ORDERCREATOR
+		            
+		        ) T
+		        
+			</if>
+			
+			<if test='purchasetype == null or purchasetype == ""'> UNION ALL </if>
+			
+			<if test='purchasetype == "" or purchasetype == null or purchasetype == "STO"'>
+				SELECT  /* [omPurchaseMonitoringService.sqlx][omPurchaseMonitoringService.getStoGraphMasterList][STO 이체 추이 마스터 조회][AI_Adaptive_Collaborator][20260202] */
+			        
+			        'STO'	AS TYPE
+					,CASE 
+			            WHEN T.LEV = '00111' THEN T.DCCODE 
+			            ELSE '' 
+			        END AS DCCODE
+			        ,CASE 
+			            WHEN T.LEV = '00011' THEN T.BUYERKEY 
+			            ELSE '' 
+			        END AS BUYERKEY
+			        ,CASE 
+			            WHEN T.LEV = '00011' THEN T.BUYERNAME 
+			            ELSE '' 
+			        END AS BUYERNAME
+			        ,CASE 
+			            WHEN T.LEV = '00001' THEN T.CUSTKEY 
+			            ELSE '' 
+			        END AS CUSTKEY
+			        ,CASE 
+			            WHEN T.LEV = '00001' THEN T.CUSTKEYNAME 
+			            ELSE '' 
+			        END AS CUSTKEYNAME
+			        ,CASE 
+			            WHEN T.LEV = '11111' THEN '합계'
+			            WHEN T.LEV = '01111' THEN '    ' || T.DT
+			            WHEN T.LEV = '00111' THEN '      ' || T.DCCODE
+			            WHEN T.LEV = '00011' THEN '        ' || T.BUYERNAME
+			            WHEN T.LEV = '00001' THEN '        ' || T.CUSTKEYNAME
+			            ELSE '                ' || T.SKUNAME 
+			        END AS LEV_TEXT
+			        ,CASE 
+			            WHEN T.LEV = '11111' THEN '0'
+			            WHEN T.LEV = '01111' THEN '0'
+			            WHEN T.LEV = '00111' THEN '1'
+			            WHEN T.LEV = '00011' THEN '2'
+			            WHEN T.LEV = '00001' THEN '3'
+			            ELSE '4' 
+			        END AS TLEVEL 
+		            ,UNISTR('') AS BULK_PO_MEMO
+		            ,T.CUSTKEY_CNT  AS CUSTKEY_CNT
+		            ,T.DT			AS RAWDT
+		            ,T.DCCODE		AS RAWDCCODE
+		            ,T.BUYERKEY		AS RAWBUYERKEY
+		            ,T.CUSTKEY		AS RAWCUSTKEY
+			        ,T.SKU
+			        ,T.SKUNAME
+			        ,T.SKU_CNT 		AS SKU_CNT
+			        ,T.CONFIRM_QTY  AS ORDER_QTY
+			        ,T.SUM_WEIGHT AS WEIGHT
+			        ,T.SUM_WEIGHT AS WEIGHT2
+			        ,NULL AS DP_CUSTKEY_CNT
+	            	,NULL AS DP_SKU_CNT
+	            	,NULL AS DP_WEIGHT
+	            	,NULL AS DP_WEIGHT2
+			        ,T.PLT
+			        ,T.LEV
+			      
+			FROM (
+			    SELECT 
+			        X.DT
+			        ,X.DCCODE
+			        ,X.BUYERKEY
+			        ,NVL(CD1.BASEDESCR, '미등록 담당자') AS BUYERNAME
+			        ,X.CUSTKEY
+			        ,X.CUSTKEY_CNT
+			        ,(SELECT P.DESCRIPTION FROM MS_CUST P WHERE P.STORERKEY = 'FW00' AND P.CUSTTYPE = 'P' AND P.CUSTKEY = X.CUSTKEY) AS CUSTKEYNAME
+			        ,X.SKU
+			        ,X.SKU_CNT
+			        ,(SELECT DESCRIPTION FROM MS_SKU WHERE MS_SKU.STORERKEY = 'FW00' AND MS_SKU.SKU = X.SKU) AS SKUNAME
+			        ,X.CONFIRM_QTY
+			        ,X.SUM_WEIGHT
+			        ,X.PLT
+			        ,X.LEV
+			    FROM (
+			        
+			        ----------------------------------------------------------------------------------------------------
+	                /* 2026-03-19 KSH 하위레벨(화면표시) 그대로 상위레벨 SUM */    
+			        SELECT
+			               DT
+			             , DCCODE
+			             , BUYERKEY
+			             , CUSTKEY
+			             , SKU
+			             , SUM(CUSTKEY_CNT) AS CUSTKEY_CNT
+			             , SUM(SKU_CNT)     AS SKU_CNT 
+			             , SUM(CONFIRM_QTY) AS CONFIRM_QTY
+			             , SUM(SUM_WEIGHT)  AS SUM_WEIGHT 
+			             , SUM(PLT)         AS PLT
+			             , GROUPING(DT)||GROUPING(DCCODE)||GROUPING(BUYERKEY)||GROUPING(CUSTKEY)||GROUPING(SKU) AS LEV
+			          FROM 
+			        (
+			        ----------------------------------------------------------------------------------------------------
+			        
+			        SELECT /*+ LEADING(DM_DOCUMENT_H_DP) USE_NL(DM_DOCUMENT_D DP_INPLAN MS) */
+			            MAX(TO_CHAR(TO_DATE(DP_INPLAN.SLIPDT, 'YYYYMMDD'), 'YYYY-MM-DD')||' ('||TO_CHAR(TO_DATE(DP_INPLAN.SLIPDT, 'YYYYMMDD'), 'DY', 'NLS_DATE_LANGUAGE=korean')||')') AS DT
+			            ,DP_INPLAN.DCCODE
+			            ,MS_MST.BUYERKEY
+			            ,MS_CUST.CUSTKEY
+			            ,DP_INPLAN.SKU
+			            ,COUNT(DISTINCT DP_INPLAN.DCCODE || MS_MST.BUYERKEY || MS_CUST.CUSTKEY) AS CUSTKEY_CNT
+	                    ,COUNT(DISTINCT DP_INPLAN.SKU) AS SKU_CNT
+			            ,SUM(DP_INPLAN.CONFIRMQTY) AS CONFIRM_QTY
+			            
+			            ,CEIL(SUM(FN_CONV_UOM(DP_INPLAN.STORERKEY, DP_INPLAN.SKU, DP_INPLAN.UOM, 'KG', DP_INPLAN.ORDERQTY )/1000)*100)/100 AS SUM_WEIGHT
+			            
+                         ,CEIL(
+                             SUM(
+                                 DP_INPLAN.CONFIRMQTY / NULLIF(NVL(MS.QTYPERBOX,0),0) / NULLIF((NVL(MSC.BOXPERLAYER,0)*NVL(MSC.LAYERPERPLT,0)),0)
+                             )
+                         ) AS PLT    -- 승인수량(CONFIRMQTY)이 대부분 0임,.. 데이터가 나오지 않는 사유이므로, BPO 대응 할것
+			            
+			            ,GROUPING(DP_INPLAN.SLIPDT)||GROUPING(DP_INPLAN.DCCODE)||GROUPING(MS_MST.BUYERKEY)||GROUPING(MS_CUST.CUSTKEY)||GROUPING(DP_INPLAN.SKU) AS LEV
+			        FROM DM_DOCUMENT_H DM_DOCUMENT_H_DP
+			        JOIN DM_DOCUMENT_D
+				      ON DM_DOCUMENT_D.DCCODE           =  DM_DOCUMENT_H_DP.DCCODE         
+				     AND DM_DOCUMENT_D.STORERKEY        =  DM_DOCUMENT_H_DP.STORERKEY               
+				     AND DM_DOCUMENT_D.DELIVERYDATE     =  DM_DOCUMENT_H_DP.DELIVERYDATE         
+				     AND DM_DOCUMENT_D.DOCNO            =  DM_DOCUMENT_H_DP.DOCNO         
+				     AND DM_DOCUMENT_D.DOCTYPE          =  DM_DOCUMENT_H_DP.DOCTYPE         
+				     AND DM_DOCUMENT_H_DP.DOCTYPE   = 'DP'
+				     AND DM_DOCUMENT_H_DP.WORKPROCESSCODE = 'STO'
+				     AND DM_DOCUMENT_D.WORKPROCESSCODE = 'STO'
+				     
+				    <!-- JOIN DP_INPLAN -->
+				    JOIN
+                       (
+                           SELECT B.BOXPERLAYER            AS CHK_BOXPERLAYER
+                                , B.LAYERPERPLT            AS CHK_LAYERPERPLT
+                                , NVL(B.DCCODE, '공통')    AS JOIN_DCCODE
+                                , NVL(B.PLANT , '공통')    AS JOIN_PLANT
+                                , A.SKU                    AS JOIN_SKU
+                                , A.STORERKEY              AS JOIN_STORERKEY
+                                , A.*
+                             FROM DP_INPLAN        A
+                             LEFT
+                             JOIN MS_DC_PLT_LOAD   B
+                               ON B.DCCODE         = A.DCCODE
+                              AND B.PLANT          = A.ORGANIZE
+                              AND B.SKU            = A.SKU
+                              AND B.STORERKEY      = A.STORERKEY
+                            WHERE A.SLIPDT BETWEEN #{fromDate} AND #{toDate} 
+                       )           DP_INPLAN
+				      ON DP_INPLAN.DCCODE             = DM_DOCUMENT_H_DP.DCCODE         
+				     AND DP_INPLAN.STORERKEY          = DM_DOCUMENT_H_DP.STORERKEY               
+				     AND DP_INPLAN.ORGANIZE           = DM_DOCUMENT_H_DP.ORGANIZE               
+				     AND DP_INPLAN.SLIPDT       	  = DM_DOCUMENT_H_DP.DELIVERYDATE         
+				     AND DP_INPLAN.DOCNO              = DM_DOCUMENT_H_DP.DOCNO         
+				     AND DP_INPLAN.DOCTYPE            = DM_DOCUMENT_H_DP.DOCTYPE     
+				     AND DP_INPLAN.IF_SEND_TYPE       ='STODC'  
+				     AND DP_INPLAN.DOCLINE          = DM_DOCUMENT_D.DOCLINE
+				     
+			        -- 담당자 및 고객 정보를 그룹화하기 위한 조인
+			        JOIN MS_PURCHASECUST MS_CUST
+			          ON MS_CUST.STORERKEY = DM_DOCUMENT_H_DP.STORERKEY
+			         AND MS_CUST.DCCODE    = DM_DOCUMENT_H_DP.DCCODE
+			         AND MS_CUST.SKU       = DP_INPLAN.SKU
+			         AND MS_CUST.PLANT     = DM_DOCUMENT_D.PLANT
+			        JOIN MS_PURCHASEMST MS_MST
+			          ON MS_CUST.STORERKEY  = MS_MST.STORERKEY
+			         AND MS_CUST.DCCODE    = MS_MST.DCCODE
+			         AND MS_CUST.CUSTTYPE  = MS_MST.CUSTTYPE
+			         AND MS_CUST.SKU       = MS_MST.SKU
+			        LEFT JOIN MS_SKU MS 
+			          ON MS.SKU = DP_INPLAN.SKU 
+			         AND MS.STORERKEY = DP_INPLAN.STORERKEY
+			         
+                    LEFT JOIN
+                            (
+                                SELECT A.*
+                                  FROM
+                                    (
+                                        SELECT ROW_NUMBER() OVER(PARTITION BY A.DCCODE, A.SKU ORDER BY A.PLANT) AS SEQ_IDX
+                                             , A.*
+                                          FROM MS_DC_PLT_LOAD           A
+                                         WHERE 1 = 1
+                                    )           A
+                                 WHERE A.SEQ_IDX    = 1
+                            )                           MSC
+                            ON MSC.DCCODE               = DP_INPLAN.JOIN_DCCODE
+                           AND MSC.PLANT                = DP_INPLAN.JOIN_PLANT
+                           AND MSC.SKU                  = DP_INPLAN.JOIN_SKU
+                           AND MSC.STORERKEY            = DP_INPLAN.JOIN_STORERKEY
+			         
+			        WHERE DM_DOCUMENT_H_DP.STORERKEY = 'FW00'
+			          AND DM_DOCUMENT_H_DP.DELIVERYDATE BETWEEN #{fromDate} AND #{toDate} 
+			            <if test='storagetypeMulti != null and storagetypeMulti != ""'>
+	                        AND MS.STORAGETYPE IN
+	                        <foreach collection="storagetypeMulti" item="item" open="(" separator="," close=")">
+				                #{item}
+				            </foreach>  
+	                    </if>
+	                    <if test='buyerkeyMulti != null and buyerkeyMulti != ""'>
+	                        AND MS_MST.BUYERKEY IN 
+	                        <foreach collection="buyerkeyMulti" item="item" open="(" separator="," close=")">
+				                #{item}
+				            </foreach> 
+	                    </if>		            
+			            <if test='dccodeMulti != null and dccodeMulti != ""'>
+		                    AND DM_DOCUMENT_H_DP.DCCODE IN 
+		                    <foreach collection="dccodeMulti" item="item" open="(" separator="," close=")">
+				                #{item}
+				            </foreach> 
+		                </if>
+		                
+		                <if test='custkeyMulti != null and custkeyMulti != ""'>
+							AND MS_CUST.CUSTKEY IN 
+							<foreach collection="custkeyMulti" item="item" open="(" separator="," close=")">
+				                #{item}
+				            </foreach> 
+						</if>
+						<if test='skuMulti != null and skuMulti != ""'>
+							AND DP_INPLAN.SKU IN
+							<foreach collection="skuMulti" item="item" open="(" separator="," close=")">
+				                #{item}
+				            </foreach> 
+						</if>		                
+		               
+				      AND EXISTS	(
+			    						SELECT 1 
+			    						FROM   DM_DOCUMENT_H 
+			    						WHERE  1=1 
+	                            		AND    DM_DOCUMENT_H.STORERKEY = DM_DOCUMENT_D.STORERKEY
+	                            		AND    DM_DOCUMENT_H.DOCDT     = DM_DOCUMENT_D.DOCDT
+	                            		AND    DM_DOCUMENT_H.DOCNO     = DM_DOCUMENT_D.DOCNO
+	                            		AND    DM_DOCUMENT_H.DOCTYPE   = 'WD'
+	                            		AND    DM_DOCUMENT_H.DELIVERYDATE     = DM_DOCUMENT_D.DELIVERYDATE
+	                            		--AND	   DM_DOCUMENT_H.STATUS    = '90'
+	                            		AND	   DM_DOCUMENT_H.DCCODE IN ('1000', '2170')
+	                            	)
+	                         	
+	                ----------------------------------------------------------------------------------------------------     
+	                /* 2026-03-19 KSH 하위레벨(화면표시) 그대로 상위레벨 SUM */          	
+			        -- GROUP BY ROLLUP(DP_INPLAN.SLIPDT, DP_INPLAN.DCCODE, MS_MST.BUYERKEY, MS_CUST.CUSTKEY, DP_INPLAN.SKU)            	
+			        GROUP BY DP_INPLAN.SLIPDT, DP_INPLAN.DCCODE, MS_MST.BUYERKEY, MS_CUST.CUSTKEY, DP_INPLAN.SKU
+		            ) Y 
+			        GROUP BY ROLLUP(DT,  DCCODE, BUYERKEY, CUSTKEY, SKU)
+			        ----------------------------------------------------------------------------------------------------
+			        
+			    ) X
+			    /* 2026-03-11 KSH 수급담당표시시 DEL_YN 체크안함 WNEXTWMS-7954 양준영 */
+			    -- LEFT JOIN CM_CODE_STORER CD1 
+			    LEFT JOIN CM_CODE CD1
+			        ON CD1.STORERKEY = 'FW00' 
+			        AND CD1.CODELIST = 'BUYERKEY' 
+			        AND CD1.BASECODE = X.BUYERKEY
+			) T			
+	
+			</if>
+			) FINAL
+				ORDER BY 
+				    CASE WHEN FINAL.TYPE = 'PO' THEN 1 ELSE 2 END,
+				    CASE WHEN FINAL.LEV = '11111' THEN 1 ELSE 2 END,
+				    FINAL.RAWDT NULLS FIRST,
+				    FINAL.RAWDCCODE NULLS FIRST,
+				    FINAL.RAWBUYERKEY NULLS FIRST,
+				    FINAL.RAWCUSTKEY NULLS FIRST,
+				    FINAL.SKU NULLS FIRST
+		
+    </select>
+    
+    <!-- 발주추이 조회 (목록) -->
+	<select id="getGraphList" resultType="OmPurchaseMonitoringGraphResDto">
+		SELECT	/* [omPurchaseMonitoringService.sqlx][omPurchaseMonitoringService.getGraphList][발주추이 조회 (목록)][JeongHyeongCheol][20251014] */ 
+				DT
+			    ,DCCODE
+			    ,CEIL(SUM(WEIGHT_VALUE)*100)/100 AS WEIGHT_VALUE
+			    ,CEIL(SUM(CASE WHEN TYPE = 'PO' THEN WEIGHT_VALUE ELSE 0 END)*100)/100 AS PO_WEIGHT_VALUE
+				,CEIL(SUM(CASE WHEN TYPE = 'STO' THEN WEIGHT_VALUE ELSE 0 END)*100)/100 AS STO_WEIGHT_VALUE
+		FROM(
+			<!-- PO -->
+    		<if test='typeList.contains("ALL") or typeList.contains("PO")'>
+				SELECT  'PO' 				AS TYPE
+				     	, MAX(TO_CHAR(TO_DATE(DP.REQUESTDT, 'YYYYMMDD'), 'YYYY-MM-DD')||' ('||TO_CHAR(TO_DATE(DP.REQUESTDT, 'YYYYMMDD'), 'DY', 'NLS_DATE_LANGUAGE=korean')||')')		AS DT
+				     	, DP.DCCODE			AS DCCODE
+				     	
+				     	----------------------------------------------------------------------------------------------------
+				     	/* 2026-03-19 KSH 저장품발주현황Tab 의 합계 값과 맞추기 위해서 */  
+				     	-- , (SUM(DP.OPENQTY * MU1.BUNJA / MU1.BUNMO * MU2.BUNMO / MU2.BUNJA) / 1000) AS WEIGHT_VALUE
+				     	, CEIL(SUM((DP.OPENQTY * MU1.BUNJA / MU1.BUNMO * MU2.BUNMO / MU2.BUNJA) / 1000) * 100) / 100 AS WEIGHT_VALUE
+				     	, DP.SKU
+				     	, DP.ORDERCREATOR
+				     	, DP.CUSTKEY
+				     	----------------------------------------------------------------------------------------------------
+				     	
+				FROM DP_PURCHASE DP
+				LEFT OUTER JOIN MS_SKU
+				    ON MS_SKU.SKU = DP.SKU
+			   	   AND MS_SKU.STORERKEY = DP.STORERKEY
+				LEFT OUTER JOIN MS_SKUCHAIN
+			        ON MS_SKUCHAIN.SKU = DP.SKU
+			       AND MS_SKUCHAIN.STORERKEY = DP.STORERKEY
+			    LEFT JOIN MS_UOM MU1
+	            	   ON MU1.STORERKEY = DP.STORERKEY
+	            	  AND MU1.SKU = DP.SKU
+	            	  AND MU1.UOM = DP.UOM
+	    	  	LEFT JOIN MS_UOM MU2
+				       ON MU2.STORERKEY = DP.STORERKEY
+				      AND MU2.SKU = DP.SKU
+				      AND MU2.UOM = 'KG'
+				WHERE DP.REQUESTDT  BETWEEN #{fromDate} AND #{toDate}
+					AND DP.DEL_YN     = 'N'
+					<if test='dccodeMulti != null and dccodeMulti != ""'>
+		                AND DP.DCCODE IN 
+		                <foreach collection="dccodeMulti" item="item" open="(" separator="," close=")">
+			                #{item}
+			            </foreach> 
+		            </if>
+					<if test='buyerkeyMulti != null and buyerkeyMulti != ""'>
+		                AND DP.ORDERCREATOR IN 
+		                <foreach collection="buyerkeyMulti" item="item" open="(" separator="," close=")">
+			                #{item}
+			            </foreach> 
+		            </if>
+		            <if test='storagetypeMulti != null and storagetypeMulti != ""'>
+		                AND EXISTS (
+		                    SELECT 1
+		                    FROM MS_SKU MS
+		                    WHERE MS.STORERKEY 	= DP.STORERKEY
+		                        AND MS.SKU 		= DP.SKU
+		                        AND MS.STORAGETYPE IN
+		                        <foreach collection="storagetypeMulti" item="item" open="(" separator="," close=")">
+					                #{item}
+					            </foreach>  
+		                )
+		            </if>
+				GROUP BY DP.REQUESTDT, DP.DCCODE
+				
+				----------------------------------------------------------------------------------------------------
+				/* 2026-03-19 KSH 저장품발주현황Tab 의 합계 값과 맞추기 위해서 */
+				    , DP.SKU
+				    , DP.ORDERCREATOR
+				    , DP.CUSTKEY
+				----------------------------------------------------------------------------------------------------
+				
+			</if>
+			
+			<if test='typeList.contains("ALL") or (typeList.contains("PO") and typeList.contains("STO"))'> UNION ALL </if>
+			
+			<!-- STO -->
+    		<if test='typeList.contains("ALL") or typeList.contains("STO")'>
+				SELECT  
+				        ---------------------------------------------------------------------------------------------------- 
+				        /* 2026-03-20 KSH 조회 속도 개선 : 힌트 변경 */
+				        <!-- /*+ LEADING(DM_DOCUMENT_H_DP) USE_NL(DM_DOCUMENT_D DP_INPLAN MS) */ -->
+				        /*+ ORDERED */
+				        ----------------------------------------------------------------------------------------------------
+				         
+						 'STO' 				AS TYPE
+						, MAX(TO_CHAR(TO_DATE(DP_INPLAN.SLIPDT, 'YYYYMMDD'), 'YYYY-MM-DD')||' ('||TO_CHAR(TO_DATE(DP_INPLAN.SLIPDT, 'YYYYMMDD'), 'DY', 'NLS_DATE_LANGUAGE=korean')||')')  AS DT
+						, DP_INPLAN.DCCODE  AS DCCODE
+						
+				        ----------------------------------------------------------------------------------------------------
+						/* 2026-03-19 KSH 저장품발주현황Tab 의 합계 값과 맞추기 위해서 */
+						-- , SUM(FN_CONV_UOM(DP_INPLAN.STORERKEY, DP_INPLAN.SKU, DP_INPLAN.UOM, 'KG', DP_INPLAN.ORDERQTY )/1000) AS WEIGHT_VALUE
+						, CEIL(SUM(FN_CONV_UOM(DP_INPLAN.STORERKEY, DP_INPLAN.SKU, DP_INPLAN.UOM, 'KG', DP_INPLAN.ORDERQTY )/1000) * 100 ) / 100 AS WEIGHT_VALUE
+						, DP_INPLAN.SKU
+				        , MS_MST.BUYERKEY
+				        , MS_CUST.CUSTKEY
+				        ----------------------------------------------------------------------------------------------------
+						         	
+			    FROM DM_DOCUMENT_H DM_DOCUMENT_H_DP
+			    
+				----------------------------------------------------------------------------------------------------
+			    /* 2026-03-20 KSH 조회 속도 개선 : EXISTS 를 JOIN으로 변경 */
+			    JOIN DM_DOCUMENT_H 
+		    	  ON DM_DOCUMENT_H.STORERKEY = DM_DOCUMENT_H_DP.STORERKEY
+                 AND DM_DOCUMENT_H.DOCDT     = DM_DOCUMENT_H_DP.DOCDT
+                 AND DM_DOCUMENT_H.DOCNO     = DM_DOCUMENT_H_DP.DOCNO
+                 AND DM_DOCUMENT_H.DOCTYPE   = 'WD'
+                 --AND DM_DOCUMENT_H.STATUS    = '90'
+                 AND DM_DOCUMENT_H.DCCODE IN ('1000', '2170')
+				----------------------------------------------------------------------------------------------------
+                
+			    JOIN DM_DOCUMENT_D
+			      ON DM_DOCUMENT_D.DCCODE           =  DM_DOCUMENT_H_DP.DCCODE         
+			     AND DM_DOCUMENT_D.STORERKEY        =  DM_DOCUMENT_H_DP.STORERKEY               
+			     AND DM_DOCUMENT_D.DELIVERYDATE     =  DM_DOCUMENT_H_DP.DELIVERYDATE         
+			     AND DM_DOCUMENT_D.DOCNO            =  DM_DOCUMENT_H_DP.DOCNO         
+			     AND DM_DOCUMENT_D.DOCTYPE          =  DM_DOCUMENT_H_DP.DOCTYPE         
+			     AND DM_DOCUMENT_H_DP.DOCTYPE   = 'DP'
+			     AND DM_DOCUMENT_H_DP.WORKPROCESSCODE = 'STO'
+			     AND DM_DOCUMENT_D.WORKPROCESSCODE = 'STO'
+			                
+			    JOIN DP_INPLAN
+			      ON DP_INPLAN.DCCODE             = DM_DOCUMENT_H_DP.DCCODE         
+			     AND DP_INPLAN.STORERKEY          = DM_DOCUMENT_H_DP.STORERKEY               
+			     AND DP_INPLAN.ORGANIZE           = DM_DOCUMENT_H_DP.ORGANIZE               
+			     AND DP_INPLAN.SLIPDT       	  = DM_DOCUMENT_H_DP.DELIVERYDATE         
+			     AND DP_INPLAN.DOCNO              = DM_DOCUMENT_H_DP.DOCNO         
+			     AND DP_INPLAN.DOCTYPE            = DM_DOCUMENT_H_DP.DOCTYPE     
+			     AND DP_INPLAN.IF_SEND_TYPE       ='STODC'
+			     /* 2026-03-10 KSH STO 조건 추가 WNEXTWMS-7961 */
+			     AND DP_INPLAN.DOCLINE            = DM_DOCUMENT_D.DOCLINE
+			     
+			     -- 담당자 및 고객 정보를 그룹화하기 위한 조인
+		        LEFT JOIN MS_PURCHASECUST MS_CUST
+		            ON MS_CUST.STORERKEY = DM_DOCUMENT_H_DP.STORERKEY
+		            AND MS_CUST.DCCODE    = DM_DOCUMENT_H_DP.DCCODE
+		            AND MS_CUST.SKU       = DP_INPLAN.SKU
+		            AND MS_CUST.PLANT     = DM_DOCUMENT_D.PLANT
+		        LEFT JOIN MS_PURCHASEMST MS_MST
+		            ON MS_CUST.STORERKEY  = MS_MST.STORERKEY
+		            AND MS_CUST.DCCODE    = MS_MST.DCCODE
+		            AND MS_CUST.CUSTTYPE  = MS_MST.CUSTTYPE
+		            AND MS_CUST.SKU       = MS_MST.SKU
+		        LEFT JOIN MS_SKU MS 
+		          ON MS.SKU = DP_INPLAN.SKU 
+		         AND MS.STORERKEY = DP_INPLAN.STORERKEY
+		        LEFT JOIN MS_SKUCHAIN MSC 
+		          ON MSC.SKU = DP_INPLAN.SKU 
+		         AND MSC.STORERKEY = DP_INPLAN.STORERKEY       
+		          
+				WHERE 1=1
+			      AND DM_DOCUMENT_H_DP.STORERKEY   = 'FW00'
+			      AND DP_INPLAN.SLIPDT             BETWEEN #{fromDate} AND #{toDate}
+			      <if test='dccodeMulti != null and dccodeMulti != ""'>
+		              AND DM_DOCUMENT_H_DP.DCCODE IN 
+		              <foreach collection="dccodeMulti" item="item" open="(" separator="," close=")">
+			              #{item}
+			          </foreach> 
+		          </if>
+		          <if test='storagetypeMulti != null and storagetypeMulti != ""'>
+		                AND EXISTS (
+		                    SELECT 1
+		                    FROM MS_SKU MS
+		                    WHERE MS.STORERKEY 	= DP_INPLAN.STORERKEY
+		                        AND MS.SKU 		= DP_INPLAN.SKU
+		                        AND MS.STORAGETYPE IN
+		                        <foreach collection="storagetypeMulti" item="item" open="(" separator="," close=")">
+					                #{item}
+					            </foreach>  
+		                )
+		          </if>
+			      AND EXISTS (SELECT 'X'
+			                     FROM MS_PURCHASECUST
+			                     JOIN MS_PURCHASEMST
+			                       ON MS_PURCHASECUST.STORERKEY       = MS_PURCHASEMST.STORERKEY
+			                      AND MS_PURCHASECUST.DCCODE          = MS_PURCHASEMST.DCCODE
+			                      AND MS_PURCHASECUST.CUSTTYPE        = MS_PURCHASEMST.CUSTTYPE
+			                      AND MS_PURCHASECUST.SKU             = MS_PURCHASEMST.SKU
+			                    WHERE MS_PURCHASECUST.STORERKEY       = DM_DOCUMENT_H_DP.STORERKEY
+			                      AND MS_PURCHASECUST.DCCODE          = DM_DOCUMENT_H_DP.DCCODE
+			                      AND MS_PURCHASECUST.SKU             = DP_INPLAN.SKU
+			                      AND MS_PURCHASECUST.PLANT           = DM_DOCUMENT_D.PLANT
+			                      <if test='buyerkeyMulti != null and buyerkeyMulti != ""'>
+				                      AND MS_PURCHASEMST.BUYERKEY IN 
+				                      <foreach collection="buyerkeyMulti" item="item" open="(" separator="," close=")">
+							              #{item}
+							          </foreach> 
+				                  </if>
+			                     )
+			      
+				----------------------------------------------------------------------------------------------------
+			    /* 2026-03-20 KSH 조회 속도 개선 : EXISTS 를 JOIN으로 변경 */               
+			    /*
+			      AND EXISTS	(
+		    						SELECT 1 
+		    						FROM   DM_DOCUMENT_H 
+		    						WHERE  1=1 
+                            		AND    DM_DOCUMENT_H.STORERKEY = DM_DOCUMENT_D.STORERKEY
+                            		AND    DM_DOCUMENT_H.DOCDT     = DM_DOCUMENT_D.DOCDT
+                            		AND    DM_DOCUMENT_H.DOCNO     = DM_DOCUMENT_D.DOCNO
+                            		AND    DM_DOCUMENT_H.DOCTYPE   = 'WD'
+                            		--AND	   DM_DOCUMENT_H.STATUS    = '90'
+                            		AND	   DM_DOCUMENT_H.DCCODE IN ('1000', '2170')
+                            	)
+                */            	         
+				----------------------------------------------------------------------------------------------------
+				
+				GROUP BY DP_INPLAN.SLIPDT, DP_INPLAN.DCCODE
+				
+				----------------------------------------------------------------------------------------------------
+				/* 2026-03-19 KSH 저장품발주현황Tab 의 합계 값과 맞추기 위해서 */
+				    , DP_INPLAN.SKU
+				    , MS_MST.BUYERKEY
+				    , MS_CUST.CUSTKEY
+				----------------------------------------------------------------------------------------------------
+				
+			</if>
+        )
+        GROUP BY DT, DCCODE
+		ORDER BY DT, DCCODE
+    </select>
+	
+    
+</mapper>

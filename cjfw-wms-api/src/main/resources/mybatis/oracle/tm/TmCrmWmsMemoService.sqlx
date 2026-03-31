@@ -1,0 +1,550 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="tmCrmWmsMemoService">
+    <!-- CRM 요청관리 일별메모 목록 조회 -->
+    <select id="getMasterList" parameterType="cjfw.wms.tm.dto.TmCrmWmsMemoReqDto" resultType="cjfw.wms.tm.dto.TmCrmWmsMemoResDto">
+        SELECT /* [TmCrmWmsMemoService.sqlx][TmCrmWmsMemoService.getMasterList][CRM 요청관리 일별메모 목록 조회][YeoSeungCheol][20251016] */
+              '0'                                                                               AS checkYn
+             , memo.SERIALKEY                                                                   AS serialKey 
+             , memo.STORERKEY                                                                   AS storerKey
+             , memo.MEMOID                                                                      AS memoId
+             , memo.PARENTID                                                                    AS parentId
+             , memo.MEMOLEVEL                                                                   AS memoLevel
+             , TO_CHAR(memo.MEMODATE, 'yyyy-mm-dd')                                             AS memoDate 
+             , memo.CUSTKEY                                                                     AS custKey
+             , cust.DESCRIPTION                                                                 AS custName
+             , cust.CUSTSTRATEGY4                                                               AS custStrategy4 /* as is 에서는 custFs */
+             , cust.CUSTTYPE                                                                    AS custType
+             , LPAD( memo.MEMOTYPE , 2, '0' )                                                   AS memoType
+             , FN_CODEDESCR(memo.STORERKEY, 'CRM_MEMO_TYPE' ,memo.MEMOTYPE)                     AS memoTypeNm 
+             , memo.MEMOWRITER                                                                  AS memoWriter
+             , memo.DESCRIPTION                                                                 AS description
+             , memo.CARNO                                                                       AS carNo
+             , fn_format_telno(DAMO.DEC(memo.DRIVERPHONE))                                      AS driverPhone
+             , memo.DRIVERNAME                                                                  AS driverName
+             , memo.EDMSFILEID                                                                  AS edmsFileId
+             , memo.SOURCE_SYSTEM                                                               AS sourceSystem
+             , FN_CODEDESCR(memo.STORERKEY, 'CRM_MEMO_SOURCE' ,memo.SOURCE_SYSTEM)              AS sourceSystemNm 
+             , memo.STATUS                                                                      AS status
+             , FN_CODEDESCR(memo.STORERKEY, 'CRM_MEMO_STATUS' ,memo.STATUS)                     AS statusNm
+             , memo.TRANSTARGET                                                                 AS transTarget
+             , FN_CODEDESCR(memo.STORERKEY, 'CRM_MEMO_TARGET' ,memo.TRANSTARGET)                AS transTargetNm
+             , memo.INQUIRYDATE                                                                 AS inquiryDate
+             , memo.ADDDATE                                                                     AS addDate
+             , memo.EDITDATE                                                                    AS editDate
+             , memo.ADDWHO                                                                      AS addWho
+             , memo.EDITWHO                                                                     AS editWho
+             , memo.DRIVERNAME                                                                  AS driverName
+             , (
+                  SELECT COUNT(1) 
+                    FROM TM_ISSUE_FILE tFile
+                   WHERE tFile.ISSUENO = TO_CHAR(memo.SERIALKEY)    
+                     AND tFile.STATUS  = 'Y'
+             )                                          AS fileCnt
+        FROM CRM_WMS_DAILYMEMO memo
+  INNER JOIN MS_CUST cust 
+            ON memo.CUSTKEY      = cust.CUSTKEY
+            AND memo.CUSTTYPE    = cust.CUSTTYPE
+            AND memo.STORERKEY   = cust.STORERKEY
+            AND cust.DEL_YN ='N'
+        WHERE 1=1
+          AND cust.DLV_DCCODE = #{gDccode} /* 주 출고처 : 기본 선택 센터 */
+          AND memo.MEMOLEVEL = 'M'
+          AND TO_CHAR(memo.MEMODATE, 'YYYYMMDD') BETWEEN #{schMemoDateFrom} AND #{schMemoDateTo}
+          
+        <if test="schSourceSystem != null and schSourceSystem != ''">
+          AND memo.SOURCE_SYSTEM = #{schSourceSystem}
+        </if>
+          
+        <if test="schStatus != null and schStatus != ''">
+          AND memo.STATUS = #{schStatus}
+        </if>
+          
+        <!-- 확정제외 체크박스 -->
+        <if test="schExcludConfirm != null and schExcludConfirm != '' ">
+            <if test="schExcludConfirm == '1'.toString()">
+          AND memo.STATUS <![CDATA[<>]]> '03'
+            </if>
+        </if>
+        
+        <if test="schMemoType != null and schMemoType != ''">
+          AND memo.MEMOTYPE = #{schMemoType}
+        </if>
+        
+        <!-- 관리처코드 다중선택 -->
+        <if test="multiToCustkey != null and multiToCustkey.size() > 0">
+          AND memo.CUSTKEY IN
+            <foreach collection="multiToCustkey" item="item" separator="," close=")" open="(">
+                #{item}
+            </foreach>
+        </if>
+        
+        <!-- 수신처 다중선택 -->
+        <if test="multiCarNo != null and multiCarNo.size() > 0">
+          AND memo.CARNO IN
+            <foreach collection="multiCarNo" item="item" separator="," close=")" open="(">
+                #{item}
+            </foreach>
+        </if>
+        
+        ORDER BY memo.MEMODATE DESC   
+    </select>
+    
+    <!-- 처리이력 목록 조회 -->
+    <select id="getDetailHistoryList" parameterType="cjfw.wms.tm.dto.TmCrmWmsMemoReqDto" resultType="cjfw.wms.tm.dto.TmCrmWmsMemoResDto">
+        SELECT /* [msCrmWmsMemoService.sqlx][msCrmWmsMemoService.getDetailHistoryList][처리상세 조회][YeoSeungCheol][20251016] */
+               A.* 
+          FROM
+              (
+                SELECT
+                        '0'                     AS checkYn
+                      , ROWNUM                            AS rnum 
+                      , dailymemo.SERIALKEY               AS serialKey
+                      , dailymemo.STORERKEY               AS storerKey
+                      , dailymemo.MEMOID                  AS memoId
+                      , dailymemo.PARENTID                AS parentId
+                      , dailymemo.MEMOLEVEL               AS memoLevel
+                      , TO_CHAR(dailymemo.MEMODATE ,'yyyy-mm-dd hh24:mi:ss')     AS memoDate
+                      , dailymemo.CUSTKEY                 AS custKey
+                      , ( SELECT MS_CUST.DESCRIPTION
+                            FROM MS_CUST
+                           WHERE MS_CUST.CUSTKEY       = dailymemo.CUSTKEY 
+                             AND MS_CUST.STORERKEY     = dailymemo.STORERKEY
+                        )                             AS custName
+                      , ( SELECT MS_CUST.CUSTSTRATEGY4 
+                            FROM MS_CUST 
+                           WHERE MS_CUST.CUSTKEY    = dailymemo.CUSTKEY 
+                             AND MS_CUST.STORERKEY  = dailymemo.STORERKEY
+                        )                             AS custStrategy4
+                      , dailymemo.CUSTTYPE                            AS custType
+                      , LPAD(dailymemo.MEMOTYPE , 2, '0' )                                                  AS memoType
+                      , FN_CODEDESCR(dailymemo.STORERKEY, 'CRM_MEMO_TYPE', dailymemo.MEMOTYPE)                  AS memoTypeNm
+                      , dailymemo.MEMOWRITER                                                                        AS memoWriter
+                      , dailymemo.DESCRIPTION                                                                       AS description
+                      , dailymemo.CARNO                                                                             AS carNo
+                      , fn_format_telno(DAMO.DEC(dailymemo.DRIVERPHONE))                                            AS driverPhone
+                      , dailymemo.DRIVERNAME                                                                        AS driverName
+                      , dailymemo.EDMSFILEID                                                                        AS edmsFileId
+                      , dailymemo.SOURCE_SYSTEM                                                                     AS sourceSystem
+                      , FN_CODEDESCR(dailymemo.STORERKEY, 'CRM_MEMO_SOURCE', dailymemo.SOURCE_SYSTEM)               AS sourceSystemNm
+                      , dailymemo.STATUS                                                                            AS status
+                      , FN_CODEDESCR(dailymemo.STORERKEY, 'CRM_MEMO_STATUS' , dailymemo.STATUS)                     AS statusNm
+                      , dailymemo.TRANSTARGET                                                                       AS transTarget
+                      , FN_CODEDESCR(dailymemo.STORERKEY, 'CRM_MEMO_TARGET' , dailymemo.TRANSTARGET)                AS transTargetNm
+                      , dailymemo.INQUIRYDATE                                                                       AS inquiryDate
+                      , dailymemo.ADDDATE                                                                           AS addDate
+                      , dailymemo.EDITDATE                                                                          AS editDate
+                      , dailymemo.ADDWHO                                                                            AS addWho
+                      , dailymemo.EDITWHO                                                                           AS editWho
+                      , ( SELECT COUNT(1)
+                            FROM TM_ISSUE_FILE
+                           WHERE TM_ISSUE_FILE.ISSUENO = TO_CHAR(dailymemo.SERIALKEY)
+                             AND TM_ISSUE_FILE.STATUS  = 'Y')                                                       AS fileCnt
+                   FROM CRM_WMS_DAILYMEMO  dailymemo
+                  WHERE dailymemo.MEMOLEVEL = 'M'     
+                    AND dailymemo.MEMOID    =  #{memoId}
+                 UNION ALL
+                SELECT 
+                        AA.CHECKYN                          AS checkYn
+                      , ROWNUM                              AS rnum 
+                      , AA.SERIALKEY                        AS serialKey
+                      , AA.STORERKEY                        AS storerKey
+                      , AA.MEMOID                           AS memoId
+                      , AA.PARENTID                         AS parentId
+                      , AA.MEMOLEVEL                        AS memoLevel
+                      , AA.MEMODATE                         AS memoDate
+                      , AA.CUSTKEY                          AS custKey
+                      , AA.CUSTNAME                         AS custName
+                      , AA.CUSTSTRATEGY4                    AS custStrategy4
+                      , AA.CUSTTYPE                         AS custType
+                      , AA.MEMOTYPE                         AS memoType
+                      , AA.MEMOTYPENM                       AS memoTypeNm
+                      , AA.MEMOWRITER                       AS memoWriter
+                      , AA.DESCRIPTION                      AS description
+                      , AA.CARNO                            AS carNo
+                      , DAMO.DEC(AA.DRIVERPHONE)            AS driverPhone
+                      , AA.DRIVERNAME                       AS driverName
+                      , AA.EDMSFILEID                       AS edmsFileId
+                      , AA.SOURCE_SYSTEM                    AS sourceSystem
+                      , AA.SOURCE_SYSTEMNM                  AS sourceSystemNm
+                      , AA.STATUS                           AS status
+                      , AA.STATUSNM                         AS statusNm 
+                      , AA.TRANSTARGET                      AS transTarget
+                      , AA.TRANSTARGETNM                    AS transTargetNm
+                      , AA.INQUIRYDATE                      AS inquiryDate
+                      , AA.ADDDATE                          AS addDate
+                      , AA.EDITDATE                         AS editDate
+                      , AA.ADDWHO                           AS addWho
+                      , AA.EDITWHO                          AS editWho
+                      , AA.FILE_CNT                         AS fileCnt
+              FROM (
+                    SELECT '0'                                          AS CHECKYN
+                         , SERIALKEY
+                         , STORERKEY 
+                         , MEMOID
+                         , PARENTID
+                         , MEMOLEVEL
+                         , TO_CHAR(MEMODATE , 'yyyy-mm-dd hh24:mi:ss') AS MEMODATE
+                         , CUSTKEY
+                         , ( SELECT MS_CUST.DESCRIPTION
+                               FROM MS_CUST 
+                              WHERE MS_CUST.CUSTKEY     = CRM_WMS_DAILYMEMO.CUSTKEY 
+                                AND MS_CUST.STORERKEY   = CRM_WMS_DAILYMEMO.STORERKEY) AS CUSTNAME
+                         , (SELECT MS_CUST.CUSTSTRATEGY4 
+                              FROM MS_CUST 
+                             WHERE MS_CUST.CUSTKEY = CRM_WMS_DAILYMEMO.CUSTKEY 
+                               AND MS_CUST.STORERKEY = CRM_WMS_DAILYMEMO.STORERKEY) AS CUSTSTRATEGY4
+                         , CUSTTYPE
+                         , MEMOTYPE
+                         , FN_CODEDESCR(CRM_WMS_DAILYMEMO.STORERKEY, 'CRM_MEMO_TYPE' , CRM_WMS_DAILYMEMO.MEMOTYPE) AS MEMOTYPENM
+                         , MEMOWRITER
+                         , DESCRIPTION
+                         , CARNO
+                         , DRIVERPHONE
+                         , DRIVERNAME
+                         , EDMSFILEID
+                         , SOURCE_SYSTEM
+                         , FN_CODEDESCR(CRM_WMS_DAILYMEMO.STORERKEY, 'CRM_MEMO_SOURCE' , CRM_WMS_DAILYMEMO.SOURCE_SYSTEM)AS SOURCE_SYSTEMNM
+                         , STATUS
+                         , FN_CODEDESCR(CRM_WMS_DAILYMEMO.STORERKEY, 'CRM_MEMO_STATUS' , CRM_WMS_DAILYMEMO.STATUS) AS STATUSNM
+                         , TRANSTARGET
+                         , FN_CODEDESCR(CRM_WMS_DAILYMEMO.STORERKEY, 'CRM_MEMO_TARGET' , CRM_WMS_DAILYMEMO.TRANSTARGET) AS TRANSTARGETNM
+                         , INQUIRYDATE
+                         , ADDDATE
+                         , EDITDATE
+                         , ADDWHO
+                         , EDITWHO
+                         , ( SELECT COUNT(1)
+                               FROM TM_ISSUE_FILE
+                              WHERE TM_ISSUE_FILE.ISSUENO = TO_CHAR(CRM_WMS_DAILYMEMO.SERIALKEY)
+                                AND TM_ISSUE_FILE.STATUS  = 'Y')                                    AS FILE_CNT
+                     FROM CRM_WMS_DAILYMEMO 
+                    WHERE MEMOLEVEL = 'C'
+                      AND PARENTID  =  #{memoId}
+                 ORDER BY MEMODATE DESC  
+                )AA
+         ) A     
+     ORDER BY
+         A.MEMOLEVEL DESC,
+         A.RNUM ASC 
+    </select>
+    
+    <!-- 처리상세 저장 -->
+    <update id="saveCrmApply">
+        UPDATE /* [msCrmWmsMemoService.sqlx][msCrmWmsMemoService.updateCrmMemoStatus][CRM 요청관리 일별메모 상태 변경 - code] */
+                CRM_WMS_DAILYMEMO
+        SET     STATUS              = '03'
+               ,EDITDATE            = SYSDATE
+               ,EDITWHO             = #{gUserId}
+        WHERE   SERIALKEY           = #{serialKey}
+    </update>
+    
+    <!-- 목록 또는 처리이력 삭제 -->
+    <update id="crmDelete">
+        DELETE /* [msCrmWmsMemoService.sqlx][msCrmWmsMemoService.crmDelete][CRM 요청관리 일별메모 목록 조회][YeoSeungCheol][20251016] */
+               CRM_WMS_DAILYMEMO
+         WHERE SERIALKEY          = #{serialKey}
+           AND SOURCE_SYSTEM  <![CDATA[<>]]> 'CRM'
+           AND STATUS         <![CDATA[<>]]> '03'
+    </update>
+    
+    <update id="updateDetail" parameterType="cjfw.wms.tm.dto.TmCrmWmsMemoReqDto">
+        UPDATE /* [msCrmWmsMemoService.sqlx][msCrmWmsMemoService.updateDetail][CRM 요청관리 일별메모 목록 조회][YeoSeungCheol][20251016] */
+                CRM_WMS_DAILYMEMO
+           SET INQUIRYDATE         = #{inquiryDate}
+             , MEMOTYPE            = #{memoType}
+             , CUSTKEY             = #{custKey}
+             , TRANSTARGET         = #{transTarget}
+             , CARNO               = #{carNo}
+             , DRIVERPHONE         = DAMO.ENC((SELECT CM_CAR.PHONE1 FROM CM_CAR WHERE CM_CAR.CARNO =#{carNo} AND DEL_YN = 'N'  AND ROWNUM = 1))           
+             , DRIVERNAME          = #{driverName}
+             , DESCRIPTION         = #{description}
+             , EDITDATE            = SYSDATE
+             , EDITWHO             = #{gUserId}
+         WHERE SERIALKEY           = #{serialKey}
+    </update>
+    
+    <insert id="insertDetail">
+        INSERT /* [msCrmWmsMemoService.sqlx][msCrmWmsMemoService.insertDetail]  */
+          INTO 
+               CRM_WMS_DAILYMEMO
+             (
+                SERIALKEY
+              , STORERKEY
+              , MEMOID
+              , PARENTID
+              , MEMOLEVEL
+              , MEMODATE
+              , CUSTKEY
+              , CUSTTYPE
+              , MEMOTYPE
+              , MEMOWRITER
+              , DESCRIPTION
+              , CARNO
+              , DRIVERPHONE
+              , DRIVERNAME
+              , EDMSFILEID
+              , SOURCE_SYSTEM
+              , STATUS
+              , TRANSTARGET
+              , INQUIRYDATE
+              , ADDDATE
+              , EDITDATE
+              , ADDWHO
+              , EDITWHO 
+              ) VALUES (
+                SEQ_CRM_WMS_DAILYMEMO.NEXTVAL
+              , #{gStorerkey}
+              , 'WMS_'||#{custKey}||'_'||TO_CHAR(SYSDATE, 'yyyymmddhh24miss')||'_'||(SELECT LPAD(COALESCE((COUNT(1)), 0) + 1, 4, '0') AS seq 
+                                                                                       FROM CRM_WMS_DAILYMEMO
+                                                                                      WHERE SOURCE_SYSTEM = #{sourceSystem}
+                                                                                        AND CUSTKEY     = #{custKey}
+                                                                                        AND MEMODATE     = TRUNC(SYSDATE))
+              , #{parentId}
+              , #{memoLevel}
+              , SYSDATE
+              , NVL(#{custKey},'')
+              , 'C'
+              , #{memoType}
+              , FN_GETUSERNAME(#{gUserId})
+              , #{description}
+              , #{carNo}
+              , DAMO.ENC((SELECT CM_CAR.PHONE1 FROM CM_CAR WHERE CM_CAR.CARNO =#{carNo} AND DEL_YN = 'N'  AND ROWNUM = 1))
+              , #{driverName}
+              , #{edmsFileId}
+              , #{sourceSystem}
+              , '02'
+              , #{transTarget}
+              , #{inquiryDate}
+              , SYSDATE
+              , SYSDATE
+              , #{gUserId}
+              , #{gUserId}
+             )
+        
+    </insert>
+    
+    <!-- CRM 요청관리 업로드 파일 목록 -->
+    <select id="getPopupUploadFileList" resultType="Hmap">
+        SELECT /* [msCrmWmsMemoService.sqlx][msCrmWmsMemoService.getPopupUploadFileList][CRM 요청관리 업로드 파일 목록][YeoSeungCheol][2025.10.22] */
+               '0'                    AS checkYn
+             , SERIALKEY              AS serialKey
+             , ISSUENO                AS issueNo
+             , DOC_TYPE               AS DOC_TYPE
+             , DOC_NAME               AS DOC_NAME
+             , FILE_NAME              AS FILE_NAME
+             , FILE_EXTENSION         AS FILE_EXTENSION
+             , FILE_LOCATION          AS FILE_LOCATION
+             , FILE_SIZE_BYTES        AS FILE_SIZE_BYTES
+             , TRANS_FILE_NAME        AS TRANS_FILE_NAME
+             , UPLOAD_HASH_ID         AS UPLOAD_HASH_ID
+             , UPLOAD_RES_DOC_ID      AS UPLOAD_RES_DOC_ID
+             , UPLOAD_FILE_NAME       AS UPLOAD_FILE_NAME
+             , UPLOAD_WORKPLACE_ID    AS UPLOAD_WORKPLACE_ID
+             , UPLOAD_LOCATION        AS UPLOAD_LOCATION
+             , DOWNLOAD_COUNT         AS DOWNLOAD_COUNT
+             , FILE_TYPE              AS FILE_TYPE
+             , STATUS                 AS status
+             , ADDWHO                 AS addWho
+             , ADDDATE                AS addDate
+             , EDITWHO                AS editWho
+             , EDITDATE               AS editDate
+         FROM TM_ISSUE_FILE
+        WHERE DOC_NAME = 'CRMMEMO_FILE'
+          AND ISSUENO  = #{issueNo}
+          AND STATUS   = 'Y'
+    </select>
+    
+    <!-- CRM 요청관리 첨부파일 Insert -->
+    <insert id="insertFileInfo">
+        INSERT /* [msCrmWmsMemoService.sqlx][msCrmWmsMemoService.insertFileInfo][CRM 요청관리 첨부파일 추가][YeoSeungCheol][2025.10.22] */
+          INTO TM_ISSUE_FILE 
+             ( SERIALKEY
+             , ISSUENO
+             , DOC_TYPE
+             , DOC_NAME
+             , FILE_NAME
+             , FILE_EXTENSION
+             , FILE_LOCATION
+             , FILE_SIZE_BYTES
+             , TRANS_FILE_NAME
+             , UPLOAD_HASH_ID
+             , UPLOAD_RES_DOC_ID
+             , UPLOAD_FILE_NAME
+             , UPLOAD_WORKPLACE_ID
+             , UPLOAD_LOCATION
+             , DOWNLOAD_COUNT
+             , FILE_CONTENT
+             , FILE_TYPE
+             , STATUS
+             , ADDWHO
+             , ADDDATE
+             , EDITWHO
+             , EDITDATE
+             ) VALUES (
+                SEQ_TM_ISSUE_FILE.NEXTVAL
+              , #{issueNo}
+              , #{docType}
+              , 'CRMMEMO_FILE' 
+              , #{fileName} 
+              , #{fileExtension}
+              , #{fileLocation}
+              , #{fileSizeBytes} 
+              , #{transFileName}
+              , ''
+              , #{uploadResDocId}
+              , #{uploadFileName}
+              , #{uploadWorkplaceId}
+              , ''
+              , '0'
+              , ''
+              , 'HTTP'
+              , 'Y'
+              , #{gUserNo}
+              , SYSDATE
+              , #{gUserNo} 
+              , SYSDATE
+            )
+
+    </insert>   
+    
+    <!-- 파일 다운로드 횟수 카운트 -->
+    <update id="updateDownloadCnt" parameterType="cjfw.wms.tm.dto.TmCrmWmsMemoReqDto">
+        UPDATE /* [msCrmWmsMemoService.sqlx][msCrmWmsMemoService.updateDownloadCnt][파일 다운로드 카운트][YeoSeungCheol][2025.10.22] */
+               TM_ISSUE_FILE
+           SET DOWNLOAD_COUNT       = NVL(DOWNLOAD_COUNT,0) + 1
+             , EDITDATE             = SYSDATE
+             , EDITWHO              = #{gUserNo}
+         WHERE SERIALKEY            = #{serialKey}  
+           AND ISSUENO              = #{issueNo}
+    </update>
+    
+    <!-- 파일 삭제 -->
+    <update id="saveFileDelete" parameterType="cjfw.wms.tm.dto.TmCrmWmsMemoReqDto">
+        UPDATE /* [msCrmWmsMemoService.sqlx][msCrmWmsMemoService.saveFileDelete][파일 삭제][YeoSeungCheol][2025.10.22] */
+               TM_ISSUE_FILE
+           SET STATUS       = 'N'
+             , EDITDATE     = SYSDATE
+             , EDITWHO      = #{gUserNo}
+         WHERE SERIALKEY    = #{serialKey}
+           AND ISSUENO      = #{issueNo}
+           AND STATUS       = 'Y'
+    </update>
+    
+    <!-- FS 알림톡 수신자 정보(수신처) -->
+    <select id="getCustRcvSMS" parameterType="cjfw.wms.tm.dto.TmCrmWmsMemoReqDto" resultType="cjfw.wms.tm.dto.TmCrmWmsMemoResDto">
+    /* [kpDpKKOSend1stBatch.sqlx][msCrmWmsMemoService.getCustRcvSMS][FS 알림톡 수신자 정보(수신처)][YeoSeungCheol][2025.10.22] */
+        SELECT CUSTKEY              AS custKey
+             , EMPNAME1             AS empName
+             , EMPPHONE1            AS empPhone
+          FROM LOGISONE.MS_CUST
+         WHERE STORERKEY    = #{storerKey}
+           AND CUSTKEY      = #{custKey}
+           AND DEL_YN       = 'N'
+           AND EMPPHONE1 IS NOT NULL
+    </select>
+    
+    <!-- 일별메모 카카오 알림톡 -->
+    <insert id="insertInspectKKO">
+        INSERT    /* [kpDpInspectMonitoringService.sqlx][KpDpInspectMonitoringService.insertInspectKKO][일별메모 카카오 알림톡 INSERT][YeoSeungCheol][2025.10.22] */
+          INTO SMS.KKO_MSG
+             ( MSGKEY
+             , REQDATE
+             , STATUS
+             , PHONE
+             , ETC1
+             , CALLBACK
+             , PROFILE_KEY
+             , MSG
+             , TEMPLATE_CODE
+             , TEMPLATE_TITLE
+             , FAILED_TYPE
+             , FAILED_SUBJECT
+             , FAILED_MSG
+             , KKO_TYPE
+             ) VALUES( 
+               SMS.KKO_MSG_SEQ.NEXTVAL          /* MSGKEY */
+             , SYSDATE                          /* REQDATE */
+             , '1'                              /* STATUS */
+             , damo.dec(#receivePhone#)         /* PHONE 수신 '010-4455-6842' */
+             , #{receiveName}                   /* 수신자명 */
+             , #{sendPhone}                     /* CALLBACK 송신 */
+             , #{profileKey}                    /* PROFILE_KEY*/
+             , #{sendMessage}                   /* MSG*/
+             , #{templateCode}                  /* TEMPLATE_CODE*/
+             , #{templateTitle}                 /* TEMPLATE_TITLE*/
+             , #{failType}                      /* FAILED_TYPE*/
+             , #{sendTitle}                     /* FAILED_SUBJECT*/
+             , #{sendMessage}                   /* FAILED_MSG*/
+             , #{kkoType}                       /* KKO_TYPE*/
+             )
+    </insert>
+    
+    <!-- 배송이슈 파일 조회 -->
+    <select id="getFileData_API" resultType="HMap">
+        SELECT /* [msCrmWmsMemoService.sqlx][msCrmWmsMemoService.getFileData_API][배송이슈 파일][YeoSeungCheol][2025.10.22]  */    
+              '17'                  AS TYPE  
+             , FILE_NAME            AS FILENAME
+             , UPLOAD_RES_DOC_ID    AS EDMSFILEID
+         FROM TM_ISSUE_FILE
+        WHERE 1=1
+          AND DOC_NAME = 'CRMMEMO_FILE'
+          AND ISSUENO  = #{serialKey}
+    </select>    
+    
+    <!-- 처리상세 조회 -->
+    <select id="getDetailInfo" parameterType="cjfw.wms.tm.dto.TmCrmWmsMemoReqDto" resultType="cjfw.wms.tm.dto.TmCrmWmsMemoResDto">
+        SELECT /* [msCrmWmsMemoService.sqlx][msCrmWmsMemoService.getDetailInfo][처리상세 조회][YeoSeungCheol][2025.10.22] */    
+               A.MEMOID                                     AS memoId
+             , A.PARENTID                                   AS parentId
+             , A.MEMOLEVEL                                  AS memoLevel
+             , TO_CHAR(A.MEMODATE, 'yyyy-mm-dd hh24:mi:ss') AS memoDate 
+             , A.CUSTKEY                                    AS custKey
+             , msCust.DESCRIPTION                           AS custName
+             , A.CUSTTYPE                                   AS custType
+             , A.MEMOTYPE                                   AS memoYype
+             , A.MEMOWRITER                                 AS memoWriter
+             , A.DESCRIPTION                                AS description
+             , A.CARNO                                      AS carNo
+             , A.DRIVERNAME                                 AS driverName
+             , DAMO.DEC(A.DRIVERPHONE)                      AS driverPhone
+             , A.INQUIRYDATE                                AS inquiryDate
+         FROM CRM_WMS_DAILYMEMO A
+   INNER JOIN MS_CUST msCust
+           ON A.CUSTKEY = msCust.CUSTKEY
+        WHERE 1=1
+          AND A.SERIALKEY  = #{serialKey}
+    </select>    
+    
+    <update id="updateCrmMemoStatus">
+        UPDATE /* [msCrmWmsMemoService.sqlx][msCrmWmsMemoService.updateCrmMemoStatus][CRM 요청관리 일별메모 상태 변경 - code][YeoSeungCheol][2025.10.22] */
+              CRM_WMS_DAILYMEMO
+           SET STATUS   = '03'    /* ASIS: 전송대상에 따른 분기처리. 03 : fs -> 거래처 MA에게 알림톡 전송 */  
+         WHERE MEMOID   = #{parentId}
+    </update>
+    
+    <update id="updateCrmMemoStatus2">
+        UPDATE /* [msCrmWmsMemoService.sqlx][msCrmWmsMemoService.updateCrmMemoStatus][CRM 요청관리 일별메모 상태 변경 - code][YeoSeungCheol][2025.10.22] */
+               CRM_WMS_DAILYMEMO
+           SET STATUS     = '04'  /* ASIS: 전송대상에 따른 분기처리. 01 : crm -> crm api */
+         WHERE MEMOID     = #{parentId}
+    </update>
+    
+    <select id="getData_API" resultType="HMap">
+    /* [msCrmWmsMemoService.sqlx][msCrmWmsMemoService.getData_API]  */    
+        SELECT MEMOID
+             , PARENTID
+             , MEMOLEVEL
+             , TO_CHAR(MEMODATE, 'yyyy-mm-dd hh24:mi:ss') AS MEMODATE 
+             , CUSTKEY
+             , CUSTTYPE
+             , MEMOTYPE
+             , MEMOWRITER
+             , DESCRIPTION
+             , CARNO
+             , DAMO.DEC(DRIVERPHONE)                    AS DRIVERPHONE
+         FROM CRM_WMS_DAILYMEMO 
+        WHERE 1=1
+          AND SERIALKEY   = #{serialKey}
+    </select>
+</mapper>

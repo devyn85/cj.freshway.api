@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cmRoadAddrHjdongService">
+
+    <!-- 주소정제 대상(행정동코드 누락건) -->
+    <select id="selectTgtList" resultType="CmRoadAddrResDto">
+        SELECT /* [cmRoadAddrHjdongService.sqlx][selectTgtList][행정동코드 누락 도로명주소][김환수][2025.12.04] */
+               A.ADR_MNG_NO                                 /* 도로명관리번호(PK) */
+			 , NULL                       AS ADDR_NM        /* 주소명(작업용) */
+             , TRIM(A.CTP_KOR_NM) ||' '||
+               TRIM(A.SIG_KOR_NM) ||' '||
+               TRIM(A.EMD_KOR_NM) ||' '   AS ADDR_NM_BASE   /* 주소명(MANDT) (NAVER API PARAM - GET X.Y) */ /* 시도명+시군구명+읍면동명 */
+             , TRIM(A.LI_KOR_NM)  ||' '   AS ADDR_NM_LI     /* 주소명(OPT:리명) */
+             , NULLIF(A.BUNJI, 0) ||' '   AS ADDR_NM_BUNJI  /* 주소명(OPT:번지) (번지=0인 경우 NULL처리) */
+             , NULL                       AS LONGITUDE      /* 경도(X) (NAVER API PARAM - GET ADMCODE) */
+             , NULL                       AS LATITUDE       /* 위도(Y) (NAVER API PARAM - GET ADMCODE) */
+             , A.HJDONG_CD                                  /* 행정동코드(results:code:id) */
+             , A.HJDONG_NM                                  /* 행정동명  (results:region:area3:name) */
+          FROM CM_ROAD_ADDRESS A /* 도로명주소 */
+         WHERE 1=1
+           AND TRIM(A.CTP_KOR_NM)||TRIM(A.SIG_KOR_NM)||TRIM(A.EMD_KOR_NM) IS NOT NULL
+           /* <!--("세종특별자치시"의 경우 "시군구명"이 미입력 상태임)-->
+           AND A.CTP_KOR_NM IS NOT NULL \* 시도명 *\
+           AND A.SIG_KOR_NM IS NOT NULL \* 시군구명 *\
+           AND A.EMD_KOR_NM IS NOT NULL \* 읍면동명 *\
+           AND A.BUNJI      IS NOT NULL \* 번지 *\
+           */
+           AND A.HJDONG_CD  IS     NULL /* 행정동코드 */
+         ORDER BY A.EDITDATE
+         FETCH FIRST TO_NUMBER(#{fetchCnt}) ROWS ONLY
+    </select>
+
+
+    <!-- 주소정제 결과(행정동정보-코드/명) 적용 -->
+    <update id="updateCmRoadAddrHjdong" parameterType="CmRoadAddrResDto">
+        MERGE /* [cmRoadAddrHjdongService.sqlx][updateCmRoadAddrHjdong][주소정제(행정동코드) 결과 적용][김환수][2025.12.04] */ INTO CM_ROAD_ADDRESS T /* 도로명주소 */
+        USING ( /* UNION SQL 생성 */ 
+            <foreach collection="list" item="item" separator="UNION ALL">
+                SELECT #{item.adrMngNo} AS ADR_MNG_NO, #{item.hjdongCd} AS HJDONG_CD, #{item.hjdongNm} AS HJDONG_NM FROM DUAL
+            </foreach>
+              ) S
+           ON ( T.ADR_MNG_NO = S.ADR_MNG_NO ) /* PK */ 
+        WHEN MATCHED THEN
+             UPDATE SET T.HJDONG_CD = NVL(TRIM(S.HJDONG_CD), T.HJDONG_CD)
+                      , T.HJDONG_NM = NVL(TRIM(S.HJDONG_NM), T.HJDONG_NM)
+                      , T.EDITDATE  = SYSDATE
+                      , T.EDITWHO   = 'BATCH'
+    </update>
+
+</mapper>

@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="msSkuDcLabelService">
+	<!-- 센터상품라벨속성 조회 -->
+	<select id="getMasterList" parameterType="cjfw.wms.ms.dto.MsSkuDcLabelReqDto" resultType="cjfw.wms.ms.dto.MsSkuDcLabelResDto">
+		SELECT /* [MsSkuDcLabelService.sqlx][getMasterList][센터상품라벨속성 조회][YeoSeungCheol][2025.07.15] */
+			'0'													AS CHECKYN
+			,ML.SERIALKEY										AS SERIALKEY
+			,ML.STORERKEY										AS STORERKEY
+			,ML.DCCODE											AS DCCODE
+			,ML.SKU												AS SKU
+			,CASE	/* FN_DESCR_SKU 함수 대체 로직 */
+				WHEN SKU_TAB.SERIALKEY 		IS NULL THEN 'NOT FOUND'
+				WHEN SKU_TAB.DESCRIPTION 	IS NULL THEN 'UNKNOWN'
+				ELSE TRIM(SKU_TAB.DESCRIPTION)
+			END													AS SKUNAME
+			,ML.STORAGE_GUBUN									AS STORAGE_GUBUN
+			,ML.DEL_YN											AS DEL_YN
+			,TO_CHAR(ML.ADDDATE,'YYYY-MM-DD HH24:MI:SS')		AS ADDDATE
+			,NVL(USR_ADD.USER_NM, ML.ADDWHO)					AS ADDWHO
+			,TO_CHAR(ML.EDITDATE,'YYYY-MM-DD HH24:MI:SS')		AS EDITDATE
+			,NVL(USR_EDIT.USER_NM, ML.EDITWHO)					AS EDITWHO
+			,'1'												AS SAVED
+		FROM MS_SKUDCLABEL ML
+			LEFT JOIN MS_SKU		sku_tab		ON	sku_tab.STORERKEY	= ML.STORERKEY AND sku_tab.SKU = ML.SKU
+    		LEFT JOIN FRAMEONE_USER usr_add 	ON 	usr_add.USER_ID		= ML.ADDWHO
+    		LEFT JOIN FRAMEONE_USER usr_edit	ON 	usr_edit.USER_ID	= ML.EDITWHO
+		WHERE 1=1
+            <if test="gStorerkey != null and gStorerkey != ''">
+                AND ML.STORERKEY = #{gStorerkey}
+            </if>
+            
+            <if test="dcCode != null and dcCode != ''">
+                AND ML.DCCODE IN (
+					SELECT TRIM(REGEXP_SUBSTR(A.VAL, '[^,]+', 1, LEVEL))
+        				FROM (
+        					SELECT #{dcCode} AS VAL FROM DUAL
+        				) A
+      				CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0
+				)
+            </if>
+            
+            <if test="sku != null and sku != ''">
+                AND ML.SKU IN (
+                    SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL))
+                      FROM (
+                      		SELECT #{sku} AS VAL FROM DUAL
+                      ) A
+                    CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) > 0
+                )
+            </if>
+            
+            <if test="delYn != null and delYn != ''">
+				AND ML.DEL_YN 		= #{delYn}
+			</if>
+			
+			<if test="storageGubun != null and storageGubun != ''">
+			    AND ML.STORAGE_GUBUN = #{storageGubun}
+			</if>
+        ORDER BY ML.DCCODE, ML.SKU
+    </select>
+    
+    <!-- 센터상품라벨속성 저장 -->
+	<update id="saveMasterList" parameterType="cjfw.wms.ms.entity.MsSkuDcLabelEntity">
+	   /* [MsSkuDcLabelService.sqlx][saveMasterList][센터상품라벨속성 저장][YeoSeungCheol][2025.07.15] */
+	   MERGE INTO MS_SKUDCLABEL
+		   USING DUAL
+		   	ON (
+			<!--
+		   			MS_SKUDCLABEL.DCCODE	=	#{dcCode}
+		   		AND	MS_SKUDCLABEL.STORERKEY	=	#{gStorerkey}
+		   		AND	MS_SKUDCLABEL.SKU		=	#{sku}
+		   	-->
+		   		   	MS_SKUDCLABEL.DCCODE	=	#{dcCode}
+		   		AND MS_SKUDCLABEL.STORERKEY	=	#{gStorerkey}
+		   	   AND	MS_SKUDCLABEL.SKU		=	#{sku}
+		   	)
+			WHEN MATCHED THEN
+				UPDATE SET
+					STORAGE_GUBUN 			= #{storageGubun}
+		       		,DEL_YN        			= #{delYn}
+		       		,EDITDATE      			= SYSDATE
+		       		,EDITWHO       			= #{gUserId}
+			WHEN NOT MATCHED THEN
+				INSERT (
+					SERIALKEY
+		       		,STORERKEY
+		       		,DCCODE
+		       		,SKU
+		       		,STORAGE_GUBUN
+		       		,DEL_YN
+		       		,ADDDATE
+		       		,EDITDATE
+		       		,ADDWHO
+		       		,EDITWHO
+		     	) VALUES (
+				    SEQ_MS_SKUDCLABEL.NEXTVAL
+				    ,#{gStorerkey}
+				    ,#{dcCode}
+				    ,#{sku}
+				    ,#{storageGubun}
+				    ,#{delYn}
+				    ,SYSDATE
+				    ,SYSDATE
+				    ,#{gUserId}
+				    ,#{gUserId}
+		     	)
+	</update>
+</mapper>

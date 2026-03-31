@@ -1,0 +1,365 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+ * Copyright 2025. CJ OliveNetworks Co. all rights reserved.
+ *
+ * @author      : KimDongHan (liop0123@cj.net)
+ * @date        : 2025.10.28
+ * @description : 재고 > 재고조사 > 재고 실사 지시 SQL
+ * @issues      :
+-->
+<mapper namespace="stInquiryInplanService">
+
+    <select id="getMasterList" resultType="cjfw.wms.st.dto.StInquiryInplanResDto">
+		SELECT /* [StInquiryInplanService.sqlx][StInquiryInplanService.getMasterList][재고 > 재고조사 > 재고 실사 지시 조회][KimDongHan][2025-10-28] */
+		       ST_STOCK.DCCODE                                                                                                                         AS DCCODE          /* 센터코드 */
+		     , FN_GETDCNAME(ST_STOCK.DCCODE)                                                                                                           AS DCNAME          /* 물류센터 */
+		     , ST_STOCK.ORGANIZE                                                                                                                       AS ORGANIZE        /* 창고 */
+			 , FN_DESCR_ORGANIZE(ST_STOCK.DCCODE,ST_STOCK.ORGANIZE)                                                                                    AS ORGANIZENAME    /* 창고명 */
+		     , ST_STOCK.SKU                                                                                                                            AS SKU             /* 상품코드 */
+		     , MS_SKU.DESCRIPTION                                                                                                                      AS SKUNAME         /* 상품명 */
+		     , MS_SKU.STORAGETYPE                                                                                                                      AS STORAGETYPE     /* 저장조건 */
+		     , NVL(CD3.BASEDESCR,MS_SKU.STORAGETYPE)                                                                                                   AS STORAGETYPE_NM  /* 저장조건 */	 
+		     , MS_LOCATION.WHAREAFLOOR                                                                                                                 AS WHAREAFLOOR     /* 창고층 */	 
+			 , MS_LOCATION.ZONE                                                                                                                        AS ZONE            /* 피킹존 */
+			 , NVL(CD4.BASEDESCR,MS_LOCATION.LOCCATEGORY)                                                                                              AS LOCCATEGORY     /* 로케이션 종류 */
+			 , ST_STOCK.LOC                                                                                                                            AS LOC             /* 로케이션 */
+		     , ST_STOCK.QTY                                                                                                                            AS QTY             /* 수량 */
+		     , ST_STOCK.UOM                                                                                                                            AS UOM             /* 단위 */		
+		     , MS_SKU.QTYPERBOX                                                                                                                        AS QTYPERBOX       /* 박스입수 */
+             , CASE WHEN ST_STOCK.UOM IN ('KG','BOX') THEN ST_STOCK.QTY                                                                    
+                    ELSE CASE WHEN FN_CONV_UOM(ST_STOCK.STORERKEY,ST_STOCK.SKU,'BOX',ST_STOCK.UOM,1) = 0 THEN ST_STOCK.QTY                 
+                              ELSE TRUNC(FN_CONV_UOM(ST_STOCK.STORERKEY,ST_STOCK.SKU,ST_STOCK.UOM,'BOX', ST_STOCK.QTY))                    
+                          END                                                                                                              
+                END                                                                                                                                    AS BOX             /* BOX */
+             , CASE WHEN ST_STOCK.UOM IN ('KG','BOX') THEN 0                                                                               
+                     ELSE CASE WHEN FN_CONV_UOM(ST_STOCK.STORERKEY,ST_STOCK.SKU,'BOX', ST_STOCK.UOM,1) = 0 THEN 0                          
+                               ELSE MOD(ST_STOCK.QTY,FN_CONV_UOM(ST_STOCK.STORERKEY,ST_STOCK.SKU,'BOX',ST_STOCK.UOM,1))                    
+                           END                                                                                                             
+                 END                                                                                                                                   AS EA              /* EA */    
+		     , NVL(CD2.BASEDESCR,ST_STOCK.STOCKGRADE)                                                                                                  AS STOCKGRADE_NM   /* 재고속성 */
+		     , NVL(CD1.BASEDESCR,ST_STOCK.STOCKTYPE)                                                                                                   AS STOCKTYPE_NM    /* 재고위치 */
+		     , NVL(TRIM(FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01, 'Y')),'N') AS NEARDURATIONYN /** 유통기한임박여부 */
+              --
+              ,LOGISONESVC.FN_LOTTABLE_INFO('1',ST_STOCK.STORERKEY,CM_LOT.LOTTABLE01,MS_SKU.DURATIONTYPE,MS_SKU.DURATION,'')             AS MANUFACTUREDT   /*제조일자*/
+              ,LOGISONESVC.FN_LOTTABLE_INFO('2',ST_STOCK.STORERKEY,CM_LOT.LOTTABLE01,MS_SKU.DURATIONTYPE,MS_SKU.DURATION,'')             AS EXPIREDT        /*소비일자*/
+              --
+              ,LOGISONESVC.FN_LOTDURATION('', MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01, 'R0')                             AS USEBYDATEFREERT /*소비기한잔여율*/                        		     
+		     , FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01, 'N0') ||'/'|| MS_SKU.DURATION                  AS DURATION_TERM   /* 유통기간(잔여/전체) */		   	            
+		     , ST_SERIALINFO.SERIALNO                                                                                                                  AS SERIALNO        /* 이력번호 */
+		     , ST_SERIALINFO.CONVSERIALNO                                                                                                              AS CONVSERIALNO    /* BL번호 */
+		     , CM_LOT.LOTTABLE01                                                                                                                       AS LOTTABLE01      /* LOTTABLE0101 */
+		     , MS_SKU.DURATION                                                                                                                         AS DURATION        /* DURATION */
+		     , MS_SKU.DURATIONTYPE                                                                                                                     AS DURATIONTYPE    /* DURATIONTYPE */
+   		     , ''                                                                                                                                      AS INQUIRYNO   
+		     , ''                                                                                                                                      AS INQUIRY_NAME  
+             , ST_STOCK.AREA                                                                                                                           AS AREA
+             , ST_STOCK.LOT                                                                                                                            AS LOT
+		     , ST_STOCK.QTY                                                                                                                            AS ORDERQTY 
+		     , ST_STOCK.QTY                                                                                                                            AS STOCKQTY 		     
+             , ''                                                                                                                                      AS LOTTYPE
+             , ST_STOCK.STOCKID                                                                                                                        AS STOCKID 
+             , ST_STOCK.STOCKGRADE                                                                                                                     AS STOCKGRADE
+		     , ST_STOCK.SERIALKEY                                                                                                                      AS SERIALKEY
+		     <!--
+		     , ST_STOCK.DCCODE                                                                                                                         AS SAVE_DCCODE
+		     , ''                                                                                                                                      AS SAVE_INQUIRYNO   
+		     , ''                                                                                                                                      AS SAVE_INQUIRY_NAME  
+		     , ST_STOCK.ORGANIZE                                                                                                                       AS SAVE_ORGANIZE
+		     , ST_STOCK.AREA                                                                                                                           AS SAVE_AREA
+		     , ST_STOCK.SKU                                                                                                                            AS SAVE_SKU 
+		     , ST_STOCK.LOC                                                                                                                            AS SAVE_LOC
+		     , ST_STOCK.LOT                                                                                                                            AS SAVE_LOT
+		     , ST_STOCK.QTY                                                                                                                            AS SAVE_ORDERQTY 
+		     , ST_STOCK.QTY                                                                                                                            AS SAVE_STOCKQTY 		     
+		     , ''                                                                                                                                      AS SAVE_LOTTYPE
+		     , ST_STOCK.STOCKID                                                                                                                        AS SAVE_STOCKID         
+		     , ST_STOCK.STOCKGRADE                                                                                                                     AS SAVE_STOCKGRADE
+		     , ST_SERIALINFO.SERIALNO                                                                                                                  AS SAVE_SERIALNO      
+		     , ST_SERIALINFO.CONVSERIALNO                                                                                                              AS SAVE_CONVSERIALNO
+		     -->  
+		  FROM ST_STOCK   
+		  JOIN MS_SKU
+		    ON MS_SKU.STORERKEY = ST_STOCK.STORERKEY
+		   AND MS_SKU.SKU       = ST_STOCK.SKU
+		<!-- 저장조건 -->    
+		<if test="storagetype != null and storagetype != ''">  
+		   AND MS_SKU.STORAGETYPE        = #{storagetype}                     
+		</if>
+	    <!-- START.상품멀티 -->
+	    <if test="skuMulti != null and skuMulti != '' ">
+			<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+				<foreach collection="skuMulti" item="item">
+					OR MS_SKU.SKU IN
+					<foreach collection="item" item="code" open="(" close=")" separator=",">
+						#{code} 	 
+		      		</foreach>
+		    	</foreach>
+		  	</trim>			                                    
+	    </if>
+	    <!-- END.상품멀티 -->	
+		  JOIN CM_LOT
+		    ON CM_LOT.STORERKEY            = ST_STOCK.STORERKEY
+		   AND CM_LOT.LOT                  = ST_STOCK.LOT
+		   AND CM_LOT.DEL_YN               = 'N'
+		  JOIN MS_LOCATION
+		    ON MS_LOCATION.DCCODE          = ST_STOCK.DCCODE
+		   AND MS_LOCATION.LOC             = ST_STOCK.LOC
+		<!-- 2025.12.29 김동한 외부비축센터는 ZONE 이 없음(박의병님 말씀). 쿼리 분기함 -->   
+        <if test="fixdccode != null and fixdccode != ''">
+            <choose>
+                <when test='fixdccode == "2170"'>
+		  LEFT OUTER JOIN MS_ZONE              
+		    ON MS_ZONE.DCCODE           = MS_LOCATION.DCCODE
+		   AND MS_ZONE.ZONE             = MS_LOCATION.ZONE		
+                </when>
+                <when test='fixdccode != "2170"'>
+		  JOIN MS_ZONE              
+		    ON MS_ZONE.DCCODE           = MS_LOCATION.DCCODE
+		   AND MS_ZONE.ZONE             = MS_LOCATION.ZONE	
+                </when>
+            </choose>
+        </if>		   
+		  LEFT OUTER JOIN ST_SNINFO ST_SERIALINFO
+		    ON ST_STOCK.STORERKEY  = ST_SERIALINFO.STORERKEY
+		   AND ST_STOCK.SKU        = ST_SERIALINFO.SKU
+		   AND ST_STOCK.STOCKID    = ST_SERIALINFO.STOCKID
+		  LEFT JOIN CM_CODE_STORER CD1 ON CD1.STORERKEY = #{gStorerkey} AND CD1.CODELIST = 'STOCKTYPE'   AND CD1.BASECODE = ST_STOCK.STOCKTYPE      /* 저장조건 */
+		  LEFT JOIN CM_CODE_STORER CD2 ON CD2.STORERKEY = #{gStorerkey} AND CD2.CODELIST = 'STOCKGRADE'  AND CD2.BASECODE = ST_STOCK.STOCKGRADE     /* 재고속성 */
+		  LEFT JOIN CM_CODE_STORER CD3 ON CD3.STORERKEY = #{gStorerkey} AND CD3.CODELIST = 'STORAGETYPE' AND CD3.BASECODE = MS_SKU.STORAGETYPE      /* 재고위치 */
+		  LEFT JOIN CM_CODE_STORER CD4 ON CD4.STORERKEY = #{gStorerkey} AND CD4.CODELIST = 'LOCCATEGORY' AND CD4.BASECODE = MS_LOCATION.LOCCATEGORY /* 로케이션 종류 */
+		 WHERE  ST_STOCK.DCCODE    = #{fixdccode}
+		   AND ST_STOCK.STORERKEY = #{gStorerkey} 
+		   AND ST_STOCK.QTY <![CDATA[>]]> 0             <!-- 2025.12.09 박의병님 요청 -->
+		<!-- START.권한센터 -->
+		   AND EXISTS (SELECT 1
+		                 FROM CM_USER_AUTHORITY 
+		                WHERE CM_USER_AUTHORITY.DCCODE    = ST_STOCK.DCCODE    
+		                  AND CM_USER_AUTHORITY.STORERKEY = ST_STOCK.STORERKEY 
+		                  AND CM_USER_AUTHORITY.ORGANIZE  = ST_STOCK.ORGANIZE  
+		                  AND CM_USER_AUTHORITY.AREA      = ST_STOCK.AREA  
+		                  AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey}
+		                  AND CM_USER_AUTHORITY.USERID    = #{gUserId}
+                          AND CM_USER_AUTHORITY.DCCODE    = #{fixdccode}
+                          AND CM_USER_AUTHORITY.AREA      = #{gArea}
+			             <!-- 창고.다중검색 -->
+			             <if test="organizeMulti != null and organizeMulti != ''">    
+				             AND CM_USER_AUTHORITY.ORGANIZE IN
+				             <foreach collection="organizeMulti" item="code" open="(" close=")" separator=",">
+				               #{code}
+				             </foreach>
+			             </if>                   
+                      )
+		<!-- END.권한센터	-->
+	    
+        <!-- 창고.다중검색 -->
+        <if test="organizeMulti != null and organizeMulti != ''">    
+	       AND ST_STOCK.ORGANIZE IN
+	       <foreach collection="organizeMulti" item="code" open="(" close=")" separator=",">
+	         #{code}
+	       </foreach>
+        </if>    	    
+		        
+		<!-- 재고위치 -->
+		<if test="stocktype != null and stocktype != ''">   
+		   AND ST_STOCK.STOCKTYPE            =  #{stocktype}   
+		</if>
+		
+		<!-- 재고속성 -->
+		<if test="stockgrade != null and stockgrade != ''">  
+		   AND ST_STOCK.STOCKGRADE           =  #{stockgrade}  
+		</if>
+		
+		<!-- 로케이션 From -->
+		<if test="fromloc != null and fromloc != ''">     
+		   AND ST_STOCK.LOC      <![CDATA[>=]]>  #{fromloc} 
+		</if>
+		
+		<!-- 로케이션 To -->
+		<if test="toloc != null and toloc != ''">       
+		   AND ST_STOCK.LOC        <![CDATA[<=]]>  #{toloc}   
+		</if>
+		
+		<!-- 피킹존 From -->
+		<if test="fromzone != null and fromzone != ''">
+		   AND MS_LOCATION.ZONE <![CDATA[>=]]> #{fromzone}
+		</if>
+		
+		<!-- 피킹존 To -->
+		<if test="tozone != null and tozone != ''">
+		   AND MS_LOCATION.ZONE <![CDATA[<=]]> #{tozone}
+		</if>
+		
+		<!-- 제외존 
+		<if test="excludeZone != null and excludeZone != ''">
+		   AND MS_LOCATION.ZONE NOT IN (#{excludeZone})
+		</if>
+		-->
+	    <!-- START.제외존멀티 -->
+        <if test="excludeZoneMulti != null and excludeZoneMulti != ''">    
+	       AND MS_LOCATION.ZONE NOT IN
+	       <foreach collection="excludeZoneMulti" item="code" open="(" close=")" separator=",">
+	         #{code}
+	       </foreach>
+        </if>  	    
+	    <!-- END.제외존멀티 -->			
+		
+		<!-- 로케이션 종류 -->
+		<if test="loccategory != null and loccategory != ''"> 
+		   AND MS_LOCATION.LOCCATEGORY = #{loccategory}   
+		</if>     
+		   <!--AND ROWNUM <![CDATA[<=]]> 10 /* 최대조회건수 제한 */-->
+        <!-- 소비기한잔여율-->
+        <if test="usebydatefreert != null and usebydatefreert != ''">
+            AND #{usebydatefreert} <![CDATA[>=]]>  LOGISONESVC.FN_LOTDURATION('', MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01, 'R')  
+        </if>		
+        
+        <!-- 소비기한(전체) -->
+        <if test="duration != null and duration != ''">
+            AND #{duration} <![CDATA[>=]]>  MS_SKU.DURATION
+        </if>	           
+		   
+        ORDER BY ST_STOCK.DCCODE
+		        ,ST_STOCK.LOC
+		        ,ST_STOCK.STORERKEY
+		        ,ST_STOCK.SKU
+		        ,CM_LOT.LOTTABLE01
+    </select>
+
+    <select id="getInquiryName" resultType="cjfw.wms.st.dto.StInquiryInplanResDto">
+		SELECT /* [StInquiryInplanService.sqlx][StInquiryInplanService.getInquiryName][재고 > 재고조사 > 재고 실사 지시 조사명칭 조회][KimDongHan][2025-10-28] */
+		       FN_ST_INFO('INQUIRY_NAME', #{gStorerkey}, #{fixdccode}, #{lottype}, TO_CHAR(SYSDATE,'YYYYMMDD'),'') AS INQUIRY_NAME
+		     , FN_ST_INFO('INQUIRYNO'   , #{gStorerkey}, #{fixdccode}, #{lottype}, TO_CHAR(SYSDATE,'YYYYMMDD'),'') AS INQUIRYNO
+		  FROM DUAL		    
+    </select>
+    
+	<insert id="insertMaster_backup" statementType="CALLABLE">
+	    <![CDATA[
+		    {
+				CALL /* [StInquiryInplanService.sqlx][StInquiryInplanService.insertMaster][재고 > 재고조사 > 재고 실사 지시 저장(Insert)][KimDongHan][2025-10-28] */
+				
+				     DECLARE
+				
+				        V_AFTER    ST_INQUIRY%rowtype;
+				        O_SUCCESS   NUMBER  					:=  1;		/* 성공여부(사용하지 않음) */
+				        O_ERRCODE   NUMBER  					:=  0;		/* 오류 코드(0이면 성공) */
+				        O_ERRMSG    VARCHAR2(4000) 				:= '';		/* 오류 메세지 */
+				        SQL_ERROR   EXCEPTION;
+				
+				     BEGIN
+				
+				        BEGIN
+				
+				            V_AFTER.DCCODE          := #{dccode};
+				            V_AFTER.INQUIRYDT       := TO_CHAR(SYSDATE, 'YYYYMMDD');
+				            V_AFTER.INQUIRYNO       := #{inquiryno};
+				            V_AFTER.INQUIRY_NAME    := #{inquiryName};
+				            V_AFTER.PRIORITY        := '1';
+				            V_AFTER.INQUIRYTYPE     := 'STD';
+				            V_AFTER.STORERKEY       := #{gStorerkey};
+				            V_AFTER.ORGANIZE        := #{organize};
+				            V_AFTER.AREA            := #{area};
+				            V_AFTER.SKU             := #{sku};
+				            V_AFTER.LOC             := #{loc};
+				            V_AFTER.LOT             := #{lot};
+				            V_AFTER.STOCKID         := #{stockid};
+				            V_AFTER.STOCKGRADE      := #{stockgrade};
+				            V_AFTER.ORDERQTY        := #{orderqty};
+				            V_AFTER.STOCKQTY        := #{stockqty};
+				            V_AFTER.STATUS          := '00';
+				            V_AFTER.DEL_YN          := 'N';
+				            V_AFTER.LOTTYPE         := #{lottype};
+				            V_AFTER.ADDDATE         := SYSDATE;
+				            V_AFTER.EDITDATE        := SYSDATE;
+				            V_AFTER.ADDWHO          := #{gUserId};
+				            V_AFTER.EDITWHO         := #{gUserId};
+				            V_AFTER.SERIALNO        := #{serialno};
+				            V_AFTER.CONVSERIALNO    := #{convserialno};
+				
+				            TRST_INQUIRY.TR_INSERT ( V_AFTER 
+				                                   , O_SUCCESS 
+				                                   , O_ERRCODE 
+				                                   , O_ERRMSG 
+				                                   );
+				
+				            IF O_ERRCODE = -20001 THEN
+				                RAISE_APPLICATION_ERROR (-20001, NVL(O_ERRMSG, SQLERRM));
+				            ELSIF O_ERRCODE != 0 THEN
+				                RAISE SQL_ERROR;
+				            END IF;
+				
+				            EXCEPTION WHEN OTHERS THEN
+				                O_ERRCODE := SQLCODE;
+				                O_ERRMSG := NVL(O_ERRMSG, SQLERRM);
+				        END;
+				
+				        #{success, 	mode=OUT, jdbcType=INTEGER, javaType=int}       :=  O_SUCCESS;
+				        #{errCode, 	mode=OUT, jdbcType=INTEGER, javaType=int}       :=  O_ERRCODE;
+				        #{errMsg, 	mode=OUT, jdbcType=VARCHAR, javaType=String}    :=  O_ERRMSG;
+				
+				     END
+		    } 
+	    ]]>
+	</insert>
+	    
+    <insert id="insertMaster">
+		INSERT /*[StInquiryInplanService.insertMaster][재고 실사 지시 등록][KimDongHan][2025-10-28] */
+		  INTO ST_INQUIRY 
+		     ( SERIALKEY          /* SERIALKEY */
+			 , DCCODE             /* DCCODE */
+			 , INQUIRYDT          /* INQUIRYDT */
+			 , INQUIRYNO          /* INQUIRYNO */
+			 , INQUIRY_NAME       /* INQUIRY_NAME */
+			 , PRIORITY           /* PRIORITY */
+			 , INQUIRYTYPE        /* INQUIRYTYPE */
+			 , STORERKEY          /* STORERKEY */
+			 , ORGANIZE           /* ORGANIZE */
+			 , AREA               /* AREA */
+			 , SKU                /* SKU */
+			 , LOC                /* LOC */
+			 , LOT                /* LOT */
+			 , STOCKID            /* STOCKID */
+			 , STOCKGRADE         /* STOCKGRADE */
+			 , ORDERQTY           /* ORDERQTY */
+			 , STOCKQTY           /* STOCKQTY */
+			 , STATUS             /* STATUS */
+			 , DEL_YN             /* DEL_YN */
+			 , LOTTYPE            /* LOTTYPE */
+			 , ADDDATE            /* ADDDATE */
+			 , EDITDATE           /* EDITDATE */
+			 , ADDWHO             /* ADDWHO */
+			 , EDITWHO            /* EDITWHO */
+			 , SERIALNO           /* SERIALNO */
+			 , CONVSERIALNO       /* CONVSERIALNO */
+			 ) VALUES 
+			 (    
+			   SEQ_ST_INQUIRY.NEXTVAL                                 /* SERIALKEY */
+			 , #{dccode}                                              /* DCCODE */
+			 , TO_CHAR(SYSDATE, 'YYYYMMDD')                           /* INQUIRYDT */
+			 , #{inquiryno}                                           /* INQUIRYNO */
+			 , #{inquiryName}                                         /* INQUIRY_NAME */
+			 , '1'                                                    /* PRIORITY */
+			 , 'STD'                                                  /* INQUIRYTYPE */
+			 , #{gStorerkey}                                          /* STORERKEY */
+			 , #{organize}                                            /* ORGANIZE */
+			 , #{area}                                                /* AREA */
+			 , #{sku}                                                 /* SKU */
+			 , #{loc}                                                 /* LOC */
+			 , #{lot}                                                 /* LOT */
+			 , #{stockid}                                             /* STOCKID */
+			 , #{stockgrade}                                          /* STOCKGRADE */
+			 , #{orderqty}                                            /* ORDERQTY */
+			 , #{orderqty}                                            /* STOCKQTY */
+			 , '00'                                                   /* STATUS */
+			 , 'N'                                                    /* DEL_YN */
+			 , #{lottype}                                             /* LOTTYPE */
+			 , SYSDATE                                                /* ADDDATE */
+			 , SYSDATE                                                /* EDITDATE */
+			 , #{gUserId}                                             /* ADDWHO */
+			 , #{gUserId}                                             /* EDITWHO */
+			 , #{serialno}                                            /* SERIALNO */
+			 , #{convserialno}                                        /* CONVSERIALNO */
+		     )	 
+    </insert>
+
+</mapper>

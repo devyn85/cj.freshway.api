@@ -1,0 +1,175 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="wdDistributePlanSkuSumService">
+
+	<select id="getWdDistributePlanSkuSumList" resultType="WdDistributePlanSkuSumResDto">
+		WITH /* [wdDistributePlanSkuSumService.sqlx][wdDistributePlanSkuSumService.getDataHeaderlist][미출예정확인(상품별합계)Header정보][YangChangHwan][20250519] */ 
+			T_SHORTAGE AS (
+		        SELECT DCCODE
+						,STORERKEY
+						,ORGANIZE
+						,AREA
+						,SKU
+						,SUM(WD_QTY) 										AS WD_QTY
+						,SUM(DP_QTY) 										AS DP_QTY
+						,SUM(ST_QTY) 										AS ST_QTY
+						,SUM(ST_OPENQTY) 									AS ST_OPENQTY
+						,SUM(WD_QTY)  - SUM(DP_QTY)  - SUM(ST_OPENQTY)  	AS ST_SHORTAGEQTY
+		        FROM (
+		             SELECT DCCODE,STORERKEY,ORGANIZE,AREA,SKU
+		                   ,ORDERQTY-QTYALLOCATED AS WD_QTY
+		                   ,0                     AS DP_QTY
+		                   ,0                     AS ST_QTY
+		                   ,0                     AS ST_OPENQTY
+		              FROM   WD_INPLAN
+		             WHERE  1=1
+		             
+		              <if test='slipdt != null and slipdt !=""'>                  AND    WD_INPLAN.SLIPDT	            =  #{slipdt}             </if>
+			          AND    STATUS <![CDATA[<]]> '90'
+			          AND    OPENQTY > 0
+			          AND    OPENQTY > QTYALLOCATED
+                      AND    DEL_YN = 'N'		              
+		              <if test='chkyn == 1'>
+		              UNION ALL
+		              SELECT DCCODE,STORERKEY,ORGANIZE,AREA,SKU
+		                   ,0                   AS WD_QTY
+		                   ,ORDERQTY-CONFIRMQTY AS DP_QTY
+		                   ,0                   AS ST_QTY
+		                   ,0                   AS ST_OPENQTY
+		              FROM   DP_INPLAN
+		              WHERE  1=1
+		              <if test='slipdt != null and slipdt !=""'>                 AND    DP_INPLAN.SLIPDT	            =  #{slipdt}             </if>
+				          AND    STATUS <![CDATA[<]]> '90'
+				          AND    OPENQTY > 0
+	                      AND    DEL_YN = 'N'
+			          </if>
+		              UNION ALL
+		              SELECT ST_STOCK.DCCODE, ST_STOCK.STORERKEY, ST_STOCK.ORGANIZE, ST_STOCK.AREA, ST_STOCK.SKU
+		                   ,0                 AS WD_QTY
+		                   ,0                 AS DP_QTY
+		                   ,ST_STOCK.QTY      AS ST_QTY
+		                   ,ST_STOCK.OPENQTY  AS ST_OPENQTY
+		              FROM   ST_STOCK_OPENQTY ST_STOCK
+		             ) 
+		        GROUP BY DCCODE,STORERKEY,ORGANIZE,AREA,SKU
+		        HAVING  (SUM(DP_QTY)  + SUM(ST_OPENQTY)) -SUM(WD_QTY) <![CDATA[<]]> 0
+		)
+	    SELECT
+		    '0'                                             AS CHECKYN          /* 선택 */
+		   ,WD_INPLAN.STORERKEY                             AS STORERKEY        /* 고객사코드 */
+		   ,WD_INPLAN.DCCODE                                AS DCCODE           /* 센터코드 */
+		   ,WD_INPLAN.SLIPDT                                AS SLIPDT           /* 문서일자 */
+		   ,WD_INPLAN.SKU                                   AS SKU              /* 상품코드 */
+		   ,MIN(MS_SKU.DESCRIPTION)                         AS SKUNAME          /* 상품명칭 */
+		   ,FN_CODEDESCR(WD_INPLAN.STORERKEY,'PUTAWAYTYPE', DM_DOCUMENT_D.CHANNEL) AS CHANNEL           /* 배송채널 */
+		   ,SUM(WD_INPLAN.ORDERQTY)                         AS ORDERQTY         /* 주문수량 */
+		   ,MIN(T_SHORTAGE.ST_QTY)                          AS QTY              /* 수량 */
+		   ,MIN(T_SHORTAGE.ST_OPENQTY)                      AS ST_OPENQTY       /* 진행예정수량 */
+		   ,MIN(T_SHORTAGE.ST_SHORTAGEQTY)                  AS SHORTAGEQTY      /* 결품처리량 */
+		   ,SUM(WD_INPLAN.OPENQTY)                          AS OPENQTY          /* 진행예정수량 */
+		   ,SUM(WD_INPLAN.QTYALLOCATED)                     AS QTYALLOCATED     /* 분배량 */
+		   ,SUM(WD_INPLAN.QTYPICKED)                        AS QTYPICKED        /* (정의 없음) */
+		   ,SUM(WD_INPLAN.ORDERQTY)                         AS TRANQTY          /* 작업수량 */
+		   ,WD_INPLAN.UOM                                   AS UOM              /* BUNJAUOM 코드 */
+		   ,MIN(T_SHORTAGE.DP_QTY)                          AS DP_QTY           /* 입고량 */
+		   ,CASE WHEN MIN(MS_SKUDCSET.CROSSDOCKTYPE) = 'CROSS' THEN 'CROSS'
+		         ELSE ''
+		    END                                             AS CROSSDOCKTYPE    /* C/D타입 */
+		FROM   WD_INPLAN
+           left JOIN   CM_USER_AUTHORITY                                                                                                
+			ON     1=1                                                                                                              
+			<if test='gDccode 			!= null and gDccode 			!=""'>      AND    CM_USER_AUTHORITY.DCCODE	    =  #{gDccode}		    </if>
+            <if test='gStorerkey 		!= null and gStorerkey 			!=""'>      AND    CM_USER_AUTHORITY.STORERKEY	=  #{gStorerkey}	    </if>
+            <if test='gOrganize 		!= null and gOrganize 			!=""'>      AND    CM_USER_AUTHORITY.ORGANIZE	=  #{gOrganize}		    </if>
+            <if test='gArea 			!= null and gArea 				!=""'>      AND    CM_USER_AUTHORITY.AREA		=  #{gArea}			    </if> 
+            <if test='gMultiDccode 		!= null and gMultiDccode 		!=""'>  	AND    CM_USER_AUTHORITY.DCCODE	    =  #{gMultiDccode}		</if>
+	    	<if test='gMultiStorerkey 	!= null and gMultiStorerkey 	!=""'>   	AND    CM_USER_AUTHORITY.STORERKEY	=  #{gMultiStorerkey}   </if>
+	    	<!-- 창고 다중선택 -->
+	    	<if test='gMultiOrganize != null and gMultiOrganize !=""'>
+	    		AND CM_USER_AUTHORITY.ORGANIZE IN (
+	    			SELECT TRIM(REGEXP_SUBSTR(#{gMultiOrganize}, '[^,]+', 1, LEVEL)) AS VAL
+				        FROM DUAL
+				        CONNECT BY LEVEL <![CDATA[<=]]> REGEXP_COUNT(#{gMultiOrganize}, '[^,]+')
+	    		)
+	    	</if>
+	    	<if test='gMultiArea != null and gMultiArea !=""'> 	    AND    CM_USER_AUTHORITY.AREA		=  #{gMultiArea}		</if>
+				AND    CM_USER_AUTHORITY.USERID     =  #{gUserId}
+				AND    CM_USER_AUTHORITY.DCCODE     =  WD_INPLAN.DCCODE             
+				AND    CM_USER_AUTHORITY.STORERKEY  =  WD_INPLAN.STORERKEY          
+				AND    CM_USER_AUTHORITY.ORGANIZE   =  WD_INPLAN.ORGANIZE           
+				AND    CM_USER_AUTHORITY.AREA       =  WD_INPLAN.AREA  
+			JOIN   T_SHORTAGE 
+			ON     T_SHORTAGE.DCCODE            =  WD_INPLAN.DCCODE         
+				AND    T_SHORTAGE.STORERKEY         =  WD_INPLAN.STORERKEY
+				AND    T_SHORTAGE.ORGANIZE          =  WD_INPLAN.ORGANIZE
+				AND    T_SHORTAGE.AREA              =  WD_INPLAN.AREA
+				AND    T_SHORTAGE.SKU               =  WD_INPLAN.SKU
+			JOIN   DM_DOCUMENT_D              
+		    ON     DM_DOCUMENT_D.DCCODE         =  WD_INPLAN.DCCODE            
+			    AND    DM_DOCUMENT_D.STORERKEY      =  WD_INPLAN.STORERKEY                  
+			    AND    DM_DOCUMENT_D.DOCDT          =  WD_INPLAN.DOCDT            
+			    AND    DM_DOCUMENT_D.DOCNO          =  WD_INPLAN.DOCNO            
+			    AND    DM_DOCUMENT_D.DOCLINE        =  WD_INPLAN.DOCLINE            
+			    AND    DM_DOCUMENT_D.DOCTYPE        =  WD_INPLAN.DOCTYPE            
+			    AND    DM_DOCUMENT_D.STATUS  <![CDATA[<]]>  '90'            
+			    AND    DM_DOCUMENT_D.DEL_YN         =  'N'
+			    AND    DM_DOCUMENT_D.CHANNEL        = '1' /* 저장품만 */
+            <if test='deliverydate != null and deliverydate !=""'>	AND   DM_DOCUMENT_D.DELIVERYDATE    =  #{deliverydate}	 </if>	     
+		    JOIN   DM_DOCUMENT_H              
+		    ON     DM_DOCUMENT_H.DCCODE         =  DM_DOCUMENT_D.DCCODE            
+			    AND    DM_DOCUMENT_H.STORERKEY      =  DM_DOCUMENT_D.STORERKEY                  
+			    AND    DM_DOCUMENT_H.DOCDT          =  DM_DOCUMENT_D.DOCDT            
+			    AND    DM_DOCUMENT_H.DOCNO          =  DM_DOCUMENT_D.DOCNO            
+			    AND    DM_DOCUMENT_H.DOCTYPE        =  DM_DOCUMENT_D.DOCTYPE            
+			    AND    DM_DOCUMENT_H.DOCTYPE        = 'WD'         
+			    AND    DM_DOCUMENT_H.STATUS   <![CDATA[<]]>  '90'            
+			    AND    DM_DOCUMENT_H.DEL_YN         =  'N'     
+			<if test='docdt != null and docdt !=""'>	        AND   DM_DOCUMENT_H.DOCDT  	        =  #{docdt}  	     </if>
+			<!-- 배송그룹 공통조회 조건 -->
+			<if test='gMultiCourier != null and gMultiCourier !=""'> AND    DM_DOCUMENT_H.COURIER        =  #{gMultiCourier} </if>
+        	JOIN   MS_CUST           
+			ON     MS_CUST.STORERKEY            =  DM_DOCUMENT_H.STORERKEY         
+				AND    MS_CUST.CUSTKEY              =  DM_DOCUMENT_H.TO_CUSTKEY 
+				AND    MS_CUST.CUSTTYPE             =  DM_DOCUMENT_H.TO_CUSTTYPE                    
+				AND    MS_CUST.DEL_YN               =  'N' 
+			JOIN   MS_SKU 
+			ON     MS_SKU.STORERKEY             =  DM_DOCUMENT_D.STORERKEY         
+				AND    MS_SKU.SKU                   =  DM_DOCUMENT_D.SKU
+				AND    MS_SKU.DEL_YN                = 'N' 
+			LEFT OUTER JOIN   
+			       MS_SKUDCSET 
+			ON     MS_SKUDCSET.DCCODE           =  DM_DOCUMENT_D.DCCODE         
+				AND    MS_SKUDCSET.STORERKEY        =  DM_DOCUMENT_D.STORERKEY         
+				AND    MS_SKUDCSET.SKU              =  DM_DOCUMENT_D.SKU
+				AND    MS_SKUDCSET.DEL_YN           = 'N' 
+			WHERE  1=1
+			<if test='slipdt != null and slipdt !=""'>                              AND    WD_INPLAN.SLIPDT	            =  #{slipdt}             </if>
+				AND    WD_INPLAN.DEL_YN             = 'N'         
+				AND    WD_INPLAN.OPENQTY            > 0
+				AND    WD_INPLAN.OPENQTY            > WD_INPLAN.QTYALLOCATED
+				AND    WD_INPLAN.STATUS             <![CDATA[<]]> '90'
+	    	<!-- 상품 다중선택 -->
+	    	<if test='skuCode != null and skuCode !=""'>
+		    	AND WD_INPLAN.SKU IN (
+		    		SELECT TRIM(REGEXP_SUBSTR(#{skuCode}, '[^,]+', 1, LEVEL)) AS VAL
+					        FROM DUAL
+					        CONNECT BY LEVEL <![CDATA[<=]]> REGEXP_COUNT(#{skuCode}, '[^,]+')
+				)
+	    	</if>
+	    	GROUP BY 
+			         WD_INPLAN.DCCODE
+	    		    ,WD_INPLAN.STORERKEY
+			        ,WD_INPLAN.SLIPDT
+			        ,WD_INPLAN.SKU
+			        ,DM_DOCUMENT_D.CHANNEL
+			        ,WD_INPLAN.UOM
+            ORDER BY WD_INPLAN.DCCODE         
+			        ,WD_INPLAN.STORERKEY
+			        ,WD_INPLAN.SLIPDT
+			        ,WD_INPLAN.SKU
+			        ,DM_DOCUMENT_D.CHANNEL
+    </select>
+    
+    
+</mapper>

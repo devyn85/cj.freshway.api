@@ -1,0 +1,762 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="dpReceiptBoxService">
+    <!-- 입고확정 헤더  -->
+    <select id="getMasterList" resultType="cjfw.wms.dp.dto.DpReceiptBoxResDto">
+        WITH /* [dpReceiptBoxService.sqlx][dpReceiptBoxService.getDataHeaderList] */
+        T_DP_INPLAN AS (
+          SELECT
+            DP_INPLAN.DCCODE AS DCCODE, /** 센터코드 */
+            DP_INPLAN.STORERKEY AS STORERKEY, /** 화주코드 */
+            DP_INPLAN.DOCDT AS DOCDT, /** 문서일자 */
+            DP_INPLAN.DOCNO AS DOCNO, /** 문서번호 */
+            DP_INPLAN.DOCTYPE AS DOCTYPE, /** 문서유형 */
+            DP_INPLAN.SLIPDT AS SLIPDT, /** 전표일자 */
+            DP_INPLAN.SLIPNO AS SLIPNO, /** 전표번호 */
+            MIN(DM_DOCUMENT_D.STATUS) AS STATUS, /** 상태(MIN) */
+            MAX(DM_DOCUMENT_D.PLANT) AS PLANT /** 플랜트(MAX) */
+          FROM
+            DP_INPLAN
+            JOIN  DM_DOCUMENT_D
+              ON DP_INPLAN.DCCODE = DM_DOCUMENT_D.DCCODE
+              AND DP_INPLAN.DOCTYPE = DM_DOCUMENT_D.DOCTYPE
+              AND DP_INPLAN.SLIPDT = DM_DOCUMENT_D.DELIVERYDATE
+              AND DP_INPLAN.DOCNO = DM_DOCUMENT_D.DOCNO
+              AND DP_INPLAN.DOCLINE = DM_DOCUMENT_D.DOCLINE
+              AND DM_DOCUMENT_D.DEL_YN = 'N' <if test="status != null and status != ''">
+              AND DM_DOCUMENT_D.STATUS = #{status} </if>
+        <if test="channel != null and channel != ''">
+              AND DM_DOCUMENT_D.CHANNEL = #{channel} </if>
+            JOIN MS_SKU ON MS_SKU.STORERKEY = DP_INPLAN.STORERKEY
+              AND MS_SKU.SKU = DP_INPLAN.SKU
+              AND MS_SKU.SERIALYN = 'N' <if test="storagetype != null and storagetype != ''">
+              AND MS_SKU.STORAGETYPE = #{storagetype} </if>
+          WHERE
+            DP_INPLAN.DEL_YN = 'N' <!-- AND DP_INPLAN.STATUS <![CDATA[<]]>'90' -->
+      <!-- START.권한센터 -->
+            AND EXISTS (SELECT 1
+                          FROM CM_USER_AUTHORITY
+                         WHERE CM_USER_AUTHORITY.DCCODE = DP_INPLAN.DCCODE
+                            AND CM_USER_AUTHORITY.STORERKEY = DP_INPLAN.STORERKEY
+                            AND CM_USER_AUTHORITY.ORGANIZE = DP_INPLAN.ORGANIZE
+                            AND CM_USER_AUTHORITY.AREA = DP_INPLAN.AREA
+                           AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey}
+                           AND CM_USER_AUTHORITY.USERID    = #{gUserId}
+                           AND CM_USER_AUTHORITY.DCCODE    = #{fixdccode}
+                           AND CM_USER_AUTHORITY.AREA      = #{gArea}
+                           <!-- 창고.다중검색 -->
+                           <if test='gOrganizeMulti != null and gOrganizeMulti.length > 0'>
+                               AND CM_USER_AUTHORITY.ORGANIZE IN
+                               <foreach collection="gOrganizeMulti" item="code" open="(" close=")" separator=",">
+                                 #{code}
+                               </foreach>
+                           </if>
+                       )
+            <!-- END.권한센터	-->
+        <if test="docdtFrom != null and docdtFrom != ''">
+            AND DP_INPLAN.DOCDT <![CDATA[>=]]> #{docdtFrom} </if>
+        <if test="docdtTo != null and docdtTo != ''">
+            AND DP_INPLAN.DOCDT <![CDATA[<=]]> #{docdtTo} </if>
+        <if test="slipdtFrom != null and slipdtFrom != ''">
+            AND DP_INPLAN.SLIPDT <![CDATA[>=]]> #{slipdtFrom} </if>
+        <if test="slipdtTo != null and slipdtTo != ''">
+            AND DP_INPLAN.SLIPDT <![CDATA[<=]]> #{slipdtTo} </if> <!-- 상품 다중선택 -->
+      <!-- 상품 다중선택 -->
+        <if test="skuMulti != null and skuMulti != '' ">
+            <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                <foreach collection="skuMulti" item="item">
+                    OR DP_INPLAN.SKU IN
+                    <foreach collection="item" item="code" open="(" close=")" separator=",">
+                        #{code}
+                    </foreach>
+                </foreach>
+            </trim>
+        </if>
+        <if test="docnoMulti != null and docnoMulti != ''">
+            AND DP_INPLAN.SLIPNO IN
+            <foreach collection="docnoMulti" item="code" open="(" close=")" separator=",">
+                #{code}
+            </foreach>
+        </if>
+        <if test="ordertype != null and ordertype != ''">
+            AND DP_INPLAN.ORDERTYPE = #{ordertype}
+        </if> <!-- 현재 전량 결품으로 처리후 다시 살리는 경우 리스트가 안나오고 있어 결품처리된 건도 리스트게 나오게 해야함
+            AND DP_INPLAN.ORDERQTY <![CDATA[>]]> 0
+        /** 결품으로만 확정완료된건은 안보이게 하기위해서 */
+        -->
+          GROUP BY
+            DP_INPLAN.DCCODE,
+            DP_INPLAN.STORERKEY,
+            DP_INPLAN.DOCDT,
+            DP_INPLAN.DOCNO,
+            DP_INPLAN.DOCTYPE,
+            DP_INPLAN.SLIPDT,
+            DP_INPLAN.SLIPNO
+        )
+        SELECT
+          '0' AS CHECKYN, /** 체크여부 */
+          DM_DOCUMENT_H.DCCODE AS DCCODE, /** 센터코드 */
+          DM_DOCUMENT_H.DOCNO AS DOCNO, /** 문서번호 */
+          DM_DOCUMENT_H.STORERKEY AS STORERKEY, /** 화주코드 */
+          DM_DOCUMENT_H.DOCTYPE AS DOCTYPE, /** 문서유형 */
+          DM_DOCUMENT_H.POTYPE AS POTYPE, /** 발주유형 */
+          FN_CODEDESCR(DM_DOCUMENT_H.STORERKEY,'POTYPE_DP',DM_DOCUMENT_H.POTYPE) AS POTYPENAME, /** 발주유형명 */
+          DM_DOCUMENT_H.ORGANIZE AS ORGANIZE, /** 창고코드 */
+          FN_DESCR_ORGANIZE(DM_DOCUMENT_H.DCCODE,DM_DOCUMENT_H.ORGANIZE) AS ORGANIZENAME, /** 창고명 */
+          DM_DOCUMENT_H.ORDERTYPE AS ORDERTYPE, /** 주문유형 */
+          FN_CODEDESCR(DM_DOCUMENT_H.STORERKEY,'ORDERTYPE_DP',DM_DOCUMENT_H.ORDERTYPE) AS ORDERTYPE_NAME, /** 주문유형명 */
+          MIN(T_DP_INPLAN.STATUS) AS STATUS, /** 상태 */
+          FN_CODEDESCR(T_DP_INPLAN.STORERKEY,'STATUS_DP',MIN(T_DP_INPLAN.STATUS)) AS STATUSNAME, /** 상태명 */
+          DM_DOCUMENT_H.DOCDT AS DOCDT, /** 문서일자 */
+          DM_DOCUMENT_H.FROM_CUSTKEY AS FROM_CUSTKEY, /** 협력사코드 */
+          MAX(DM_DOCUMENT_H.FROM_CUSTNAME) AS FROM_CUSTNAME, /** 협력사명 */
+          T_DP_INPLAN.SLIPDT AS SLIPDT, /** 전표일자 */
+          T_DP_INPLAN.SLIPNO AS SLIPNO, /** 전표번호 */
+          '[' || MAX(T_DP_INPLAN.PLANT) || ']' || FN_DESCR_PLANT(MAX(T_DP_INPLAN.PLANT)) AS PLANT /** 플랜트 */
+        FROM
+          T_DP_INPLAN
+          JOIN DM_DOCUMENT_H
+          ON DM_DOCUMENT_H.DCCODE = T_DP_INPLAN.DCCODE
+            AND DM_DOCUMENT_H.STORERKEY = T_DP_INPLAN.STORERKEY
+            AND DM_DOCUMENT_H.DOCDT = T_DP_INPLAN.DOCDT
+            AND DM_DOCUMENT_H.DOCTYPE = T_DP_INPLAN.DOCTYPE
+            AND DM_DOCUMENT_H.DOCNO = T_DP_INPLAN.DOCNO
+            AND DM_DOCUMENT_H.DOCTYPE = 'DP'
+            AND DM_DOCUMENT_H.DEL_YN = 'N' <!-- 배송그룹 공통조회 조건 -->
+        <if test="gMultiCourier != null and gMultiCourier != ''">
+            AND DM_DOCUMENT_H.COURIER = #{gMultiCourier}
+        </if> <!-- 협력사 다중선택 -->
+        <if test="fromCustkeyMulti != null and fromCustkeyMulti != ''">
+             AND  DM_DOCUMENT_H.FROM_CUSTKEY      IN
+            <foreach collection="fromCustkeyMulti" item="item" open="(" separator="," close=")">
+                 #{item}
+            </foreach>
+        </if>
+        GROUP BY
+          DM_DOCUMENT_H.DCCODE,
+          DM_DOCUMENT_H.DOCNO,
+          DM_DOCUMENT_H.STORERKEY,
+          DM_DOCUMENT_H.DOCTYPE,
+          DM_DOCUMENT_H.POTYPE,
+          DM_DOCUMENT_H.ORGANIZE,
+          DM_DOCUMENT_H.ORDERTYPE,
+          DM_DOCUMENT_H.DOCDT,
+          DM_DOCUMENT_H.FROM_CUSTKEY,
+          T_DP_INPLAN.STORERKEY,
+          T_DP_INPLAN.SLIPDT,
+          T_DP_INPLAN.SLIPNO
+        ORDER BY
+          DM_DOCUMENT_H.ORDERTYPE,
+          DM_DOCUMENT_H.POTYPE,
+          DM_DOCUMENT_H.FROM_CUSTKEY,
+          DM_DOCUMENT_H.DOCNO,
+          T_DP_INPLAN.SLIPDT,
+          T_DP_INPLAN.SLIPNO
+
+    </select>
+    <!-- 입고확정처리 상세 -->
+    <select id="getDetailList" resultType="cjfw.wms.dp.dto.DpReceiptBoxResDetailDto">
+        WITH T_DP_INSPECT AS (
+          SELECT
+            DP_INSPECT.DCCODE AS DCCODE,
+            DP_INSPECT.STORERKEY AS STORERKEY,
+            DP_INSPECT.ORGANIZE AS ORGANIZE,
+            DP_INSPECT.AREA AS AREA,
+            DP_INSPECT.DOCDT AS DOCDT,
+            DP_INSPECT.DOCNO AS DOCNO,
+            DP_INSPECT.DOCLINE AS DOCLINE,
+            DP_INSPECT.DOCTYPE AS DOCTYPE,
+            DP_INSPECT.SLIPDT AS SLIPDT,
+            DP_INSPECT.SLIPNO AS SLIPNO,
+            DP_INSPECT.SLIPLINE AS SLIPLINE,
+            DP_INSPECT.SLIPTYPE AS SLIPTYPE,
+            DP_INSPECT.SKU AS SKU,
+            DP_INSPECT.LOTTABLE01 AS LOTTABLE01,
+            DP_INSPECT.STOCKID AS STOCKID,
+            DP_INSPECT.STOCKGRADE AS STOCKGRADE,
+            SUM(DP_INSPECT.INSPECTQTY) AS INSPECTQTY,
+            SUM(DP_INSPECT.CONFIRMQTY) AS CONFIRMQTY,
+            DP_INSPECT.TOLOC AS TOLOC
+          FROM
+            DP_INSPECT
+          WHERE
+            1 = 1
+        <if test="fixdccode != null and fixdccode != ''">
+            AND DP_INSPECT.DCCODE = #{fixdccode} </if>
+        <if test="gStorerkey != null and gStorerkey != ''">
+            AND DP_INSPECT.STORERKEY = #{gStorerkey} </if>
+        <if test="gOrganize != null and gOrganize != ''">
+            AND DP_INSPECT.ORGANIZE = #{gOrganize} </if>
+        <if test="gArea != null and gArea != ''">
+            AND DP_INSPECT.AREA = #{gArea} </if> <!-- 창고 다중선택 -->
+        <if test="gMultiOrganize != null and gMultiOrganize != ''">
+            AND DP_INSPECT.ORGANIZE IN (
+              SELECT
+                TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+              FROM
+                (
+                  SELECT
+                    #{gMultiOrganize} AS VAL
+                  FROM
+                    DUAL
+                )  A CONNECT BY INSTR(A.VAL,',',1,LEVEL - 1) > 0
+            ) </if>
+            AND DP_INSPECT.DCCODE = #{dccode}
+            AND DP_INSPECT.STORERKEY = #{storerkey}
+            AND DP_INSPECT.SLIPDT = #{slipdt}
+            AND DP_INSPECT.SLIPNO = #{slipno}
+            AND DP_INSPECT.OPENQTY > 0
+            AND DP_INSPECT.INSPECTQTY > 0
+          GROUP BY
+            DP_INSPECT.DCCODE,
+            DP_INSPECT.STORERKEY,
+            DP_INSPECT.ORGANIZE,
+            DP_INSPECT.AREA,
+            DP_INSPECT.DOCDT,
+            DP_INSPECT.DOCNO,
+            DP_INSPECT.DOCLINE,
+            DP_INSPECT.DOCTYPE,
+            DP_INSPECT.SLIPDT,
+            DP_INSPECT.SLIPNO,
+            DP_INSPECT.SLIPLINE,
+            DP_INSPECT.SLIPTYPE,
+            DP_INSPECT.SKU,
+            DP_INSPECT.LOTTABLE01,
+            DP_INSPECT.STOCKID,
+            DP_INSPECT.STOCKGRADE,
+            DP_INSPECT.TOLOC
+        ),
+        T_DP_EXCPT_SKU AS (
+        	SELECT
+	        	SLIPNO,
+		        DELIVERYDATE,
+		        SKU,
+		        EXCPT_YN,
+		        DRAFT_NO,
+		        EDITWHO,
+		        SLIPLINE_SEQ
+		    FROM (
+		        SELECT
+	        	    SLIPNO,
+		            DELIVERYDATE,
+		            SKU,
+		            EXCPT_YN,
+		            DRAFT_NO,
+		            EDITWHO,
+		            SLIPLINE_SEQ,
+		            ROW_NUMBER() OVER (
+		                PARTITION BY DELIVERYDATE, SKU
+		                ORDER BY EDITDATE DESC
+		            ) AS RN
+		        FROM DP_EXCPT_SKU
+<!--		        WHERE EXCPT_YN = 'Y'-->
+		    )
+		    WHERE RN = 1
+        )
+        SELECT
+          /* [dpReceiptBoxService.sqlx][dpReceiptBoxService.getDataDetailList][입고확정처리 문서 Detail정보] */
+          '0' AS CHECKYN, /** 체크여부 */
+          DP_INPLAN.DCCODE AS DCCODE, /** 센터코드 */
+          DP_INPLAN.STORERKEY AS STORERKEY, /** 화주코드 */
+          DP_INPLAN.ORGANIZE AS ORGANIZE, /** 창고코드 */
+          DP_INPLAN.DOCDT AS DOCDT, /** 문서일자 */
+          DP_INPLAN.DOCNO AS DOCNO, /** 문서번호 */
+          DP_INPLAN.DOCLINE AS DOCLINE, /** 문서라인 */
+          DP_INPLAN.SLIPDT AS SLIPDT, /** 전표일자 */
+          DP_INPLAN.SLIPNO AS SLIPNO, /** 전표번호 */
+          DP_INPLAN.SLIPLINE AS SLIPLINE, /** 전표라인 */
+          DP_INPLAN.SKU AS SKU, /** 상품코드 */
+          MS_SKU.DESCRIPTION AS SKUNAME, /** 상품명 */
+          DM_DOCUMENT_D.STORERUOM AS UOM, /** UOM */
+          DM_DOCUMENT_D.BUNJA AS BUNJA, /** 분자 */
+          DM_DOCUMENT_D.BUNMO AS BUNMO, /** 분모 */
+          FN_UOMCAL(DM_DOCUMENT_D.BUNMO,DM_DOCUMENT_D.BUNJA,DP_INPLAN.ORDERQTY + DP_INPLAN.CANCELQTY) AS ORDERQTY,
+          TRUNC(
+            FN_CONV_UOM(
+              DP_INPLAN.STORERKEY
+              /** 발주수량(BOX) */,DP_INPLAN.SKU,DP_INPLAN.UOM,'BOX',DP_INPLAN.ORDERQTY + DP_INPLAN.CANCELQTY
+            )
+          ) AS ORDERQTY_BOX,
+          MOD(
+            FN_CONV_UOM(
+              DP_INPLAN.STORERKEY
+              /** 발주수량(EA) */,DP_INPLAN.SKU,DP_INPLAN.UOM,'EA',(DP_INPLAN.ORDERQTY + DP_INPLAN.CANCELQTY)
+            ),
+            MS_SKU.QTYPERBOX
+          ) AS ORDERQTY_EA,
+          FN_UOMCAL(
+            DM_DOCUMENT_D.BUNMO
+            /** 검사수량 */,DM_DOCUMENT_D.BUNJA,NVL(T_DP_INSPECT.INSPECTQTY,DP_INPLAN.INSPECTQTY)
+          ) AS INSPECTQTY,
+          TRUNC(
+            FN_CONV_UOM(
+              DP_INPLAN.STORERKEY
+              /** 검사수량(BOX) */,
+              DP_INPLAN.SKU,
+              DP_INPLAN.UOM,
+              'BOX',
+              NVL(T_DP_INSPECT.INSPECTQTY,DP_INPLAN.INSPECTQTY)
+            )
+          ) AS INSPECTQTY_BOX,
+          MOD(
+            FN_CONV_UOM(
+              DP_INPLAN.STORERKEY
+              /** 검사수량(EA) */,DP_INPLAN.SKU,DP_INPLAN.UOM,'EA',NVL(T_DP_INSPECT.INSPECTQTY,DP_INPLAN.INSPECTQTY)
+            ),
+            MS_SKU.QTYPERBOX
+          ) AS INSPECTQTY_EA,
+          FN_UOMCAL(
+            DM_DOCUMENT_D.BUNMO
+            /** 확정수량 */,DM_DOCUMENT_D.BUNJA,NVL(T_DP_INSPECT.CONFIRMQTY,DP_INPLAN.CONFIRMQTY)
+          ) AS CONFIRMQTY,
+          TRUNC(
+            FN_CONV_UOM(
+              DP_INPLAN.STORERKEY
+              /** 확정수량(BOX) */,
+              DP_INPLAN.SKU,
+              DP_INPLAN.UOM,
+              'BOX',
+              NVL(T_DP_INSPECT.CONFIRMQTY,DP_INPLAN.CONFIRMQTY)
+            )
+          ) AS CONFIRMQTY_BOX,
+          MOD(
+            FN_CONV_UOM(
+              DP_INPLAN.STORERKEY
+              /** 확정수량(EA) */,DP_INPLAN.SKU,DP_INPLAN.UOM,'EA',NVL(T_DP_INSPECT.CONFIRMQTY,DP_INPLAN.CONFIRMQTY)
+            ),
+            MS_SKU.QTYPERBOX
+          ) AS CONFIRMQTY_EA,
+          FN_UOMCAL(
+            DM_DOCUMENT_D.BUNMO
+            /** 결품수량 */,DM_DOCUMENT_D.BUNJA,DP_INPLAN.CANCELQTY
+          ) AS SHORTAGEQTY,
+          TRUNC(
+            FN_CONV_UOM(
+              DP_INPLAN.STORERKEY
+              /** 결품수량(BOX) */,DP_INPLAN.SKU,DP_INPLAN.UOM,'BOX',DP_INPLAN.CANCELQTY
+            )
+          ) AS SHORTAGEQTY_BOX,
+          MOD(
+            FN_CONV_UOM(
+              DP_INPLAN.STORERKEY
+              /** 결품수량(EA) */,DP_INPLAN.SKU,DP_INPLAN.UOM,'EA',DP_INPLAN.CANCELQTY
+            ),
+            MS_SKU.QTYPERBOX
+          ) AS SHORTAGEQTY_EA,
+          0 AS SHORTAGETRANQTY, /** 결품이동수량 */
+          0 AS SHORTAGETRANQTY_BOX, /** 결품이동수량(BOX) */
+          0 AS SHORTAGETRANQTY_EA, /** 결품이동수량(EA) */
+          0 AS TRANQTY_BOX, /** 처리수량(BOX) */
+          0 AS TRANQTY_EA, /** 처리수량(EA) */
+          0 AS TRANQTY, /** 처리수량 */
+          0 AS TRANQTY, /** 처리수량(중복컬럼) */
+          'STAGE' AS TOLOC, /** 적치대상로케이션 */
+          NVL(T_DP_INSPECT.LOTTABLE01,DP_INPLAN.LOTTABLE01) AS LOTTABLE01, /** 유통기한 */
+          NVL(CASE WHEN MS_SKU.DURATIONTYPE = '1' AND REGEXP_LIKE(NVL(T_DP_INSPECT.LOTTABLE01,DP_INPLAN.LOTTABLE01), '^[0-9]{8}$')
+          THEN TO_CHAR(TO_DATE(NVL(T_DP_INSPECT.LOTTABLE01,DP_INPLAN.LOTTABLE01),'YYYYMMDD') - (MS_SKU.DURATION - 1), 'YYYYMMDD')
+          ELSE NVL(T_DP_INSPECT.LOTTABLE01,DP_INPLAN.LOTTABLE01)
+          END,'STD') AS LOT_MANUFACTURE,                    /** 제조 */
+          NVL(CASE WHEN MS_SKU.DURATIONTYPE != '1' AND REGEXP_LIKE(NVL(T_DP_INSPECT.LOTTABLE01,DP_INPLAN.LOTTABLE01), '^[0-9]{8}$')
+          THEN TO_CHAR(TO_DATE(NVL(T_DP_INSPECT.LOTTABLE01,DP_INPLAN.LOTTABLE01),'YYYYMMDD') + (MS_SKU.DURATION - 1), 'YYYYMMDD')
+          ELSE NVL(T_DP_INSPECT.LOTTABLE01,DP_INPLAN.LOTTABLE01)
+          END,'STD') AS LOT_EXPIRE,                         /** 유통 */
+          FN_LOTDURATION(DP_INPLAN.STORERKEY,MS_SKU.DURATIONTYPE,MS_SKU.DURATION,NVL(T_DP_INSPECT.LOTTABLE01,DP_INPLAN.LOTTABLE01),'N') || '/' || MS_SKU.DURATION AS DURATION_TERM, /** 잔여기간/총기간 */
+          MS_SKU.COLORDESCR AS COLORDESCR, /** 색상/규격 */
+          DM_DOCUMENT_D.REFERENCE02 AS REFERENCE02, /** 참조2 */
+          DM_DOCUMENT_D.REASONCODE AS REASONCODE, /** 사유코드 */
+          DM_DOCUMENT_D.REASONMSG AS REASONMSG, /** 사유메시지 */
+          CASE
+            WHEN NVL(T_DP_INSPECT.LOTTABLE01,DP_INPLAN.LOTTABLE01) = 'STD' THEN 'N'
+            WHEN MONTHS_BETWEEN(TO_DATE(NVL(T_DP_INSPECT.LOTTABLE01,DP_INPLAN.LOTTABLE01),'yyyy-mm-dd'),SYSDATE) > 3 THEN 'N'
+            ELSE 'Y'
+          END AS NEARDURATIONYN, /** 유통임박여부 */
+          DM_DOCUMENT_D.STATUS AS STATUS, /** 상태 */
+          FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY,'STATUS_DP',DM_DOCUMENT_D.STATUS) AS STATUSNAME, /** 상태명 */
+          MS_SKU.QTYPERBOX AS QTYPERBOX, /** 입수 */
+          DM_DOCUMENT_D.CHANNEL AS CHANNEL, /** 저장유형 */
+          MS_SKU.DURATION AS DURATION, /** 유통기한기간 */
+          MS_SKU.DURATIONTYPE AS DURATIONTYPE, /** 유통기한구분 */
+          UNISTR('') AS LASTLOTTABLE01, /** 최종유통기한(미사용) */
+          NVL(T_DP_INSPECT.STOCKID,DP_INPLAN.STOCKID) AS STOCKID, /** 재고ID */
+          NVL(T_DP_INSPECT.STOCKGRADE,DP_INPLAN.STOCKGRADE) AS STOCKGRADE, /** 재고등급 */
+          DECODE(
+            SPDP_RECEIPT.FN_GETTOLOC (DP_INPLAN.DCCODE,DP_INPLAN.STORERKEY,DP_INPLAN.SKU,DM_DOCUMENT_D.PLANT,DM_DOCUMENT_D.STORAGELOC,DM_DOCUMENT_D.CHANNEL),
+            'CROSS',
+            'CROSS',
+            'STAGE'
+          ) AS CROSSLOC, /** 교차도크여부 */
+          DM_DOCUMENT_D.PLANT AS PLANT, /** 플랜트 */
+          '[' || DM_DOCUMENT_D.PLANT || ']' || FN_DESCR_PLANT(DM_DOCUMENT_D.PLANT) AS PLANT_DESCR, /** 플랜트명 */
+          FN_CODEDESCR(DP_INPLAN.STORERKEY,'PUTAWAYTYPE',DM_DOCUMENT_D.CHANNEL) AS CHANNEL_NAME, /** 적치유형명 */
+          FN_CODEDESCR(MS_SKU.STORERKEY,'STORAGETYPE',MS_SKU.STORAGETYPE) AS STORAGETYPENAME, /** 보관유형명 */
+          LPAD(MS_SKU.BOXPERPLT,4,'0') || '-' || LPAD(MS_SKU.QTYPERBOX,4,'0') AS BOX_INFO, <!-- 입수정보 --> /** 입수정보(PLT-BOX) */
+          UNISTR('') AS PLTID, /** 팔렛ID */
+          DP_INPLAN.UOM AS DP_UOM, /** 발주단위 */
+          MS_SKU.BOXPERPLT AS BOXPERPLT, /** PLT당 BOX수 */
+          NVL(
+            TRUNC(FN_CONV_UOM(DM_DOCUMENT_D_WD.STORERKEY,DM_DOCUMENT_D_WD.SKU,DM_DOCUMENT_D_WD.UOM,'BOX',DM_DOCUMENT_D_WD.CONFIRMQTY)),
+            0
+          ) AS CONFIRMQTY_BOX_WD, /** WD확정수량(BOX) */
+          NVL(
+            MOD(
+              FN_CONV_UOM(DM_DOCUMENT_D_WD.STORERKEY,DM_DOCUMENT_D_WD.SKU,DP_INPLAN.UOM,'EA',(DM_DOCUMENT_D_WD.CONFIRMQTY)),
+              MS_SKU.QTYPERBOX
+            ),
+            0
+          ) AS CONFIRMQTY_EA_WD /** WD확정수량(EA) */
+          ,MS_DC_PLT_LOAD.BOXPERLAYER AS BOXPERLAYER /** 방수 */
+          ,MS_DC_PLT_LOAD.LAYERPERPLT AS LAYERPERPLT /** 단수 */
+          , DP_EXCPT_SKU.EXCPT_YN AS EXCPT_YN  /** 입고예외여부 */
+          , DP_EXCPT_SKU.EXCPT_YN AS EXCPT_YN_ORI  /** 입고예외여부 */
+          , DP_EXCPT_SKU.DRAFT_NO AS DRAFT_NO  /** 기안번호 */
+          , DP_EXCPT_SKU.SLIPLINE_SEQ AS SLIPLINE_SEQ  /** SEQ */
+          , DP_EXCPT_SKU.EDITWHO AS EDITWHO  /** 최종변경자 */
+          , FRAMEONE_USER.USER_NM AS EDITWHO_NAME /** 예외입력자 이름 */
+        FROM
+          DP_INPLAN
+        JOIN DM_DOCUMENT_H
+          ON  DP_INPLAN.DCCODE = DM_DOCUMENT_H.DCCODE
+            AND DP_INPLAN.DOCTYPE = DM_DOCUMENT_H.DOCTYPE
+            AND DP_INPLAN.SLIPDT = DM_DOCUMENT_H.DELIVERYDATE
+            AND DP_INPLAN.DOCNO = DM_DOCUMENT_H.DOCNO
+            AND DM_DOCUMENT_H.DOCTYPE = 'DP'
+            AND DM_DOCUMENT_H.DEL_YN = 'N' <!-- 협력사 다중선택 -->
+        <if test="fromCustkeyMulti != null and fromCustkeyMulti != ''">
+             AND  DM_DOCUMENT_H.FROM_CUSTKEY      IN
+            <foreach collection="fromCustkeyMulti" item="item" open="(" separator="," close=")">
+                 #{item}
+            </foreach>
+        </if>
+          JOIN DM_DOCUMENT_D
+          ON  DP_INPLAN.DCCODE = DM_DOCUMENT_D.DCCODE
+            AND DP_INPLAN.DOCTYPE = DM_DOCUMENT_D.DOCTYPE
+            AND DP_INPLAN.SLIPDT = DM_DOCUMENT_D.DELIVERYDATE
+            AND DP_INPLAN.DOCNO = DM_DOCUMENT_D.DOCNO
+            AND DP_INPLAN.DOCLINE = DM_DOCUMENT_D.DOCLINE
+            AND DM_DOCUMENT_D.CHANNEL IN ('1','2','3') <!-- 저장품만 처리함 1.저장 2.일배 3.광역일배 2015.01.26 SLLEE MODIFY [ 1,2] 김해경님 요청 -->
+        <if test="channel != null and channel != ''">
+            AND DM_DOCUMENT_D.CHANNEL LIKE #{channel} </if>
+            AND DM_DOCUMENT_D.DEL_YN = 'N'
+          LEFT OUTER JOIN DM_DOCUMENT_D DM_DOCUMENT_D_WD ON DM_DOCUMENT_D_WD.STORERKEY = DM_DOCUMENT_H.STORERKEY
+            AND DM_DOCUMENT_D_WD.DCCODE = LEFT (DM_DOCUMENT_H.FROM_CUSTKEY, 4)
+            AND DM_DOCUMENT_D_WD.DOCNO = DM_DOCUMENT_D.DOCNO
+            AND DM_DOCUMENT_D_WD.DOCLINE = DM_DOCUMENT_D.DOCLINE
+            AND DM_DOCUMENT_D_WD.DOCTYPE = 'WD'
+            AND DM_DOCUMENT_D_WD.WORKPROCESSCODE = 'STO'
+            AND DM_DOCUMENT_D_WD.DEL_YN = 'N'
+          JOIN MS_SKU ON MS_SKU.STORERKEY = DP_INPLAN.STORERKEY
+            AND MS_SKU.SKU = DP_INPLAN.SKU <if test="storagetype != null and storagetype != ''">
+            AND MS_SKU.STORAGETYPE LIKE #{storagetype} </if>
+          LEFT OUTER JOIN T_DP_INSPECT
+          ON T_DP_INSPECT.DCCODE = DP_INPLAN.DCCODE
+            AND T_DP_INSPECT.STORERKEY = DP_INPLAN.STORERKEY
+            AND T_DP_INSPECT.ORGANIZE = DP_INPLAN.ORGANIZE
+            AND T_DP_INSPECT.AREA = DP_INPLAN.AREA
+            AND T_DP_INSPECT.DOCDT = DP_INPLAN.DOCDT
+            AND T_DP_INSPECT.DOCNO = DP_INPLAN.DOCNO
+            AND T_DP_INSPECT.DOCLINE = DP_INPLAN.DOCLINE
+            AND T_DP_INSPECT.DOCTYPE = DP_INPLAN.DOCTYPE
+            AND T_DP_INSPECT.SLIPDT = DP_INPLAN.SLIPDT
+            AND T_DP_INSPECT.SLIPNO = DP_INPLAN.SLIPNO
+            AND T_DP_INSPECT.SLIPLINE = DP_INPLAN.SLIPLINE
+            AND T_DP_INSPECT.SLIPTYPE = DP_INPLAN.SLIPTYPE
+            AND T_DP_INSPECT.SKU = DP_INPLAN.SKU
+          LEFT OUTER JOIN MS_SKUCHAIN
+            ON MS_SKUCHAIN.SKU = DP_INPLAN.SKU
+            AND MS_SKUCHAIN.STORERKEY = DP_INPLAN.STORERKEY
+            AND MS_SKUCHAIN.DEL_YN = 'N'
+          LEFT OUTER JOIN MS_DC_PLT_LOAD
+            ON MS_DC_PLT_LOAD.DCCODE = DP_INPLAN.DCCODE
+            AND MS_DC_PLT_LOAD.PLANT = DM_DOCUMENT_D.PLANT
+            AND MS_DC_PLT_LOAD.STORERKEY = DP_INPLAN.STORERKEY
+            AND MS_DC_PLT_LOAD.SKU = DP_INPLAN.SKU
+            AND MS_DC_PLT_LOAD.CUSTKEY = DP_INPLAN.CUSTKEY
+          LEFT JOIN T_DP_EXCPT_SKU DP_EXCPT_SKU
+        	ON DP_EXCPT_SKU.SKU = DP_INPLAN.SKU
+        	AND DP_EXCPT_SKU.DELIVERYDATE = DP_INPLAN.SLIPDT
+        	AND DP_EXCPT_SKU.SLIPNO = DP_INPLAN.SLIPNO
+          LEFT JOIN FRAMEONE_USER
+            ON FRAMEONE_USER.USER_ID = DP_EXCPT_SKU.EDITWHO
+        WHERE
+          DP_INPLAN.DCCODE = #{dccode}
+          AND DP_INPLAN.STORERKEY = #{storerkey}
+          AND DP_INPLAN.SLIPDT = #{slipdt}
+          AND DP_INPLAN.SLIPNO = #{slipno} <!-- 상품 다중선택 -->
+        <!-- 상품 다중선택 -->
+        <if test="skuMulti != null and skuMulti != '' ">
+            <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                <foreach collection="skuMulti" item="item">
+                    OR DP_INPLAN.SKU IN
+                    <foreach collection="item" item="code" open="(" close=")" separator=",">
+                        #{code}
+                    </foreach>
+                </foreach>
+            </trim>
+        </if>
+        <if test="docnoMulti != null and docnoMulti != ''">
+            AND DP_INPLAN.SLIPNO IN
+            <foreach collection="docnoMulti" item="code" open="(" close=")" separator=",">
+                #{code}
+            </foreach>
+        </if>
+        <if test="ordertype != null and ordertype != ''">
+          AND DP_INPLAN.ORDERTYPE LIKE #{ordertype}
+        </if>
+      <!-- START.권한센터 -->
+        AND EXISTS (SELECT 1
+                      FROM CM_USER_AUTHORITY
+                     WHERE CM_USER_AUTHORITY.DCCODE = DP_INPLAN.DCCODE
+                    AND CM_USER_AUTHORITY.STORERKEY = DP_INPLAN.STORERKEY
+                    AND CM_USER_AUTHORITY.ORGANIZE = DP_INPLAN.ORGANIZE
+                    AND CM_USER_AUTHORITY.AREA = DP_INPLAN.AREA
+                       AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey}
+                       AND CM_USER_AUTHORITY.USERID    = #{gUserId}
+                       AND CM_USER_AUTHORITY.DCCODE    = #{fixdccode}
+                       AND CM_USER_AUTHORITY.AREA      = #{gArea}
+                       <!-- 창고.다중검색 -->
+                       <if test='gOrganizeMulti != null and gOrganizeMulti.length > 0'>
+                           AND CM_USER_AUTHORITY.ORGANIZE IN
+                           <foreach collection="gOrganizeMulti" item="code" open="(" close=")" separator=",">
+                             #{code}
+                           </foreach>
+                       </if>
+                   )
+        <!-- END.권한센터	-->
+<!--          AND DP_INPLAN.ORDERQTY <![CDATA[>]]> 0-->
+        /** 결품으로만 확정완료된건은 안보이게 하기위해서 */
+        ORDER BY
+          DP_INPLAN.SLIPLINE,
+          DP_INPLAN.SKU
+
+
+    </select>
+    <!-- 입고확정처리 엑셀 -->
+    <select id="getExcelList" resultType="cjfw.wms.dp.dto.DpReceiptBoxResExcelDto">
+        SELECT
+          /* [dpReceiptBoxService.sqlx][dpReceiptBoxService.getDataExcelList][입고확정처리 엑셀] */
+          '0' AS CHECKYN, /** 체크여부 */
+          DP_INPLAN.DCCODE AS DCCODE, /** 센터코드 */
+          DP_INPLAN.STORERKEY AS STORERKEY, /** 화주코드 */
+          DP_INPLAN.ORGANIZE AS ORGANIZE, /** 창고코드 */
+          DP_INPLAN.DOCDT AS DOCDT, /** 문서일자 */
+          DP_INPLAN.DOCNO AS DOCNO, /** 문서번호 */
+          DP_INPLAN.DOCLINE AS DOCLINE, /** 문서라인 */
+          DP_INPLAN.SLIPDT AS SLIPDT, /** 전표일자 */
+          DP_INPLAN.SLIPNO AS SLIPNO, /** 전표번호 */
+          DP_INPLAN.SLIPLINE AS SLIPLINE, /** 전표라인 */
+          DM_DOCUMENT_H.POTYPE AS POTYPE, /** 발주유형 */
+          FN_CODEDESCR(DM_DOCUMENT_H.STORERKEY,'POTYPE_DP',DM_DOCUMENT_H.POTYPE) AS POTYPENAME,
+          FN_DESCR_ORGANIZE(DM_DOCUMENT_H.DCCODE,DM_DOCUMENT_H.ORGANIZE) AS ORGANIZENAME,
+          DM_DOCUMENT_H.ORDERTYPE AS ORDERTYPE, /** 주문유형 */
+          FN_CODEDESCR(DM_DOCUMENT_H.STORERKEY,'ORDERTYPE_DP',DM_DOCUMENT_H.ORDERTYPE) AS ORDERTYPE_NAME,
+          DM_DOCUMENT_H.FROM_CUSTKEY AS FROM_CUSTKEY, /** 협력사코드 */
+          DM_DOCUMENT_H.FROM_CUSTNAME AS FROM_CUSTNAME, /** 협력사명 */
+          DP_INPLAN.SKU AS SKU, /** 상품코드 */
+          MS_SKU.DESCRIPTION AS SKUNAME, /** 상품명 */
+          DM_DOCUMENT_D.STORERUOM AS UOM, /** UOM */
+          DM_DOCUMENT_D.BUNJA AS BUNJA, /** 분자 */
+          DM_DOCUMENT_D.BUNMO AS BUNMO, /** 분모 */
+          FN_UOMCAL(DM_DOCUMENT_D.BUNMO,DM_DOCUMENT_D.BUNJA,DP_INPLAN.ORDERQTY + DP_INPLAN.CANCELQTY) AS ORDERQTY,
+          TRUNC(
+            FN_CONV_UOM(
+              DP_INPLAN.STORERKEY
+              /** 발주수량(BOX) */,DP_INPLAN.SKU,DP_INPLAN.UOM,'BOX',DP_INPLAN.ORDERQTY + DP_INPLAN.CANCELQTY
+            )
+          ) AS ORDERQTY_BOX,
+          MOD(
+            FN_CONV_UOM(
+              DP_INPLAN.STORERKEY
+              /** 발주수량(EA) */,DP_INPLAN.SKU,DP_INPLAN.UOM,'EA',(DP_INPLAN.ORDERQTY + DP_INPLAN.CANCELQTY)
+            ),
+            MS_SKU.QTYPERBOX
+          ) AS ORDERQTY_EA,
+          FN_UOMCAL(
+            DM_DOCUMENT_D.BUNMO
+            /** 검사수량 */,DM_DOCUMENT_D.BUNJA,DP_INPLAN.INSPECTQTY
+          ) AS INSPECTQTY,
+          TRUNC(
+            FN_CONV_UOM(
+              DP_INPLAN.STORERKEY
+              /** 검사수량(BOX) */,DP_INPLAN.SKU,DP_INPLAN.UOM,'BOX',DP_INPLAN.INSPECTQTY
+            )
+          ) AS INSPECTQTY_BOX,
+          MOD(
+            FN_CONV_UOM(
+              DP_INPLAN.STORERKEY
+              /** 검사수량(EA) */,DP_INPLAN.SKU,DP_INPLAN.UOM,'EA',DP_INPLAN.INSPECTQTY
+            ),
+            MS_SKU.QTYPERBOX
+          ) AS INSPECTQTY_EA,
+          FN_UOMCAL(
+            DM_DOCUMENT_D.BUNMO
+            /** 확정수량 */,DM_DOCUMENT_D.BUNJA,DP_INPLAN.CONFIRMQTY
+          ) AS CONFIRMQTY,
+          TRUNC(
+            FN_CONV_UOM(
+              DP_INPLAN.STORERKEY
+              /** 확정수량(BOX) */,DP_INPLAN.SKU,DP_INPLAN.UOM,'BOX',DP_INPLAN.CONFIRMQTY
+            )
+          ) AS CONFIRMQTY_BOX,
+          MOD(
+            FN_CONV_UOM(
+              DP_INPLAN.STORERKEY
+              /** 확정수량(EA) */,DP_INPLAN.SKU,DP_INPLAN.UOM,'EA',DP_INPLAN.CONFIRMQTY
+            ),
+            MS_SKU.QTYPERBOX
+          ) AS CONFIRMQTY_EA,
+          FN_UOMCAL(
+            DM_DOCUMENT_D.BUNMO
+            /** 결품수량 */,DM_DOCUMENT_D.BUNJA,DP_INPLAN.CANCELQTY
+          ) AS SHORTAGEQTY,
+          TRUNC(
+            FN_CONV_UOM(
+              DP_INPLAN.STORERKEY
+              /** 결품수량(BOX) */,DP_INPLAN.SKU,DP_INPLAN.UOM,'BOX',DP_INPLAN.CANCELQTY
+            )
+          ) AS SHORTAGEQTY_BOX,
+          MOD(
+            FN_CONV_UOM(
+              DP_INPLAN.STORERKEY
+              /** 결품수량(EA) */,DP_INPLAN.SKU,DP_INPLAN.UOM,'EA',DP_INPLAN.CANCELQTY
+            ),
+            MS_SKU.QTYPERBOX
+          ) AS SHORTAGEQTY_EA,
+          0 AS SHORTAGETRANQTY, /** 결품이동수량 */
+          0 AS SHORTAGETRANQTY_BOX, /** 결품이동수량(BOX) */
+          0 AS SHORTAGETRANQTY_EA, /** 결품이동수량(EA) */
+          0 AS TRANQTY, /** 처리수량 */
+          0 AS TRANQTY_BOX, /** 처리수량(BOX) */
+          0 AS TRANQTY_EA, /** 처리수량(EA) */
+          NVL(
+            DP_INPLAN.TOLOC
+            /** 적치대상로케이션 */,
+            CORE_CM_STRATEGY.FN_GETTOLOC (DP_INPLAN.DOCTYPE,DP_INPLAN.DCCODE,DP_INPLAN.STORERKEY,DP_INPLAN.ORDERTYPE,DP_INPLAN.SLIPTYPE)
+          ) AS TOLOC,
+          DP_INPLAN.LOTTABLE01 AS LOTTABLE01, /** 유통기한 */
+          FN_LOTDURATION(DP_INPLAN.STORERKEY,MS_SKU.DURATIONTYPE,MS_SKU.DURATION,DP_INPLAN.LOTTABLE01,'N') || '/' || MS_SKU.DURATION AS DURATION_TERM, /** 잔여기간/총기간 */
+          MS_SKU.COLORDESCR AS COLORDESCR, /** 색상/규격 */
+          DM_DOCUMENT_D.REFERENCE02 AS REFERENCE02, /** 참조2 */
+          DM_DOCUMENT_D.REASONCODE AS REASONCODE, /** 사유코드 */
+          DM_DOCUMENT_D.REASONMSG AS REASONMSG, /** 사유메시지 */
+          CASE
+            WHEN DP_INPLAN.LOTTABLE01 = 'STD' THEN 'N'
+            WHEN MONTHS_BETWEEN(TO_DATE(DP_INPLAN.LOTTABLE01,'yyyy-mm-dd'),SYSDATE) > 3 THEN 'N'
+            ELSE 'Y'
+          END AS NEARDURATIONYN, /** 유통임박여부 */
+          DM_DOCUMENT_D.STATUS AS STATUS, /** 상태 */
+          FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY,'STATUS_DP',DM_DOCUMENT_D.STATUS) AS STATUSNAME, /** 상태명 */
+          MS_SKU.QTYPERBOX AS QTYPERBOX, /** 입수 */
+          DM_DOCUMENT_D.CHANNEL AS CHANNEL, /** 저장유형 */
+          MS_SKU.DURATION AS DURATION, /** 유통기한기간 */
+          MS_SKU.DURATIONTYPE AS DURATIONTYPE, /** 유통기한구분 */
+          UNISTR('') AS LASTLOTTABLE01, /** 최종유통기한(미사용) */
+          DP_INPLAN.STOCKID AS STOCKID, /** 재고ID */
+          DP_INPLAN.STOCKGRADE AS STOCKGRADE, /** 재고등급 */
+          DM_DOCUMENT_D.PLANT AS PLANT, /** 플랜트 */
+          '[' || DM_DOCUMENT_D.PLANT || ']' || FN_DESCR_PLANT(DM_DOCUMENT_D.PLANT) AS PLANT_DESCR, /** 플랜트명 */
+          FN_CODEDESCR(DP_INPLAN.STORERKEY,'PUTAWAYTYPE',DM_DOCUMENT_D.CHANNEL) AS CHANNEL_NAME, /** 적치유형명 */
+          FN_CODEDESCR(MS_SKU.STORERKEY,'STORAGETYPE',MS_SKU.STORAGETYPE) AS STORAGETYPENAME, /** 보관유형명 */
+          LPAD(MS_SKU.BOXPERPLT,4,'0') || '-' || LPAD(MS_SKU.QTYPERBOX,4,'0') AS BOX_INFO, <!-- 입수정보 --> /** 입수정보(PLT-BOX) */
+          UNISTR('') AS PLTID, /** 팔렛ID */
+          DP_INPLAN.UOM AS DP_UOM /** 발주단위 */
+        FROM
+          DP_INPLAN
+          JOIN DM_DOCUMENT_H
+          ON  DP_INPLAN.DCCODE = DM_DOCUMENT_H.DCCODE
+            AND DP_INPLAN.DOCTYPE = DM_DOCUMENT_H.DOCTYPE
+            AND DP_INPLAN.SLIPDT = DM_DOCUMENT_H.DELIVERYDATE
+            AND DP_INPLAN.DOCNO = DM_DOCUMENT_H.DOCNO
+            AND DM_DOCUMENT_H.DOCTYPE = 'DP'
+            AND DM_DOCUMENT_H.DEL_YN = 'N' <!-- 협력사 다중선택 -->
+        <if test="fromCustkeyMulti != null and fromCustkeyMulti != ''">
+             AND  DM_DOCUMENT_H.FROM_CUSTKEY      IN
+            <foreach collection="fromCustkeyMulti" item="item" open="(" separator="," close=")">
+                 #{item}
+            </foreach>
+        </if>
+          JOIN DM_DOCUMENT_D
+            ON  DP_INPLAN.DCCODE = DM_DOCUMENT_D.DCCODE
+            AND DP_INPLAN.DOCTYPE = DM_DOCUMENT_D.DOCTYPE
+            AND DP_INPLAN.SLIPDT = DM_DOCUMENT_D.DELIVERYDATE
+            AND DP_INPLAN.DOCNO = DM_DOCUMENT_D.DOCNO
+            AND DP_INPLAN.DOCLINE = DM_DOCUMENT_D.DOCLINE
+            AND DM_DOCUMENT_D.CHANNEL IN ('1','2','3') <!-- 저장품만 처리함 1.저장 2.일배 3.광역일배 2015.01.26 SLLEE MODIFY [ 1,2] 김해경님 요청 -->
+        <if test="status != null and status != ''">
+            AND DM_DOCUMENT_D.STATUS LIKE #{status} </if>
+        <if test="channel != null and channel != ''">
+            AND DM_DOCUMENT_D.CHANNEL LIKE #{channel} </if>
+            AND DM_DOCUMENT_D.DEL_YN = 'N'
+          JOIN MS_SKU ON MS_SKU.STORERKEY = DP_INPLAN.STORERKEY
+            AND MS_SKU.SKU = DP_INPLAN.SKU <if test="storagetype != null and storagetype != ''">
+            AND MS_SKU.STORAGETYPE LIKE #{storagetype} </if>
+        WHERE
+          1 = 1
+        <!-- START.권한센터 -->
+        AND EXISTS (SELECT 1
+                      FROM CM_USER_AUTHORITY
+                     WHERE CM_USER_AUTHORITY.DCCODE = DP_INPLAN.DCCODE
+                    AND CM_USER_AUTHORITY.STORERKEY = DP_INPLAN.STORERKEY
+                    AND CM_USER_AUTHORITY.ORGANIZE = DP_INPLAN.ORGANIZE
+                    AND CM_USER_AUTHORITY.AREA = DP_INPLAN.AREA
+                       AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey}
+                       AND CM_USER_AUTHORITY.USERID    = #{gUserId}
+                       AND CM_USER_AUTHORITY.DCCODE    = #{fixdccode}
+                       AND CM_USER_AUTHORITY.AREA      = #{gArea}
+                       <!-- 창고.다중검색 -->
+                       <if test='gOrganizeMulti != null and gOrganizeMulti.length > 0'>
+                           AND CM_USER_AUTHORITY.ORGANIZE IN
+                           <foreach collection="gOrganizeMulti" item="code" open="(" close=")" separator=",">
+                             #{code}
+                           </foreach>
+                       </if>
+                   )
+        <!-- END.권한센터	-->
+        <if test="docdtFrom != null and docdtFrom != ''">
+          AND DP_INPLAN.DOCDT <![CDATA[>=]]> #{docdtFrom} </if>
+        <if test="docdtTo != null and docdtTo != ''">
+          AND DP_INPLAN.DOCDT <![CDATA[<=]]> #{docdtTo} </if>
+        <if test="slipdtFrom != null and slipdtFrom != ''">
+          AND DP_INPLAN.SLIPDT <![CDATA[>=]]> #{slipdtFrom} </if>
+        <if test="slipdtTo != null and slipdtTo != ''">
+          AND DP_INPLAN.SLIPDT <![CDATA[<=]]> #{slipdtTo} </if> <!-- 상품 다중선택 -->
+        <!-- 상품 다중선택 -->
+        <if test="skuMulti != null and skuMulti != '' ">
+            <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                <foreach collection="skuMulti" item="item">
+                    OR DP_INPLAN.SKU IN
+                    <foreach collection="item" item="code" open="(" close=")" separator=",">
+                        #{code}
+                    </foreach>
+                </foreach>
+            </trim>
+        </if>
+        <if test="docnoMulti != null and docnoMulti != ''">
+            AND DP_INPLAN.SLIPNO IN
+            <foreach collection="docnoMulti" item="code" open="(" close=")" separator=",">
+                #{code}
+            </foreach>
+        </if>
+        <if test="ordertype != null and ordertype != ''">
+          AND DP_INPLAN.ORDERTYPE LIKE #{ordertype}
+        </if>
+        ORDER BY
+          DM_DOCUMENT_H.ORDERTYPE,
+          DM_DOCUMENT_H.POTYPE,
+          DM_DOCUMENT_H.FROM_CUSTKEY,
+          DM_DOCUMENT_H.DOCNO,
+          DP_INPLAN.SLIPDT,
+          DP_INPLAN.SLIPNO,
+          DP_INPLAN.SLIPLINE,
+          DP_INPLAN.SKU
+
+    </select>
+    <!--PLT ID 자동부여-->
+    <select id="getMaxStockId" resultType="string">
+        SELECT TO_CHAR(NVL(TO_NUMBER(SUBSTR(MAX(STOCKID), 2)), 0) + 1, 'FM000000') /** 다음재고ID(6자리) */
+        FROM ST_STOCK A
+        WHERE DCCODE = #{dccode}
+        AND A.STOCKID NOT IN ('STD', '바코드')
+    </select>
+</mapper>

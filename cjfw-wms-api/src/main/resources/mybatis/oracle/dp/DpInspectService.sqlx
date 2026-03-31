@@ -1,0 +1,522 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="dpInspectService">
+
+	<select id="getMasterList" resultType="DpInspectHeaderResDto">
+		SELECT
+			/* [dpInspectService.sqlx][dpInspectService.getHeaderList][입고검수처리문서 Header정보]*/
+			/*+ USE_CONCAT */ -- ■ 튜닝으로 힌트 추가
+			DM_DOCUMENT_H.FROM_CUSTKEY                                                        AS FROM_CUSTKEY  ,
+		    DM_DOCUMENT_H.FROM_CUSTNAME                                                       AS FROM_CUSTNAME ,
+		    SUM(CASE
+		        WHEN DP_INPLAN.ORDERQTY+DP_INPLAN.CANCELQTY <![CDATA[<>]]> 0
+		        AND DP_INPLAN.INSPECTQTY <![CDATA[<]]>  DP_INPLAN.ORDERQTY+DP_INPLAN.CANCELQTY
+		        AND DM_DOCUMENT_D.STATUS <![CDATA[<=]]> '60' THEN 1
+		        ELSE 0
+		    END)                                                                              AS INSPECTPLANCNT  ,
+		    SUM(CASE
+		        WHEN (DP_INPLAN.ORDERQTY+DP_INPLAN.CANCELQTY <![CDATA[<>]]> 0
+		        AND DP_INPLAN.INSPECTQTY =  DP_INPLAN.ORDERQTY+DP_INPLAN.CANCELQTY
+		        AND DM_DOCUMENT_D.STATUS = '60')
+		        OR DM_DOCUMENT_D.STATUS <![CDATA[>]]> '60' THEN 1
+		        ELSE 0
+		    END)                                                                              AS INSPECTEDCNT ,
+			ROUND(SUM(DP_INPLAN.INSPECTQTY)/CASE WHEN SUM(DP_INPLAN.ORDERQTY) = 0 THEN 1 ELSE SUM(DP_INPLAN.ORDERQTY) END*100,2)  AS INSPECTRATE ,<!--2025-12-15 실제 수량으로 rate 계산-->
+<!--		    DECODE(SUM(CASE-->
+<!--		        WHEN DP_INPLAN.ORDERQTY+DP_INPLAN.CANCELQTY <![CDATA[<>]]> 0-->
+<!--		        AND DP_INPLAN.INSPECTQTY <![CDATA[<=]]>  DP_INPLAN.ORDERQTY+DP_INPLAN.CANCELQTY THEN 1-->
+<!--		        ELSE 0-->
+<!--		    END),-->
+<!--		    0,-->
+<!--		    0,-->
+<!--		    ROUND(SUM(CASE-->
+<!--		        WHEN (DP_INPLAN.ORDERQTY+DP_INPLAN.CANCELQTY <![CDATA[<>]]> 0-->
+<!--		        AND DP_INPLAN.INSPECTQTY =  DP_INPLAN.ORDERQTY+DP_INPLAN.CANCELQTY-->
+<!--		        AND DM_DOCUMENT_D.STATUS = '60')-->
+<!--		        OR DM_DOCUMENT_D.STATUS <![CDATA[>]]> '60' THEN 1-->
+<!--		        ELSE 0-->
+<!--		    END)/SUM(CASE-->
+<!--		        WHEN DP_INPLAN.ORDERQTY+DP_INPLAN.CANCELQTY <![CDATA[<>]]> 0-->
+<!--		        AND DP_INPLAN.INSPECTQTY <![CDATA[<=]]>  DP_INPLAN.ORDERQTY+DP_INPLAN.CANCELQTY THEN 1-->
+<!--		        ELSE 0-->
+<!--		    END)*100,-->
+<!--		    2))                           AS INSPECTRATE                      ,-->
+		    MIN(DM_DOCUMENT_D.STATUS)                                                             AS STATUS     ,
+		    FN_CODEDESCR (DM_DOCUMENT_D.STORERKEY, 'STATUS_DP', MIN(DM_DOCUMENT_D.STATUS))        AS STATUSNAME ,
+		    DM_DOCUMENT_H.DCCODE                                                                  AS DCCODE     ,
+		    DM_DOCUMENT_H.STORERKEY                                                               AS STORERKEY  ,
+		    MAX(MSCUST.ISSUETYPE)                                                                 AS ISSUETYPE  ,
+		    MAX(FN_CODEDESCR (MSCUST.STORERKEY, 'ISSUETYPE_CUST', MSCUST.ISSUETYPE))              AS ISSUETYPENAME ,
+		    DP_INPLAN.SLIPDT                                                                      AS SLIPDT     ,
+		    DP_INPLAN.SLIPNO                                                                      AS SLIPNO     ,
+		    DP_INPLAN.DOCNO                                                                       AS DOCNO_DP
+		FROM
+		    DM_DOCUMENT_D
+		JOIN
+		    CM_USER_AUTHORITY                      
+		         ON  CM_USER_AUTHORITY.USERID     = #{gUserId}                            
+		        AND  CM_USER_AUTHORITY.DCCODE     = #{fixdccode}                            
+		        AND  CM_USER_AUTHORITY.STORERKEY  = #{gStorerkey}
+				<if test="gMultiOrganize != null and gMultiOrganize != ''">
+					AND CM_USER_AUTHORITY.ORGANIZE IN (
+					SELECT TRIM(REGEXP_SUBSTR(#{gMultiOrganize}, '[^,]+', 1, LEVEL)) AS VAL
+					FROM DUAL
+					CONNECT BY LEVEL <![CDATA[<=]]> REGEXP_COUNT(#{gMultiOrganize}, '[^,]+')
+					)
+				</if>
+		        AND  CM_USER_AUTHORITY.DCCODE     = DM_DOCUMENT_D.DCCODE                       
+		        AND  CM_USER_AUTHORITY.STORERKEY  = DM_DOCUMENT_D.STORERKEY                    
+		        AND  CM_USER_AUTHORITY.ORGANIZE   = DM_DOCUMENT_D.ORGANIZE                     
+		        AND  CM_USER_AUTHORITY.AREA       = DM_DOCUMENT_D.AREA                   
+		JOIN
+		    DM_DOCUMENT_H                     
+		         ON  DM_DOCUMENT_D.DCCODE       = DM_DOCUMENT_H.DCCODE
+				AND  DM_DOCUMENT_D.DOCTYPE      = DM_DOCUMENT_H.DOCTYPE
+				AND  DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+				AND  DM_DOCUMENT_D.DOCNO        = DM_DOCUMENT_H.DOCNO
+				-- ■ 조인 조건 추가 DELIVERYDATE
+				AND  DM_DOCUMENT_H.DELIVERYDATE = DM_DOCUMENT_D.DELIVERYDATE
+				AND  DM_DOCUMENT_H.DEL_YN       = 'N'
+		        <!-- 협력사 다중선택 -->				
+				<if test='partnerCode != null and partnerCode !=""'>
+		        AND DM_DOCUMENT_H.FROM_CUSTKEY IN
+		          (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+		                        FROM (SELECT #{partnerCode} AS VAL FROM DUAL) A
+		                     CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+		        </if>
+				<!-- 배송그룹 공통조회 조건 -->
+				<!--isNotEmpty property="g_MULTI_COURIER">
+				AND    DM_DOCUMENT_H.COURIER          =      #g_MULTI_COURIER#
+				</!isNotEmpty-->
+		JOIN
+		    MS_SKU                        
+		         ON  MS_SKU.STORERKEY   = DM_DOCUMENT_D.STORERKEY                      
+		        AND  MS_SKU.SKU         = DM_DOCUMENT_D.SKU
+		<!-- 2025-11-28 BPO협의 이력상품포함되게 수정 박의병-->
+<!--		        AND    MS_SKU.SERIALYN              =  'N'                      -->
+		        AND    MS_SKU.DEL_YN                =  'N'                       
+		        <!--isNotEmpty property="STORAGETYPE">         AND    MS_SKU.STORAGETYPE               =    #STORAGETYPE#       </isNotEmpty-->
+		JOIN
+			(
+			 SELECT STORERKEY, CUSTKEY, MAX(DESCRIPTION) DESCRIPTION, MAX(ISSUETYPE) ISSUETYPE
+			 FROM MS_CUST 
+			 WHERE  MS_CUST.STORERKEY   = #{gStorerkey}
+			 AND    MS_CUST.DEL_YN      = 'N'
+			 GROUP BY  MS_CUST.STORERKEY, MS_CUST.CUSTKEY    
+			)    MSCUST
+				 ON  MSCUST.STORERKEY   = DM_DOCUMENT_H.STORERKEY
+				AND  MSCUST.CUSTKEY     = DM_DOCUMENT_H.FROM_CUSTKEY
+		JOIN
+			DP_INPLAN
+				 ON  DP_INPLAN.DCCODE   = DM_DOCUMENT_D.DCCODE
+				AND  DP_INPLAN.DOCTYPE  = DM_DOCUMENT_D.DOCTYPE
+				AND  DP_INPLAN.SLIPDT   = DM_DOCUMENT_D.DELIVERYDATE
+				AND  DP_INPLAN.DOCNO    = DM_DOCUMENT_D.DOCNO
+				AND  DP_INPLAN.DOCLINE  = DM_DOCUMENT_D.DOCLINE
+				AND  DP_INPLAN.SLIPDT   = DM_DOCUMENT_D.DELIVERYDATE
+				AND  DP_INPLAN.DEL_YN   = 'N'
+		LEFT OUTER JOIN
+		    DP_INSPECT    
+		        ON  DP_INSPECT.DCCODE    = DP_INPLAN.DCCODE    
+		        AND DP_INSPECT.STORERKEY = DP_INPLAN.STORERKEY    
+		        AND DP_INSPECT.ORGANIZE  = DP_INPLAN.ORGANIZE    
+		        AND DP_INSPECT.AREA      = DP_INPLAN.AREA    
+		        AND DP_INSPECT.DOCTYPE   = DP_INPLAN.DOCTYPE
+		        AND DP_INSPECT.DOCNO     = DP_INPLAN.DOCNO    
+		        AND DP_INSPECT.DOCLINE   = DP_INPLAN.DOCLINE    
+		        AND DP_INSPECT.SLIPDT    = DP_INPLAN.SLIPDT    
+		        AND DP_INSPECT.SLIPNO    = DP_INPLAN.SLIPNO    
+		        AND DP_INSPECT.SLIPLINE  = DP_INPLAN.SLIPLINE    
+		        AND DP_INSPECT.SLIPTYPE  = DP_INPLAN.SLIPTYPE     
+		        AND DP_INSPECT.SKU       = DP_INPLAN.SKU                                                
+		WHERE 1=1   
+		    AND DM_DOCUMENT_D.DCCODE         =   #{fixdccode} /**P*/       
+		    AND DM_DOCUMENT_D.DOCTYPE        =  'DP'                
+		    AND DM_DOCUMENT_D.DEL_YN         =  'N'                
+		    AND DM_DOCUMENT_D.DELIVERYDATE    <![CDATA[>=]]>  #{fromSlipdt} /**P*/
+		    AND DM_DOCUMENT_D.DELIVERYDATE    <![CDATA[<=]]>  #{toSlipdt} /**P*/
+		    <!-- 상품 다중선택 -->
+		    <if test='skuCode != null and skuCode !=""'>
+	        AND DM_DOCUMENT_D.SKU IN
+	          (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+	                FROM (SELECT #{skuCode} AS VAL FROM DUAL) A
+	             CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+	        </if>
+	        <choose>
+	        	<when test='undoneYn == "Y"'>
+	        AND DM_DOCUMENT_D.ORDERQTY <![CDATA[<=]]> DM_DOCUMENT_D.CONFIRMQTY
+	        	</when>
+	        	<when test='undoneYn == "N"'>
+	        AND DM_DOCUMENT_D.ORDERQTY <![CDATA[>]]>  DM_DOCUMENT_D.CONFIRMQTY
+	        	</when>
+	        </choose>	        
+	        <if test='status != null and status !=""'>
+	        AND DM_DOCUMENT_D.STATUS             =   #{status}
+	        </if>
+	        <if test='channel != null and channel !=""'>
+	        AND DM_DOCUMENT_D.CHANNEL            LIKE #{channel}
+	        </if>
+		<!--20251121 입고검수지정 메뉴 삭제에 따른 모든 상품 검사 -->
+<!--		    AND  (-->
+<!--		        DM_DOCUMENT_D.CHANNEL = '1' -->
+<!--		        OR             (-->
+<!--		            (-->
+<!--		                DM_DOCUMENT_D.CHANNEL = '2' -->
+<!--		                OR DM_DOCUMENT_D.CHANNEL = '3'-->
+<!--		            )                -->
+<!--		            AND EXISTS (-->
+<!--		                SELECT-->
+<!--		                    1                              -->
+<!--		                FROM-->
+<!--		                    DP_INSPECTPLAN                             -->
+<!--		                WHERE-->
+<!--		                    DP_INSPECTPLAN.DCCODE     = DP_INPLAN.DCCODE                                             -->
+<!--		                    AND DP_INSPECTPLAN.STORERKEY  = DP_INPLAN.STORERKEY                                             -->
+<!--		                    AND DP_INSPECTPLAN.FROMTASKDT <![CDATA[<=]]> DP_INPLAN.SLIPDT                                             -->
+<!--		                    AND DP_INSPECTPLAN.TOTASKDT   <![CDATA[>=]]> DP_INPLAN.SLIPDT                                -->
+<!--		                    AND (-->
+<!--		                        (-->
+<!--		                            DP_INSPECTPLAN.CUSTKEY    =  DM_DOCUMENT_H.FROM_CUSTKEY                                         -->
+<!--		                            AND DP_INSPECTPLAN.SKU        =  'STD'  -->
+<!--		                        )                                    -->
+<!--		                        OR  (-->
+<!--		                            DP_INSPECTPLAN.SKU = DP_INPLAN.SKU                                         -->
+<!--		                            AND DP_INSPECTPLAN.CUSTKEY    =  'STD'  -->
+<!--		                        )                                   -->
+<!--		                    )                                                                     -->
+<!--		                    AND DP_INSPECTPLAN.DEL_YN     = 'N'                           -->
+<!--		            )              -->
+<!--		        )             -->
+<!--		    )-->
+        <if test='reasonCode != null and reasonCode !=""'>
+            AND DP_INSPECT.REASONCODE         LIKE    #{reasonCode}
+        </if>
+		GROUP BY
+		    DM_DOCUMENT_H.FROM_CUSTKEY  ,
+		    DM_DOCUMENT_H.FROM_CUSTNAME ,
+		    DM_DOCUMENT_H.DCCODE        ,
+		    DM_DOCUMENT_H.STORERKEY     ,
+		    DM_DOCUMENT_D.STORERKEY     ,
+		    DP_INPLAN.SLIPDT            ,
+		    DP_INPLAN.SLIPNO            ,
+		    DP_INPLAN.DOCNO     
+		ORDER BY
+		    DP_INPLAN.SLIPDT            ,
+		    DM_DOCUMENT_H.FROM_CUSTKEY
+    </select>
+    
+    <select id="getTotalList" resultType="DpInspectTotalResDto">		
+		WITH T_DP_INSPECT AS (       
+			SELECT
+				DP_INSPECT.DCCODE                             ,
+				DP_INSPECT.STORERKEY                          ,
+				DP_INSPECT.ORGANIZE                           ,
+				DP_INSPECT.AREA                               ,
+				DP_INSPECT.DOCDT                              ,
+				DP_INSPECT.DOCNO                              ,
+				DP_INSPECT.DOCLINE                            ,
+				DP_INSPECT.DOCTYPE                            ,
+				DP_INSPECT.SLIPDT                             ,
+				DP_INSPECT.SLIPNO                             ,
+				DP_INSPECT.SLIPLINE                           ,
+				DP_INSPECT.SLIPTYPE                           ,
+				DP_INSPECT.SKU                                ,
+				DP_INSPECT.LOTTABLE01                         ,
+				DP_INSPECT.STOCKID                            ,
+				SUM(DP_INSPECT.INSPECTQTY) AS INSPECTQTY      ,
+				MAX(DP_INSPECT.EDITWHO)    AS EDITWHO         ,
+				MAX(DP_INSPECT.REASONCODE) AS REASONCODE      ,
+				MAX(DP_INSPECT.REASONMSG)  AS REASONMSG         
+			FROM
+			    DP_INSPECT        
+			WHERE
+			    1 = 1           
+			    AND DP_INSPECT.ORGANIZE IN   ( #{gMultiOrganize}  )     
+			    AND DP_INSPECT.SLIPDT        = #{slipDt}   
+			    AND DP_INSPECT.SLIPNO        = #{slipNo}   
+			GROUP BY
+			    DP_INSPECT.DCCODE                             ,
+			    DP_INSPECT.STORERKEY                          ,
+			    DP_INSPECT.ORGANIZE                           ,
+			    DP_INSPECT.AREA                               ,
+			    DP_INSPECT.DOCDT                              ,
+			    DP_INSPECT.DOCNO                              ,
+			    DP_INSPECT.DOCLINE                            ,
+			    DP_INSPECT.DOCTYPE                            ,
+			    DP_INSPECT.SLIPDT                             ,
+			    DP_INSPECT.SLIPNO                             ,
+			    DP_INSPECT.SLIPLINE                           ,
+			    DP_INSPECT.SLIPTYPE                           ,
+			    DP_INSPECT.SKU                                ,
+			    DP_INSPECT.LOTTABLE01                         ,
+			    DP_INSPECT.STOCKID  )
+		
+		SELECT  /* [dpInspectService.sqlx][dpInspectService.getDataDetailList][입고검수처리문서 Detail정보]*/            
+		    '0'                                                                                                    AS CHECKYN         ,
+		    'CUSTKEY'                                                                                              AS INSPECTTYPE         ,
+		    DM_DOCUMENT_H.DCCODE                                                                                   AS DCCODE         ,
+		    DM_DOCUMENT_H.STORERKEY                                                                                AS STORERKEY         ,
+		    DM_DOCUMENT_H.ORGANIZE                                                                                 AS ORGANIZE         ,
+		    DM_DOCUMENT_H.FROM_CUSTKEY                                                                             AS CUSTKEY         ,
+		    DM_DOCUMENT_H.DOCDT                                                                                    AS DOCDT         ,
+		    DM_DOCUMENT_D.DOCNO                                                                                    AS DOCNO           ,
+		    DM_DOCUMENT_D.SKU                                                                                      AS SKU           ,
+		    MIN(MS_SKU.DESCRIPTION)                                                                                AS SKUNAME           ,
+		    DM_DOCUMENT_D.CHANNEL                                                                                  AS CHANNEL           ,
+		    FN_CODEDESCR(DM_DOCUMENT_H.STORERKEY, 'PUTAWAYTYPE', DM_DOCUMENT_D.CHANNEL)                            AS CHANNELNAME           ,
+		    FN_UOMCAL  ( DM_DOCUMENT_D.BUNMO, DM_DOCUMENT_D.BUNJA, SUM(DP_INPLAN.ORDERQTY+DP_INPLAN.CANCELQTY) )   AS ORDERQTY           ,
+		    FN_UOMCAL  ( DM_DOCUMENT_D.BUNMO, DM_DOCUMENT_D.BUNJA, SUM(CASE WHEN DM_DOCUMENT_D.CHANNEL = '1' THEN T_DP_INSPECT.INSPECTQTY ELSE DP_INPLAN.INSPECTQTY END  ) )  AS INSPECTQTY           ,
+		    FN_UOMCAL  ( DM_DOCUMENT_D.BUNMO, DM_DOCUMENT_D.BUNJA, SUM(DP_INPLAN.ORDERQTY+DP_INPLAN.CANCELQTY-DP_INPLAN.INSPECTQTY) )                                         AS SHORTAGEQTY           ,
+		    DM_DOCUMENT_D.STORERUOM                                                                                AS UOM           ,
+		    DM_DOCUMENT_D.STATUS                                                                                   AS STATUS           ,
+		    MAX(FN_CODEDESCR (DM_DOCUMENT_D.STORERKEY, 'STATUS_DP', DM_DOCUMENT_D.STATUS))                         AS STATUSNAME           ,
+		    MAX(DM_DOCUMENT_D.REASONCODE)                                                                          AS REASONCODE           ,
+		    FN_UOMCAL  ( DM_DOCUMENT_D.BUNMO, DM_DOCUMENT_D.BUNJA, SUM(DP_INPLAN.CONFIRMQTY))                      AS TRANQTY           ,
+		    NVL(T_DP_INSPECT.LOTTABLE01,DP_INPLAN.LOTTABLE01)                                                      AS LOTTABLE01           ,
+			NVL(CASE WHEN MS_SKU.DURATIONTYPE = '1' AND REGEXP_LIKE(NVL(T_DP_INSPECT.LOTTABLE01,DP_INPLAN.LOTTABLE01), '^[0-9]{8}$')
+			         THEN TO_CHAR(TO_DATE(NVL(T_DP_INSPECT.LOTTABLE01,DP_INPLAN.LOTTABLE01),'YYYYMMDD') - (MS_SKU.DURATION - 1), 'YYYYMMDD')
+			         ELSE NVL(T_DP_INSPECT.LOTTABLE01,DP_INPLAN.LOTTABLE01)
+			 END,'STD')                                                                                            AS LOT_MANUFACTURE ,                    /** 제조 */
+			NVL(CASE WHEN MS_SKU.DURATIONTYPE != '1' AND REGEXP_LIKE(NVL(T_DP_INSPECT.LOTTABLE01,DP_INPLAN.LOTTABLE01), '^[0-9]{8}$')
+			         THEN TO_CHAR(TO_DATE(NVL(T_DP_INSPECT.LOTTABLE01,DP_INPLAN.LOTTABLE01),'YYYYMMDD') + (MS_SKU.DURATION - 1), 'YYYYMMDD')
+			         ELSE NVL(T_DP_INSPECT.LOTTABLE01,DP_INPLAN.LOTTABLE01)
+			 END,'STD')                                                                                            AS LOT_EXPIRE                         /** 유통 */,
+		    T_DP_INSPECT.STOCKID                                                                                   AS STOCKID           ,
+		    MAX(DM_DOCUMENT_D.REASONMSG)                                                                           AS REASONMSG           ,
+		    ''                                                                                                     AS REFERENCE02                ,
+		    MS_SKU.DURATIONTYPE                                                                                    AS DURATIONTYPE           ,
+		    DP_INPLAN.SLIPDT                                                                                       AS SLIPDT           ,
+		    DP_INPLAN.SLIPNO                                                                                       AS SLIPNO           ,
+		    MAX(T_DP_INSPECT.REASONCODE)                                                                           AS INSPECTREASON           ,
+		    MAX(T_DP_INSPECT.REASONMSG)                                                                            AS INSPECTMSG           ,
+		    MS_SKU.DURATION                                                                                        AS DURATION           ,
+		    MAX(MS_SKU.QTYPERBOX)                                                                                  AS QTYPERBOX           ,
+		    MAX(NVL(T_DP_INSPECT.EDITWHO,DP_INPLAN.EDITWHO))                                                       AS EDITWHO           ,
+			MAX(FRAMEONE_USER.USER_NM)                                                                             AS EDITWHONAME           ,
+		    DECODE(SPDP_RECEIPT.FN_GETTOLOC( DM_DOCUMENT_H.DCCODE, DM_DOCUMENT_H.STORERKEY, DM_DOCUMENT_D.SKU, MIN(DM_DOCUMENT_D.PLANT), MIN(DM_DOCUMENT_D.STORAGELOC), MIN(DM_DOCUMENT_D.CHANNEL   ) ),
+		      'CROSS',
+		      'CROSS',
+		      'STAGE')                                                                                             AS CROSSLOC           ,
+		    MAX(DM_DOCUMENT_D.PLANT)                                                                               AS PLANT           ,
+		    '['||MAX(DM_DOCUMENT_D.PLANT)||']'||FN_DESCR_PLANT(MAX(DM_DOCUMENT_D.PLANT))                           AS PLANT_DESCR     
+		FROM
+		    DM_DOCUMENT_H           
+		JOIN
+		    DM_DOCUMENT_D                 
+		        ON     DM_DOCUMENT_D.DCCODE = DM_DOCUMENT_H.DCCODE
+				AND DM_DOCUMENT_D.DOCTYPE = DM_DOCUMENT_H.DOCTYPE
+				AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+				AND DM_DOCUMENT_D.DOCNO = DM_DOCUMENT_H.DOCNO
+				AND    DM_DOCUMENT_D.DOCTYPE        =  'DP'
+		        AND    DM_DOCUMENT_D.DEL_YN         =  'N'
+		        <!-- 상품 다중선택 -->
+			    <if test='skuCode != null and skuCode !=""'>
+		          AND DM_DOCUMENT_D.SKU IN
+		          (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+		                FROM (SELECT #{skuCode} AS VAL FROM DUAL) A
+		             CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+		        </if>
+		        <choose>
+		        	<when test='undoneYn == "Y"'>
+		        	AND    DM_DOCUMENT_D.ORDERQTY <![CDATA[<=]]> DM_DOCUMENT_D.CONFIRMQTY
+		        	</when>
+		        	<when test='undoneYn == "N"'>
+		        	AND    DM_DOCUMENT_D.ORDERQTY <![CDATA[>]]>  DM_DOCUMENT_D.CONFIRMQTY
+		        	</when>
+		        </choose>
+		        <if test='channel != null and channel !=""'>
+		        	AND    DM_DOCUMENT_D.CHANNEL            LIKE #{channel}
+		        </if>
+		JOIN
+		    DP_INPLAN      
+		        ON     DP_INPLAN.DCCODE = DM_DOCUMENT_D.DCCODE
+				AND DP_INPLAN.DOCTYPE = DM_DOCUMENT_D.DOCTYPE
+				AND DP_INPLAN.SLIPDT = DM_DOCUMENT_D.DELIVERYDATE
+				AND DP_INPLAN.DOCNO = DM_DOCUMENT_D.DOCNO
+				AND DP_INPLAN.DOCLINE = DM_DOCUMENT_D.DOCLINE
+		        AND    DP_INPLAN.DEL_YN         =  'N'               
+		        AND    DP_INPLAN.SLIPDT              =    #{slipDt} /**P*/                           
+		        AND    DP_INPLAN.SLIPNO              =    #{slipNo} /**P*/                
+		JOIN
+		    CM_USER_AUTHORITY                  
+		        ON    CM_USER_AUTHORITY.USERID      =   #{gUserId} /**P*/                                   
+		        AND   CM_USER_AUTHORITY.DCCODE      =   #{fixdccode} /**P*/                       
+		        AND   CM_USER_AUTHORITY.STORERKEY   =   #{gStorerkey} /**P*/                      
+		        AND   CM_USER_AUTHORITY.DCCODE      = DM_DOCUMENT_D.DCCODE                      
+		        AND   CM_USER_AUTHORITY.STORERKEY   = DM_DOCUMENT_D.STORERKEY                   
+		        AND   CM_USER_AUTHORITY.ORGANIZE    = DM_DOCUMENT_D.ORGANIZE                    
+		        AND   CM_USER_AUTHORITY.AREA        = DM_DOCUMENT_D.AREA                
+		        AND CM_USER_AUTHORITY.ORGANIZE IN       (
+		             #{gMultiOrganize} /**P*/          
+		        )           
+		JOIN
+		    MS_SKU                    
+		        ON     MS_SKU.STORERKEY             =  DM_DOCUMENT_D.STORERKEY                  
+		        AND    MS_SKU.SKU                   =  DM_DOCUMENT_D.SKU
+		<!-- 2025-11-28 BPO협의 이력상품포함되게 수정 박의병-->
+<!--		        AND    MS_SKU.SERIALYN              =  'N'                  -->
+		        AND    MS_SKU.DEL_YN                =  'N'
+		        <!-- 상품 다중선택 -->
+			    <if test='skuCode != null and skuCode !=""'>
+		          AND MS_SKU.SKU IN
+		          (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+		                FROM (SELECT #{skuCode} AS VAL FROM DUAL) A
+		             CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+		        </if>                                               
+		LEFT OUTER JOIN
+		    T_DP_INSPECT           
+		        ON  T_DP_INSPECT.DCCODE               = DP_INPLAN.DCCODE           
+		        AND T_DP_INSPECT.STORERKEY            = DP_INPLAN.STORERKEY           
+		        AND T_DP_INSPECT.ORGANIZE             = DP_INPLAN.ORGANIZE           
+		        AND T_DP_INSPECT.AREA                 = DP_INPLAN.AREA           
+		        AND T_DP_INSPECT.DOCNO                = DP_INPLAN.DOCNO
+		        AND T_DP_INSPECT.DOCLINE              = DP_INPLAN.DOCLINE           
+		        AND T_DP_INSPECT.DOCTYPE              = DP_INPLAN.DOCTYPE           
+		        AND T_DP_INSPECT.SLIPDT               = DP_INPLAN.SLIPDT           
+		        AND T_DP_INSPECT.SLIPNO               = DP_INPLAN.SLIPNO           
+		        AND T_DP_INSPECT.SLIPLINE             = DP_INPLAN.SLIPLINE           
+		        AND T_DP_INSPECT.SLIPTYPE             = DP_INPLAN.SLIPTYPE            
+		        AND T_DP_INSPECT.SKU     = DP_INPLAN.SKU
+		LEFT JOIN FRAMEONE_USER
+         ON FRAMEONE_USER.USER_ID = NVL(T_DP_INSPECT.EDITWHO, DP_INPLAN.EDITWHO)
+		WHERE
+		    DM_DOCUMENT_H.DOCTYPE         =  'DP'              
+		    AND    DM_DOCUMENT_H.DEL_YN          =  'N'
+		<!--20251121 입고검수지정 메뉴 삭제에 따른 모든 상품 검사 -->
+<!--		    AND  (-->
+<!--		        DM_DOCUMENT_D.CHANNEL = '1' -->
+<!--		        OR           (-->
+<!--		            EXISTS (-->
+<!--		                SELECT-->
+<!--		                    1                            -->
+<!--		                FROM-->
+<!--		                    DP_INSPECTPLAN                           -->
+<!--		                WHERE-->
+<!--		                    DP_INSPECTPLAN.DCCODE     = DM_DOCUMENT_H.DCCODE                                           -->
+<!--		                    AND DP_INSPECTPLAN.STORERKEY  = DM_DOCUMENT_H.STORERKEY                                           -->
+<!--		                    AND DP_INSPECTPLAN.FROMTASKDT <![CDATA[<=]]> DP_INPLAN.SLIPDT                                         -->
+<!--		                    AND DP_INSPECTPLAN.TOTASKDT   <![CDATA[>=]]> DP_INPLAN.SLIPDT                             -->
+<!--		                    AND (-->
+<!--		                        DP_INSPECTPLAN.CUSTKEY    =  DM_DOCUMENT_H.FROM_CUSTKEY -->
+<!--		                        OR DP_INSPECTPLAN.SKU = DM_DOCUMENT_D.SKU-->
+<!--		                    )                                                                   -->
+<!--		                    AND DP_INSPECTPLAN.DEL_YN     = 'N'                         -->
+<!--		            )            -->
+<!--		        )           -->
+<!--		    )-->
+	        <if test='fromCustKey != null and fromCustKey !=""'>
+		    	AND    DM_DOCUMENT_H.FROM_CUSTKEY       =    #{fromCustKey} /**P*/
+		    </if>
+	        <!-- 배송그룹 공통조회 조건 -->
+			<!--isNotEmpty property="g_MULTI_COURIER"> AND    DM_DOCUMENT_H.COURIER          =   #g_MULTI_COURIER#     </isNotEmpty-->
+	        <if test='reasonCode != null and reasonCode !=""'>
+	        	AND    T_DP_INSPECT.REASONCODE         LIKE   #{reasonCode}
+	        </if>
+		GROUP BY
+		    DM_DOCUMENT_H.DCCODE             ,
+		    DM_DOCUMENT_H.STORERKEY             ,
+		    DM_DOCUMENT_H.ORGANIZE             ,
+		    DM_DOCUMENT_H.FROM_CUSTKEY             ,
+		    DM_DOCUMENT_H.DOCDT             ,
+		    DM_DOCUMENT_D.DOCNO             ,
+		    DM_DOCUMENT_D.SKU             ,
+		    DM_DOCUMENT_D.BUNJA             ,
+		    DM_DOCUMENT_D.BUNMO             ,
+		    DM_DOCUMENT_D.STORERUOM             ,
+		    DM_DOCUMENT_D.STATUS              ,
+		    DP_INPLAN.LOTTABLE01               ,
+			NVL(CASE WHEN MS_SKU.DURATIONTYPE = '1' AND REGEXP_LIKE(NVL(T_DP_INSPECT.LOTTABLE01,DP_INPLAN.LOTTABLE01), '^[0-9]{8}$')
+			THEN TO_CHAR(TO_DATE(NVL(T_DP_INSPECT.LOTTABLE01,DP_INPLAN.LOTTABLE01),'YYYYMMDD') - (MS_SKU.DURATION - 1), 'YYYYMMDD')
+			ELSE NVL(T_DP_INSPECT.LOTTABLE01,DP_INPLAN.LOTTABLE01)
+			END,'STD'),
+			NVL(CASE WHEN MS_SKU.DURATIONTYPE != '1' AND REGEXP_LIKE(NVL(T_DP_INSPECT.LOTTABLE01,DP_INPLAN.LOTTABLE01), '^[0-9]{8}$')
+			THEN TO_CHAR(TO_DATE(NVL(T_DP_INSPECT.LOTTABLE01,DP_INPLAN.LOTTABLE01),'YYYYMMDD') + (MS_SKU.DURATION - 1), 'YYYYMMDD')
+			ELSE NVL(T_DP_INSPECT.LOTTABLE01,DP_INPLAN.LOTTABLE01)
+			END,'STD'),
+		    MS_SKU.DURATIONTYPE              ,
+		    DM_DOCUMENT_D.CHANNEL              ,
+		    DP_INPLAN.SLIPDT              ,
+		    DP_INPLAN.SLIPNO             ,
+		    MS_SKU.DURATION              ,
+		    T_DP_INSPECT.LOTTABLE01             ,
+		    T_DP_INSPECT.STOCKID     
+		ORDER BY
+		    DM_DOCUMENT_D.SKU
+    </select>
+    
+    <select id="getDetailList" resultType="DpInspectDetailResDto">		
+		SELECT
+		    WD_INPLAN.SKU                                 AS SKU        ,
+		    MS_SKU.DESCRIPTION                            AS SKUNAME        ,
+		    DM_DOCUMENT_D.CHANNEL                          AS CHANNEL        ,
+		    FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY,
+		    'PUTAWAYTYPE',
+		    DM_DOCUMENT_D.CHANNEL)                       AS CHANNELNAME        ,
+		    WD_INPLAN.ORDERQTY+WD_INPLAN.CANCELQTY                 AS ORDERQTY        ,
+		    FN_UOMCAL(  DM_DOCUMENT_D.BUNMO                    ,
+		    DM_DOCUMENT_D.BUNJA                    ,
+		    DM_DOCUMENT_D.INSPECTQTY  )                 AS INSPECTQTY        ,
+		    FN_UOMCAL(  DM_DOCUMENT_D.BUNMO                    ,
+		    DM_DOCUMENT_D.BUNJA                    ,
+		    WD_INPLAN.CANCELQTY)                  AS SHORTAGEQTY        ,
+		    DM_DOCUMENT_D.STORERUOM                       AS STORERUOM        ,
+		    DM_DOCUMENT_D.STATUS                          AS STATUS        ,
+		    FN_CODEDESCR (DM_DOCUMENT_D.STORERKEY,
+		    'STATUS_WD',
+		    DM_DOCUMENT_D.STATUS)                         AS STATUSNAME        ,
+		    DM_DOCUMENT_H.TO_CUSTKEY                      AS DAILY_TO_CUSTKEY        ,
+		    DM_DOCUMENT_H.TO_CUSTNAME                     AS DAILY_TO_CUSTNAME        ,
+		    MS_SKU.QTYPERBOX                           AS QTYPERBOX        ,
+		    DM_DOCUMENT_D.PLANT                    AS PLANT           ,
+		    '['||DM_DOCUMENT_D.PLANT||']'||FN_DESCR_PLANT(DM_DOCUMENT_D.PLANT)                            AS PLANT_DESCR  
+		FROM
+		    WD_INPLAN  
+		JOIN
+		    CM_USER_AUTHORITY              
+		        ON    CM_USER_AUTHORITY.USERID      =   #{gUserId} /**P*/                               
+		        AND   CM_USER_AUTHORITY.DCCODE      =   #{fixdccode} /**P*/                   
+		        AND   CM_USER_AUTHORITY.STORERKEY   =   #{gStorerkey} /**P*/                  
+		        AND   CM_USER_AUTHORITY.DCCODE      = WD_INPLAN.DCCODE                  
+		        AND   CM_USER_AUTHORITY.STORERKEY   = WD_INPLAN.STORERKEY               
+		        AND   CM_USER_AUTHORITY.ORGANIZE    = WD_INPLAN.ORGANIZE                
+		        AND   CM_USER_AUTHORITY.AREA        = WD_INPLAN.AREA              
+		        AND CM_USER_AUTHORITY.ORGANIZE IN     (
+		             #{gMultiOrganize} /**P*/        
+		        )      
+		JOIN
+		    DM_DOCUMENT_D  
+		        ON     WD_INPLAN.DCCODE = DM_DOCUMENT_D.DCCODE
+				AND WD_INPLAN.DOCTYPE = DM_DOCUMENT_D.DOCTYPE
+				AND WD_INPLAN.SLIPDT = DM_DOCUMENT_D.DELIVERYDATE
+				AND WD_INPLAN.DOCNO = DM_DOCUMENT_D.DOCNO
+				AND WD_INPLAN.DOCLINE = DM_DOCUMENT_D.DOCLINE
+		        AND    DM_DOCUMENT_D.POKEY =  #{slipNo} /**P*/  /**상단에서 선택된 입고문서번호 DOCNO*/  
+		        AND    DM_DOCUMENT_D.CHANNEL <![CDATA[<>]]> '1' /** 저장품제외 */
+		        <!-- 상품 다중선택 -->
+			    <if test='skuCode != null and skuCode !=""'>
+		          AND DM_DOCUMENT_D.SKU IN
+		          (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+		                FROM (SELECT #{skuCode} AS VAL FROM DUAL) A
+		             CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+		        </if>              
+		JOIN
+		    DM_DOCUMENT_H  
+		        ON     DM_DOCUMENT_D.DCCODE = DM_DOCUMENT_H.DCCODE
+				AND DM_DOCUMENT_D.DOCTYPE = DM_DOCUMENT_H.DOCTYPE
+				AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+				AND DM_DOCUMENT_D.DOCNO = DM_DOCUMENT_H.DOCNO
+
+		<!-- 배송그룹 공통조회 조건 -->
+				<!--isNotEmpty property="g_MULTI_COURIER"> AND    DM_DOCUMENT_H.COURIER          =   #g_MULTI_COURIER#     </isNotEmpty-->        
+		JOIN
+		    MS_SKU  
+		        ON     MS_SKU.STORERKEY = WD_INPLAN.STORERKEY  
+		        AND    MS_SKU.SKU       = WD_INPLAN.SKU
+		<!-- 2025-11-28 BPO협의 이력상품포함되게 수정 박의병-->
+<!--		        AND    MS_SKU.SERIALYN  = 'N'  -->
+		WHERE
+		    WD_INPLAN.SLIPDT =  #{slipDt} /**P*/  
+		ORDER BY
+		    WD_INPLAN.SKU
+    </select>
+</mapper>

@@ -1,0 +1,555 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="msCenterDistrictOrdGrpService">
+	<!-- 주문그룹 정보 조회(목록) -->
+    <select id="getOrdGrpList" resultType="MsCenterDistrictOrdGrpInfoResDto">
+    	SELECT /* [msCenterDistrictOrdGrpService.sqlx][msCenterDistrictOrdGrpService.getOrdGrpList][주문 그룹 목록 조회] */
+    		 BASECODE         AS ORDGRP
+    		,BASEDESCR        AS ORDGRP_NM
+    	FROM CM_CODE
+    	WHERE STORERKEY = 'FW00'
+    	AND CODELIST = 'ORDR_GROUP'
+    </select>
+    
+    	<!-- 주문그룹 정보 조회(목록) -->
+    <select id="getMasterList" parameterType="MsCenterDistrictOrdGrpReqDto" resultType="MsCenterDistrictOrdGrpResDto">
+    	SELECT /* [msCenterDistrictOrdGrpService.sqlx][msCenterDistrictOrdGrpService.getMasterList][센터 행정동별 주문 그룹 목록 조회] */ 
+    		 MS_DC_DISTRICT_ORDGRP.SERIALKEY          AS SERIALKEY
+    		,MS_DC_DISTRICT_ORDGRP.DCCODE             AS DCCODE
+    		,MS_HJDONG_POLYGON.HJDONG_NM              AS HJDONG_NM
+    		,CM_CODE.BASEDESCR                        AS ORDGRP_NM
+    		,MS_DC_DISTRICT_ORDGRP.HJDONG_CD          AS HJDONG_CD
+    		,MS_DC_DISTRICT_ORDGRP.ORDGRP             AS ORDGRP
+    		,MS_DC_DISTRICT_ORDGRP.DEL_YN             AS DEL_YN
+    		,MS_DC_DISTRICT_ORDGRP.FROMDATE           AS FROMDATE
+    		,MS_DC_DISTRICT_ORDGRP.TODATE             AS TODATE
+    	FROM MS_DC_DISTRICT_ORDGRP
+		LEFT OUTER JOIN MS_HJDONG_POLYGON
+		  ON MS_HJDONG_POLYGON.HJDONG_CD = MS_DC_DISTRICT_ORDGRP.HJDONG_CD
+		  AND #{effectiveDate} BETWEEN MS_HJDONG_POLYGON.FROMDATE AND MS_HJDONG_POLYGON.TODATE
+		LEFT OUTER JOIN CM_CODE
+		  ON CM_CODE.BASECODE = MS_DC_DISTRICT_ORDGRP.ORDGRP
+		  AND CM_CODE.STORERKEY = 'FW00'
+		  AND CM_CODE.CODELIST = 'ORDR_GROUP'
+    	WHERE MS_DC_DISTRICT_ORDGRP.HJDONG_CD = #{hjdongCd}
+    	  AND DCCODE = #{dccode}
+    	  AND TO_DATE(#{effectiveDate}, 'YYYYMMDD') BETWEEN MS_DC_DISTRICT_ORDGRP.FROMDATE AND MS_DC_DISTRICT_ORDGRP.TODATE
+    </select> 
+    
+    <select id="getDcOrdGrpList" resultType="MsCenterDistrictDcOrdGrpResDto">
+    	SELECT 
+		   SERIALKEY
+		  ,ORDGRP
+		  ,PR1_DCCODE
+		  ,PR2_DCCODE
+		  ,FROMDATE
+		  ,TODATE
+		  ,DEL_YN
+		FROM MS_DC_ORDGRP
+		WHERE 1 = 1
+		  AND #{effectiveDate} BETWEEN FROMDATE AND TODATE
+    </select>
+
+    <select id="getSerialkeysFromOrdgrp" parameterType="int" resultType="string">
+        <![CDATA[
+        SELECT LOGISONESVC.SEQ_MS_DC_ORDGRP_01.NEXTVAL FROM DUAL
+        CONNECT BY LEVEL <= #{count}
+        ]]>
+    </select>
+
+    <select id="getSerialkeysFromDcOrdgrp" parameterType="int" resultType="string">
+        <![CDATA[
+        SELECT LOGISONESVC.SEQ_MS_DC_DISTRICT_ORDGRP_01.NEXTVAL FROM DUAL
+        CONNECT BY LEVEL <= #{count}
+        ]]>
+    </select>
+
+    <!-- 주문그룹 정보 저장 -->
+    <insert id="saveDcDistrictOrdgrp" parameterType="MsCenterDistrictOrdGrpReqDto">
+		<![CDATA[
+        /* [msCenterDistrictOrdgrpService.sqlx][msCenterDistrictOrdgrpService.saveDcDistrictOrdgrp][센터 행정동 주문그룹 저장] */
+		MERGE INTO MS_DC_DISTRICT_ORDGRP A
+		USING (SELECT #{serialkey} AS SERIALKEY, #{dccode} AS DCCODE, #{hjdongCd} AS HJDONG_CD, #{ordGrp} AS ORDGRP, #{fromDate} AS FROMDATE, #{toDate} AS TODATE FROM DUAL) B
+		ON (
+			A.DCCODE = B.DCCODE AND A.HJDONG_CD = B.HJDONG_CD AND A.ORDGRP = B.ORDGRP AND A.FROMDATE = B.FROMDATE
+		)
+		WHEN MATCHED THEN
+			UPDATE
+				SET A.TODATE = B.TODATE, A.EDITWHO = #{editWho}, A.EDITDATE = TO_DATE(#{editDate}, 'YYYYMMDDHH24MISS')
+		WHEN NOT MATCHED THEN
+			INSERT (A.SERIALKEY, A.DCCODE, A.HJDONG_CD, A.ORDGRP, A.FROMDATE, A.TODATE, A.ADDWHO, A.EDITWHO, A.EDITDATE)
+			VALUES (B.SERIALKEY, B.DCCODE, B.HJDONG_CD, B.ORDGRP, B.FROMDATE, B.TODATE, NVL(#{gUserId}, 'SYSTEM'), #{editWho}, TO_DATE(#{editDate}, 'YYYYMMDDHH24MISS'))
+		]]>
+    </insert>
+    
+  		  <!-- 주문그룹 정보 업데이트 -->
+    <update id="updateDcDistrictOrdgrp" parameterType="MsCenterDistrictOrdGrpReqDto">
+    	UPDATE
+			MS_DC_DISTRICT_ORDGRP
+		SET	EDITWHO = NVL(#{editWho}, 'SYSTEM'), EDITDATE = TO_DATE(#{editDate}, 'YYYYMMDDHH24MISS')
+		WHERE SERIALKEY = #{serialkey}
+    </update>
+
+    <delete id="deleteDcDistrictOrdgrp">
+		MERGE INTO MS_DC_DISTRICT_ORDGRP /* [msCenterDistrictOrdGrpService.sqlx][msCenterDistrictOrdGrpService.deleteMasterList][주문그룹 삭제(미래데이터) / 만료처리] */ 
+		USING (SELECT 1 FROM DUAL)
+		ON (
+				MS_DC_DISTRICT_ORDGRP.SERIALKEY = #{serialkey}
+			)
+		WHEN MATCHED THEN
+	    UPDATE 
+    	SET  MS_DC_DISTRICT_ORDGRP.TODATE   = LEAST(MS_DC_DISTRICT_ORDGRP.TODATE, TO_CHAR(SYSDATE + 3, 'YYYYMMDD'))
+    		,MS_DC_DISTRICT_ORDGRP.DEL_YN   = 'Y'
+	    DELETE 
+	  	WHERE MS_DC_DISTRICT_ORDGRP.FROMDATE > SYSDATE
+    </delete>
+    
+        	<!-- 주문그룹 정보 검증 -->
+    <select id="getDcDistrictOrdGrpValidationInsert" parameterType="MsCenterDistrictOrdGrpReqDto" resultType="MsCenterDistrictOrdGrpResDto">
+    	SELECT /* [msCenterDistrictOrdGrpService.sqlx][msCenterDistrictOrdGrpService.getMasterValidationInsert][센터 저장 예정 주문그룹 검증] */ 
+			 MS_DC_DISTRICT_ORDGRP.DCCODE          AS DCCODE
+			,CM_DC.DCNAME                          AS DCNAME
+			,MS_HJDONG_POLYGON.HJDONG_NM           AS HJDONG_NM
+			,MS_DC_DISTRICT_ORDGRP.HJDONG_CD       AS HJDONG_CD
+			,MS_DC_DISTRICT_ORDGRP.ORDGRP          AS ORDGRP
+			,CM_CODE.BASEDESCR                     AS ORDGRP_NM
+			,MS_DC_DISTRICT_ORDGRP.FROMDATE        AS FROMDATE
+			,MS_DC_DISTRICT_ORDGRP.TODATE          AS TODATE
+			,MS_DC_DISTRICT_ORDGRP.DEL_YN          AS DEL_YN
+		FROM MS_DC_DISTRICT_ORDGRP
+		INNER JOIN CM_DC 
+		ON    CM_DC.DCCODE =  MS_DC_DISTRICT_ORDGRP.DCCODE
+		AND   CM_DC.DEL_YN = 'N'
+		LEFT OUTER JOIN MS_HJDONG_POLYGON
+		ON MS_HJDONG_POLYGON.HJDONG_CD = MS_DC_DISTRICT_ORDGRP.HJDONG_CD
+		AND MS_HJDONG_POLYGON.DEL_YN   = 'N' 
+        LEFT OUTER JOIN CM_CODE
+        ON CM_CODE.BASECODE = MS_DC_DISTRICT_ORDGRP.ORDGRP
+        AND CM_CODE.STORERKEY = 'FW00'
+        AND CM_CODE.CODELIST = 'ORDR_GROUP'
+		WHERE MS_DC_DISTRICT_ORDGRP.FROMDATE <![CDATA[<=]]> TO_DATE(#{toDate}, 'YYYYMMDD')
+		AND   MS_DC_DISTRICT_ORDGRP.TODATE   <![CDATA[>=]]> TO_DATE(#{fromDate}, 'YYYYMMDD')
+		AND   MS_DC_DISTRICT_ORDGRP.HJDONG_CD = #{hjdongCd}
+		AND   MS_DC_DISTRICT_ORDGRP.ORDGRP    = #{ordGrp}
+		AND   MS_DC_DISTRICT_ORDGRP.DEL_YN    = 'N'
+    </select>
+    <select id="getMasterValidationUpdate" parameterType="MsCenterDistrictOrdGrpReqDto" resultType="MsCenterDistrictOrdGrpResDto">
+    	SELECT /* [msCenterDistrictOrdGrpService.sqlx][msCenterDistrictOrdGrpService.getMasterValidationUpdate][센터 업데이트 예정 주문그룹 검증] */ 
+			 MS_DC_DISTRICT_ORDGRP.DCCODE          AS DCCODE
+			,CM_DC.DCNAME                          AS DCNAME
+			,MS_HJDONG_POLYGON.HJDONG_NM           AS HJDONG_NM
+			,MS_DC_DISTRICT_ORDGRP.HJDONG_CD       AS HJDONG_CD
+			,MS_DC_DISTRICT_ORDGRP.ORDGRP          AS ORDGRP
+			,CM_CODE.BASEDESCR                     AS ORDGRP_NM
+			,MS_DC_DISTRICT_ORDGRP.FROMDATE        AS FROMDATE
+			,MS_DC_DISTRICT_ORDGRP.TODATE          AS TODATE
+			,MS_DC_DISTRICT_ORDGRP.DEL_YN          AS DEL_YN
+		FROM MS_DC_DISTRICT_ORDGRP
+		INNER JOIN CM_DC 
+		ON    CM_DC.DCCODE =  MS_DC_DISTRICT_ORDGRP.DCCODE
+		AND   CM_DC.DEL_YN = 'N'
+		LEFT OUTER JOIN MS_HJDONG_POLYGON
+		ON  MS_HJDONG_POLYGON.HJDONG_CD = MS_DC_DISTRICT_ORDGRP.HJDONG_CD
+		AND MS_HJDONG_POLYGON.DEL_YN    = 'N'
+        LEFT OUTER JOIN CM_CODE
+        ON CM_CODE.BASECODE = MS_DC_DISTRICT_ORDGRP.ORDGRP
+        AND CM_CODE.STORERKEY = 'FW00'
+        AND CM_CODE.CODELIST = 'ORDR_GROUP'
+		WHERE MS_DC_DISTRICT_ORDGRP.FROMDATE <![CDATA[<=]]> TO_DATE(#{toDate}, 'YYYYMMDD')
+		AND   MS_DC_DISTRICT_ORDGRP.TODATE   <![CDATA[>=]]> TO_DATE(#{fromDate}, 'YYYYMMDD')
+		AND   MS_DC_DISTRICT_ORDGRP.SERIALKEY != #{serialkey}
+		AND   MS_DC_DISTRICT_ORDGRP.HJDONG_CD  = #{hjdongCd}
+		AND   MS_DC_DISTRICT_ORDGRP.ORDGRP     = #{ordGrp}
+		AND   MS_DC_DISTRICT_ORDGRP.DEL_YN     = 'N'
+    </select>
+    
+    <insert id="saveMasterListByHjdong">
+		INSERT /* [msCenterDistrictOrdGrpService.sqlx][msCenterDistrictOrdGrpService.saveMasterListNew][센터 행정동 기준 주문그룹 목록 저장] */ 
+			INTO MS_DC_DISTRICT_ORDGRP
+		(DCCODE, HJDONG_CD, ORDGRP, FROMDATE, TODATE, DEL_YN)
+		SELECT 
+		   MS_DC_DISTRICT_HJDONG.DCCODE
+		  ,MS_DC_DISTRICT_HJDONG.HJDONG_CD
+		  ,MS_DC_ORDGRP.ORDGRP
+		  ,GREATEST(MS_DC_DISTRICT_HJDONG.FROMDATE, MS_DC_ORDGRP.FROMDATE)  AS FROMDATE
+		  ,LEAST(MS_DC_DISTRICT_HJDONG.TODATE, MS_DC_ORDGRP.TODATE)         AS TODATE
+		  ,#{delYn}                                                         AS DEL_YN
+		FROM MS_DC_DISTRICT_HJDONG
+		INNER JOIN MS_DC_ORDGRP
+		ON MS_DC_DISTRICT_HJDONG.FROMDATE <![CDATA[<=]]> MS_DC_ORDGRP.TODATE
+		AND MS_DC_ORDGRP.FROMDATE         <![CDATA[<=]]> MS_DC_DISTRICT_HJDONG.TODATE
+		WHERE 1 = 1
+		AND MS_DC_DISTRICT_HJDONG.HJDONG_CD = #{hjdongCd}
+		AND MS_DC_DISTRICT_HJDONG.DCCODE    = #{dccode}
+		AND MS_DC_DISTRICT_HJDONG.FROMDATE  = #{fromDate}
+    </insert>
+    
+    <update id="updateMasterListByHjdong">
+	    UPDATE  /* [msCenterDistrictOrdGrpService.sqlx][msCenterDistrictOrdGrpService.updateMasterListByHjdong][센터 행정동 기준 주문그룹 목록 데이터 갱신] */ 
+	    	MS_DC_DISTRICT_ORDGRP
+		SET TODATE      = #{toDate}
+		WHERE DCCODE    = #{dccode}
+		  AND HJDONG_CD = #{hjdongCd}
+		  AND TODATE <![CDATA[>=]]> TO_CHAR(SYSDATE, 'YYYYMMDD')
+    </update>
+    
+    <delete id="deleteMasterListByHjdong">
+		MERGE INTO MS_DC_DISTRICT_ORDGRP  /* [msCenterDistrictOrdGrpService.sqlx][msCenterDistrictOrdGrpService.deleteMasterListByHjdong][센터 행정동 기준 주문그룹 목록 데이터 삭제] */
+		USING (
+		      SELECT MS_DC_DISTRICT_ORDGRP.SERIALKEY, MS_DC_DISTRICT_ORDGRP.TODATE
+		      FROM MS_DC_DISTRICT_ORDGRP
+		      WHERE 1 = 1
+		      AND MS_DC_DISTRICT_ORDGRP.HJDONG_CD = #{hjdongCd}
+		      AND MS_DC_DISTRICT_ORDGRP.DCCODE    = #{dccode}
+		      AND MS_DC_DISTRICT_ORDGRP.TODATE   <![CDATA[>=]]> TO_CHAR(SYSDATE, 'YYYYMMDD')
+		) SRC
+		ON (
+		    MS_DC_DISTRICT_ORDGRP.SERIALKEY = SRC.SERIALKEY
+		)
+		WHEN MATCHED THEN
+		UPDATE
+		SET MS_DC_DISTRICT_ORDGRP.TODATE = LEAST(MS_DC_DISTRICT_ORDGRP.TODATE, #{toDate})
+		   ,MS_DC_DISTRICT_ORDGRP.DEL_YN = 'Y'
+		DELETE
+		WHERE MS_DC_DISTRICT_ORDGRP.FROMDATE > TO_CHAR(SYSDATE, 'YYYYMMDD')
+    </delete>
+
+    <insert id="saveMasterListByDcOrdGrp">
+		MERGE /* [msCenterDistrictOrdGrpService.sqlx][msCenterDistrictOrdGrpService.saveMasterListByDcOrdGrp][센터 주문그룹 우선순위 기준 주문그룹 목록 저장] */
+			INTO MS_DC_DISTRICT_ORDGRP A
+	    USING (
+            SELECT
+                  MS_DC_DISTRICT_HJDONG.DCCODE
+                , MS_DC_DISTRICT_HJDONG.HJDONG_CD
+                , MS_DC_ORDGRP.ORDGRP
+                , GREATEST(MS_DC_ORDGRP.FROMDATE, MS_DC_DISTRICT_HJDONG.FROMDATE) AS  FROMDATE
+                , LEAST(MS_DC_ORDGRP.TODATE, MS_DC_DISTRICT_HJDONG.TODATE)        AS TODATE
+                , #{delYn} AS DEL_YN
+            FROM MS_DC_DISTRICT_HJDONG
+            INNER JOIN MS_DC_ORDGRP
+                ON  MS_DC_ORDGRP.ORDGRP   = #{ordGrp}
+                AND MS_DC_ORDGRP.FROMDATE = #{fromDate}
+            WHERE 1 = 1
+              AND MS_DC_DISTRICT_HJDONG.TODATE <![CDATA[>=]]> TO_CHAR(SYSDATE, 'YYYYMMDD')
+	    ) B ON ( B.DCCODE    = A.DCCODE
+	        AND  B.HJDONG_CD = A.HJDONG_CD
+	        AND  B.ORDGRP    = A.ORDGRP
+	        AND  B.FROMDATE  = A.FROMDATE
+	    )
+	    WHEN NOT MATCHED THEN
+	        INSERT (DCCODE, HJDONG_CD, ORDGRP, FROMDATE, TODATE, DEL_YN)
+            VALUES (B.DCCODE, B.HJDONG_CD, B.ORDGRP, B.FROMDATE, B.TODATE, B.DEL_YN)
+    </insert>
+
+    <select id="getDcOrdgrpByOrdgrpKeyList">
+        SELECT /* [msCenterDistrictOrdGrpService.sqlx][msCenterDistrictOrdGrpService.saveMasterListByDcOrdGrp][센터 주문그룹 우선순위 기준 주문그룹 목록 저장] */
+            h.DCCODE
+            ,h.HJDONG_CD
+            ,MS_DC_ORDGRP.ORDGRP
+            ,GREATEST(o.FROMDATE, h.FROMDATE) AS  FROMDATE
+            ,LEAST(o.TODATE, h.TODATE)        AS TODATE
+        FROM MS_DC_DISTRICT_HJDONG h
+        JOIN MS_DC_ORDGRP o ON (o.PR1_DCCODE = (SELECT CASE WHEN c.CONVCODE = '0' THEN 'FW' ELSE 'FO' END FROM CM_CODE c WHERE BASECODE = h.DCCODE AND CODELIST = 'WMS_MNG_DC')
+            OR o.PR2_DCCODE = (SELECT CASE WHEN c.CONVCODE = '0' THEN 'FW' ELSE 'FO' END FROM CM_CODE c WHERE BASECODE = h.DCCODE AND CODELIST = 'WMS_MNG_DC'))
+        WHERE o.SERIALKEY IN
+        <foreach collection="serialkeySet" item="key" open="(" separator="," close=")">
+            #{key}
+        </foreach>
+    </select>
+
+    <select id="getPlatformDcOrdgrpByOrdgrpKeyList" parameterType="MsDistrictValidationReqDto" resultType="MsCenterDistrictOrdGrpResDto">
+		<![CDATA[
+        WITH DC_TYPE AS (
+            SELECT
+                CONVCODE,
+                BASECODE
+            FROM CM_CODE
+            WHERE CM_CODE.CODELIST = 'WMS_MNG_DC' AND CM_CODE.STORERKEY  = 'FW00' AND CONVCODE IN ('0', '1')
+        ),
+        CM_CODE_ORDGRP AS (
+			SELECT BASECODE, DATA1
+			FROM CM_CODE
+			WHERE CODELIST  = 'ORDR_GROUP'
+			  AND STORERKEY = 'FW00'
+			  AND DEL_YN    = 'N'
+		),
+		HJDONG AS (
+			SELECT H.SERIALKEY, H.DCCODE, H.HJDONG_CD, H.FROMDATE, H.TODATE, H.EDITWHO, H.EDITDATE, H.RMK,
+			    CASE WHEN D1.CONVCODE = '0' THEN 'FW' WHEN D1.CONVCODE = '1' THEN 'FO' END AS PR_ROLE,
+			    CASE WHEN D1.CONVCODE = '0' AND D2.CONVCODE = '1' THEN DUP.DCCODE
+            		WHEN D1.CONVCODE = '1' AND D2.CONVCODE = '0' THEN DUP.DCCODE
+        		END AS MATCH_DCCODE,
+				CASE WHEN H.FROMDATE >= TO_CHAR(SYSDATE+3, 'YYYYMMDD') AND H.DEL_YN = 'Y' THEN 'Y' ELSE H.DEL_YN END AS DEL_YN
+			FROM MS_DC_DISTRICT_HJDONG H
+			JOIN DC_TYPE D1 ON D1.BASECODE = H.DCCODE
+			LEFT JOIN MS_DC_DISTRICT_HJDONG DUP ON DUP.HJDONG_CD = H.HJDONG_CD AND DUP.FROMDATE <= H.TODATE AND DUP.TODATE >= H.FROMDATE
+			    AND H.SERIALKEY <> DUP.SERIALKEY
+			LEFT JOIN DC_TYPE D2 ON D2.BASECODE = DUP.DCCODE
+		)
+		SELECT DISTINCT
+			O.ORDGRP, O.DELIVERY_DCCODE AS DCCODE, H.HJDONG_CD, GREATEST(O.FROMDATE, H.FROMDATE) AS FROMDATE, LEAST(O.TODATE, H.TODATE) AS TODATE, H.RMK,
+			H.DEL_YN
+		FROM MS_DC_ORDGRP O
+		JOIN CM_CODE_ORDGRP C ON C.BASECODE = O.ORDGRP AND C.DATA1 IS NULL OR C.DATA1 <> 'Y'
+		JOIN HJDONG H ON (
+			( H.PR_ROLE = 'FW' AND H.DCCODE = O.PR1_DCCODE AND H.MATCH_DCCODE = O.PR2_DCCODE) OR
+			( H.PR_ROLE = 'FO' AND H.DCCODE = O.PR2_DCCODE AND H.MATCH_DCCODE = O.PR1_DCCODE))
+			AND H.MATCH_DCCODE IS NOT NULL AND O.FROMDATE <= H.TODATE AND H.FROMDATE <= O.TODATE
+		AND O.SERIALKEY IN
+		]]>
+		<foreach collection="serialkeySet" item="key" open="(" separator="," close=")">
+			#{key}
+		</foreach>
+		<![CDATA[
+		UNION ALL
+		SELECT DISTINCT
+			C.BASECODE AS ORDGRP, H.DCCODE, H.HJDONG_CD, H.FROMDATE, H.TODATE, H.RMK,
+			H.DEL_YN
+		FROM HJDONG H
+		JOIN CM_CODE_ORDGRP C ON C.DATA1 IS NULL OR C.DATA1 <> 'Y'
+		LEFT JOIN MS_DC_ORDGRP O ON O.ORDGRP = C.BASECODE AND O.FROMDATE <= H.TODATE AND H.FROMDATE <= O.TODATE
+		WHERE H.MATCH_DCCODE IS NULL AND H.DCCODE IN (O.PR1_DCCODE, O.PR2_DCCODE)
+		  AND O.SERIALKEY IN
+		]]>
+		<foreach collection="serialkeySet" item="key" open="(" separator="," close=")">
+			#{key}
+		</foreach>
+    </select>
+
+    <update id="updateMasterListByDcOrdGrp">
+		<![CDATA[
+	    UPDATE  /* [msCenterDistrictOrdGrpService.sqlx][msCenterDistrictOrdGrpService.updateMasterListByDcOrdGrp][센터 주문그룹 우선순위 기준 주문그룹 목록 데이터 갱신] */ 
+	    	MS_DC_DISTRICT_ORDGRP
+		SET TODATE = #{toDate}, EDITWHO = NVL(#{editWho}, 'SYSTEM'), EDITDATE = TO_DATE(#{editDate}, 'YYYYMMDDHH24MISS')
+		WHERE (ORDGRP, DCCODE, FROMDATE) IN (
+			SELECT ORDGRP, DELIVERY_DCCODE, FROMDATE FROM MS_DC_ORDGRP WHERE SERIALKEY = #{serialkey}
+		)
+		]]>
+    </update>
+
+    <update id="updateDistrictOrdgrpByKey">
+	    UPDATE  /* [msCenterDistrictOrdGrpService.sqlx][msCenterDistrictOrdGrpService.updateDistrictOrdgrpByKey][센터 주문그룹 우선순위 기준 주문그룹 목록 데이터 갱신] */
+	    	MS_DC_DISTRICT_ORDGRP
+		SET TODATE      = #{toDate}
+		WHERE SERIALKEY = #{serialkey}
+    </update>
+
+    <select id="getDisctrictOrdgrpListByOrdgrpKeyList" parameterType="MsDistrictValidationReqDto" resultType="MsCenterDistrictOrdGrpResDto">
+        <![CDATA[
+	    SELECT o.SERIALKEY,
+	           o.DCCODE,
+               o.HJDONG_CD,
+               o.ORDGRP,
+               o.FROMDATE,
+               o.TODATE,
+               g.SERIALKEY AS ORDGRP_SERIALKEY
+	    FROM MS_DC_DISTRICT_ORDGRP o
+	    JOIN MS_DC_ORDGRP g ON o.ORDGRP = g.ORDGRP AND o.FROMDATE <= g.TODATE AND g.FROMDATE <= o.TODATE
+        WHERE o.ORDGRP = g.ORDGRP
+        AND g.SERIALKEY IN
+        ]]>
+        <foreach collection="serialkeySet" item="key" open="(" separator="," close=")">
+            #{key}
+        </foreach>
+    </select>
+
+    <delete id="deleteMasterListByDcOrdGrp">
+		MERGE INTO MS_DC_DISTRICT_ORDGRP  /* [msCenterDistrictOrdGrpService.sqlx][msCenterDistrictOrdGrpService.deleteMasterListByDcOrdGrp][센터 주문그룹 우선순위 기준 주문그룹 목록 데이터 삭제] */
+		USING (
+		      SELECT MS_DC_DISTRICT_ORDGRP.SERIALKEY, MS_DC_DISTRICT_ORDGRP.TODATE
+		      FROM MS_DC_DISTRICT_ORDGRP
+		      WHERE 1 = 1
+		      AND MS_DC_DISTRICT_ORDGRP.ORDGRP    = #{ordGrp}
+		      AND MS_DC_DISTRICT_ORDGRP.TODATE   <![CDATA[>=]]> TO_CHAR(SYSDATE, 'YYYYMMDD')
+		) SRC
+		ON (
+		    MS_DC_DISTRICT_ORDGRP.SERIALKEY = SRC.SERIALKEY
+		)
+		WHEN MATCHED THEN
+		UPDATE
+		SET MS_DC_DISTRICT_ORDGRP.TODATE = LEAST(MS_DC_DISTRICT_ORDGRP.TODATE, #{toDate})
+		   ,MS_DC_DISTRICT_ORDGRP.DEL_YN = 'Y'
+		DELETE
+		WHERE MS_DC_DISTRICT_ORDGRP.FROMDATE > TO_CHAR(SYSDATE, 'YYYYMMDD')
+    </delete>
+    
+    <select id="saveOrdGrpByHjdong">
+    /* [msCenterDistrictOrdGrpService.sqlx][msCenterDistrictOrdGrpService.saveOrdGrpByHjdong][행정동-주문그룹 우선순위 기준 주문그룹 생성(추가예정, 수정필요)] */
+    	WITH DC_GROUP AS (
+		    SELECT
+		        A.DCCODE,
+		        CASE 
+		            WHEN B.CONVCODE = '0' THEN 'FW'
+		            WHEN B.CONVCODE = '1' THEN 'FO'
+		        END AS DCGROUP
+		    FROM CM_DC A
+		    LEFT JOIN CM_CODE B
+		        ON B.BASECODE = A.DCCODE
+		       AND B.STORERKEY = 'FW00'
+		       AND B.CODELIST = 'WMS_MNG_DC'
+		),
+		HJDONG_DC AS (
+		    SELECT
+		        M.HJDONG_CD,
+		        M.DCCODE,
+		        D.DCGROUP,
+		        TO_DATE(M.FROMDATE,'YYYYMMDD') AS FROMDATE,
+		        TO_DATE(M.TODATE,'YYYYMMDD') AS TODATE
+		    FROM MS_DC_DISTRICT_HJDONG M
+		    LEFT JOIN DC_GROUP D
+		        ON M.DCCODE = D.DCCODE
+		    WHERE HJDONG_CD = #{hjdongCd}
+		      AND TODATE >= TO_CHAR(SYSDATE, 'YYYYMMDD')
+		),
+		BOUNDARY AS (
+		    SELECT HJDONG_CD, FROMDATE AS BOUNDARY_DATE FROM HJDONG_DC
+		    UNION
+		    SELECT HJDONG_CD, TODATE + 1 AS BOUNDARY_DATE FROM HJDONG_DC
+		),
+		SORTED_BOUNDARY AS (
+		    SELECT 
+		        HJDONG_CD, 
+		        BOUNDARY_DATE,
+		        LEAD(BOUNDARY_DATE) OVER(PARTITION BY HJDONG_CD ORDER BY BOUNDARY_DATE) AS NEXT_DATE
+		    FROM BOUNDARY
+		),
+		APPLY_DCCODES AS (
+		    SELECT
+		        S.HJDONG_CD,
+		        S.BOUNDARY_DATE,
+		        S.NEXT_DATE,
+		        H.DCCODE,
+		        H.DCGROUP
+		    FROM SORTED_BOUNDARY S
+		    LEFT JOIN HJDONG_DC H
+		      ON S.HJDONG_CD = H.HJDONG_CD
+		     AND S.BOUNDARY_DATE BETWEEN H.FROMDATE AND H.TODATE
+		),
+		BASE AS ( 
+		SELECT 
+		    HJDONG_CD,
+		    MAX(CASE WHEN DCGROUP='FW' THEN DCCODE END) AS FW_DCCODE,
+		    MAX(CASE WHEN DCGROUP='FO' THEN DCCODE END) AS FO_DCCODE,
+		    TO_CHAR(BOUNDARY_DATE, 'YYYYMMDD') AS FROMDATE,
+		    TO_CHAR(NEXT_DATE - 1, 'YYYYMMDD') AS TODATE,
+		    CASE 
+		        WHEN COUNT(DISTINCT CASE WHEN DCGROUP='FW' THEN DCCODE END) > 0 
+		         AND COUNT(DISTINCT CASE WHEN DCGROUP='FO' THEN DCCODE END) > 0 THEN 'Y'
+		        ELSE 'N'
+		    END AS IS_DUPLICATE
+		FROM APPLY_DCCODES
+		WHERE DCGROUP IS NOT NULL
+		GROUP BY HJDONG_CD, BOUNDARY_DATE, NEXT_DATE
+		ORDER BY HJDONG_CD, BOUNDARY_DATE
+		),
+		HJDONG_ORDGRP AS (
+		SELECT 
+		   MS_DC_ORDGRP.ORDGRP
+		   ,CASE WHEN IS_DUPLICATE = 'Y' AND PR1_DCCODE = 'FW'
+		      THEN FW_DCCODE
+		    WHEN IS_DUPLICATE = 'Y' AND PR1_DCCODE = 'FO'
+		      THEN FO_DCCODE
+		    WHEN IS_DUPLICATE = 'N' AND (PR1_DCCODE = 'FW' OR PR2_DCCODE = 'FW')
+		      THEN FW_DCCODE
+		    WHEN IS_DUPLICATE = 'N' AND (PR1_DCCODE = 'FO' OR PR2_DCCODE = 'FO')
+		      THEN FO_DCCODE
+		    ELSE
+		      NULL
+		   END AS DCCODE
+		  ,BASE.HJDONG_CD
+		  ,BASE.FROMDATE
+		  ,BASE.TODATE
+		FROM BASE
+		LEFT OUTER JOIN MS_DC_ORDGRP
+		ON 1 = 1
+		)
+		SELECT 
+		    ORDGRP
+		   ,DCCODE
+		   ,HJDONG_CD
+		   ,FROMDATE
+		   ,TODATE
+		FROM HJDONG_ORDGRP
+		WHERE DCCODE IS NOT NULL
+    </select>
+
+    <select id="getOrdgrpByHjdongKey" resultType="MsCenterDistrictHjdongResDto">
+        <![CDATA[
+        SELECT
+            h.SERIALKEY,
+            h.DCCODE,
+            h.FROMDATE,
+            h.TODATE
+        FROM MS_DC_DISTRICT_HJDONG h
+        JOIN MS_DC_ORDGRP g ON h.FROMDATE >= g.FROMDATE AND h.TODATE <= g.TODATE
+        WHERE h.SERIALKEY = #{serialkey}
+        ]]>
+    </select>
+
+    <select id="getDistrictOrdgrpByHjdongKeyList" resultType="map">
+        <![CDATA[
+        SELECT
+            TO_CHAR(g.SERIALKEY) AS SERIALKEY,
+            TO_CHAR(h.SERIALKEY) AS HJDONG_SERIALKEY
+        FROM MS_DC_DISTRICT_ORDGRP g
+        JOIN MS_DC_DISTRICT_HJDONG h ON h.FROMDATE <= g.TODATE AND h.TODATE >= g.FROMDATE
+            AND h.HJDONG_CD = g.HJDONG_CD AND h.DCCODE = g.DCCODE
+        WHERE h.SERIALKEY IN
+        ]]>
+        <foreach collection="serialkeySet" item="key" open="(" separator="," close=")">
+            #{key}
+        </foreach>
+    </select>
+
+    <update id="expireDistrictOrdgrpByKey">
+        <![CDATA[
+        UPDATE MS_DC_DISTRICT_ORDGRP
+        SET DEL_YN = 'N',
+            TODATE = LEAST(TODATE, TO_CHAR(SYSDATE + 2, 'YYYYMMDD'))
+        WHERE h.SERIALKEY IN
+        ]]>
+        <foreach collection="serialkeySet" item="key" open="(" separator="," close=")">
+            #{key}
+        </foreach>
+    </update>
+
+	<select id="countUnSettingMatrixOrdgrp" resultType="int">
+		<![CDATA[
+        WITH DC_TYPE AS (
+            SELECT
+                CONVCODE,
+                BASECODE
+            FROM CM_CODE
+            WHERE CM_CODE.CODELIST = 'WMS_MNG_DC' AND CM_CODE.STORERKEY  = 'FW00' AND CONVCODE IN ('0', '1')
+        ),
+        DC AS (
+            SELECT
+                A.DCCODE,
+                A.DCNAME,
+                CASE WHEN B.CONVCODE = '0' THEN 'FW'
+                     WHEN B.CONVCODE = '1' THEN 'FO'
+                END AS DCGROUP
+            FROM CM_DC A
+            JOIN DC_TYPE B ON B.BASECODE = A.DCCODE
+            WHERE B.CONVCODE IS NOT NULL
+        ),
+        CM_CODE_ORDGRP AS (
+            SELECT
+                BASECODE, BASEDESCR, DEL_YN, DATA1
+            FROM CM_CODE C
+            WHERE CODELIST = 'ORDR_GROUP' AND STORERKEY = 'FW00' AND DEL_YN = 'N'
+            AND BASECODE <> 'A100'
+        )
+        SELECT COUNT(*) AS CNT
+        FROM DC FW
+        CROSS JOIN DC FO
+        CROSS JOIN CM_CODE_ORDGRP C
+        LEFT JOIN MS_DC_ORDGRP G ON G.PR1_DCCODE = FW.DCCODE AND G.PR2_DCCODE = FO.DCCODE AND G.ORDGRP = C.BASECODE
+        	AND TO_CHAR(SYSDATE, 'YYYYMMDD') BETWEEN G.FROMDATE AND G.TODATE
+        LEFT JOIN DC_TYPE T ON T.BASECODE = G.DELIVERY_DCCODE
+        WHERE FW.DCGROUP = 'FW' AND FO.DCGROUP = 'FO' AND G.DELIVERY_DCCODE IS NULL
+        ORDER BY FW.DCCODE, FO.DCCODE
+		]]>
+	</select>
+
+</mapper>

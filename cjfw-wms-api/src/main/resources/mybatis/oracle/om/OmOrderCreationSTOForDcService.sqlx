@@ -1,0 +1,352 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="omOrderCreationSTOForDcService">
+	<!-- 저장품센터간이체 목록 조회 -->
+    <select id="getMasterList" parameterType="cjfw.wms.om.dto.OmOrderCreationSTOForDcReqDto" resultType="cjfw.wms.om.dto.OmOrderCreationSTOForDcResDto">
+        SELECT /* [omOrderCreationSTOForDcService.sqlx][omOrderCreationSTOForDcService.getMasterList][이체대상조회][YeoSeungCheol][20250917] */
+			'0' as CHECKYN   	       						/* 선택		*/
+			,PURCHASE_MST.STORERKEY      					/* 회사코드	*/
+			,PURCHASE_MST.DCCODE         					/* 센터코드	*/
+			,PURCHASE_MST.SKU            					/* 상품코드	*/
+			,MS_SKU.DESCRIPTION          					AS SKU_NAME/* 상품명		*/
+			,NVL(STOCK_FR.STOCKGRADE,'STD') AS STOCKGRADE   /* 재고속성	*/
+			,MS_SKU.BASEUOM                 AS UOM          /* 단위 ( 주문, 재고 모두 기본단위를 기준으로 처리함을 원칙으로 하기에 아래 수량정보에 별도의 변환작업을 하지 않음)*/
+			,nvl(STOCK_FR.OPENQTY,0)        AS OPENQTY      /* 공급센터 이동 가능량 */
+			,nvl(STOCK_TO.TO_OPENQTY, 0) AS TO_OPENQTY /* 공급받는센터 이동 가능량 */
+			,nvl(FR_DP.DP_QTY,0)  AS DP_QTY  /*공급센터 입고예정량*/
+		    ,0                    AS REQ     /*수원광역 발주량(보유재고량을 최대값으로 발주예정량 우선 적용)*/
+			
+		FROM (
+			SELECT
+				STORERKEY
+				,DCCODE
+				,SKU
+			FROM
+				MS_PURCHASECUST A
+			WHERE
+				DCCODE 	  = #{DC_B}
+			AND CHANNEL   = '1'
+			AND STORERKEY = #{gStorerkey}
+			<!-- 다중선택 -->
+			<if test="MULTI_SKU != null and MULTI_SKU != ''">
+			AND SKU IN (
+				SELECT TRIM (
+					REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+							  FROM (SELECT #{MULTI_SKU} AS VAL FROM DUAL
+					) A
+	            CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0
+	        )
+        	</if>
+			GROUP BY STORERKEY, DCCODE, SKU
+		) PURCHASE_MST
+		
+		LEFT OUTER JOIN (
+			SELECT ST_STOCK.STORERKEY
+			,ST_STOCK.DCCODE
+			,ST_STOCK.SKU
+			,ST_STOCK.STOCKGRADE
+			,SUM(ST_STOCK.QTY - ST_STOCK.QTYALLOCATED - ST_STOCK.QTYPICKED) as OPENQTY
+			,MAX(UOM) as UOM
+		FROM
+			VW_ST_STOCK ST_STOCK
+         
+		WHERE  1=1
+			AND    ST_STOCK.STORERKEY     = #{gStorerkey}
+			AND    ST_STOCK.DCCODE        = #{DC_A}
+			AND    ST_STOCK.STOCKGRADE    = 'STD'
+		GROUP BY ST_STOCK.STORERKEY,ST_STOCK.DCCODE,ST_STOCK.SKU,ST_STOCK.STOCKGRADE ) STOCK_FR
+        	ON     PURCHASE_MST.STORERKEY = STOCK_FR.STORERKEY
+        	AND    PURCHASE_MST.SKU       = STOCK_FR.SKU
+			AND     0             	   &lt; STOCK_FR.OPENQTY
+        JOIN    MS_SKU
+        ON      MS_SKU.STORERKEY = PURCHASE_MST.STORERKEY
+        AND     MS_SKU.SKU       = PURCHASE_MST.SKU
+        AND     MS_SKU.SERIALYN 	 = 'N'
+        AND     MS_SKU.DEL_YN    = 'N'
+        
+        /* 스칼라서브쿼리 Join 방식으로 전환 */
+
+        LEFT OUTER JOIN (
+            SELECT
+                 STORERKEY
+                ,DCCODE
+                ,SKU
+                ,UOM
+                ,SUM(
+                    CASE WHEN QTY - QTYALLOCATED - QTYPICKED > 0
+                         THEN QTY - QTYALLOCATED - QTYPICKED
+                         ELSE 0
+                    END
+                 ) AS TO_OPENQTY
+            FROM  VW_ST_STOCK
+            WHERE STOCKGRADE = 'STD'
+            GROUP BY STORERKEY, DCCODE, SKU, UOM
+        ) STOCK_TO
+        ON  STOCK_TO.STORERKEY = PURCHASE_MST.STORERKEY
+        AND STOCK_TO.DCCODE    = PURCHASE_MST.DCCODE
+        AND STOCK_TO.SKU       = PURCHASE_MST.SKU
+        AND STOCK_TO.UOM       = MS_SKU.BASEUOM
+                
+        <!--
+		<if test="SERIALYN != null and SERIALYN ==  '1'">
+			AND    MS_SKU.SERIALYN = 'N' 
+		</if>
+		 -->
+		
+		<if test="STORAGETYPE != null and STORAGETYPE != ''">
+			AND    MS_SKU.STORAGETYPE  = #{STORAGETYPE} 
+		</if>
+		
+		LEFT OUTER JOIN (
+			SELECT  DM_DOCUMENT_D.STORERKEY
+					,DM_DOCUMENT_D.SKU
+					,SUM(DM_DOCUMENT_D.ORDERQTY+DM_DOCUMENT_D.ORDERADJUSTQTY-DM_DOCUMENT_D.CONFIRMQTY) as DP_QTY
+			FROM   DM_DOCUMENT_D
+			JOIN   MS_SKU dp_sku
+			  ON     dp_sku.STORERKEY      = DM_DOCUMENT_D.STORERKEY         
+			  AND    dp_sku.SKU            = DM_DOCUMENT_D.SKU
+			  AND    dp_sku.DEL_YN         = 'N'		
+			  AND    dp_sku.SERIALYN 	   = 'N'
+			  <!--
+			  <if test="SERIALYN == 1">
+			  	AND    dp_sku.SERIALYN = 'N' 
+			  </if>
+			   -->
+			   
+			  <if test="STORAGETYPE != null and STORAGETYPE != ''">
+			  	AND    dp_sku.STORAGETYPE    = #{STORAGETYPE}
+			  </if>
+			  
+	          WHERE  1=1
+	          AND    DM_DOCUMENT_D.STORERKEY       = #{gStorerkey}
+	          AND    DM_DOCUMENT_D.DELIVERYDATE    = #{DELIVERYDATE}
+	          AND    DM_DOCUMENT_D.DCCODE          = #{DC_A}
+	          AND    DM_DOCUMENT_D.DOCTYPE         = 'DP'
+	          AND    DM_DOCUMENT_D.DEL_YN          = 'N'
+              AND    DM_DOCUMENT_D.STATUS          &lt; '90' 
+              AND    DM_DOCUMENT_D.CHANNEL         = '1' 
+              AND    DM_DOCUMENT_D.STOCKGRADE      = 'STD'
+
+		GROUP BY DM_DOCUMENT_D.STORERKEY, DM_DOCUMENT_D.SKU )  FR_DP
+		
+	    ON  PURCHASE_MST.STORERKEY = FR_DP.STORERKEY
+	    AND PURCHASE_MST.SKU       = FR_DP.SKU
+		WHERE 1=1
+		ORDER BY STOCK_FR.SKU,STOCK_FR.STOCKGRADE
+	</select>
+	
+	<!-- 저장품센터간이체 처리결과 조회 -->
+    <select id="getDataResultlist" resultType="cjfw.wms.om.dto.OmOrderCreationSTOForDcResDto">
+        SELECT /* [omOrderCreationSTOForDcService.sqlx][omOrderCreationSTOForDcService.getDataResultlist][센터간이체 처리결과조회][YeoSeungCheol][20250917] */
+               '0' as CHECKYN
+              ,SY_PROCESSTEMP_ST.FROM_STORERKEY
+              ,SY_PROCESSTEMP_ST.FROM_DCCODE
+              ,SY_PROCESSTEMP_ST.FROM_ORGANIZE
+              ,SY_PROCESSTEMP_ST.FROM_AREA
+              ,SY_PROCESSTEMP_ST.FROM_SKU
+              ,SY_PROCESSTEMP_ST.FROM_UOM
+              ,SY_PROCESSTEMP_ST.FROM_STOCKGRADE
+              ,SY_PROCESSTEMP_ST.TO_ORDERQTY
+              ,SY_PROCESSTEMP_ST.TO_DCCODE
+              ,SY_PROCESSTEMP_ST.TO_ORGANIZE
+              ,SY_PROCESSTEMP_ST.TO_AREA
+              ,SY_PROCESSTEMP_ST.TO_SKU
+              ,SY_PROCESSTEMP_ST.TO_UOM
+              ,SY_PROCESSTEMP_ST.TO_STOCKGRADE
+              ,SY_PROCESSTEMP_ST.PROCESSFLAG
+              ,SY_PROCESSTEMP_ST.PROCESSMSG
+              ,MS_SKU.DESCRIPTION AS SKU_NAME
+              ,(SELECT DCNAME FROM CM_DC WHERE CM_DC.DCCODE = SY_PROCESSTEMP_ST.FROM_DCCODE AND ROWNUM = 1) as FROM_DCNAME
+              ,(SELECT DCNAME FROM CM_DC WHERE CM_DC.DCCODE = SY_PROCESSTEMP_ST.TO_DCCODE AND ROWNUM = 1) as TO_DCNAME
+        FROM   SY_PROCESSTEMP_ST 
+        JOIN   MS_SKU
+        ON     MS_SKU.STORERKEY         = SY_PROCESSTEMP_ST.FROM_STORERKEY
+        AND    MS_SKU.SKU               = SY_PROCESSTEMP_ST.FROM_SKU
+        AND    MS_SKU.DEL_YN            = 'N'
+        WHERE  SY_PROCESSTEMP_ST.PROCESSTYPE    = 'OM_ORDERCREATIONSTO_FD'
+        AND    SY_PROCESSTEMP_ST.PROCESSCREATOR = #{gUserId}
+        AND    SY_PROCESSTEMP_ST.SPID	        = #{gSpid}
+        ORDER BY SY_PROCESSTEMP_ST.FROM_DCCODE
+                ,SY_PROCESSTEMP_ST.FROM_STORERKEY
+                ,SY_PROCESSTEMP_ST.FROM_SKU
+    </select>
+    
+    <insert id="insertSyProcessTempST" parameterType="java.util.List">
+        INSERT
+            INTO SY_PROCESSTEMP_ST (
+                PROCESSTYPE
+              , PROCESSCREATOR
+              , SPID
+              , PROCESSFLAG
+              , FROM_DCCODE
+              , FROM_STORERKEY
+              , FROM_ORGANIZE
+              , FROM_AREA
+              , FROM_SKU
+              , FROM_STOCKID
+              , FROM_STOCKGRADE
+              , FROM_UOM
+              , TO_ORDERQTY
+              , TO_DCCODE
+              , TO_STORERKEY
+              , TO_ORGANIZE
+              , TO_AREA
+              , TO_SKU
+              , TO_STOCKID
+              , TO_STOCKGRADE 
+              , TO_UOM
+              , ADDDATE
+              , EDITDATE 
+              , ADDWHO
+              , EDITWHO
+        )
+        <foreach collection="list" item="item" separator="UNION ALL">
+            SELECT
+                #{item.processtype}   AS PROCESSTYPE
+              , #{item.gUserId}       AS PROCESSCREATOR
+              , #{item.gSpid}         AS SPID
+              , 'N'                   AS PROCESSFLAG
+              , #{item.fromDccode}    AS FROM_DCCODE
+              , #{item.fromStorerkey} AS FROM_STORERKEY
+              , #{item.fromOrganize}  AS FROM_ORGANIZE
+              , #{item.fromArea}      AS FROM_AREA
+              , #{item.fromSku}       AS FROM_SKU
+              , #{item.fromStockid}   AS FROM_STOCKID
+              , #{item.fromStockgrade} AS FROM_STOCKGRADE
+              , #{item.fromUom}       AS FROM_UOM
+              , #{item.toOrderqty}    AS TO_ORDERQTY
+              , #{item.toDccode}      AS TO_DCCODE
+              , #{item.toStorerkey}   AS TO_STORERKEY
+              , #{item.toOrganize}    AS TO_ORGANIZE
+              , #{item.toArea}        AS TO_AREA
+              , #{item.toSku}         AS TO_SKU
+              , #{item.toStockid}     AS TO_STOCKID
+              , #{item.toStockgrade}  AS TO_STOCKGRADE
+              , #{item.toUom}         AS TO_UOM
+              , SYSDATE               AS ADDDATE
+              , SYSDATE               AS EDITDATE
+              , #{item.gUserId}       AS ADDWHO
+              , #{item.gUserId}       AS EDITWHO
+            FROM DUAL
+        </foreach>
+    </insert>
+
+	<delete id="deleteSyProcessTempST">
+		DELETE FROM SY_PROCESSTEMP_ST
+		WHERE
+			PROCESSTYPE = 'OM_ORDERCREATIONSTO_FD'
+		AND PROCESSCREATOR = #{gUserId}
+		AND SPID = #{gSpid}
+	</delete>
+	
+	<select id="getScm0160Header" resultType="HMap">
+	/* [omPurchaseStorageAutoService.sqlx][omPurchaseStorageAutoService.getScm0160Header] */
+		SELECT DOCNO
+		      ,ORDERTYPE
+		      ,DCCODE
+		      ,FROM_BILLTOKEY
+		      ,STORERKEY
+		      ,SHOPPINGMALL
+		FROM   IF_DM_DOCUMENT_H
+		WHERE  IF_FLAG        = 'N'
+		AND    IF_DESTINATION = 'MM'
+		AND    IF_ID          = 'SCM0160'
+		AND    ADDWHO         = #{userId}
+		AND    STORERKEY      = 'FW00'		
+	</select>
+	
+	<select id="getScm0160Detail" resultType="HMap">
+		SELECT /* [omPurchaseStorageAutoService.sqlx][omPurchaseStorageAutoService.getScm0160Detail] */
+		       DOCNO
+		      ,DOCLINE
+		      ,DEL_YN
+		      ,PLANT
+		      ,STORAGELOC
+		      ,SKU
+		      ,STORERORDERQTY
+		      ,STORERUOM
+		      ,DELIVERYDATE
+		FROM   IF_DM_DOCUMENT_D
+		WHERE  IF_FLAG        = 'P'
+		AND    IF_DESTINATION = 'MM'
+		AND    IF_ID          = 'SCM0160'
+		AND    DOCNO          = #{docNo}
+		AND    STORERKEY      = 'FW00'
+	</select>
+	
+	<update id="updateScm0160Header" parameterType="HMap">
+		/* [omPurchaseStorageAutoService.sqlx][omPurchaseStorageAutoService.updateScm0160Header] */
+		UPDATE IF_DM_DOCUMENT_H
+		SET    IF_FLAG = #{updateIfFlag}
+		      ,IF_MEMO = #{updateIfMemo}
+		WHERE  1=1
+		AND    IF_FLAG        = #{searchIfFlag}
+		AND    IF_DESTINATION = 'MM'
+		AND    IF_ID          = 'SCM0160'
+		AND    DOCNO          = #{docNo}
+		AND    STORERKEY      = 'FW00'
+	</update>
+	
+	<update id="updateScm0160Detail" parameterType="HMap">
+		/* [omPurchaseStorageAutoService.sqlx][omPurchaseStorageAutoService.updateScm0160Detail] */
+		UPDATE IF_DM_DOCUMENT_D
+		SET    IF_FLAG = #{updateIfFlag}
+		      ,IF_MEMO = #{updateIfMemo}
+		WHERE  1=1
+		AND    IF_FLAG        = #{searchIfFlag}
+		AND    IF_DESTINATION = 'MM'
+		AND    IF_ID          = 'SCM0160'
+		AND    DOCNO          = #{docNo}
+		AND    STORERKEY      = 'FW00'
+	</update>
+	
+	<!-- 엑셀업로드 유효성체크-->
+	<select id="getValidateExcelList" resultType="OmOrderCreationSTOForDcResDto">
+		WITH  /* [OmOrderCreationSTOForDcService.sqlx][OmOrderCreationSTOForDcService.getValidateExcelList][엑셀 업로드 유효성 체크][JeongHyeongCheol][20260203] */
+	  		  V AS (
+		        <foreach collection="list" item="item" separator="UNION ALL">
+			        SELECT
+			             #{item.sku} 													AS SKU
+						,#{item.stockgrade} 											AS STOCKGRADE
+						,#{item.dccode} 												AS DCCODE
+						,#{item.checkId, jdbcType=VARCHAR}								AS CHECK_ID						
+			            ,ROW_NUMBER() OVER(ORDER BY 1) AS RN 
+			        FROM DUAL
+		        </foreach>
+		    )
+		    
+		    SELECT 
+		         V.SKU 								AS SKU
+		        ,V.STOCKGRADE						AS STOCKGRADE
+		        ,V.CHECK_ID							AS CHECK_ID				
+		        ,CASE 
+		        	WHEN T1.SKU IS NOT NULL 
+		        	THEN 'Y' ELSE 'N' 
+		         END 								AS SKU_YN
+		        ,CASE 
+		        	WHEN T2.BASECODE IS NOT NULL 
+		        	THEN 'Y' ELSE 'N' 
+		         END 								AS STOCKGRADE_YN		        
+		        
+		    FROM V
+		    
+		    LEFT JOIN (
+					    SELECT 
+					        STORERKEY, 
+					        DCCODE, 
+					        SKU
+					    FROM MS_PURCHASECUST
+					    WHERE CHANNEL = '1'
+					      AND STORERKEY = 'FW00'
+					    GROUP BY STORERKEY, DCCODE, SKU
+					) T1 
+		    	   ON T1.DCCODE		= V.DCCODE
+		          AND T1.SKU 		= V.SKU		          
+		        
+		    LEFT JOIN CM_CODE T2 
+		           ON T2.CODELIST 	= 'STOCKGRADE'
+		          AND T2.BASECODE	= V.STOCKGRADE
+				  
+		    ORDER BY V.RN 
+    </select>
+</mapper>

@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="batchCommonService">
+
+    <!-- 배치상태 업데이트 -->
+    <update id="updateBatchStatus">
+        UPDATE	/* [BatchMngService.sqlx][batchMngService.updateBatchStatus][배치 상태 UPDATE][yewon.kim][20251217] */
+                BATCH_H
+           SET  JOB_STATUS = #{jobStatus}
+             ,  EDITDATE = SYSDATE
+             ,  EDITWHO = NVL(#{userId}, 'BATCH')
+         WHERE  JOB_NAME = #{jobName}
+    </update>
+
+    <!-- 배치상태 조회 -->
+    <select id="selectBatchStatus" resultType = "String">
+        SELECT CASE WHEN T1.ERROR_STATUS = 'FAILED' THEN 'FAILED'
+                    ELSE T1.RESULT_STATUS
+               END STATUS
+          FROM (
+                SELECT BATCH_JOB_EXECUTION.STATUS  AS RESULT_STATUS
+                     , CASE WHEN BATCH_JOB_EXECUTION.STATUS NOT IN ('FAILED', 'COMPLETED') THEN ''
+                            WHEN T.MIN_RESULT_CODE IS NULL THEN ''
+                            WHEN T.MIN_RESULT_CODE <![CDATA[<]]>  0 THEN 'FAILED'
+                            ELSE 'COMPLETED'
+                       END AS ERROR_STATUS
+                  FROM BATCH_JOB_EXECUTION
+                  LEFT OUTER JOIN BATCH_JOB_INSTANCE BATCH_JOB_INSTANCE
+                               ON BATCH_JOB_EXECUTION.JOB_INSTANCE_ID = BATCH_JOB_INSTANCE.JOB_INSTANCE_ID
+                  LEFT OUTER JOIN (
+                                     SELECT JOB_EXECUTION_ID, MIN(RESULT_CODE) AS MIN_RESULT_CODE
+                                     FROM MG_BATCH_LOG
+                                    WHERE JOB_EXECUTION_ID = #{jobExecutionId}
+                                    GROUP BY JOB_EXECUTION_ID
+                                  ) T
+                                 ON T.JOB_EXECUTION_ID = BATCH_JOB_EXECUTION.JOB_EXECUTION_ID
+                 WHERE BATCH_JOB_INSTANCE.JOB_NAME = #{jobName}
+                   AND BATCH_JOB_EXECUTION.JOB_EXECUTION_ID = #{jobExecutionId}
+               ) T1
+    </select>
+
+    <!-- ############################################################################################ -->
+    <!-- ### IF_MASTER 상태값 관리 ################################################################## -->
+    <!-- ############################################################################################ -->
+
+    <!-- ### DEL_YN 사용하는 경우 ### -->
+    <select id="getIfSendFlag" parameterType="BatchParamsUtil" resultType="String">
+        SELECT DEL_YN
+          FROM IF_MASTER
+         WHERE IF_ID = #{ifId}
+    </select>
+
+    <update id="updateIfSendFlag">
+        /* [resultDataSendBatch.sqlx][resultDataSendBatch.updateStatus][실적처리 IF FLAG 수정][김성원][20150703] */
+        UPDATE IF_MASTER
+        SET    DEL_YN = #{delYn}
+        WHERE  IF_ID  = #{ifId}
+    </update>
+
+    <!-- ### SPBT_COMMON.IF_MASTER_PROC 사용 방식(트랜잭션 분리) ### -->
+    <sql id="procedureParams">
+        #{AVC_COMMAND   , mode=IN   , jdbcType=VARCHAR},
+        #{AVC_IFID      , mode=IN   , jdbcType=VARCHAR},
+        #{OUT_SUCCESS   , mode=INOUT, jdbcType=INTEGER},
+        #{OUT_ERR_CODE  , mode=INOUT, jdbcType=INTEGER},
+        #{OUT_RETURN_MSG, mode=INOUT, jdbcType=VARCHAR}
+    </sql>
+    <select id="procIFStatus" statementType="CALLABLE" parameterType="BatchParamsUtil" resultType="BatchParamsUtil" timeout="60">
+        { CALL SPBT_COMMON.IF_MASTER_PROC( /* [batchCommonService.sqlx][procIFStatus][IF_MASTER 상태값 관리(공통)][김환수][20260108] */
+            <include refid="procedureParams"/>
+        ) }
+    </select>
+
+    <!-- ############################################################################################ -->
+    <!-- ### BATCH LOG 기록 ######################################################################### -->
+    <!-- ############################################################################################ -->
+    <select id="insertBatchLog" statementType="CALLABLE" parameterType="BatchLogParamsDto">
+        { CALL SPBT_COMMON.INSERT_LOG( /* [batchCommonService.sqlx][insertBatchLog][BATCH수행결과기록(공통)][김환수][20250815] */
+              AVC_JOB_ID      => #{jobExecutionId, mode=IN, jdbcType=VARCHAR} /* JOB 실행ID */
+            , AVC_JOB_NAME    => #{jobName       , mode=IN, jdbcType=VARCHAR} /* JOB NAME */
+            , AVC_JOB_DIV     => #{jobDiv        , mode=IN, jdbcType=VARCHAR} /* JOB 구분 */
+            , AVN_NODE_LEVEL  => #{nodeLevel     , mode=IN, jdbcType=VARCHAR} /* 노드레벨 */
+            , AVC_JOB_STATUS  => #{jobStatus     , mode=IN, jdbcType=VARCHAR} /* 상태 */
+            , AVC_COMMAND     => #{command       , mode=IN, jdbcType=VARCHAR} /* 수행명령어 */
+            , AVN_LINE_NO     => #{lineNo        , mode=IN, jdbcType=VARCHAR} /* 라인번호 */
+            , AVN_RESULT_CODE => #{resultCode    , mode=IN, jdbcType=VARCHAR} /* 결과코드 */
+            , AVC_RESULT_MSG  => #{resultMsg     , mode=IN, jdbcType=VARCHAR} /* 결과내용 */
+        ) }
+    </select>
+
+
+</mapper>

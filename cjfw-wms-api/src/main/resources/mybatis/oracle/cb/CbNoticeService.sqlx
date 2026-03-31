@@ -1,0 +1,438 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cbNoticeService">
+
+	<select id="getNoticeList" resultType="CbNoticeResDto">
+            WITH RES AS (
+		        SELECT 
+		        	 A.*
+		        	,USER1.USER_NM 				AS REG_NM			/* 등록자명 */
+		        	,USER2.USER_NM				AS UPD_NM			/* 수정자명 */
+		        FROM CB_COMMUNITY_BOARD A
+		        LEFT JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = A.ADDWHO  /*등록자명*/
+		        LEFT JOIN FRAMEONE_USER USER2 ON USER2.USER_ID = A.EDITWHO  /*수정자명*/
+		        WHERE A.BRDDOCDIVCD = #{brdDocDivCd}
+		          <if test="delYn != null and delYn != ''">
+		            AND A.DEL_YN = #{delYn}
+		          </if>
+		          <if test="brdTit != null and brdTit != ''">
+		            AND A.BRDTIT LIKE '%' || #{brdTit} || '%'
+		          </if>
+		          <if test="brdCntt != null and brdCntt != ''">
+		            AND A.BRDCNTT LIKE '%' || #{brdCntt} || '%'
+		          </if>
+		          <if test="brdDocKndCd != null and brdDocKndCd != ''">
+		            AND A.BRDDOCKNDCD = #{brdDocKndCd}
+		          </if>
+		          <if test="updNm != null and updNm != ''">
+		            AND UPPER(USER2.USER_NM) LIKE '%' || UPPER(#{updNm}) || '%'
+		          </if>
+		          <if test="popYn != null and popYn != ''">
+		            AND A.POP_YN = #{popYn}
+		          </if>
+		          <if test="brdStDt != null and brdStDt != ''">
+		            AND A.BRDSTDT <![CDATA[>=]]> #{brdStDt}
+		          </if>
+		          <if test="brdExprDt != null and brdExprDt != ''">
+		            AND A.BRDEXPRDT <![CDATA[<=]]> #{brdExprDt}
+		          </if>
+		          <if test="brdNum != null and brdNum != ''">
+		            AND A.BRDNUM = #{brdNum}
+		          </if>
+		          AND A.RCVUSRID IN ('STD', #{gUserId})
+		          AND EXISTS (
+		            SELECT 'A'
+		            FROM CM_USER_AUTHORITY U
+		            WHERE U.USERID = #{gUserId}
+		              AND A.RCVDCCODE IN ('STD', U.DCCODE)
+		              AND A.RCVSTORERKEY IN ('STD', U.STORERKEY)
+		              AND A.RCVORGANIZE IN ('STD', U.ORGANIZE)
+		              AND A.RCVAREA IN ('STD', U.AREA)
+		          )
+		    )
+		    SELECT BOARD.*
+		    FROM (
+		        SELECT
+		            R.SERIALKEY AS SERIALKEY,
+		            R.BRDNUM AS BRDNUM,
+		            0 AS SEQNUM,
+		            R.BRDTIT AS BRDTIT,
+		            R.BRDUSRID AS BRDUSRID,
+		            R.BRDUSRDCCODE AS BRDUSRDCCODE,
+		            R.BRDREGDT AS BRDREGDT,
+		            R.QRYFRQ AS QRYFRQ,
+		            R.POP_YN AS POPYN,
+		            R.BRDDOCKNDCD AS BRDDOCKNDCD,
+		            R.ADDWHO,
+		            R.EDITWHO,
+		            R.ADDDATE,
+		            R.EDITDATE,
+		            R.REG_NM,
+		            R.UPD_NM,
+		            R.DEL_YN,
+		            TO_CHAR(TO_DATE(R.BRDSTDT, 'YYYYMMDD'), 'YYYY-MM-DD') AS BRDSTDT,
+                	TO_CHAR(TO_DATE(R.BRDEXPRDT, 'YYYYMMDD'), 'YYYY-MM-DD') AS BRDEXPRDT,
+                	CASE 
+	                    WHEN (
+	                      SELECT COUNT(*) 
+	                      FROM FRAMEONE_TPL_FILE_UPLOAD 
+	                      WHERE REF_KEY = R.BRDNUM 
+	                      AND TYPE = 'NOTICE'
+	                    ) > 0 THEN 'Y' 
+	                    ELSE 'N' 
+	                END AS FILE_YN,
+	                (
+		                SELECT 
+						    CASE 
+						        /* (1) R이 1개이고 U는 없음 */
+						        WHEN SUM(CASE WHEN RCVCUST_TYPE = 'R' THEN 1 ELSE 0 END) = 1
+						             AND SUM(CASE WHEN RCVCUST_TYPE = 'U' THEN 1 ELSE 0 END) = 0 THEN 
+						            MAX(CASE WHEN RCVCUST_TYPE = 'R' THEN RG.RECV_GROUP_NM END) || ' 그룹'
+						
+						        /* (2) R이 1개이고 U가 1개 이상 OR R이 2개 이상 */
+						        WHEN (SUM(CASE WHEN RCVCUST_TYPE = 'R' THEN 1 ELSE 0 END) = 1 
+						              AND SUM(CASE WHEN RCVCUST_TYPE = 'U' THEN 1 ELSE 0 END) > 0)
+						             OR SUM(CASE WHEN RCVCUST_TYPE = 'R' THEN 1 ELSE 0 END) >= 2 THEN 
+						            MAX(CASE WHEN RCVCUST_TYPE = 'R' THEN RG.RECV_GROUP_NM END) || ' 그룹 외'
+						
+						        /* (3) R이 없고 U가 1개 */
+						        WHEN SUM(CASE WHEN RCVCUST_TYPE = 'R' THEN 1 ELSE 0 END) = 0
+						             AND SUM(CASE WHEN RCVCUST_TYPE = 'U' THEN 1 ELSE 0 END) = 1 THEN 
+						            MAX(CASE WHEN RCVCUST_TYPE = 'U' THEN FU.USER_NM END)
+						
+						        /* (4) R이 없고 U가 2개 이상 */
+						        WHEN SUM(CASE WHEN RCVCUST_TYPE = 'R' THEN 1 ELSE 0 END) = 0
+						             AND SUM(CASE WHEN RCVCUST_TYPE = 'U' THEN 1 ELSE 0 END) > 1 THEN 
+						            MAX(CASE WHEN RCVCUST_TYPE = 'U' THEN FU.USER_NM END)
+						            || ' 외 '
+						            || (SUM(CASE WHEN RCVCUST_TYPE = 'U' THEN 1 ELSE 0 END) - 1)
+						            || '명'
+						    END
+						FROM CM_NOTICES_RCVCUST NR
+						LEFT JOIN CM_RECV_GROUP RG ON NR.RECV_GROUP_ID = RG.RECV_GROUP_ID
+						LEFT JOIN FRAMEONE_USER FU ON NR.USER_ID = FU.USER_ID 
+						WHERE NR.BRDNUM = R.BRDNUM
+	                ) AS BRD_TARGET
+		        FROM RES R
+		        UNION ALL
+		        SELECT
+		            B.SERIALKEY AS SERIALKEY,
+		            B.BRDNUM AS BRDNUM,
+		            B.SEQNUM AS SEQNUM,
+		            '    [RE] ' || B.BRDTIT AS BRDTIT,
+		            B.BRDUSRID AS BRDUSRID,
+		            B.BRDUSRDCCODE AS BRDUSRDCCODE,
+		            B.BRDREGDT AS BRDREGDT,
+		            B.QRYFRQ AS QRYFRQ,
+		            R.POP_YN AS POPYN,
+		            R.BRDDOCKNDCD AS BRDDOCKNDCD,
+		            R.ADDWHO,
+		            R.EDITWHO,
+		            R.ADDDATE,
+		            R.EDITDATE,
+		            R.REG_NM,
+		            R.UPD_NM,
+		            R.DEL_YN,
+		            TO_CHAR(TO_DATE(R.BRDSTDT, 'YYYYMMDD'), 'YYYY-MM-DD') AS BRDSTDT,
+                	TO_CHAR(TO_DATE(R.BRDEXPRDT, 'YYYYMMDD'), 'YYYY-MM-DD') AS BRDEXPRDT,
+                	'N' AS FILE_YN,
+                	'' AS BRD_TARGET
+		        FROM CB_COMMUNITY_BOARD_REPLY B
+		        JOIN RES R ON R.BRDNUM = B.BRDNUM
+		        JOIN CM_DC D ON D.DCCODE = B.BRDUSRDCCODE
+		        WHERE B.DEL_YN = 'N'
+		    ) BOARD
+		    ORDER BY BOARD.BRDSTDT DESC, BOARD.BRDNUM DESC
+    </select>
+    
+    <select id="getNoticeDetail" resultType="CbNoticeDetailResDto">
+        SELECT /* [CbCommunityService.sqlx][cbCommunityService.getCommunityBoardDetail][게시판 정보 조회 (단건)][JiSooKim] */
+               A.SERIALKEY                     AS SERIALKEY
+              ,A.BRDNUM                        AS BRDNUM         /* 게시판번호 */
+              ,A.BRDUSRDCCODE                  AS BRDUSRDCCODE   /* 게시자센터코드 */
+              ,A.BRDUSRID                      AS BRDUSRID       /* 게시자ID */
+              ,A.BRDREGDT                      AS BRDREGDT       /* 게시판등록일자 */
+              ,A.BRDSTDT                       AS BRDSTDT        /* 게시시작일자 */
+              ,A.BRDEXPRDT                     AS BRDEXPRDT      /* 게시종료일자 */
+              ,A.BRDDOCDIVCD                   AS BRDDOCDIVCD    /* 게시문서구분코드 */
+              ,A.BRDDOCKNDCD                   AS BRDDOCKNDCD    /* 게시문서종류코드 */
+              ,A.BRDTIT                        AS BRDTIT         /* 게시판제목 */
+              ,A.BRDCNTT                       AS BRDCNTT        /* 게시판내용 */
+              ,A.ARRORD                        AS ARRORD         /* 정렬순서 */
+              ,A.QRYFRQ                        AS QRYFRQ         /* 조회횟수 */
+              ,A.DEL_YN                        AS DEL_YN         /* 삭제여부 */
+              ,TO_CHAR(A.ADDDATE, 'yyyymmddhh24miss')  AS ADDDATE  /* 최초등록시간 */
+              ,TO_CHAR(A.EDITDATE, 'yyyymmddhh24miss') AS EDITDATE /* 최종변경시간 */
+              ,A.ADDWHO                        AS ADDWHO         /* 최초등록자 */
+              ,A.EDITWHO                       AS EDITWHO        /* 최종변경자 */
+              ,A.POP_YN                        AS POPYN          /* 팝업여부 */
+              ,A.REDIRECT_URL                  AS REDIRECT_URL   /* 이동URL */
+        FROM   CB_COMMUNITY_BOARD A
+        WHERE  1=1
+        AND    A.BRDNUM           = #{brdNum}
+    </select>
+    
+
+	<update id="updateReadCount" >
+	    UPDATE CB_COMMUNITY_BOARD
+	    SET QRYFRQ = NVL(QRYFRQ, 0) + 1
+	    WHERE BRDNUM = #{brdNum}
+	</update>
+
+    
+    <select id="getBoardKey" resultType="string">
+    	SELECT /* [CbCommunityService.sqlx][cbCommunityService.getBoardKey][게시판 KEY 조회][JiSooKim] */
+               NVL(
+                   (SELECT /*+INDEX_DESC(A PK_CB_COMMUNITY_BOARD)*/ MAX(BRDNUM)+1 SS FROM CB_COMMUNITY_BOARD A 
+                   WHERE A.BRDNUM LIKE TO_CHAR(SYSDATE , 'YYYYMMDD') || '%' )
+                   , TO_CHAR(SYSDATE,'YYYYMMDD')|| '00001') AS BRDNUM
+         FROM DUAL		
+    </select>
+    
+    
+	<insert id="insertBoard">
+	    INSERT INTO CB_COMMUNITY_BOARD
+	      (SERIALKEY,
+	       BRDNUM,
+	       BRDUSRDCCODE,
+	       BRDUSRID,
+	       BRDREGDT,
+	       BRDSTDT,
+	       BRDEXPRDT,
+	       BRDDOCDIVCD,
+	       BRDDOCKNDCD,
+	       BRDTIT,
+	       BRDCNTT,
+	       ARRORD,
+	       QRYFRQ,
+	       USEYN,
+	       DEL_YN,
+	       POP_YN,
+	       REDIRECT_URL,
+	       ADDDATE,
+	       EDITDATE,
+	       ADDWHO,
+	       EDITWHO)
+	    VALUES
+	      (
+	        SEQ_CB_COMMUNITY_BOARD.NEXTVAL,
+	        #{brdNum},
+	        #{brdUsrDcCode},
+        	#{brdUsrId},
+	        TO_CHAR(SYSDATE, 'YYYYMMDD'),
+	        #{brdStDt},
+	        #{brdExprDt},
+	        #{brdDocDivCd},
+	        #{brdDocKndCd},
+	        #{brdTit},
+	        #{brdCntt},
+	        #{arrOrd},
+	        0,
+	        'Y',
+	        #{delYn},
+	        #{popYn},
+	        #{redirectUrl},
+	        SYSDATE,
+	        SYSDATE,
+	        #{addWho},
+        	#{editWho}
+	      )
+	</insert>
+    
+	<update id="updateBoard">
+	    UPDATE CB_COMMUNITY_BOARD
+	    SET BRDUSRDCCODE = #{brdUsrDcCode},
+	        BRDUSRID     = #{brdUsrId},
+	        BRDSTDT      = #{brdStDt},
+	        BRDEXPRDT    = #{brdExprDt},
+	        BRDTIT       = #{brdTit},
+	        BRDCNTT      = #{brdCntt},
+	        POP_YN       = #{popYn},
+	        DEL_YN       = #{delYn},
+	        REDIRECT_URL = #{redirectUrl},
+	        EDITDATE     = SYSDATE,
+	        EDITWHO      = #{editWho}
+	    WHERE SERIALKEY = #{serialKey}
+	</update>
+    
+	<update id="deleteBoard">
+	    UPDATE CB_COMMUNITY_BOARD
+	    SET DEL_YN   = 'Y',
+	        EDITDATE = SYSDATE,
+	        EDITWHO  = #{editWho}
+	    WHERE SERIALKEY = #{serialKey}
+	</update>
+	
+	<select id="getRecvList" resultType="CbNoticeRecvResDto">
+		SELECT RCVCUST_TYPE
+			, CASE WHEN RCVCUST_TYPE = 'R' THEN RG.RECV_GROUP_NM
+					WHEN RCVCUST_TYPE = 'U' THEN FU.USER_NM END 	AS  RECV_NM
+			FROM CM_NOTICES_RCVCUST NR
+			LEFT JOIN CM_RECV_GROUP RG ON NR.RECV_GROUP_ID = RG.RECV_GROUP_ID
+			LEFT JOIN FRAMEONE_USER FU ON NR.USER_ID = FU.USER_ID 
+			WHERE NR.BRDNUM = #{brdNum}
+		
+	</select>
+    
+    <insert id="insertRecvGroupUser">
+        INSERT INTO CM_NOTICES_RCVCUST
+          (BRDNUM,
+           SEQ,
+           RCVCUST_TYPE,
+           RECV_GROUP_ID,
+           USER_ID,
+           ADDDATE,
+           EDITDATE,
+           ADDWHO,
+           EDITWHO)
+        VALUES
+          (
+            #{brdNum},
+            (SELECT NVL(MAX(TO_NUMBER(SEQ)),0) + 1 FROM CM_NOTICES_RCVCUST WHERE BRDNUM = #{brdNum}),
+            #{rcvcustType},
+            #{recvGroupId},
+            #{userId},
+            SYSDATE,
+            SYSDATE,
+            NVL(#{addWho}, 'SYSTEM'),
+            NVL(#{editWho}, 'SYSTEM')
+          )
+    </insert>
+    
+    <insert id="insertRecvGroupAllUser">
+        INSERT INTO CM_NOTICES_RCVCUST
+          (BRDNUM,
+           SEQ,
+           RCVCUST_TYPE,
+           USER_ID,
+           ADDDATE,
+           EDITDATE,
+           ADDWHO,
+           EDITWHO)
+        SELECT
+        	#{brdNum} 												AS BRDNUM,
+        	ROW_NUMBER() OVER (ORDER BY FRAMEONE_USER.USER_ID) 		AS SEQ,
+        	'U' 													AS RCVCUST_TYPE,
+            FRAMEONE_USER.USER_ID 									AS USER_ID,
+            SYSDATE 												AS ADDDATE,
+            SYSDATE 												AS EDITDATE,
+            NVL(#{gUserId}, 'SYSTEM') 								AS ADDWHO,
+            NVL(#{gUserId}, 'SYSTEM') 								AS EDITWHO
+        FROM FRAMEONE_USER
+        WHERE 1 = 1
+        	AND FRAMEONE_USER.DEL_YN = 'N'
+			AND FRAMEONE_USER.STATUS = '90'
+    </insert>
+    
+        <insert id="insertSendHist">
+        MERGE INTO CM_NOTICES_SEND_HIST H 
+			USING (
+				SELECT MAX(USER_ID) 	AS USER_ID
+				FROM CM_RECV_GROUP_USER
+				WHERE 1=1
+				<if test="recvGroupId != null and recvGroupId != ''">
+					AND RECV_GROUP_ID = #{recvGroupId}
+				</if>
+				<if test="userId != null and userId != ''">
+					AND USER_ID = #{userId}
+				</if>
+					GROUP BY USER_ID
+				) GU 
+			ON (
+				H.USER_ID = GU.USER_ID AND H.BRDNUM = #{brdNum}
+				) -- 조건
+			WHEN MATCHED THEN
+			   UPDATE SET 
+			   	EDITDATE = SYSDATE
+			WHEN NOT MATCHED THEN
+				INSERT 
+					(
+					   BRDNUM,
+			           USER_ID,
+			           ADDDATE,
+			           EDITDATE,
+			           ADDWHO,
+			           EDITWHO
+			           )
+		        VALUES
+			          (
+			            #{brdNum},
+			           	GU.USER_ID,
+			            SYSDATE,
+			            SYSDATE,
+			            NVL(#{addWho}, 'SYSTEM'),
+			            NVL(#{editWho}, 'SYSTEM')
+			          )
+
+    </insert>
+    
+    <insert id="insertSendHistUser">
+        INSERT INTO CM_NOTICES_SEND_HIST
+	      (
+		      BRDNUM,
+	          USER_ID,
+	          ADDDATE,
+	          EDITDATE,
+	          ADDWHO,
+	          EDITWHO
+           )
+        VALUES
+          (
+            #{brdNum},
+            #{userId},
+            SYSDATE,
+            SYSDATE,
+            NVL(#{addWho}, 'SYSTEM'),
+            NVL(#{editWho}, 'SYSTEM')
+          )
+    </insert>
+    
+    <insert id="insertSendHistAllUser">
+        INSERT INTO CM_NOTICES_SEND_HIST
+	      (
+		      BRDNUM,
+	          USER_ID,
+	          ADDDATE,
+	          EDITDATE,
+	          ADDWHO,
+	          EDITWHO
+           )
+        SELECT
+        	#{brdNum} 												AS BRDNUM,
+            FRAMEONE_USER.USER_ID 									AS USER_ID,
+            SYSDATE 												AS ADDDATE,
+            SYSDATE 												AS EDITDATE,
+            NVL(#{gUserId}, 'SYSTEM') 								AS ADDWHO,
+            NVL(#{gUserId}, 'SYSTEM') 								AS EDITWHO
+        FROM FRAMEONE_USER
+        WHERE 1 = 1
+        	AND FRAMEONE_USER.DEL_YN = 'N'
+			AND FRAMEONE_USER.STATUS = '90'
+    </insert>
+    
+    <select id="saveNotice" statementType="CALLABLE">
+		<![CDATA[ 
+	    {
+	    	CALL /* [CbNoticeService.sqlx][saveNotice][공지사항 등록 및 수신처 전송][JGS][2025.10.29] */
+    		PRC_CM_NOTICE_SEND(
+		         AVC_SYSTEM      => #{avc_SYSTEM,       mode=IN,    jdbcType=VARCHAR} /*시스템*/
+		        ,AVC_EXECUTEMODE => #{avc_EXECUTEMODE,  mode=IN,    jdbcType=VARCHAR} /*수행모드*/
+		        ,AVC_COMMAND     => #{avc_COMMAND,      mode=IN,    jdbcType=VARCHAR} /*수행명령어*/
+		        ,AVC_DCCODE      => #{avc_DCCODE,       mode=IN,    jdbcType=VARCHAR} /*센터코드*/
+		        ,AVC_STORERKEY   => #{avc_STORERKEY,    mode=IN,    jdbcType=VARCHAR} /*고객사코드*/
+		        ,AVC_ORGANIZE    => #{avc_ORGANIZE,     mode=IN,    jdbcType=VARCHAR} /*조직코드*/
+		        ,AVC_AREA        => #{avc_AREA,         mode=IN,    jdbcType=VARCHAR} /*창고코드*/
+		        ,AVC_REQUESTCODE => #{avc_REQUESTCODE,  mode=IN,    jdbcType=VARCHAR} /*요청코드*/
+		        ,AVC_REQUESTMSG  => #{avc_REQUESTMSG,   mode=IN,    jdbcType=VARCHAR} /*요청문자열*/
+		        ,AVC_WORKER      => #{avc_WORKER,       mode=IN,    jdbcType=VARCHAR} /*작업자*/
+		        ,AVC_SECURITYKEY => #{avc_SECURITYKEY,  mode=IN,    jdbcType=VARCHAR} /*보안KEY*/
+		        ,AI_SPID         => #{ai_SPID,          mode=IN,    jdbcType=INTEGER} /*SPID*/
+		        ,I_ERR       	 => #{resultCode, 		mode=OUT, 	jdbcType=INTEGER, javaType=String}
+		        ,VC_RESULTMSG    => #{resultMessage, 	mode=OUT, 	jdbcType=VARCHAR, javaType=String}
+		        ,VC_RETURNMSG    => #{returnMessage, 	mode=OUT, 	jdbcType=VARCHAR, javaType=String}
+		    )
+	    } 
+	    ]]>
+    </select>
+    
+</mapper>

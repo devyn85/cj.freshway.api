@@ -1,0 +1,915 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="msCenterDistrictService">
+
+	<select id="getDcType" parameterType="MsCenterDistrictReqDto" resultType="CmCodeResDto">
+		SELECT
+			CONVCODE,
+			BASECODE
+		FROM CM_CODE
+		WHERE CM_CODE.CODELIST = 'WMS_MNG_DC' AND CM_CODE.STORERKEY  = 'FW00' AND CONVCODE IN ('0', '1')
+		AND BASECODE = #{dccode}
+	</select>
+
+	<!-- 권역별 폴리곤 정보 조회(목록) -->
+    <select id="getCenterDistrictPolygonList" parameterType="MsCenterDistrictReqDto" resultType="MsCenterDistrictHjdongResDto">
+        <![CDATA[
+        WITH /* [msCenterDistrictService.sqlx][getMasterList][센터별 권역 행정동 데이터 조회(목록)] */
+            HJDONG_LIST AS (
+            SELECT
+                  SERIALKEY
+                , DCCODE
+                , HJDONG_CD
+                , FROMDATE
+                , TODATE
+                , DEL_YN
+                , RMK
+                , ROW_NUMBER() OVER(PARTITION BY DCCODE, HJDONG_CD, FROMDATE ORDER BY FROMDATE) AS RN
+            FROM MS_DC_DISTRICT_HJDONG
+            WHERE ( #{effectiveDate} BETWEEN FROMDATE AND TODATE OR FROMDATE >= #{effectiveDate} )
+        ]]>
+        <if test="dccode != null and dccode != ''">
+            <choose>
+                <when test="dccode.indexOf(',') > -1">
+                    AND MS_DC_DISTRICT_HJDONG.DCCODE IN
+                    <foreach item="item" index="index" collection="dccode.split(',')" open="(" separator="," close=")">
+                        #{item}
+                    </foreach>
+                </when>
+                <otherwise>
+                    AND MS_DC_DISTRICT_HJDONG.DCCODE = #{dccode}
+                </otherwise>
+            </choose>
+        </if>
+        <if test="hjdongCd != null and hjdongCd.size != 0">
+              AND MS_DC_DISTRICT_HJDONG.HJDONG_CD IN
+            <foreach collection="hjdongCd" item="item" separator="," open="(" close=")">
+              #{item}
+            </foreach>
+        </if>
+        )
+        SELECT
+              HJDONG_LIST.SERIALKEY
+            , HJDONG_LIST.DCCODE
+            , CM_DC.DCNAME
+            , HJDONG_LIST.HJDONG_CD
+            , COALESCE(MS_HJDONG_POLYGON.CTP_KOR_NM, CM_HJDONG.CTP_KOR_NM) AS CTP_KOR_NM
+            , CASE WHEN COALESCE(MS_HJDONG_POLYGON.CTP_KOR_NM, CM_HJDONG.CTP_KOR_NM) = '세종특별자치시' THEN '세종특별자치시' ELSE COALESCE(MS_HJDONG_POLYGON.SIG_KOR_NM, CM_HJDONG.SIG_KOR_NM) END AS SIG_KOR_NM
+            , COALESCE(MS_HJDONG_POLYGON.HJDONG_NM, CM_HJDONG.HJDONG_NM) AS HJDONG_NM
+            , HJDONG_LIST.FROMDATE
+            , HJDONG_LIST.TODATE
+            , HJDONG_LIST.DEL_YN
+            , HJDONG_LIST.RMK
+            , CASE WHEN EXISTS (
+                  SELECT 1
+                  FROM MS_DC_DISTRICT_HJDONG
+                  WHERE  MS_DC_DISTRICT_HJDONG.HJDONG_CD = HJDONG_LIST.HJDONG_CD
+                    AND  MS_DC_DISTRICT_HJDONG.DCCODE   != HJDONG_LIST.DCCODE
+                    AND (MS_DC_DISTRICT_HJDONG.FROMDATE BETWEEN HJDONG_LIST.FROMDATE AND HJDONG_LIST.TODATE
+                     OR  MS_DC_DISTRICT_HJDONG.TODATE   BETWEEN HJDONG_LIST.FROMDATE AND HJDONG_LIST.TODATE)
+              ) THEN 1 ELSE 0 END AS IS_DUPLICATE
+            , CASE WHEN CM_HJDONG.MVMN_RES_CD = '63' THEN 'Y' ELSE 'N' END AS ABOLISHED_YN
+        FROM HJDONG_LIST
+        LEFT OUTER JOIN CM_DC
+            ON  CM_DC.DCCODE = HJDONG_LIST.DCCODE
+        LEFT OUTER JOIN MS_HJDONG_POLYGON
+            ON  MS_HJDONG_POLYGON.HJDONG_CD = HJDONG_LIST.HJDONG_CD
+            AND HJDONG_LIST.FROMDATE BETWEEN MS_HJDONG_POLYGON.FROMDATE AND MS_HJDONG_POLYGON.TODATE
+        LEFT OUTER JOIN CM_HJDONG
+            ON  CM_HJDONG.HJDONG_CD = HJDONG_LIST.HJDONG_CD
+        WHERE HJDONG_LIST.RN BETWEEN 0 AND 1
+        ORDER BY HJDONG_LIST.SERIALKEY
+    </select>
+    
+    <select id="getValidateInsertAndNew"  parameterType="cjfw.wms.ms.dto.MsCenterDistrictValidationReqDto" resultType="MsCenterDistrictValidationResDto">
+    	/* [msCenterDistrictService.sqlx][msCenterDistrictSerivce.getValidateInsertAndNew][센터 권역 수정시 검증] */
+        WITH BASE AS (
+		    SELECT 
+		        m.SERIALKEY ,m.DCCODE ,m.HJDONG_CD ,m.FROMDATE ,m.TODATE ,'OLD' AS SRC
+		    FROM MS_DC_DISTRICT_HJDONG m
+		    WHERE 1 = 1
+		    <if test="serialkeySet != null and serialkeySet.size > 0">
+            AND SERIALKEY NOT IN
+		        <foreach collection="serialkeySet" item="key" open="(" separator="," close=")">
+		            #{key}
+		        </foreach>
+	        </if>
+        	<foreach collection="districtHjdongList" item="dto">
+            UNION ALL
+            SELECT 
+                 NULL ,#{dto.dccode} ,#{dto.hjdongCd} ,#{dto.fromDate} ,#{dto.toDate} ,'NEW' AS SRC
+            FROM DUAL
+            </foreach>
+		),
+		BASE2 AS (
+		    SELECT 
+		        b.SERIALKEY ,b.DCCODE ,b.HJDONG_CD ,b.FROMDATE ,b.TODATE ,c.CONVCODE ,b.SRC
+		    FROM BASE b
+		    LEFT JOIN CM_CODE c
+		      ON c.BASECODE = b.DCCODE
+		     AND c.CODELIST = 'WMS_MNG_DC'
+		),
+		NUMBERED AS (
+		    SELECT 
+		        BASE2.SERIALKEY ,BASE2.DCCODE ,BASE2.HJDONG_CD ,BASE2.FROMDATE ,BASE2.TODATE ,BASE2.CONVCODE ,BASE2.SRC
+	           ,ROW_NUMBER() OVER (ORDER BY DCCODE, HJDONG_CD, FROMDATE, TODATE) AS RN
+		    FROM BASE2
+		)
+        <![CDATA[
+		SELECT 
+	        MS_HJDONG_POLYGON_A.HJDONG_NM     AS HJDONG_NM
+	       ,MS_HJDONG_POLYGON_A.HJDONG_CD     AS HJDONG_CD
+	       ,dca.DCNAME                 	      AS DCNAME_A 
+	       ,a.FROMDATE                 	      AS FROM_A
+	       ,a.TODATE                   	      AS TO_A
+	       ,dcb.DCNAME                 	      AS DCNAME_B 
+	       ,b.FROMDATE                 	      AS FROM_B
+	       ,b.TODATE                   	      AS TO_B
+		   ,a.SERIALKEY
+		FROM NUMBERED a
+		JOIN NUMBERED b
+		  ON a.HJDONG_CD = b.HJDONG_CD
+		 AND a.CONVCODE  = b.CONVCODE
+		 AND a.FROMDATE <= b.TODATE
+		 AND a.TODATE   >= b.FROMDATE
+		 AND a.RN       <  b.RN
+		LEFT JOIN CM_DC dca 
+		  ON a.DCCODE = dca.DCCODE  
+		LEFT JOIN CM_DC dcb 
+		  ON b.DCCODE = dcb.DCCODE 
+		LEFT JOIN MS_HJDONG_POLYGON MS_HJDONG_POLYGON_A  
+		  ON a.HJDONG_CD = MS_HJDONG_POLYGON_A.HJDONG_CD
+	  	 AND MS_HJDONG_POLYGON_A.DEL_YN = 'N'
+        ]]>
+    </select>
+    
+    <select id="getCenterDistrictPolyglon" resultType="MsCenterDistrictResDto">
+        SELECT /* [msCenterDistrictSerivce.sqlx][getCenterDistrictPolyglon][센터별 권역 폴리곤 조회(목록)] */
+             MS_DC_DISTRICT.DCCODE
+           , WMS_MNG_DC.BASEDESCR AS DCNAME
+           , SDO_UTIL.TO_GEOJSON(MS_DC_DISTRICT.SPATIAL_GEOM) AS GEOJSON
+           , CASE WHEN WMS_MNG_DC.CONVCODE = 1 THEN 'FO'
+                  WHEN WMS_MNG_DC.CONVCODE = 0 THEN 'FW'
+                  ELSE NULL
+                  END AS DCCATEGORY
+           , MS_DC_DISTRICT.FROMDATE
+           , MS_DC_DISTRICT.TODATE
+        FROM MS_DC_DISTRICT
+        LEFT OUTER JOIN CM_CODE WMS_MNG_DC
+             ON  WMS_MNG_DC.CODELIST  = 'WMS_MNG_DC'
+             AND WMS_MNG_DC.BASECODE  = MS_DC_DISTRICT.DCCODE
+             AND WMS_MNG_DC.STORERKEY = 'FW00'
+        WHERE (#{effectiveDate} BETWEEN MS_DC_DISTRICT.FROMDATE AND MS_DC_DISTRICT.TODATE OR MS_DC_DISTRICT.FROMDATE >= #{effectiveDate})
+		<if test="dccode != null and dccode != ''">
+			<choose>
+				<when test="dccode.indexOf(',') > -1">
+					AND MS_DC_DISTRICT.DCCODE IN
+					<foreach item="item" index="index" collection="dccode.split(',')" open="(" separator="," close=")">
+						#{item}
+					</foreach>
+				</when>
+				<otherwise>
+					AND MS_DC_DISTRICT.DCCODE = #{dccode}
+				</otherwise>
+		  	</choose>
+		</if>
+        <if test="hjdongCd != null and hjdongCd.size != 0">
+          AND EXISTS (
+            SELECT 1
+            FROM MS_DC_DISTRICT_HJDONG
+            WHERE MS_DC_DISTRICT_HJDONG.DCCODE = MS_DC_DISTRICT.DCCODE
+              AND MS_DC_DISTRICT_HJDONG.HJDONG_CD IN
+            <foreach collection="hjdongCd" item="item" separator="," open="(" close=")">
+                #{item}
+            </foreach>
+              AND (#{effectiveDate} BETWEEN MS_DC_DISTRICT_HJDONG.FROMDATE AND MS_DC_DISTRICT_HJDONG.TODATE OR MS_DC_DISTRICT.FROMDATE >= #{effectiveDate})
+          )
+        </if>
+    </select>
+
+    <insert id="updateAndInsertDistrict">
+    	MERGE INTO /* [msCenterDlvDistrictService.sqlx][msCenterDlvDistrictService.updateAndInsertDistrict][센터 배송 권역 갱신 (D+3일 신규 데이터 생성 및 기존 데이터 만료 처리)] */
+    	MS_DLV_DISTRICT T
+		USING (
+		  SELECT 
+		      SERIALKEY                                          AS SERIALKEY
+		     ,DCCODE                                             AS DCCODE
+		     ,DLVGROUP_ID                                        AS DLVGROUP_ID
+		     ,DLVDISTRICT_ID                                     AS DLVDISTRICT_ID
+		     ,DLVDISTRICT_NM                                     AS DLVDISTRICT_NM
+		     ,DESCRIPTION                                        AS DESCRIPTION
+		     ,DEL_YN                                             AS DEL_YN
+		     ,FROMDATE                                           AS FROMDATE
+		     ,LEAST(TODATE, TO_CHAR(SYSDATE + 2, 'YYYYMMDD'))    AS TODATE
+		  FROM MS_DLV_DISTRICT
+		  WHERE SERIALKEY = #{serialkey}
+		  UNION ALL
+		    SELECT 
+		      NULL                                                     AS SERIALKEY
+		     ,DCCODE                                                   AS DCCODE
+		     ,#{dlvgroupId}                                            AS DLVGROUP_ID
+		     ,DLVDISTRICT_ID                                           AS DLVDISTRICT_ID
+		     ,DLVDISTRICT_NM                                           AS DLVDISTRICT_NM
+		     ,DESCRIPTION                                              AS DESCRIPTION
+		     ,DEL_YN                                                   AS DEL_YN
+		     ,GREATEST(TO_CHAR(SYSDATE + 3, 'YYYYMMDD'), FROMDATE)     AS FROMDATE
+		     ,TODATE                                                   AS TODATE
+		  FROM MS_DLV_DISTRICT
+		  WHERE SERIALKEY = #{serialkey}
+		) S
+		ON (
+		       T.SERIALKEY = S.SERIALKEY
+		    AND S.FROMDATE > SYSDATE
+		)
+		WHEN MATCHED THEN
+		  UPDATE 
+		  SET T.TODATE = S.TODATE
+		    , T.DEL_YN = 'Y'
+		WHEN NOT MATCHED THEN
+		  INSERT (
+		      DCCODE
+		     ,DLVGROUP_ID
+		     ,DLVDISTRICT_ID
+		     ,DLVDISTRICT_NM
+		     ,DESCRIPTION
+		     ,DEL_YN
+		     ,FROMDATE
+		     ,TODATE
+		  ) VALUES (
+		      S.DCCODE       
+		     ,S.DLVGROUP_ID   
+		     ,S.DLVDISTRICT_ID
+		     ,S.DLVDISTRICT_NM 
+		     ,S.DESCRIPTION   
+		     ,'N'     
+		     ,TO_CHAR(SYSDATE + 3, 'YYYYMMDD')
+		     ,S.TODATE   
+		  )
+    </insert>
+
+    <select id="getValidationMasterExist" parameterType="MsCenterDistrictHjdongReqDto" resultType="MsDistrictPolygonResDto">
+    	SELECT  /* [msCenterDistrictService.sqlx][msCenterDistrictService.getValidationMasterExist][권역 데이터 검증(마스터 행정동 조회)] */ 
+	       MS_HJDONG_POLYGON.HJDONG_CD                               AS HJDONG_CD
+	      ,MS_HJDONG_POLYGON.CTP_KOR_NM                              AS CTP_KOR_NM
+	      ,MS_HJDONG_POLYGON.SIG_KOR_NM                              AS SIG_KOR_NM 
+	      ,MS_HJDONG_POLYGON.HJDONG_NM                               AS HJDONG_NM
+	      ,null                                                      AS GEOJSON
+	      ,MS_HJDONG_POLYGON.FROMDATE                                AS FROM_DATE
+	      ,MS_HJDONG_POLYGON.TODATE                                  AS TO_DATE
+    	FROM MS_HJDONG_POLYGON
+    	WHERE 1 = 1
+          AND HJDONG_CD = #{hjdongCd}
+          AND DEL_YN = 'N'
+    </select>
+    <select id="getValidationInsertData" parameterType="MsCenterDistrictHjdongReqDto" resultType="MsCenterDistrictHjdongResDto">
+		SELECT   /* [msCenterDistrictService.sqlx][msCenterDistrictService.getValidationInsertData][저장 예정 데이터 검증] */ 
+		     DC.DCNAME                               AS DCNAME
+		    ,DC.DCCODE                               AS DCCODE
+		    ,MS_HJDONG_POLYGON.HJDONG_NM             AS HJDONG_NM
+		    ,MS_HJDONG_POLYGON.HJDONG_CD             AS HJDONG_CD
+		    ,MS_DC_DISTRICT_HJDONG.FROMDATE          AS FROMDATE
+		    ,MS_DC_DISTRICT_HJDONG.TODATE            AS TODATE
+		    ,MS_DC_DISTRICT_HJDONG.DEL_YN            AS DEL_YN
+		    ,NULL                                    AS IS_DUPLICATE
+		    ,NULL                                    AS ERROR_MESSAGE
+		FROM MS_HJDONG_POLYGON
+		INNER JOIN MS_DC_DISTRICT_HJDONG
+		ON MS_HJDONG_POLYGON.HJDONG_CD = MS_DC_DISTRICT_HJDONG.HJDONG_CD
+		AND MS_HJDONG_POLYGON.DEL_YN = 'N'
+		INNER JOIN (
+		SELECT 
+		    CM_DC.DCCODE,
+		    CM_DC.DCNAME
+		FROM CM_DC
+		LEFT OUTER JOIN CM_CODE
+		ON BASECODE = DCCODE
+		AND CODELIST = 'WMS_MNG_DC'
+		WHERE CM_CODE.CONVCODE = (
+		        SELECT 
+		          CM_CODE.CONVCODE
+		        FROM CM_DC 
+		        INNER JOIN CM_CODE
+		        ON BASECODE = DCCODE
+		        AND CODELIST = 'WMS_MNG_DC'
+		        AND CM_DC.DCCODE = #{dccode}
+		    )
+		) DC
+		ON MS_DC_DISTRICT_HJDONG.DCCODE = DC.DCCODE
+		WHERE 1 = 1
+		  AND MS_HJDONG_POLYGON.DEL_YN = 'N'
+		  AND MS_HJDONG_POLYGON.HJDONG_CD = #{hjdongCd}
+          AND MS_DC_DISTRICT_HJDONG.FROMDATE <![CDATA[<=]]> #{toDate}
+          AND MS_DC_DISTRICT_HJDONG.TODATE <![CDATA[>=]]> #{fromDate}
+	</select>
+    <select id="getValidationUpdateData" parameterType="MsCenterDistrictHjdongReqDto" resultType="MsCenterDistrictHjdongResDto">
+		SELECT   /* [msCenterDistrictService.sqlx][msCenterDistrictService.getValidationUpdateData][업데이트 예정 데이터 검증] */ 
+		     DC.DCNAME                               AS DCNAME
+		    ,DC.DCCODE                               AS DCCODE
+		    ,MS_HJDONG_POLYGON.HJDONG_NM             AS HJDONG_NM
+		    ,MS_HJDONG_POLYGON.HJDONG_CD             AS HJDONG_CD
+		    ,MS_DC_DISTRICT_HJDONG.FROMDATE          AS FROMDATE
+		    ,MS_DC_DISTRICT_HJDONG.TODATE            AS TODATE
+		    ,MS_DC_DISTRICT_HJDONG.DEL_YN            AS DEL_YN
+		    ,NULL                                    AS IS_DUPLICATE
+		    ,NULL                                    AS ERROR_MESSAGE
+		FROM MS_HJDONG_POLYGON
+		INNER JOIN MS_DC_DISTRICT_HJDONG
+		ON MS_HJDONG_POLYGON.HJDONG_CD = MS_DC_DISTRICT_HJDONG.HJDONG_CD
+		INNER JOIN (
+		SELECT 
+		    CM_DC.DCCODE,
+		    CM_DC.DCNAME
+		FROM CM_DC
+		LEFT OUTER JOIN CM_CODE
+		ON BASECODE = DCCODE
+		AND CODELIST = 'WMS_MNG_DC'
+		WHERE CM_CODE.CONVCODE = (
+		        SELECT 
+		          CM_CODE.CONVCODE
+		        FROM CM_DC 
+		        INNER JOIN CM_CODE
+		        ON BASECODE = DCCODE
+		        AND CODELIST = 'WMS_MNG_DC'
+		        AND CM_DC.DCCODE = #{dccode}
+		    )
+		) DC
+		ON MS_DC_DISTRICT_HJDONG.DCCODE = DC.DCCODE
+		WHERE 1 = 1
+		  AND MS_HJDONG_POLYGON.DEL_YN = 'N'
+		  AND MS_HJDONG_POLYGON.HJDONG_CD = #{hjdongCd}
+		  AND MS_DC_DISTRICT_HJDONG.SERIALKEY != #{serialkey}
+          AND MS_DC_DISTRICT_HJDONG.FROMDATE <![CDATA[<=]]> #{toDate}
+          AND MS_DC_DISTRICT_HJDONG.TODATE   <![CDATA[>=]]> #{fromDate}
+	</select>
+	<select id="getMasterChildHjdongList" parameterType="MsCenterDistrictHjdongReqDto" resultType="MsDistrictPolygonResDto">
+	    	SELECT  /* [msCenterDistrictService.sqlx][msCenterDistrictService.getChildHjdongList][권역 하위 행정동 조회(목록)] */ 
+		       MS_HJDONG_POLYGON.HJDONG_CD                               AS HJDONG_CD
+		      ,MS_HJDONG_POLYGON.CTP_KOR_NM                              AS CTP_KOR_NM
+		      ,MS_HJDONG_POLYGON.SIG_KOR_NM                              AS SIG_KOR_NM 
+		      ,MS_HJDONG_POLYGON.HJDONG_NM                               AS HJDONG_NM
+		      ,null                                                      AS GEOJSON
+		      ,MS_HJDONG_POLYGON.FROMDATE                                AS FROM_DATE
+		      ,MS_HJDONG_POLYGON.TODATE                                  AS TO_DATE
+	    	FROM MS_HJDONG_POLYGON
+	    	WHERE 1 = 1
+	          AND HJDONG_NM IS NOT NULL
+	          AND HJDONG_CD LIKE REGEXP_REPLACE(#{hjdongCd}, '0+$', '') || '%'
+	          AND DEL_YN = 'N'
+	</select>
+
+    <select id="getSerialkeysFromHjdong" parameterType="int" resultType="string">
+        <![CDATA[
+        SELECT LOGISONESVC.SEQ_MS_DC_DISTRICT_HJDONG_01.NEXTVAL FROM DUAL
+        CONNECT BY LEVEL <= #{count}
+        ]]>
+    </select>
+
+	<insert id="saveDistrictHjdong" parameterType="MsCenterDistrictHjdongReqDto">
+		INSERT /* [msCenterDistrictService.sqlx][msCenterDistrictService.saveDistrictHjdong][센터 권역 행정동 저장] */
+            INTO MS_DC_DISTRICT_HJDONG (
+            SERIALKEY
+            ,DCCODE
+            ,HJDONG_CD
+            ,DEL_YN
+            ,FROMDATE
+            ,TODATE
+			,RMK
+			,ADDWHO
+			,EDITWHO
+			,EDITDATE
+		)
+		VALUES(
+            #{serialkey}
+            ,#{dccode}
+            ,#{hjdongCd}
+            ,'N'
+            ,#{fromDate}
+            ,#{toDate}
+			,#{rmk}
+			,NVL(#{gUserId}, 'SYSTEM')
+			,NVL(#{editWho}, 'SYSTEM')
+			,TO_DATE(#{editDate}, 'YYYYMMDDHH24MISS')
+		)
+	</insert>
+	<update id="updateDistrictHjdong" parameterType="MsCenterDistrictHjdongReqDto">
+		UPDATE /* [msCenterDistrictService.sqlx][msCenterDistrictService.updateDistrictHjdong][센터 권역 행정동 업데이트] */
+			  MS_DC_DISTRICT_HJDONG
+		SET TODATE = #{toDate}, EDITWHO = NVL(#{editWho}, 'SYSTEM'), EDITDATE = TO_DATE(#{editDate}, 'YYYYMMDDHH24MISS'), DEL_YN = #{delYn}, RMK = #{rmk}
+		WHERE SERIALKEY = #{serialkey}
+	</update>
+
+	<delete id="deleteDcDistrictHjdongByKey">
+		/* [중복 권역 행정동 삭제] */
+		DELETE FROM MS_DC_DISTRICT_HJDONG
+		WHERE SERIALKEY = #{serialkey}
+	</delete>
+
+	<delete id="deleteFutureDcDistrictHjdong">
+		<![CDATA[
+		/* [msCenterDistrictService.sqlx][msCenterDistrictService.deleteFutureDcDistrictHjdong][센터권역 행정동 삭제 (미래데이터)] */
+		DELETE FROM MS_DC_DISTRICT_HJDONG
+		WHERE FROMDATE >= TO_CHAR(SYSDATE+3, 'YYYYMMDD') AND DEL_YN = 'Y'
+		AND SERIALKEY IN
+		]]>
+		<foreach collection="serialkeySet" item="key" open="(" separator="," close=")">
+			#{key}
+		</foreach>
+	</delete>
+
+	<delete id="deleteChildOrdGroup">
+		MERGE INTO MS_DC_DISTRICT_ORDGRP /* [msCenterDistrictService.sqlx][msCenterDistrictService.deleteChildOrdGroup][중복 권역 행정동 삭제(미래데이터) / 만료처리] */
+		USING (
+			SELECT MS_DC_DISTRICT_ORDGRP.SERIALKEY
+			FROM MS_DC_DISTRICT_HJDONG
+			JOIN MS_DC_DISTRICT_ORDGRP
+			  ON MS_DC_DISTRICT_ORDGRP.HJDONG_CD = MS_DC_DISTRICT_HJDONG.HJDONG_CD
+			 AND MS_DC_DISTRICT_HJDONG.SERIALKEY = #{serialkey}
+			 AND MS_DC_DISTRICT_HJDONG.DCCODE    = MS_DC_DISTRICT_ORDGRP.DCCODE
+			 AND MS_DC_DISTRICT_HJDONG.FROMDATE <![CDATA[<=]]> MS_DC_DISTRICT_ORDGRP.TODATE
+			 AND MS_DC_DISTRICT_ORDGRP.FROMDATE <![CDATA[<=]]> MS_DC_DISTRICT_HJDONG.TODATE
+			 AND MS_DC_DISTRICT_ORDGRP.DEL_YN    = 'N'
+		) SRC
+		ON (
+				MS_DC_DISTRICT_ORDGRP.SERIALKEY = SRC.SERIALKEY
+			)
+		WHEN MATCHED THEN
+	    UPDATE
+    	SET  MS_DC_DISTRICT_ORDGRP.TODATE   = LEAST(MS_DC_DISTRICT_ORDGRP.TODATE, TO_CHAR(SYSDATE + 3, 'YYYYMMDD'))
+    		,MS_DC_DISTRICT_ORDGRP.DEL_YN   = 'Y'
+	    DELETE
+	  	WHERE MS_DC_DISTRICT_ORDGRP.FROMDATE <![CDATA[>]]> SYSDATE
+	</delete>
+
+	<update id="updateDistrictOrdgrpTodate">
+	    UPDATE MS_DC_DISTRICT_ORDGRP
+    	SET  MS_DC_DISTRICT_ORDGRP.TODATE   = LEAST(MS_DC_DISTRICT_ORDGRP.TODATE, TO_CHAR(SYSDATE + 3, 'YYYYMMDD'))
+    		,MS_DC_DISTRICT_ORDGRP.DEL_YN   = 'Y'
+	  	WHERE SERIALKEY IN
+        <foreach collection="serialkeySet" item="key" open="(" separator="," close=")">
+            #{key}
+        </foreach>
+	</update>
+
+	<delete id="updateCenterDistrictPolygonInvalid" parameterType="MsCenterDistrictHjdongReqDto">
+		<![CDATA[
+        DELETE  /* [msCenterDistrictService.sqlx][msCenterDistrictService.updateCenterDistrictPolygonInvalid][센터 권역 행정동 폴리곤 삭제] */
+        	FROM MS_DC_DISTRICT
+        WHERE DCCODE = #{dccode}
+          AND TODATE >= TO_CHAR(SYSDATE, 'YYYYMMDD')
+		]]>
+	</delete>
+	<insert id="saveCenterDistrictPolygon" parameterType="MsCenterDistrictHjdongReqDto">
+		/* [msCenterDistrictService.sqlx][msCenterDistrictService.saveCenterDistrictPolygon][센터 권역 행정동 폴리곤 저장] */
+	 	<![CDATA[
+         INSERT
+         	INTO MS_DC_DISTRICT (
+              DCCODE
+             ,DCNAME
+             ,SPATIAL_GEOM
+             ,DEL_YN
+             ,FROMDATE
+             ,TODATE
+         )
+         WITH BOUNDARIES AS (
+                 SELECT
+                 	TO_DATE(FROMDATE, 'YYYYMMDD') AS BOUNDARY
+                 FROM MS_DC_DISTRICT_HJDONG
+                 WHERE 1 = 1
+                   AND DCCODE = #{dccode}
+                 UNION
+                 SELECT
+                 	TO_DATE(TODATE, 'YYYYMMDD') + 1
+                 FROM MS_DC_DISTRICT_HJDONG
+                 WHERE 1 = 1
+                   AND DCCODE = #{dccode}
+             ),
+             SORTED_BOUNDARIES AS (
+                 SELECT
+                 	 BOUNDARY                               AS BOUNDARY
+                    ,LAG(BOUNDARY) OVER (ORDER BY BOUNDARY) AS PREV_BOUNDARY
+                 FROM (SELECT DISTINCT BOUNDARY FROM BOUNDARIES)
+             ),
+             PERIODS AS (
+                 SELECT
+                 	 PREV_BOUNDARY                       AS START_DATE
+                    ,BOUNDARY - 1                        AS END_DATE
+                 FROM SORTED_BOUNDARIES
+                 WHERE PREV_BOUNDARY IS NOT NULL
+                 AND TRUNC(BOUNDARY - 1) >= TRUNC(SYSDATE)
+             ),
+             PERIOD_DATA AS (
+                 SELECT
+                      PERIODS.START_DATE                                                 AS START_DATE
+                     ,PERIODS.END_DATE                                                   AS END_DATE
+                     ,MS_DC_DISTRICT_HJDONG.HJDONG_CD                                    AS HJDONG_CD
+                     ,SUBSTR(MS_DC_DISTRICT_HJDONG.HJDONG_CD, 1, 5) || RPAD('0', 5, '0') AS GU_CD
+                 FROM PERIODS
+                 JOIN MS_DC_DISTRICT_HJDONG
+                   ON PERIODS.START_DATE <= TO_DATE(MS_DC_DISTRICT_HJDONG.TODATE, 'YYYYMMDD')
+                  AND PERIODS.END_DATE   >= TO_DATE(MS_DC_DISTRICT_HJDONG.FROMDATE, 'YYYYMMDD')
+                 WHERE MS_DC_DISTRICT_HJDONG.DCCODE = #{dccode}
+             ),
+             GU_TOTAL AS (
+                 SELECT
+                 	 SUBSTR(MS_HJDONG_POLYGON.HJDONG_CD, 1, 5) || RPAD('0', 5, '0')     AS GU_CD
+                    ,COUNT(MS_HJDONG_POLYGON.HJDONG_CD)                                 AS TOTAL_HJDONG
+                 FROM MS_HJDONG_POLYGON
+                 WHERE MS_HJDONG_POLYGON.HJDONG_CD IS NOT NULL
+                 GROUP BY SUBSTR(MS_HJDONG_POLYGON.HJDONG_CD, 1, 5) || RPAD('0', 5, '0')
+             ),
+             GU_SELECTED AS (
+                 SELECT
+                 	 PERIOD_DATA.START_DATE                                 AS START_DATE
+                    ,PERIOD_DATA.END_DATE                                   AS END_DATE
+                    ,PERIOD_DATA.GU_CD                                      AS GU_CD
+                    ,COUNT(PERIOD_DATA.HJDONG_CD)                           AS SELECTED_HJDONG
+                 FROM PERIOD_DATA
+                 GROUP BY PERIOD_DATA.START_DATE, PERIOD_DATA.END_DATE, PERIOD_DATA.GU_CD
+             ),
+             FINAL_GROUP AS (
+                 SELECT
+                 	 PERIOD_DATA.START_DATE
+                    ,PERIOD_DATA.END_DATE
+                    ,CASE
+                        WHEN GU_SELECTED.SELECTED_HJDONG = GU_TOTAL.TOTAL_HJDONG
+                        THEN PERIOD_DATA.GU_CD
+                        ELSE PERIOD_DATA.HJDONG_CD
+                    END AS FINAL_CODE
+                 FROM PERIOD_DATA
+                 LEFT JOIN GU_TOTAL
+                   ON PERIOD_DATA.GU_CD = GU_TOTAL.GU_CD
+                 LEFT JOIN GU_SELECTED
+                   ON PERIOD_DATA.START_DATE = GU_SELECTED.START_DATE
+                  AND PERIOD_DATA.END_DATE   = GU_SELECTED.END_DATE
+                  AND PERIOD_DATA.GU_CD      = GU_SELECTED.GU_CD
+             ),
+             DEDUP AS (
+                 SELECT
+                 	 DISTINCT START_DATE
+                 	,END_DATE
+                 	,FINAL_CODE
+                 FROM FINAL_GROUP
+             ),
+             SIMPLIFIED AS (
+                 SELECT
+                      DEDUP.START_DATE
+                     ,DEDUP.END_DATE
+                     ,MS_HJDONG_POLYGON.SPATIAL_GEOM AS GEOM
+                 FROM DEDUP
+                 INNER JOIN MS_HJDONG_POLYGON
+                   ON MS_HJDONG_POLYGON.HJDONG_CD = DEDUP.FINAL_CODE
+                   AND MS_HJDONG_POLYGON.DEL_YN = 'N'
+             ),
+             STEP1 AS (
+                 SELECT
+                      START_DATE
+                     ,END_DATE
+                     ,CEIL(ROWNUM / 50) AS GRP
+                     ,GEOM
+                 FROM SIMPLIFIED
+             ),
+             STEP2 AS (
+                 SELECT
+                      START_DATE
+                     ,END_DATE
+                     ,SDO_AGGR_UNION(SDOAGGRTYPE(GEOM, 0.005)) AS GEOM
+                 FROM STEP1
+                 GROUP BY START_DATE, END_DATE, GRP
+             ),
+             GEOM_PER_PERIOD AS (
+                 SELECT
+                      START_DATE
+                     ,END_DATE
+                     ,SDO_AGGR_UNION(SDOAGGRTYPE(GEOM, 0.005)) AS MERGED_GEOM
+                 FROM STEP2
+                 GROUP BY START_DATE, END_DATE
+             )
+             SELECT
+                 #{dccode}                                                     AS DCCODE
+                 ,CM_DC.DCNAME                                                 AS DCNAME
+                 ,GEOM_PER_PERIOD.MERGED_GEOM                                  AS SPATIAL_GEOM
+                 ,'N'                                                          AS DEL_YN
+                 ,TO_CHAR(GEOM_PER_PERIOD.START_DATE, 'YYYYMMDD')              AS FROMDATE
+                 ,TO_CHAR(GEOM_PER_PERIOD.END_DATE, 'YYYYMMDD')                AS TODATE
+             FROM GEOM_PER_PERIOD
+             LEFT OUTER JOIN CM_DC
+             ON CM_DC.DCCODE = #{dccode}
+         ]]>
+     </insert>
+
+	<insert id="mergeCenterDistrictPolygon" parameterType="MsCenterDistrictHjdongReqDto">
+		/* [msCenterDistrictService.sqlx][msCenterDistrictService.mergeCenterDistrictPolygon][센터 권역 행정동 폴리곤 저장] */
+	 	<![CDATA[
+		MERGE INTO MS_DC_DISTRICT T
+		USING (
+			SELECT
+				  GEOM_LIST.DCCODE
+				, CM_DC.DCNAME
+				, GEOM_LIST.FROMDATE
+				, GEOM_LIST.TODATE
+				-- 최종 병합
+				, SDO_AGGR_UNION(SDOAGGRTYPE(SPATIAL_GEOM, 0.005)) AS SPATIAL_GEOM
+			FROM (
+				SELECT
+					  MERGE_LIST.DCCODE
+					, MERGE_LIST.FROMDATE
+					, MERGE_LIST.TODATE
+					-- 1차 병합
+					, MERGE_LIST.MERGE_ID
+					, SDO_AGGR_UNION(SDOAGGRTYPE(MS_HJDONG_POLYGON.SPATIAL_GEOM, 0.005)) AS SPATIAL_GEOM
+				FROM (
+					SELECT
+						  HJDONG_LIST.DCCODE
+						, MS_DC_DISTRICT_HJDONG.HJDONG_CD
+						, MS_DC_DISTRICT_HJDONG.FROMDATE
+						, MS_DC_DISTRICT_HJDONG.TODATE
+						, CEIL(ROW_NUMBER() OVER(
+							  PARTITION BY HJDONG_LIST.DCCODE
+							  ORDER BY MS_DC_DISTRICT_HJDONG.HJDONG_CD
+						  ) / 20) AS MERGE_ID -- 그룹핑 개수
+					FROM (
+						SELECT
+							 DCCODE
+						   , FROMDATE
+						   , MIN(TODATE) AS TODATE
+						FROM MS_DC_DISTRICT_HJDONG
+						WHERE DCCODE = #{dccode}
+						  AND FROMDATE = #{fromDate}
+						GROUP BY
+							 DCCODE
+						   , FROMDATE
+					) HJDONG_LIST
+					LEFT JOIN MS_DC_DISTRICT_HJDONG
+						ON  MS_DC_DISTRICT_HJDONG.DCCODE   = HJDONG_LIST.DCCODE
+						AND MS_DC_DISTRICT_HJDONG.FROMDATE = HJDONG_LIST.FROMDATE
+						AND MS_DC_DISTRICT_HJDONG.TODATE   = HJDONG_LIST.TODATE
+				) MERGE_LIST
+				LEFT JOIN MS_HJDONG_POLYGON
+					ON  MS_HJDONG_POLYGON.HJDONG_CD = MERGE_LIST.HJDONG_CD
+					AND MERGE_LIST.FROMDATE BETWEEN MS_HJDONG_POLYGON.FROMDATE AND MS_HJDONG_POLYGON.TODATE
+				GROUP BY
+					  MERGE_LIST.DCCODE
+					, MERGE_LIST.FROMDATE
+					, MERGE_LIST.TODATE
+					, MERGE_LIST.MERGE_ID
+			) GEOM_LIST
+			LEFT JOIN CM_DC
+				ON  CM_DC.DCCODE = GEOM_LIST.DCCODE
+			GROUP BY
+				  GEOM_LIST.DCCODE
+				, CM_DC.DCNAME
+				, GEOM_LIST.FROMDATE
+				, GEOM_LIST.TODATE
+		) S ON ( S.DCCODE   = T.DCCODE
+			 AND S.FROMDATE = T.FROMDATE
+		)
+		WHEN MATCHED THEN
+			UPDATE
+				SET T.DCNAME       = S.DCNAME
+				  , T.SPATIAL_GEOM = S.SPATIAL_GEOM
+				  , T.TODATE       = S.TODATE
+		WHEN NOT MATCHED THEN
+			INSERT (DCCODE, DCNAME, SPATIAL_GEOM, FROMDATE, TODATE)
+			VALUES (S.DCCODE, S.DCNAME, S.SPATIAL_GEOM, S.FROMDATE, S.TODATE)
+         ]]>
+     </insert>
+
+    <select id="findDuplicateHjdongByDcType" resultType="MsCenterDistrictHjdongResDto">
+        <![CDATA[
+		WITH DC_TYPE AS (
+		     SELECT
+		        CONVCODE,
+		        BASECODE
+		     FROM CM_CODE
+		     WHERE CM_CODE.CODELIST = 'WMS_MNG_DC' AND CM_CODE.BASECODE = #{dccode} AND CM_CODE.STORERKEY  = 'FW00'
+		),
+		DC_LIST AS (
+		    SELECT
+		        CM_DC.DCCODE,
+		        CM_DC.DCNAME
+		     FROM DC_TYPE
+		     INNER JOIN CM_CODE ON CM_CODE.CONVCODE = DC_TYPE.CONVCODE
+		        AND CM_CODE.CODELIST  = 'WMS_MNG_DC'
+		        AND CM_CODE.STORERKEY = 'FW00'
+		     LEFT OUTER JOIN CM_DC ON CM_DC.DCCODE = CM_CODE.BASECODE
+		)
+		SELECT
+		   MS_DC_DISTRICT_HJDONG.DCCODE
+		  ,DC_LIST.DCNAME
+		  ,MS_HJDONG_POLYGON.HJDONG_NM
+		  ,MS_DC_DISTRICT_HJDONG.FROMDATE
+		  ,MS_DC_DISTRICT_HJDONG.TODATE
+		FROM MS_DC_DISTRICT_HJDONG
+		LEFT OUTER JOIN DC_LIST ON MS_DC_DISTRICT_HJDONG.DCCODE = DC_LIST.DCCODE
+		LEFT OUTER JOIN MS_HJDONG_POLYGON ON MS_HJDONG_POLYGON.HJDONG_CD = MS_DC_DISTRICT_HJDONG.HJDONG_CD
+            AND   MS_HJDONG_POLYGON.FROMDATE     <= #{toDate}
+            AND   MS_HJDONG_POLYGON.TODATE       >= #{fromDate}
+		WHERE MS_DC_DISTRICT_HJDONG.HJDONG_CD = #{hjdongCd}
+		AND   MS_DC_DISTRICT_HJDONG.FROMDATE <= #{toDate}
+		AND   MS_DC_DISTRICT_HJDONG.TODATE   >= #{fromDate}
+        ]]>
+		<if test="serialkey != null and serialkey != ''">
+			AND   MS_DC_DISTRICT_HJDONG.SERIALKEY != #{serialkey}
+		</if>
+		AND   MS_DC_DISTRICT_HJDONG.DCCODE   IN DC_LIST.DCCODE
+    </select>
+
+    <select id="getDupHjdongList" resultType="MsCenterDistrictHjdongResDto">
+		WITH DC_TYPE AS (
+		     SELECT
+		        CONVCODE,
+		        BASECODE
+		     FROM CM_CODE
+		     WHERE CM_CODE.CODELIST = 'WMS_MNG_DC' AND CM_CODE.BASECODE = #{dccode} AND CM_CODE.STORERKEY  = 'FW00'
+		),
+		DC_LIST AS (
+		    SELECT
+		        CM_DC.DCCODE,
+		        CM_DC.DCNAME
+		     FROM DC_TYPE
+		     JOIN CM_CODE ON CM_CODE.CONVCODE = DC_TYPE.CONVCODE
+		        AND CM_CODE.CODELIST  = 'WMS_MNG_DC'
+		        AND CM_CODE.STORERKEY = 'FW00'
+		     JOIN CM_DC ON CM_DC.DCCODE = CM_CODE.BASECODE
+		),
+		BASE AS (
+            SELECT
+                m.SERIALKEY ,m.DCCODE ,m.HJDONG_CD ,m.FROMDATE ,m.TODATE , 0 AS ROW_COUNT
+            FROM MS_DC_DISTRICT_HJDONG m
+            WHERE m.DCCODE IN (SELECT DCCODE FROM DC_LIST)
+            <if test="serialkeySet != null and serialkeySet.size > 0">
+                AND SERIALKEY NOT IN
+                <foreach collection="serialkeySet" item="key" open="(" separator="," close=")">
+                    #{key}
+                </foreach>
+            </if>
+            <if test="list != null and list.size > 0">
+                <foreach collection="list" item="dto">
+                UNION ALL
+                SELECT
+                    NULL ,#{dto.dccode} ,#{dto.hjdongCd} ,#{dto.fromDate} ,#{dto.toDate}, #{dto.rowCount}
+                FROM DUAL
+                </foreach>
+            </if>
+        ),
+		<![CDATA[
+        NUMBERED AS (
+            SELECT
+                b.SERIALKEY, b.DCCODE, d.DCNAME, b.HJDONG_CD, p.HJDONG_NM, b.FROMDATE, b.TODATE, b.ROW_COUNT,
+                ROW_NUMBER() OVER (ORDER BY b.DCCODE, b.HJDONG_CD, b.FROMDATE, b.TODATE) AS RN
+            FROM BASE b
+			JOIN DC_LIST d ON d.DCCODE = b.DCCODE
+            JOIN MS_HJDONG_POLYGON p ON p.HJDONG_CD = b.HJDONG_CD AND p.FROMDATE <= b.TODATE AND p.TODATE >= b.FROMDATE
+        )
+		SELECT
+			a.DCCODE
+		    ,a.DCNAME
+			,a.FROMDATE
+			,a.TODATE
+		    ,a.HJDONG_CD
+		    ,a.HJDONG_NM
+			,CASE WHEN a.SERIALKEY IS NULL THEN b.SERIALKEY
+				  WHEN b.SERIALKEY IS NULL THEN a.SERIALKEY
+			 END AS SERIALKEY
+			,CASE WHEN a.ROW_COUNT = 0 THEN b.ROW_COUNT
+				  WHEN b.ROW_COUNT = 0 THEN a.ROW_COUNT
+			 END AS ROW_COUNT
+		FROM NUMBERED a
+		JOIN NUMBERED b ON a.HJDONG_CD = b.HJDONG_CD AND a.FROMDATE <= b.TODATE AND a.TODATE >= b.FROMDATE
+		    AND a.ROW_COUNT = 0 AND a.ROW_COUNT <> b.ROW_COUNT
+        ]]>
+    </select>
+
+     <select id="getNewHjdongList" parameterType="MsCenterDistrictReqDto" resultType="MsCenterDistrictNewHjdongResDto">
+         <![CDATA[
+         WITH  /* [신규 행정동 목록 조회] */
+             HJDONG_LIST AS (
+             SELECT
+                   HJDONG_CD
+                 , HJDONG_NM
+                 , SIG_KOR_NM
+                 , CTP_KOR_NM
+                 , SHOW_YN
+             FROM (
+                 SELECT
+                       P.HJDONG_CD
+                     , P.HJDONG_NM
+                     , P.SIG_KOR_NM
+                     , P.CTP_KOR_NM
+                     , ROW_NUMBER() OVER(PARTITION BY P.HJDONG_CD ORDER BY P.FROMDATE DESC) AS RN
+                     , CASE WHEN CH.MVMN_RES_CD = '63' THEN 'N' ELSE 'Y' END AS SHOW_YN
+                 FROM MS_HJDONG_POLYGON P
+             	 LEFT JOIN CM_HJDONG CH ON CH.HJDONG_CD = P.HJDONG_CD
+                 WHERE (TO_CHAR(SYSDATE, 'YYYYMMDD') BETWEEN P.FROMDATE AND P.TODATE OR TO_CHAR(SYSDATE, 'YYYYMMDD') <= P.FROMDATE )
+                   AND P.HJDONG_NM IS NOT NULL
+             ) A
+             WHERE A.RN = 1
+         ),
+         DC_TYPE AS (
+             SELECT
+                 CONVCODE,
+                 BASECODE
+             FROM CM_CODE
+             WHERE CM_CODE.CODELIST = 'WMS_MNG_DC' AND CM_CODE.STORERKEY  = 'FW00' AND CONVCODE IN ('0', '1')
+         ),
+         DC_HJDONG_LIST AS (
+             SELECT H.SERIALKEY, H.DCCODE, H.HJDONG_CD, H.FROMDATE, H.TODATE, D.CONVCODE
+             FROM MS_DC_DISTRICT_HJDONG H
+             JOIN DC_TYPE D ON D.BASECODE = H.DCCODE
+         )
+         SELECT
+               HJDONG_LIST.HJDONG_CD
+             , HJDONG_LIST.HJDONG_NM
+             , HJDONG_LIST.SIG_KOR_NM
+             , HJDONG_LIST.CTP_KOR_NM
+             , HJDONG_LIST.SHOW_YN
+         FROM HJDONG_LIST
+         WHERE NOT EXISTS (
+             SELECT 1
+             FROM DC_HJDONG_LIST H
+             WHERE H.HJDONG_CD = HJDONG_LIST.HJDONG_CD
+             AND ( #{effectiveDate} BETWEEN H.FROMDATE AND H.TODATE OR #{effectiveDate} <= H.FROMDATE)
+         ]]>
+         <choose>
+             <when test='dcgroup != null and dcgroup == "fw"'>
+                 AND H.CONVCODE = '0'
+             </when>
+             <when test='dcgroup != null and dcgroup == "fo"'>
+                 AND H.CONVCODE = '1'
+             </when>
+             <otherwise>
+                 AND H.CONVCODE IN ('0', '1')
+             </otherwise>
+         </choose>
+         )
+    </select>
+
+    <select id="getNewCreatedHjdongWithoutPolygon" resultType="MsCenterDistrictNewHjdongResDto">
+        <![CDATA[
+        /* [MsCenterDistrictService.sqlx][getNewCreatedHjdongWithoutPolygon][신규 행정동 폴리곤 미반영 목록 조회][2026.03.16] */
+        SELECT DISTINCT
+              H.HJDONG_CD
+            , H.CTP_KOR_NM
+            , CASE WHEN H.CTP_KOR_NM = '세종특별자치시' THEN '세종특별자치시' ELSE H.SIG_KOR_NM END AS SIG_KOR_NM
+            , H.HJDONG_NM
+        FROM CM_HJDONG H
+        WHERE H.MVMN_RES_CD = '31'
+          AND NOT EXISTS (
+              SELECT 1
+              FROM MS_HJDONG_POLYGON P
+              WHERE P.HJDONG_CD = H.HJDONG_CD
+                AND P.DEL_YN = 'N'
+          )
+          AND NOT EXISTS (
+              SELECT 1
+              FROM MS_DC_DISTRICT_HJDONG D
+              WHERE D.HJDONG_CD = H.HJDONG_CD
+          )
+        ORDER BY CTP_KOR_NM, SIG_KOR_NM, HJDONG_NM
+        ]]>
+    </select>
+
+    <select id="getDupDcDistrictHjdongList" resultType="MsCenterDistrictHjdongResDto">
+        <![CDATA[
+		SELECT
+	        h.SERIALKEY,
+		    h.DCCODE,
+		    h.FROMDATE,
+		    h.TODATE
+		FROM MS_DC_DISTRICT_HJDONG h
+		JOIN CM_CODE c ON c.BASECODE = h.DCCODE AND c.CODELIST = 'WMS_MNG_DC' AND c.DEL_YN = 'N'
+		WHERE h.HJDONG_CD = #{hjdongCd}
+		  AND c.CONVCODE = (
+		    SELECT c2.CONVCODE
+            FROM CM_CODE c2
+            WHERE c2.BASECODE = #{dccode} AND c2.CODELIST = 'WMS_MNG_DC' AND c2.DEL_YN = 'N'
+          )
+		  AND h.FROMDATE <= #{toDate} AND h.TODATE >= #{fromDate}
+		  AND h.DEL_YN = 'N'
+        ]]>
+    </select>
+
+    <update id="expireDcDistrictHjdongTodate">
+        <![CDATA[
+		UPDATE MS_DC_DISTRICT_HJDONG
+		SET DEL_YN = 'N',
+            TODATE = LEAST(TODATE, TO_CHAR(SYSDATE + 2, 'YYYYMMDD'))
+        WHERE h.SERIALKEY IN
+        ]]>
+        <foreach collection="serialkeySet" item="key" open="(" separator="," close=")">
+            #{key}
+        </foreach>
+    </update>
+
+	<!-- 센터권역 행정동 TODATE 단축 시 하위 배송권역 행정동 영향도 검증 -->
+	<select id="countHjdongChildBeyondTodate" parameterType="MsCenterDistrictHjdongReqDto" resultType="int">
+		/* [MsCenterDistrictService.sqlx][countHjdongChildBeyondTodate] */
+		SELECT COUNT(*)
+		FROM MS_DLV_DISTRICT_HJDONG
+		WHERE DCCODE    = #{dccode}
+		  AND HJDONG_CD = #{hjdongCd}
+		  AND DEL_YN    = 'N'
+		  AND TODATE    > #{toDate}
+	</select>
+
+</mapper>

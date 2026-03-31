@@ -1,0 +1,1017 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="wdInvoiceTotalService">
+
+    <!-- 납품서출력 헤더 -->
+	<select id="getMasterList" resultType="WdInvoiceTotalResDto">
+	    SELECT
+	        '0'                  AS CHECKYN          /*체크여부*/   
+	        ,MAX(CARNO)          AS CARNO            /*차량번호*/
+	        ,CUSTKEY             AS CUSTKEY          /*거래처코드*/
+	        ,CUSTNAME            AS CUSTNAME         /*거래처명*/
+	        ,TRUTHCUSTKEY            AS TRUTHCUSTKEY         /*거래처명*/
+	        ,TRUTHCUSTNAME            AS TRUTHCUSTNAME         /*거래처명*/
+	        /**/
+	        ,MAX(PRIORITY)       AS PRIORITY         /*우선순위*/
+	        ,MAX(DELIVERYGROUP)  AS DELIVERYGROUP    /*배송그룹*/
+	        ,MAX(MNGPLCID)       AS MNGPLCID         /*분할관리처코드*/
+	        ,MAX(SHPTOID)        AS SHPTOID          /*배송관리처코드*/
+	        ,#{invoiceprinttype} AS INVOICEPRINTTYPE /*인보이스출력유형*/
+	        /*
+              WD : 납품서출력
+                ->TO_CUSTKEY        
+              RT : 반품납품서출력
+                ->FROM_CUSTKEY                      
+              RTP : 반품납품서출력(미확정)
+             */
+	    FROM (
+	        <choose>
+	            <when test='invoiceprinttype == "WD"'>
+                    SELECT TM_INPLAN.CARNO              AS CARNO
+                          ,TM_INPLAN.PRIORITY           AS PRIORITY
+                          ,TM_INPLAN.DELIVERYGROUP      AS DELIVERYGROUP
+                          ,NVL(DM_DOCUMENT_H.MNGPLC_ID, DM_DOCUMENT_H.TO_CUSTKEY)     AS CUSTKEY
+                          ,MS_CUST.DESCRIPTION    AS CUSTNAME
+                          , MS_CUSTDLVINFO.TRUTHCUSTKEY						 AS TRUTHCUSTKEY
+                          , FN_DESCR_CUST(MS_CUSTDLVINFO.STORERKEY, MS_CUSTDLVINFO.TRUTHCUSTKEY) AS TRUTHCUSTNAME
+                          ,DM_DOCUMENT_H.INVOICETYPE    AS INVOICETYPE
+                          ,DM_DOCUMENT_H.SHPTO_ID       AS SHPTOID
+                          ,NVL(DM_DOCUMENT_H.MNGPLC_ID, DM_DOCUMENT_H.TO_custkey) AS MNGPLCID
+                          ,(SELECT FN_CODEDESCR(DM_DOCUMENT_H.STORERKEY, 'INVOICETYPE', DM_DOCUMENT_H.INVOICETYPE) FROM DUAL) AS INVOICETYPEDESC
+                    FROM DM_DOCUMENT_H
+                    JOIN DM_DOCUMENT_D
+                      ON (--튜닝.modify
+                              DM_DOCUMENT_D.DCCODE       = DM_DOCUMENT_H.DCCODE
+                          AND DM_DOCUMENT_D.DOCTYPE      = DM_DOCUMENT_H.DOCTYPE
+                          AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE 
+                          AND DM_DOCUMENT_D.DOCNO        = DM_DOCUMENT_H.DOCNO
+                          AND DM_DOCUMENT_D.STATUS       = '90' /*상태(90:확정완료)*/
+                          AND DM_DOCUMENT_D.DEL_YN       = 'N'                  
+                         )
+                    JOIN MS_CUST
+                        ON      MS_CUST.STORERKEY   = DM_DOCUMENT_H.STORERKEY
+                        AND     MS_CUST.CUSTKEY     = NVL(DM_DOCUMENT_H.MNGPLC_ID, DM_DOCUMENT_H.TO_CUSTKEY)
+                        AND     MS_CUST.CUSTTYPE    = DM_DOCUMENT_H.TO_CUSTTYPE
+				    JOIN MS_CUSTDLVINFO
+                          ON MS_CUST.STORERKEY = MS_CUSTDLVINFO.STORERKEY
+                         AND MS_CUST.CUSTKEY   = MS_CUSTDLVINFO.CUSTKEY
+                         AND MS_CUST.CUSTTYPE   = MS_CUSTDLVINFO.CUSTTYPE
+                    JOIN WD_INPLAN
+                      ON (--튜닝.modify
+                             WD_INPLAN.DCCODE    = DM_DOCUMENT_D.DCCODE
+                         AND WD_INPLAN.DOCTYPE   = DM_DOCUMENT_D.DOCTYPE    
+                         AND WD_INPLAN.SLIPDT    = DM_DOCUMENT_H.DELIVERYDATE 
+                         AND WD_INPLAN.DOCNO     = DM_DOCUMENT_D.DOCNO
+                         AND WD_INPLAN.DOCLINE   = DM_DOCUMENT_D.DOCLINE
+                         AND WD_INPLAN.STATUS    = '90'
+                         )
+                    <choose>
+                    <when test='searchcar != null and searchcar != ""'>
+                        JOIN TM_INPLAN
+                          ON (
+                                  TM_INPLAN.DCCODE  = DM_DOCUMENT_H.DCCODE
+                              AND TM_INPLAN.DOCTYPE = DM_DOCUMENT_H.DOCTYPE
+                              AND TM_INPLAN.SLIPDT  = DM_DOCUMENT_H.DELIVERYDATE
+                              AND TM_INPLAN.DOCNO   = DM_DOCUMENT_H.DOCNO
+                              AND TM_INPLAN.DOCTYPE = 'WD'
+                              <if test='deliverygroup != null and deliverygroup != ""'>
+                                  AND TM_INPLAN.deliverygroup = #{deliverygroup}
+                              </if>
+                              <!-- 차량 다중선택 -->
+                              <if test='carno != null and carno != ""'>
+                                  AND TM_INPLAN.CARNO IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                                                          FROM (SELECT #{carno} AS VAL FROM DUAL) A
+                                                       CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)                          
+                              </if>                          
+                              AND TM_INPLAN.DELIVERYGROUP <![CDATA[<>]]> 'RO'
+                             )                         
+                    </when>
+                    <otherwise>
+                        LEFT JOIN TM_INPLAN
+                          ON (
+                                  TM_INPLAN.DCCODE  = DM_DOCUMENT_H.DCCODE
+                              AND TM_INPLAN.DOCTYPE = DM_DOCUMENT_H.DOCTYPE
+                              AND TM_INPLAN.SLIPDT  = DM_DOCUMENT_H.DELIVERYDATE
+                              AND TM_INPLAN.DOCNO   = DM_DOCUMENT_H.DOCNO
+                              AND TM_INPLAN.DOCTYPE = 'WD'
+                             )                         
+                    </otherwise>     
+                    </choose>
+                    JOIN CM_USER_AUTHORITY ON
+                    (    
+                         CM_USER_AUTHORITY.USERID    = #{gUserId}
+                     AND CM_USER_AUTHORITY.DCCODE    = DM_DOCUMENT_D.DCCODE
+                     AND CM_USER_AUTHORITY.STORERKEY = DM_DOCUMENT_D.STORERKEY
+                     AND CM_USER_AUTHORITY.ORGANIZE  = DM_DOCUMENT_D.ORGANIZE
+                     AND CM_USER_AUTHORITY.AREA      = DM_DOCUMENT_D.AREA
+                     <if test='fixdccode != null and fixdccode != ""'>       AND CM_USER_AUTHORITY.DCCODE    =  #{fixdccode}       </if>    
+                     <if test='gStorerkey != null and gStorerkey != ""'> AND CM_USER_AUTHORITY.STORERKEY =  #{gStorerkey}    </if>    
+                     <if test='gArea != null and gArea != ""'>           AND CM_USER_AUTHORITY.AREA      =  #{gArea}         </if>
+                     <!-- 창고 다중선택 -->
+                     <if test='gOrganize != null and gOrganize != ""'>            
+                        AND CM_USER_AUTHORITY.ORGANIZE IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                                                             FROM (SELECT #{gOrganize} AS VAL FROM DUAL) A
+                                                          CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0) 
+                     </if>
+                    )
+                    WHERE DM_DOCUMENT_H.DOCTYPE    = 'WD'
+                      AND DM_DOCUMENT_H.WORKPROCESSCODE <![CDATA[<>]]> 'STO'
+                      AND DM_DOCUMENT_H.STATUS     = '90'
+                      AND DM_DOCUMENT_H.DEL_YN     = 'N'
+                      AND DM_DOCUMENT_H.DELIVERYDATE <![CDATA[>=]]> #{dt1}
+                      AND DM_DOCUMENT_H.DELIVERYDATE <![CDATA[<=]]> #{dt2}
+                      <!-- 고객 다중선택 -->
+                      <if test='custkey != null and custkey != ""'>
+                          AND DM_DOCUMENT_H.TO_CUSTKEY IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                                                             FROM (SELECT #{custkey} AS VAL FROM DUAL) A
+                                                            CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0) 
+                      </if>             
+                      <!-- 문서번호 다중선택 -->
+                      <if test='docno != null and docno != ""'>
+                          AND DM_DOCUMENT_H.DOCNO IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                                                     FROM (SELECT #{docno} AS VAL FROM DUAL) A
+                                                  CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0) 
+                      </if>   
+	            </when>
+				<when test='invoiceprinttype == "RT"'>
+                    SELECT TM_INPLAN.CARNO              AS CARNO
+                          ,TM_INPLAN.PRIORITY           AS PRIORITY
+                          ,TM_INPLAN.DELIVERYGROUP      AS DELIVERYGROUP
+                          ,NVL(DM_DOCUMENT_H.MNGPLC_ID, DM_DOCUMENT_H.TO_CUSTKEY)     AS CUSTKEY
+                          ,MS_CUST.DESCRIPTION    AS CUSTNAME
+                          , MS_CUSTDLVINFO.TRUTHCUSTKEY						 AS TRUTHCUSTKEY
+                          , FN_DESCR_CUST(MS_CUSTDLVINFO.STORERKEY, MS_CUSTDLVINFO.TRUTHCUSTKEY) AS TRUTHCUSTNAME
+                          ,DM_DOCUMENT_H.INVOICETYPE    AS INVOICETYPE
+                          ,DM_DOCUMENT_H.SHPTO_ID       AS SHPTOID
+                          ,NVL(DM_DOCUMENT_H.MNGPLC_ID, DM_DOCUMENT_H.FROM_CUSTKEY) AS MNGPLCID
+                          ,(SELECT FN_CODEDESCR(DM_DOCUMENT_H.STORERKEY, 'INVOICETYPE', DM_DOCUMENT_H.INVOICETYPE) FROM DUAL) AS INVOICETYPEDESC
+                    FROM DM_DOCUMENT_H
+                    JOIN DM_DOCUMENT_D
+                      ON (--튜닝.modify
+                              DM_DOCUMENT_D.DCCODE       = DM_DOCUMENT_H.DCCODE
+                          AND DM_DOCUMENT_D.DOCTYPE      = DM_DOCUMENT_H.DOCTYPE
+                          AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE 
+                          AND DM_DOCUMENT_D.DOCNO        = DM_DOCUMENT_H.DOCNO
+                          AND DM_DOCUMENT_D.STATUS       = '90' /*상태(90:확정완료)*/
+                          AND DM_DOCUMENT_D.DEL_YN       = 'N'                 
+                         )
+                    JOIN MS_CUST
+                        ON      MS_CUST.STORERKEY   = DM_DOCUMENT_H.STORERKEY
+                        AND     MS_CUST.CUSTKEY     = NVL(DM_DOCUMENT_H.MNGPLC_ID, DM_DOCUMENT_H.TO_CUSTKEY)
+                        AND     MS_CUST.CUSTTYPE    = DM_DOCUMENT_H.TO_CUSTTYPE
+				    JOIN MS_CUSTDLVINFO
+                          ON MS_CUST.STORERKEY = MS_CUSTDLVINFO.STORERKEY
+                         AND MS_CUST.CUSTKEY   = MS_CUSTDLVINFO.CUSTKEY
+                         AND MS_CUST.CUSTTYPE   = MS_CUSTDLVINFO.CUSTTYPE
+                    JOIN RT_INPLAN
+                      ON (--튜닝.modify
+                             RT_INPLAN.DCCODE    = DM_DOCUMENT_D.DCCODE
+                         AND RT_INPLAN.DOCTYPE   = DM_DOCUMENT_D.DOCTYPE    
+                         AND RT_INPLAN.SLIPDT    = DM_DOCUMENT_H.DELIVERYDATE 
+                         AND RT_INPLAN.DOCNO     = DM_DOCUMENT_D.DOCNO
+                         AND RT_INPLAN.DOCLINE   = DM_DOCUMENT_D.DOCLINE
+                         AND RT_INPLAN.STATUS    = '90'
+                         )
+                    <choose>
+                    <when test='searchcar != null and searchcar != ""'>
+                        JOIN TM_INPLAN
+                          ON (
+                                  TM_INPLAN.DCCODE  = DM_DOCUMENT_H.DCCODE
+                              AND TM_INPLAN.DOCTYPE = DM_DOCUMENT_H.DOCTYPE
+                              AND TM_INPLAN.SLIPDT  = DM_DOCUMENT_H.DELIVERYDATE
+                              AND TM_INPLAN.DOCNO   = DM_DOCUMENT_H.DOCNO
+                              <!-- 배송그룹 -->                     
+                              <if test='deliverygroup != null and deliverygroup != ""'>
+                                  AND TM_INPLAN.deliverygroup = #{deliverygroup}
+                              </if>
+                              <!-- 차량 다중선택 -->
+                              <if test='carno != null and carno != ""'>
+                                  AND TM_INPLAN.CARNO IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                                                          FROM (SELECT #{carno} AS VAL FROM DUAL) A
+                                                       CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)                          
+                              </if>                          
+                              AND TM_INPLAN.DELIVERYGROUP <![CDATA[<>]]> 'RO'
+                             )                         
+                    </when>
+                    <otherwise>
+                        LEFT JOIN TM_INPLAN
+                          ON (
+                                  TM_INPLAN.DCCODE  = DM_DOCUMENT_H.DCCODE
+                              AND TM_INPLAN.DOCTYPE = DM_DOCUMENT_H.DOCTYPE
+                              AND TM_INPLAN.SLIPDT  = DM_DOCUMENT_H.DELIVERYDATE
+                              AND TM_INPLAN.DOCNO   = DM_DOCUMENT_H.DOCNO
+                              AND TM_INPLAN.DELIVERYGROUP <![CDATA[<>]]> 'RO'
+                             )                         
+                    </otherwise>     
+                    </choose>
+                    JOIN CM_USER_AUTHORITY ON
+                    (    
+                         CM_USER_AUTHORITY.USERID    = #{gUserId}
+                     AND CM_USER_AUTHORITY.DCCODE    = DM_DOCUMENT_D.DCCODE
+                     AND CM_USER_AUTHORITY.STORERKEY = DM_DOCUMENT_D.STORERKEY
+                     AND CM_USER_AUTHORITY.ORGANIZE  = DM_DOCUMENT_D.ORGANIZE
+                     AND CM_USER_AUTHORITY.AREA      = DM_DOCUMENT_D.AREA
+                     <if test='fixdccode != null and fixdccode != ""'>       AND CM_USER_AUTHORITY.DCCODE    =  #{fixdccode}       </if>    
+                     <if test='gStorerkey != null and gStorerkey != ""'> AND CM_USER_AUTHORITY.STORERKEY =  #{gStorerkey}    </if>    
+                     <if test='gArea != null and gArea != ""'>           AND CM_USER_AUTHORITY.AREA      =  #{gArea}         </if>
+                     <!-- 창고 다중선택 -->
+                     <if test='gOrganize != null and gOrganize != ""'>            
+                        AND CM_USER_AUTHORITY.ORGANIZE IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                                                             FROM (SELECT #{gOrganize} AS VAL FROM DUAL) A
+                                                          CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0) 
+                     </if>
+                    )
+                    WHERE DM_DOCUMENT_H.DOCTYPE    = 'RT'
+                      AND DM_DOCUMENT_H.WORKPROCESSCODE <![CDATA[<>]]> 'STO'
+                      AND DM_DOCUMENT_H.STATUS     = '90'
+                      AND DM_DOCUMENT_H.DEL_YN     = 'N'
+                      AND DM_DOCUMENT_H.DELIVERYDATE <![CDATA[>=]]> #{dt1}
+                      AND DM_DOCUMENT_H.DELIVERYDATE <![CDATA[<=]]> #{dt2}
+                      <!-- 고객 다중선택 -->
+                      <if test='custkey != null and custkey != ""'>
+                          AND DM_DOCUMENT_H.FROM_CUSTKEY IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                                                               FROM (SELECT #{custkey} AS VAL FROM DUAL) A
+                                                            CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0) 
+                      </if>             
+                      <!-- 문서번호 다중선택 -->
+                      <if test='docno != null and docno != ""'>
+                          AND DM_DOCUMENT_H.DOCNO IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                                                     FROM (SELECT #{docno} AS VAL FROM DUAL) A
+                                                  CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0) 
+                      </if>   
+				</when>	    
+				<when test='invoiceprinttype == "RTP"'>
+                    SELECT TM_INPLAN.CARNO              AS CARNO
+                          ,TM_INPLAN.PRIORITY           AS PRIORITY
+                          ,TM_INPLAN.DELIVERYGROUP      AS DELIVERYGROUP
+                          ,NVL(DM_DOCUMENT_H.MNGPLC_ID, DM_DOCUMENT_H.TO_CUSTKEY)     AS CUSTKEY
+                          ,MS_CUST.DESCRIPTION    AS CUSTNAME
+                          , MS_CUSTDLVINFO.TRUTHCUSTKEY						 AS TRUTHCUSTKEY
+                          , FN_DESCR_CUST(MS_CUSTDLVINFO.STORERKEY, MS_CUSTDLVINFO.TRUTHCUSTKEY) AS TRUTHCUSTNAME
+                          ,DM_DOCUMENT_H.INVOICETYPE    AS INVOICETYPE
+                          ,DM_DOCUMENT_H.SHPTO_ID       AS SHPTOID
+                          ,NVL(DM_DOCUMENT_H.MNGPLC_ID, DM_DOCUMENT_H.FROM_CUSTKEY) AS MNGPLCID
+                          ,(SELECT FN_CODEDESCR(DM_DOCUMENT_H.STORERKEY, 'INVOICETYPE', DM_DOCUMENT_H.INVOICETYPE) FROM DUAL) AS INVOICETYPEDESC
+                    FROM DM_DOCUMENT_H
+                    JOIN DM_DOCUMENT_D
+                      ON (--튜닝.modify
+                              DM_DOCUMENT_D.DCCODE       = DM_DOCUMENT_H.DCCODE
+                          AND DM_DOCUMENT_D.DOCTYPE      = DM_DOCUMENT_H.DOCTYPE
+                          AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE 
+                          AND DM_DOCUMENT_D.DOCNO        = DM_DOCUMENT_H.DOCNO
+                          AND DM_DOCUMENT_D.STATUS    <![CDATA[<]]> '90'
+                          AND DM_DOCUMENT_D.DEL_YN       = 'N'                 
+                         )
+                    JOIN MS_CUST
+                        ON      MS_CUST.STORERKEY   = DM_DOCUMENT_H.STORERKEY
+                        AND     MS_CUST.CUSTKEY     = NVL(DM_DOCUMENT_H.MNGPLC_ID, DM_DOCUMENT_H.TO_CUSTKEY)
+                        AND     MS_CUST.CUSTTYPE    = DM_DOCUMENT_H.TO_CUSTTYPE
+				    JOIN MS_CUSTDLVINFO
+                          ON MS_CUST.STORERKEY = MS_CUSTDLVINFO.STORERKEY
+                         AND MS_CUST.CUSTKEY   = MS_CUSTDLVINFO.CUSTKEY
+                         AND MS_CUST.CUSTTYPE   = MS_CUSTDLVINFO.CUSTTYPE
+                    JOIN RT_INPLAN
+                      ON (--튜닝.modify
+                             RT_INPLAN.DCCODE    = DM_DOCUMENT_D.DCCODE
+                         AND RT_INPLAN.DOCTYPE   = DM_DOCUMENT_D.DOCTYPE    
+                         AND RT_INPLAN.SLIPDT    = DM_DOCUMENT_H.DELIVERYDATE 
+                         AND RT_INPLAN.DOCNO     = DM_DOCUMENT_D.DOCNO
+                         AND RT_INPLAN.DOCLINE   = DM_DOCUMENT_D.DOCLINE
+                         AND RT_INPLAN.STATUS    <![CDATA[<]]> '90'
+                         )                         
+                    <choose>
+                    <when test='searchcar != null and searchcar != ""'>
+                        JOIN TM_INPLAN
+                          ON (
+                                  TM_INPLAN.DCCODE  = DM_DOCUMENT_H.DCCODE
+                              AND TM_INPLAN.DOCTYPE = DM_DOCUMENT_H.DOCTYPE
+                              AND TM_INPLAN.SLIPDT  = DM_DOCUMENT_H.DELIVERYDATE
+                              AND TM_INPLAN.DOCNO   = DM_DOCUMENT_H.DOCNO
+                              <!-- 배송그룹 -->                     
+                              <if test='deliverygroup != null and deliverygroup != ""'>
+                                  AND TM_INPLAN.deliverygroup = #{deliverygroup}
+                              </if>
+                              <!-- 차량 다중선택 -->
+                              <if test='carno != null and carno != ""'>
+                                  AND TM_INPLAN.CARNO IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                                                          FROM (SELECT #{carno} AS VAL FROM DUAL) A
+                                                       CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)                          
+                              </if>                          
+                              AND TM_INPLAN.DELIVERYGROUP <![CDATA[<>]]> 'RO'
+                             )                         
+                    </when>
+                    <otherwise>
+                        LEFT JOIN TM_INPLAN
+                          ON (
+                                  TM_INPLAN.DCCODE  = DM_DOCUMENT_H.DCCODE
+                              AND TM_INPLAN.DOCTYPE = DM_DOCUMENT_H.DOCTYPE
+                              AND TM_INPLAN.SLIPDT  = DM_DOCUMENT_H.DELIVERYDATE
+                              AND TM_INPLAN.DOCNO   = DM_DOCUMENT_H.DOCNO
+                              AND TM_INPLAN.DELIVERYGROUP <![CDATA[<>]]> 'RO'
+                             )                         
+                    </otherwise>     
+                    </choose>
+                    JOIN CM_USER_AUTHORITY ON
+                    (    
+                         CM_USER_AUTHORITY.USERID    = #{gUserId}
+                     AND CM_USER_AUTHORITY.DCCODE    = DM_DOCUMENT_D.DCCODE
+                     AND CM_USER_AUTHORITY.STORERKEY = DM_DOCUMENT_D.STORERKEY
+                     AND CM_USER_AUTHORITY.ORGANIZE  = DM_DOCUMENT_D.ORGANIZE
+                     AND CM_USER_AUTHORITY.AREA      = DM_DOCUMENT_D.AREA
+                     <if test='fixdccode != null and fixdccode != ""'>       AND CM_USER_AUTHORITY.DCCODE    =  #{fixdccode}       </if>    
+                     <if test='gStorerkey != null and gStorerkey != ""'> AND CM_USER_AUTHORITY.STORERKEY =  #{gStorerkey}    </if>    
+                     <if test='gArea != null and gArea != ""'>           AND CM_USER_AUTHORITY.AREA      =  #{gArea}         </if>
+                     <!-- 창고 다중선택 -->
+                     <if test='gOrganize != null and gOrganize != ""'>            
+                        AND CM_USER_AUTHORITY.ORGANIZE IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                                                             FROM (SELECT #{gOrganize} AS VAL FROM DUAL) A
+                                                          CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0) 
+                     </if>
+                    )
+                    WHERE DM_DOCUMENT_H.DOCTYPE    = 'RT'
+                      AND DM_DOCUMENT_H.WORKPROCESSCODE <![CDATA[<>]]> 'STO'
+                      AND DM_DOCUMENT_H.STATUS     <![CDATA[<]]> '90'
+                      AND DM_DOCUMENT_H.DEL_YN     = 'N'
+                      AND DM_DOCUMENT_H.DELIVERYDATE <![CDATA[>=]]> #{dt1}
+                      AND DM_DOCUMENT_H.DELIVERYDATE <![CDATA[<=]]> #{dt2}
+                      <!-- 고객 다중선택 -->
+                      <if test='custkey != null and custkey != ""'>
+                          AND DM_DOCUMENT_H.FROM_CUSTKEY IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                                                               FROM (SELECT #{custkey} AS VAL FROM DUAL) A
+                                                            CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0) 
+                      </if>             
+                      <!-- 문서번호 다중선택 -->
+                      <if test='docno != null and docno != ""'>
+                          AND DM_DOCUMENT_H.DOCNO IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                                                     FROM (SELECT #{docno} AS VAL FROM DUAL) A
+                                                  CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0) 
+                      </if>   
+				</when>				        
+	        </choose>
+	        
+	    )
+	    GROUP BY CUSTKEY
+	            ,CUSTNAME
+	            ,TRUTHCUSTKEY
+	            ,TRUTHCUSTNAME
+	    ORDER BY CARNO
+	           , PRIORITY
+	           , deliverygroup
+	           , custkey
+	           , CUSTNAME
+	</select>
+	
+    <!-- 납품서출력 상세 -->
+    <select id="getDetailList" resultType="WdInvoiceTotalDetailResDto"> 
+        SELECT /* [wdInvoiceTotalService.sqlx][wdInvoiceTotalService.getDataDetaillist][통합납품서출력][sypark][20151023] */
+                '0'                        AS CHECKYN
+               ,STORERKEY                  AS STORERKEY
+               ,DELIVERYDT                 AS DELIVERYDT
+               ,CARNO                      AS CARNO
+               ,PRIORITY                   AS PRIORITY
+               ,DELIVERYGROUP              AS DELIVERYGROUP
+               ,CUSTKEY                    AS CUSTKEY
+               ,CUSTNAME                   AS CUSTNAME
+               ,TRUTHCUSTKEY            AS TRUTHCUSTKEY         /*거래처명*/
+	           ,TRUTHCUSTNAME            AS TRUTHCUSTNAME         /*거래처명*/
+               ,TRUTHCUSTKEY            AS TRUTHCUSTKEY         /*거래처명*/
+	           ,TRUTHCUSTNAME            AS TRUTHCUSTNAME         /*거래처명*/
+               ,MNGPLCID                   AS MNGPLCID         /*분할관리처코드*/
+               ,MNGPLCNAME                 AS MNGPLCNAME       /*분할관리처명*/
+               ,SHPTOID                    AS SHPTOID 
+               ,INVOICETYPEDESC            AS INVOICETYPEDESC
+               ,INVOICETYPE                AS INVOICETYPE
+               ,#{invoiceprinttype}        AS INVOICEPRINTTYPE       
+        FROM (
+            <choose>
+                <when test='invoiceprinttype == "WD"'>
+	               SELECT  DM_DOCUMENT_H.STORERKEY    AS STORERKEY
+	                      ,DM_DOCUMENT_H.DELIVERYDATE AS DELIVERYDT
+	                      ,TM_INPLAN.CARNO            AS CARNO
+	                      ,TM_INPLAN.PRIORITY         AS PRIORITY
+	                      ,TM_INPLAN.DELIVERYGROUP    AS DELIVERYGROUP
+	                      ,DM_DOCUMENT_H.TO_CUSTKEY   AS CUSTKEY
+	                      ,DM_DOCUMENT_H.TO_CUSTNAME  AS CUSTNAME
+                          , MS_CUSTDLVINFO.TRUTHCUSTKEY						 AS TRUTHCUSTKEY
+                          , FN_DESCR_CUST(MS_CUSTDLVINFO.STORERKEY, MS_CUSTDLVINFO.TRUTHCUSTKEY) AS TRUTHCUSTNAME
+	                      ,(SELECT FN_CODEDESCR(DM_DOCUMENT_H.STORERKEY, 'INVOICETYPE', NVL(NVL(MS_CUST.INVOICETYPE,DM_DOCUMENT_H.INVOICETYPE),'STD')) FROM DUAL) AS INVOICETYPEDESC
+	                      ,''                         AS PRINTYN 
+	                      ,NVL(NVL(MS_CUST.INVOICETYPE,DM_DOCUMENT_H.INVOICETYPE),'STD')  AS INVOICETYPE
+	                      ,''                         AS DOCNO
+	                      ,''                         AS ORDERTYPE
+	                      ,''                         AS SLIPDT
+	                      ,''                         AS SLIPNO
+	                      ,NVL(DM_DOCUMENT_H.MNGPLC_ID, DM_DOCUMENT_H.TO_CUSTKEY )   AS MNGPLCID
+	                      ,DM_DOCUMENT_H.SHPTO_ID     AS  SHPTOID 
+	                      ,MS_CUST.DESCRIPTION        AS MNGPLCNAME
+				    FROM DM_DOCUMENT_H
+				    JOIN DM_DOCUMENT_D
+                      ON (--튜닝.modify
+                              DM_DOCUMENT_D.DCCODE       = DM_DOCUMENT_H.DCCODE
+                          AND DM_DOCUMENT_D.DOCTYPE      = DM_DOCUMENT_H.DOCTYPE
+                          AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE 
+                          AND DM_DOCUMENT_D.DOCNO        = DM_DOCUMENT_H.DOCNO
+                          AND DM_DOCUMENT_D.STATUS       = '90' /*상태(90:확정완료)*/
+                          AND DM_DOCUMENT_D.DEL_YN       = 'N'               
+                         )
+				    JOIN WD_INPLAN
+                      ON (--튜닝.modify
+                             WD_INPLAN.DCCODE    = DM_DOCUMENT_D.DCCODE
+                         AND WD_INPLAN.DOCTYPE   = DM_DOCUMENT_D.DOCTYPE    
+                         AND WD_INPLAN.SLIPDT    = DM_DOCUMENT_H.DELIVERYDATE 
+                         AND WD_INPLAN.DOCNO     = DM_DOCUMENT_D.DOCNO
+                         AND WD_INPLAN.DOCLINE   = DM_DOCUMENT_D.DOCLINE
+                         AND WD_INPLAN.STATUS    = '90'
+                         )				         
+                    <choose>
+                    <when test='searchcar != null and searchcar != ""'>
+                        JOIN TM_INPLAN
+                          ON (
+                                  TM_INPLAN.DCCODE  = DM_DOCUMENT_H.DCCODE
+                              AND TM_INPLAN.DOCTYPE = DM_DOCUMENT_H.DOCTYPE
+                              AND TM_INPLAN.SLIPDT  = DM_DOCUMENT_H.DELIVERYDATE
+                              AND TM_INPLAN.DOCNO   = DM_DOCUMENT_H.DOCNO
+                              AND TM_INPLAN.DOCTYPE = 'WD'
+		                      AND TM_INPLAN.DELIVERYDT <![CDATA[>=]]> #{dt1}
+		                      AND TM_INPLAN.DELIVERYDT <![CDATA[<=]]> #{dt2}                              
+                              <!-- 배송그룹 -->                     
+                              <if test='deliverygroup != null and deliverygroup != ""'>
+                                  AND TM_INPLAN.deliverygroup = #{deliverygroup}
+                              </if>
+                              <!-- 차량 다중선택 -->
+                              <if test='carno != null and carno != ""'>
+                                  AND TM_INPLAN.CARNO IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                                                          FROM (SELECT #{carno} AS VAL FROM DUAL) A
+                                                       CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)                          
+                              </if>                          
+                              AND TM_INPLAN.DELIVERYGROUP <![CDATA[<>]]> 'RO'
+                             )                         
+                    </when>
+                    <otherwise>
+                        LEFT JOIN TM_INPLAN
+                          ON (
+                                  TM_INPLAN.DCCODE  = DM_DOCUMENT_H.DCCODE
+                              AND TM_INPLAN.DOCTYPE = DM_DOCUMENT_H.DOCTYPE
+                              AND TM_INPLAN.SLIPDT  = DM_DOCUMENT_H.DELIVERYDATE
+                              AND TM_INPLAN.DOCNO   = DM_DOCUMENT_H.DOCNO
+                              AND TM_INPLAN.DOCTYPE = 'WD'
+                              AND TM_INPLAN.DELIVERYDT <![CDATA[>=]]> #{dt1}
+                              AND TM_INPLAN.DELIVERYDT <![CDATA[<=]]> #{dt2}                                 
+                             )                         
+                    </otherwise>     
+                    </choose>
+                     JOIN MS_CUST
+                       ON (
+                               MS_CUST.STORERKEY = DM_DOCUMENT_H.STORERKEY
+                           AND MS_CUST.CUSTKEY   = NVL(DM_DOCUMENT_H.MNGPLC_ID, DM_DOCUMENT_H.TO_CUSTKEY )
+                           AND MS_CUST.CUSTTYPE  = DM_DOCUMENT_H.TO_CUSTTYPE
+                          )
+                    JOIN MS_CUSTDLVINFO
+                          ON MS_CUST.STORERKEY = MS_CUSTDLVINFO.STORERKEY
+                         AND MS_CUST.CUSTKEY   = MS_CUSTDLVINFO.CUSTKEY
+                         AND MS_CUST.CUSTTYPE   = MS_CUSTDLVINFO.CUSTTYPE
+                    WHERE 1=1
+                      AND DM_DOCUMENT_H.DCCODE    = #{fixdccode}
+                      AND DM_DOCUMENT_H.STORERKEY = #{gStorerkey}                              
+				      AND DM_DOCUMENT_H.DOCTYPE    = 'WD'
+				      AND DM_DOCUMENT_H.STATUS     = '90'
+				      AND DM_DOCUMENT_H.DEL_YN     = 'N'
+				      AND DM_DOCUMENT_H.DELIVERYDATE <![CDATA[>=]]> #{dt1}
+				      AND DM_DOCUMENT_H.DELIVERYDATE <![CDATA[<=]]> #{dt2}
+                    <!-- 고객 다중선택 -->
+                    <if test='custkey != null and custkey != ""'>
+                        AND DM_DOCUMENT_H.TO_CUSTKEY = #{custkey} 
+                    </if>                   
+                    <!-- 문서번호 다중선택 -->
+                    <if test='docno != null and docno != ""'>
+                        AND DM_DOCUMENT_H.DOCNO IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                                                   FROM (SELECT #{docno} AS VAL FROM DUAL) A
+                                                CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0) 
+                    </if> 
+                </when>
+                <when test='invoiceprinttype == "RT"'>
+	              SELECT DM_DOCUMENT_H.STORERKEY      AS STORERKEY
+	                    ,DM_DOCUMENT_H.DELIVERYDATE   AS DELIVERYDT
+	                    ,TM_INPLAN.CARNO              AS CARNO
+	                    ,TM_INPLAN.PRIORITY           AS PRIORITY
+	                    ,TM_INPLAN.DELIVERYGROUP      AS DELIVERYGROUP
+	                    ,DM_DOCUMENT_H.FROM_CUSTKEY   AS CUSTKEY
+	                    ,DM_DOCUMENT_H.FROM_CUSTNAME  AS CUSTNAME
+                        , MS_CUSTDLVINFO.TRUTHCUSTKEY						 AS TRUTHCUSTKEY
+                        , FN_DESCR_CUST(MS_CUSTDLVINFO.STORERKEY, MS_CUSTDLVINFO.TRUTHCUSTKEY) AS TRUTHCUSTNAME
+	                    ,(SELECT FN_CODEDESCR(DM_DOCUMENT_H.STORERKEY, 'INVOICETYPE', NVL(NVL(MS_CUST.INVOICETYPE,DM_DOCUMENT_H.INVOICETYPE),'STD')) FROM DUAL)  AS INVOICETYPEDESC
+	                    ,''                           AS PRINTYN 
+	                    ,NVL(NVL(MS_CUST.INVOICETYPE,DM_DOCUMENT_H.INVOICETYPE),'STD')    AS INVOICETYPE
+	                    ,''                           AS DOCNO
+	                    ,''                           AS ORDERTYPE
+	                    ,''                           AS SLIPDT
+	                    ,''                           AS SLIPNO
+	                    ,NVL(DM_DOCUMENT_H.MNGPLC_ID, DM_DOCUMENT_H.FROM_CUSTKEY )   AS MNGPLCID
+	                    ,DM_DOCUMENT_H.SHPTO_ID      AS  SHPTOID 
+	                    ,MS_CUST.DESCRIPTION        AS MNGPLCNAME
+                    FROM DM_DOCUMENT_H
+                    JOIN DM_DOCUMENT_D
+                      ON (--튜닝.modify
+                              DM_DOCUMENT_D.DCCODE       = DM_DOCUMENT_H.DCCODE
+                          AND DM_DOCUMENT_D.DOCTYPE      = DM_DOCUMENT_H.DOCTYPE
+                          AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE 
+                          AND DM_DOCUMENT_D.DOCNO        = DM_DOCUMENT_H.DOCNO
+                          AND DM_DOCUMENT_D.STATUS       = '90' /*상태(90:확정완료)*/
+                          AND DM_DOCUMENT_D.DEL_YN       = 'N'                 
+                         )
+                    JOIN RT_INPLAN
+                      ON (--튜닝.modify
+                             RT_INPLAN.DCCODE    = DM_DOCUMENT_D.DCCODE
+                         AND RT_INPLAN.DOCTYPE   = DM_DOCUMENT_D.DOCTYPE    
+                         AND RT_INPLAN.SLIPDT    = DM_DOCUMENT_H.DELIVERYDATE 
+                         AND RT_INPLAN.DOCNO     = DM_DOCUMENT_D.DOCNO
+                         AND RT_INPLAN.DOCLINE   = DM_DOCUMENT_D.DOCLINE
+                         AND RT_INPLAN.STATUS    <![CDATA[<]]> '90'
+                         )   
+                    <choose>
+                    <when test='searchcar != null and searchcar != ""'>
+                        JOIN TM_INPLAN
+                          ON (
+                                  TM_INPLAN.DCCODE  = DM_DOCUMENT_H.DCCODE
+                              AND TM_INPLAN.DOCTYPE = DM_DOCUMENT_H.DOCTYPE
+                              AND TM_INPLAN.SLIPDT  = DM_DOCUMENT_H.DELIVERYDATE
+                              AND TM_INPLAN.DOCNO   = DM_DOCUMENT_H.DOCNO
+                              <!-- 배송그룹 -->                     
+                              <if test='deliverygroup != null and deliverygroup != ""'>
+                                  AND TM_INPLAN.deliverygroup = #{deliverygroup}
+                              </if>
+                              <!-- 차량 다중선택 -->
+                              <if test='carno != null and carno != ""'>
+                                  AND TM_INPLAN.CARNO IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                                                          FROM (SELECT #{carno} AS VAL FROM DUAL) A
+                                                       CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)                          
+                              </if>                          
+                              AND TM_INPLAN.DELIVERYGROUP <![CDATA[<>]]> 'RO'
+                              AND TM_INPLAN.DELIVERYDT <![CDATA[>=]]> #{dt1}
+                              AND TM_INPLAN.DELIVERYDT <![CDATA[<=]]> #{dt2}                              
+                             )                         
+                    </when>
+                    <otherwise>
+                        LEFT JOIN TM_INPLAN
+                          ON (
+                                  TM_INPLAN.DCCODE  = DM_DOCUMENT_H.DCCODE
+                              AND TM_INPLAN.DOCTYPE = DM_DOCUMENT_H.DOCTYPE
+                              AND TM_INPLAN.SLIPDT  = DM_DOCUMENT_H.DELIVERYDATE
+                              AND TM_INPLAN.DOCNO   = DM_DOCUMENT_H.DOCNO
+                              AND TM_INPLAN.DELIVERYGROUP <![CDATA[<>]]> 'RO'
+                              AND TM_INPLAN.DELIVERYDT <![CDATA[>=]]> #{dt1}
+                              AND TM_INPLAN.DELIVERYDT <![CDATA[<=]]> #{dt2}   
+                             )                         
+                    </otherwise>     
+                    </choose>
+                     JOIN MS_CUST
+	                   ON (
+	                           MS_CUST.STORERKEY = DM_DOCUMENT_H.STORERKEY
+	                       AND MS_CUST.CUSTKEY   = NVL(DM_DOCUMENT_H.MNGPLC_ID, DM_DOCUMENT_H.TO_CUSTKEY )
+	                       AND MS_CUST.CUSTTYPE  = DM_DOCUMENT_H.TO_CUSTTYPE
+	                      )
+                    JOIN MS_CUSTDLVINFO
+                          ON MS_CUST.STORERKEY = MS_CUSTDLVINFO.STORERKEY
+                         AND MS_CUST.CUSTKEY   = MS_CUSTDLVINFO.CUSTKEY
+                         AND MS_CUST.CUSTTYPE   = MS_CUSTDLVINFO.CUSTTYPE
+	                WHERE 1=1
+	                  AND DM_DOCUMENT_H.DCCODE    = #{fixdccode}
+	                  AND DM_DOCUMENT_H.STORERKEY = #{gStorerkey}                         
+                      AND DM_DOCUMENT_H.DOCTYPE    = 'RT'
+                      AND DM_DOCUMENT_H.STATUS     = '90'
+                      AND DM_DOCUMENT_H.DEL_YN     = 'N'
+                      AND DM_DOCUMENT_H.DELIVERYDATE <![CDATA[>=]]> #{dt1}
+                      AND DM_DOCUMENT_H.DELIVERYDATE <![CDATA[<=]]> #{dt2}
+                    <!-- 고객 다중선택 -->
+                    <if test='custkey != null and custkey != ""'>
+                        AND DM_DOCUMENT_H.TO_CUSTKEY = #{custkey}
+                    </if>                 
+                    <!-- 문서번호 다중선택 -->
+                    <if test='docno != null and docno != ""'>
+                        AND DM_DOCUMENT_H.DOCNO IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                                                   FROM (SELECT #{docno} AS VAL FROM DUAL) A
+                                                CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0) 
+                    </if> 
+                </when>        
+                <when test='invoiceprinttype == "RTP"'>
+	              SELECT DM_DOCUMENT_H.STORERKEY      AS STORERKEY
+	                    ,DM_DOCUMENT_H.DELIVERYDATE   AS DELIVERYDT
+	                    ,TM_INPLAN.CARNO              AS CARNO
+	                    ,TM_INPLAN.PRIORITY           AS PRIORITY
+	                    ,TM_INPLAN.DELIVERYGROUP      AS DELIVERYGROUP
+	                    ,DM_DOCUMENT_H.FROM_CUSTKEY   AS CUSTKEY
+	                    ,DM_DOCUMENT_H.FROM_CUSTNAME  AS CUSTNAME
+                        , MS_CUSTDLVINFO.TRUTHCUSTKEY						 AS TRUTHCUSTKEY
+                        , FN_DESCR_CUST(MS_CUSTDLVINFO.STORERKEY, MS_CUSTDLVINFO.TRUTHCUSTKEY) AS TRUTHCUSTNAME
+	                    ,(SELECT FN_CODEDESCR(DM_DOCUMENT_H.STORERKEY, 'INVOICETYPE', NVL(NVL(MS_CUST.INVOICETYPE,DM_DOCUMENT_H.INVOICETYPE),'STD')) FROM DUAL)  AS INVOICETYPEDESC
+	                    ,''                           AS PRINTYN 
+	                    ,NVL(NVL(MS_CUST.INVOICETYPE,DM_DOCUMENT_H.INVOICETYPE),'STD')    AS INVOICETYPE
+	                    ,''                           AS DOCNO
+	                    ,''                           AS ORDERTYPE
+	                    ,''                           AS SLIPDT
+	                    ,''                           AS SLIPNO
+	                    ,NVL(DM_DOCUMENT_H.MNGPLC_ID, DM_DOCUMENT_H.FROM_CUSTKEY )   AS MNGPLCID
+	                    ,DM_DOCUMENT_H.SHPTO_ID      AS  SHPTOID 
+	                    ,MS_CUST.DESCRIPTION        AS MNGPLCNAME
+	                FROM DM_DOCUMENT_H
+	                JOIN DM_DOCUMENT_D
+                      ON (--튜닝.modify
+                              DM_DOCUMENT_D.DCCODE       = DM_DOCUMENT_H.DCCODE
+                          AND DM_DOCUMENT_D.DOCTYPE      = DM_DOCUMENT_H.DOCTYPE
+                          AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE 
+                          AND DM_DOCUMENT_D.DOCNO        = DM_DOCUMENT_H.DOCNO
+                          AND DM_DOCUMENT_D.STATUS    <![CDATA[<]]> '90'
+                          AND DM_DOCUMENT_D.DEL_YN       = 'N'                
+                         )
+	                JOIN RT_INPLAN
+                      ON (--튜닝.modify
+                             RT_INPLAN.DCCODE    = DM_DOCUMENT_D.DCCODE
+                         AND RT_INPLAN.DOCTYPE   = DM_DOCUMENT_D.DOCTYPE    
+                         AND RT_INPLAN.SLIPDT    = DM_DOCUMENT_H.DELIVERYDATE 
+                         AND RT_INPLAN.DOCNO     = DM_DOCUMENT_D.DOCNO
+                         AND RT_INPLAN.DOCLINE   = DM_DOCUMENT_D.DOCLINE
+                         AND RT_INPLAN.STATUS    <![CDATA[<]]> '90'
+                         )   	                     
+                    <choose>
+                    <when test='searchcar != null and searchcar != ""'>
+                        JOIN TM_INPLAN
+                          ON (
+                                  TM_INPLAN.DCCODE  = DM_DOCUMENT_H.DCCODE
+                              AND TM_INPLAN.DOCTYPE = DM_DOCUMENT_H.DOCTYPE
+                              AND TM_INPLAN.SLIPDT  = DM_DOCUMENT_H.DELIVERYDATE
+                              AND TM_INPLAN.DOCNO   = DM_DOCUMENT_H.DOCNO
+                              AND TM_INPLAN.DELIVERYDT <![CDATA[>=]]> #{dt1}
+                              AND TM_INPLAN.DELIVERYDT <![CDATA[<=]]> #{dt2}           
+                              <!-- 배송그룹 -->                     
+                              <if test='deliverygroup != null and deliverygroup != ""'>
+                                  AND TM_INPLAN.deliverygroup = #{deliverygroup}
+                              </if>
+                              <!-- 차량 다중선택 -->
+                              <if test='carno != null and carno != ""'>
+                                  AND TM_INPLAN.CARNO IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                                                          FROM (SELECT #{carno} AS VAL FROM DUAL) A
+                                                       CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)                          
+                              </if>                          
+                              AND TM_INPLAN.DELIVERYGROUP <![CDATA[<>]]> 'RO'
+                             )                         
+                    </when>
+                    <otherwise>
+                        LEFT JOIN TM_INPLAN
+	                      ON (
+	                              TM_INPLAN.DCCODE  = DM_DOCUMENT_H.DCCODE
+	                          AND TM_INPLAN.DOCTYPE = DM_DOCUMENT_H.DOCTYPE
+	                          AND TM_INPLAN.SLIPDT  = DM_DOCUMENT_H.DELIVERYDATE
+	                          AND TM_INPLAN.DOCNO   = DM_DOCUMENT_H.DOCNO
+	                          AND TM_INPLAN.DELIVERYGROUP <![CDATA[<>]]> 'RO'
+                              AND TM_INPLAN.DELIVERYDT <![CDATA[>=]]> #{dt1}
+                              AND TM_INPLAN.DELIVERYDT <![CDATA[<=]]> #{dt2}     	                          
+	                         )                         
+                    </otherwise>     
+                    </choose>
+
+	             JOIN MS_CUST
+	               ON (
+	                       MS_CUST.STORERKEY = DM_DOCUMENT_H.STORERKEY
+	                   AND MS_CUST.CUSTKEY   = NVL(DM_DOCUMENT_H.MNGPLC_ID, DM_DOCUMENT_H.TO_CUSTKEY )
+	                   AND MS_CUST.CUSTTYPE  = DM_DOCUMENT_H.TO_CUSTTYPE
+	                  )
+                    JOIN MS_CUSTDLVINFO
+                          ON MS_CUST.STORERKEY = MS_CUSTDLVINFO.STORERKEY
+                         AND MS_CUST.CUSTKEY   = MS_CUSTDLVINFO.CUSTKEY
+                         AND MS_CUST.CUSTTYPE   = MS_CUSTDLVINFO.CUSTTYPE
+                WHERE 1=1
+                  AND DM_DOCUMENT_H.DCCODE    = #{fixdccode}
+                  AND DM_DOCUMENT_H.STORERKEY = #{gStorerkey}
+                  AND DM_DOCUMENT_H.DOCTYPE   = 'RT'                
+                  AND DM_DOCUMENT_H.STATUS     <![CDATA[<]]> '90'
+                  AND DM_DOCUMENT_H.DEL_YN     = 'N'
+                  AND DM_DOCUMENT_H.DELIVERYDATE <![CDATA[>=]]> #{dt1}
+                  AND DM_DOCUMENT_H.DELIVERYDATE <![CDATA[<=]]> #{dt2}
+                    <!-- 고객 다중선택 -->
+                    <if test='custkey != null and custkey != ""'>
+                        AND DM_DOCUMENT_H.FROM_CUSTKEY IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                                                             FROM (SELECT #{custkey} AS VAL FROM DUAL) A
+                                                          CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0) 
+                    </if>                   
+                    <!-- 문서번호 다중선택 -->
+                    <if test='docno != null and docno != ""'>
+                        AND DM_DOCUMENT_H.DOCNO IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                                                   FROM (SELECT #{docno} AS VAL FROM DUAL) A
+                                                CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0) 
+                    </if> 
+                </when>                 
+            </choose>   
+          
+        )
+        GROUP BY  STORERKEY 
+                 ,DELIVERYDT                 
+                 ,CARNO             
+                 ,PRIORITY          
+                 ,DELIVERYGROUP     
+                 ,custkey           
+                 ,CUSTNAME
+                 ,TRUTHCUSTKEY
+	             ,TRUTHCUSTNAME
+                 ,MNGPLCID           
+                 ,MNGPLCNAME    
+                 ,SHPTOID                              
+                 ,INVOICETYPEDESC   
+                 ,INVOICETYPE
+        ORDER BY  CUSTKEY
+                 ,CUSTNAME
+                 ,INVOICETYPE                
+         
+
+        
+    </select>
+    
+    <delete id="deleteTampTable">
+        DELETE /* [WdInvoiceTotalService.sqlx][deleteTampTable][엑셀데이터임시 Tabele 삭제][sss][2025.05.23] */
+               SY_PROCESSTEMP_WD
+         WHERE PROCESSCREATOR = #{gUserId}
+           AND PROCESSTYPE    = #{processtype}
+           AND SPID           = #{gSpid}
+    </delete>    
+    
+    <!-- 엑셀업로드 정보을(를) 등록 -->
+    <insert id="insertTempExcel" parameterType="java.util.List" >
+        <!-- 
+        <selectKey resultType="int" keyProperty="seq" order="BEFORE">
+        SELECT '1' AS SEQ FROM DUAL
+        </selectKey>
+        -->
+        <foreach collection="list" index="index" item="item" separator=" " open="INSERT ALL" close="SELECT * FROM DUAL">
+              /* [WdInvoiceTotalService.sqlx][insertTempExcel][엑셀데이터임시 Tabele 등록][sss][2025.05.23] */
+              INTO SY_PROCESSTEMP_WD (PROCESSTYPE,PROCESSCREATOR,SPID,ADDWHO,EDITWHO
+                                      /**/
+                                     ,DELIVERYDT
+                                     ,CARNO
+                                     ,PRIORITY
+                                     ,DELIVERYGROUP
+                                     ,CUSTKEY
+                                     ,PICK_LIST_NO
+                                     /**/
+                                     ,OTHER01
+                                     ,OTHER05
+                                     ,OTHER03
+                                    )
+            VALUES (
+                    #{item.processtype},#{item.gUserId},#{item.gSpid},#{item.gUserId},#{item.gUserId}
+                    /**/
+                    ,#{item.deliverydt}      /*1.납품일자-grid*/
+                    ,#{item.carno}           /*1.차량번호-grid*/
+                    ,#{item.priority}        /*2.우선순위-grid*/
+                    ,#{item.deliverygroup}   /*3.배송그룹-grid*/
+                    ,#{item.custkey}         /*4.거래처코드-grid*/
+                    ,#{item.pickListNo}      /*5.피킹리스트번호-ui*/
+                    /**/
+                    ,#{item.invoiceprintkey} /*6.인보이스출력키-ui*/
+                    ,#{item.mngplcid}        /*7.분할관리처코드-grid*/
+                    ,#{item.shptoid}         /*8.배송관리처코드-grid*/
+                   )
+        </foreach>
+    </insert>
+    
+    <!-- 납품서 RD 헤더 -->
+    <select id="getHeaderPrintInvoice"  resultType="cjfw.wms.wd.dto.WdInvoiceTotalPrintResDto">
+        SELECT /* [wdInvoiceTotalService.sqlx][wdInvoiceTotalService.getHeaderPrintInvoice][납품서출력][김경은][20141017] */
+               FN_FORMAT_MASK(SY_INVOICE_HEADER.DOCDT, '####-##-##')                 AS DELIVERYDT        /*납품일자*/
+              ,SY_INVOICE_HEADER.FROM_VATNO                                          AS FROM_VATNO        /*공급자사업자등록번호*/
+              ,SY_INVOICE_HEADER.FROM_VATCUSTNAME                                    AS FROM_VATNAME      /*공급자상호*/
+              ,SY_INVOICE_HEADER.FROM_VATOWNER                                       AS FROM_VATOWNER     /*공급자성명*/
+              ,SY_INVOICE_HEADER.FROM_VATTYPE                                        AS FROM_VATTYPE      /*공급자업태*/
+              ,SY_INVOICE_HEADER.FROM_VATCATEGORY                                    AS FROM_VATCATEGORY  /*공급자종목*/
+              ,SY_INVOICE_HEADER.FROM_VATADDRESS1                                    AS FROM_VATADDRESS1  /*공급자주소1*/
+              ,SY_INVOICE_HEADER.FROM_VATADDRESS2                                    AS FROM_VATADDRESS2  /*공급자주소2*/    
+              ,SY_INVOICE_HEADER.CUSTKEY                                             AS TO_CUSTKEY        /*거래처코드*/
+              ,FN_FORMAT_MASK(SY_INVOICE_HEADER.TO_VATNO, '###-##-#####')            AS TO_VATNO          /*공급받는자사업자등록번호*/
+              ,SY_INVOICE_HEADER.TO_VATCUSTNAME                                      AS TO_VATNAME        /*공급받는자상호*/
+              ,SY_INVOICE_HEADER.TO_VATOWNER                                         AS TO_VATOWNER       /*공급받는자성명**/
+              ,SY_INVOICE_HEADER.TO_VATADDRESS1                                      AS TO_VATADDRESS1    /*공급받는자주소1*/ 
+              ,SY_INVOICE_HEADER.TO_VATADDRESS2                                      AS TO_VATADDRESS2    /*공급받는자주소2*/        
+              ,SY_INVOICE_HEADER.TO_VATTYPE                                          AS TO_VATTYPE        /*공급받는자업태*/
+              ,SY_INVOICE_HEADER.TO_VATCATEGORY                                      AS TO_VATCATEGORY    /*공급받는자종목*/
+              ,SY_INVOICE_HEADER.CSTEAM_EMPNAME                                      AS CS_PERSON         /*고객지원센터담당자*/
+              ,SY_INVOICE_HEADER.EMPNAME                                             AS EMPNAME           /*담당영업사원명*/
+              ,SY_INVOICE_HEADER.DCCODE                                              AS FROM_CUSTKEY      /*출고센터코드*/
+              ,SY_INVOICE_HEADER.DCNAME                                              AS FROM_CUSTNAME     /*출고센터명*/
+              ,SY_INVOICE_HEADER.DCADDRESS1 ||' '|| SY_INVOICE_HEADER.DCADDRESS2     AS FROM_ADDRESS      /*출고센터주소*/
+              ,SY_INVOICE_HEADER.CARNO                                               AS CARNO             /*차량번호*/
+              ,SY_INVOICE_HEADER.DELIVERYGROUP                                       AS DELIVERYGROUP     /*POP번호*/
+              ,SY_INVOICE_HEADER.DRIVERNAME                                          AS DRIVERNAME        /*배송기사명*/
+              ,SY_INVOICE_HEADER.DLV_CUSTNAME                                        AS TO_CUSTNAME       /*납품처명*/
+              ,SY_INVOICE_HEADER.DLV_ADDRESS1                                        AS TO_ADDRESS1       /*납품처주소1*/
+              ,SY_INVOICE_HEADER.DLV_ADDRESS2                                        AS TO_ADDRESS2       /*납품처주소2*/
+              ,SY_INVOICE_HEADER.INVOICETYPE                                         AS INVOICETYPE       /*납품서유형*/
+              ,SY_INVOICE_HEADER.DOCTYPE                                             AS DOCTYPE           /*납품서유형*/
+              ,SY_INVOICE_HEADER.HEADERKEY                                           AS HEADERKEY         /*납품서생성키*/
+              ,SY_INVOICE_HEADER.MEMO1                                               AS MEMO1             /*메모사항1*/
+              ,SY_INVOICE_HEADER.INVOICETYPE_BT                                      AS INVOICETYPE_BT    /*납품서하단유형*/
+              ,SY_INVOICE_HEADER.BT_CARNO                                            AS BT_CARNO          /*납품서하단차량번호*/
+            ,SY_INVOICE_HEADER.MEMO2                                                		 AS CHECK_TEMPER
+            ,DAMO.DEC(SY_INVOICE_HEADER.CSTEAM_EMPPHONE)                                     AS CS_TEL            /*고객지원센터담당자전화*/
+            ,DAMO.DEC(SY_INVOICE_HEADER.EMPPHONE)                                            AS EMPPHONE          /*담당영업사원전화*/
+            ,DAMO.DEC(SY_INVOICE_HEADER.DRIVER_PHONE)                                        AS DRIVER_PHONE      /*배송기사연락처*/
+            ,DAMO.DEC(SY_INVOICE_HEADER.DLV_PHONE)                                           AS TO_PHONE          /*납품처연락처*/
+            ,DAMO.DEC(SY_INVOICE_HEADER.FROM_PHONE1)									     AS FROM_PHONE1
+            ,DAMO.DEC(SY_INVOICE_HEADER.FROM_FAX)										     AS FROM_FAX
+            ,DAMO.DEC(SY_INVOICE_HEADER.TO_PHONE1)								         AS TO_PHONE1
+            ,DAMO.DEC(SY_INVOICE_HEADER.TO_FAX)                                         AS TO_FAX
+            ,MS_CUSTDLVINFO.INSPECTORPRINTYN                                            AS INSPECTORPRINTYN
+            ,CASE WHEN EXISTS (
+            			SELECT 1
+            			FROM MS_CUSTXPOP
+	            		WHERE SY_INVOICE_HEADER.CUSTKEY = MS_CUSTXPOP.CUSTKEY
+			               AND MS_CUSTXPOP.STORERKEY = 'FW00'
+			               AND MS_CUSTXPOP.DEL_YN = 'N'
+			               AND MS_CUSTXPOP.CUSTTYPE = 'C')
+	               THEN 'NEW'
+	               ELSE 'OLD'
+	           END NEWOLDTYPE
+            ,MS_CUSTDLVINFO.TRUTHCUSTKEY AS TRUTHCUSTKEY
+        FROM   SY_INVOICE_HEADER
+        LEFT JOIN MS_CUSTDLVINFO
+		      ON SY_INVOICE_HEADER.CUSTKEY   = MS_CUSTDLVINFO.CUSTKEY
+        WHERE  SY_INVOICE_HEADER.PROCESSTYPE     = #{processtype}
+        AND    SY_INVOICE_HEADER.PROCESSCREATOR  = #{gUserId}
+        AND    SY_INVOICE_HEADER.SPID            = #{gSpid}
+        AND    SY_INVOICE_HEADER.INVOICEPRINTKEY = #{invoiceprintkey}
+        ORDER BY MS_CUSTDLVINFO.TRUTHCUSTKEY
+                ,SY_INVOICE_HEADER.SORTKEY
+                ,SY_INVOICE_HEADER.CARNO
+                ,SY_INVOICE_HEADER.DELIVERYGROUP
+                ,SY_INVOICE_HEADER.PRIORITY
+                ,SY_INVOICE_HEADER.CUSTKEY
+                ,SY_INVOICE_HEADER.DOCDT
+                ,SY_INVOICE_HEADER.HEADERKEY DESC
+    </select>   
+    
+    <!-- 납품서 RD 상세 -->
+    <select id="getDetailPrintInvoice" resultType="cjfw.wms.wd.dto.WdInvoiceTotalPrintDetailResDto">
+        SELECT /* [wdInvoiceTotalService.sqlx][wdInvoiceTotalService.getDetailPrintInvoice][납품서출력][김경은][20141017] */
+               SY_INVOICE_DETAIL.SKU                         AS SKU          /*상품코드*/
+              ,REPLACE(SY_INVOICE_DETAIL.SKUNAME,'!@','! @') AS SKUNAME      /*상품명칭*/
+              ,SY_INVOICE_DETAIL.UOM                         AS UOM          /*단위*/
+              ,SY_INVOICE_DETAIL.CONFIRMQTY                  AS CONFIRMQTY   /*확정수량*/
+              ,SY_INVOICE_DETAIL.UNITPRICE                   AS UNITPRICE    /*단가*/          
+              ,SY_INVOICE_DETAIL.SUPPLYPRICE                 AS SUPPLYPRICE  /*공급가*/        
+              ,SY_INVOICE_DETAIL.TAXAMOUNT                   AS TAXAMOUNT    /*세액*/       
+              ,SY_INVOICE_DETAIL.TOTAMOUNT                   AS TOTAMOUNT    /*총액*/                  
+              ,SY_INVOICE_DETAIL.HEADERKEY                   AS HEADERKEY    /*납품서생성키*/
+              ,SY_INVOICE_DETAIL.DOCNO                       AS DOCNO        /*문서번호*/     
+              ,SY_INVOICE_DETAIL.STORAGETYPE                 AS STORAGE_TYPE /*저장타입*/
+              ,SY_INVOICE_DETAIL.QTYPERBOX                   AS QTYPERBOX
+        FROM   SY_INVOICE_DETAIL
+        WHERE  SY_INVOICE_DETAIL.PROCESSTYPE     = #{processtype}     
+        AND    SY_INVOICE_DETAIL.PROCESSCREATOR  = #{gUserId}         
+        AND    SY_INVOICE_DETAIL.SPID            = #{gSpid}            
+        AND    SY_INVOICE_DETAIL.INVOICEPRINTKEY = #{invoiceprintkey}   
+        ORDER BY SY_INVOICE_DETAIL.HEADERKEY
+              ,TO_NUMBER(SY_INVOICE_DETAIL.SORTKEY)
+              ,SY_INVOICE_DETAIL.DOCNO
+              ,SY_INVOICE_DETAIL.LINENO
+              ,SY_INVOICE_DETAIL.SERIALKEY  
+    </select>     
+    
+    <!-- 납품서 RD 상세(여신) -->
+    <select id="getCreditPrintInvoice" resultType="cjfw.wms.wd.dto.WdInvoiceTotalPrintDetailResDto">
+        SELECT /* [wdInvoiceTotalService.sqlx][wdInvoiceTotalService.getCreditPrintInvoice][납품서출력][김경은][20141017] */
+               SY_INVOICE_HEADER.CUSTKEY                             AS TO_CUSTKEY       /*거래처코드*/
+              ,MS_CREDITINFO.CREDITLIMIT                             AS CREDITLIMIT      /*여신한도*/
+              ,MS_CREDITINFO.BEFOREDAYBALANCE                        AS BEFOREDAYBALANCE /*전일잔고*/
+              ,MS_CREDITINFO.CURMONTHCHECK                           AS CURMONTHCHECK    /*당월구매금액*/
+              ,MS_CREDITINFO.ORDERBALANCE                            AS ORDERBALANCE     /*주문가능금액*/
+              ,MS_CREDITINFO.CURMONTHDEPOSIT                         AS CURMONTHDEPOSIT  /*당월입금금액*/
+              ,MS_CREDITINFO.BEFOREMONBALANCE                        AS BEFOREMONBALANCE /*전월잔고*/
+              ,MS_CREDITINFO.CURMONORDAMT                            AS CURMONORDAMT     /*당월누계매출(전일)*/
+              ,SY_INVOICE_HEADER.INVOICETYPE                         AS INVOICETYPE      /*납품서유형*/
+              ,SY_INVOICE_HEADER.DOCTYPE                             AS DOCTYPE          /*문서유형*/
+              ,CASE WHEN SY_INVOICE_HEADER.INVOICETYPE IN('05','10') THEN NULL                  
+                    ELSE SUM(SY_INVOICE_DETAIL.TOTAMOUNT)
+               END AS TOTAMOUNT                                                          /*총액*/ 
+              ,SY_INVOICE_HEADER.HEADERKEY          AS HEADERKEY                         /*납품서생성키*/            
+        FROM SY_INVOICE_HEADER         
+        JOIN SY_INVOICE_DETAIL         
+        ON     SY_INVOICE_DETAIL.PROCESSTYPE     = SY_INVOICE_HEADER.PROCESSTYPE          
+        AND    SY_INVOICE_DETAIL.PROCESSCREATOR  = SY_INVOICE_HEADER.PROCESSCREATOR          
+        AND    SY_INVOICE_DETAIL.SPID            = SY_INVOICE_HEADER.SPID          
+        AND    SY_INVOICE_DETAIL.HEADERKEY       = SY_INVOICE_HEADER.HEADERKEY
+        AND    SY_INVOICE_DETAIL.INVOICEPRINTKEY = SY_INVOICE_HEADER.INVOICEPRINTKEY        
+        JOIN MS_CREDITINFO         
+        ON   MS_CREDITINFO.CUSTKEY          = SY_INVOICE_HEADER.CUSTKEY         
+        AND  MS_CREDITINFO.ACCOUNTYYYY      = SUBSTR(SY_INVOICE_HEADER.DOCDT,0,4)         
+        AND  MS_CREDITINFO.ACCOUNTMM        = SUBSTR(SY_INVOICE_HEADER.DOCDT,5,2)         
+        AND  MS_CREDITINFO.ACCOUNTDD        = SUBSTR(SY_INVOICE_HEADER.DOCDT,7,2)  
+        WHERE  SY_INVOICE_HEADER.PROCESSTYPE     = #{processtype}     
+        AND    SY_INVOICE_HEADER.PROCESSCREATOR  = #{gUserId}         
+        AND    SY_INVOICE_HEADER.SPID            = #{gSpid}            
+        AND    SY_INVOICE_HEADER.INVOICEPRINTKEY = #{invoiceprintkey} 
+        GROUP BY
+             SY_INVOICE_HEADER.CUSTKEY
+             ,MS_CREDITINFO.CREDITLIMIT
+             ,MS_CREDITINFO.BEFOREDAYBALANCE
+             ,MS_CREDITINFO.CURMONTHCHECK
+             ,MS_CREDITINFO.ORDERBALANCE
+             ,MS_CREDITINFO.CURMONTHDEPOSIT
+             ,MS_CREDITINFO.BEFOREMONBALANCE
+             ,MS_CREDITINFO.CURMONORDAMT
+             ,SY_INVOICE_HEADER.INVOICETYPE
+             ,SY_INVOICE_HEADER.DOCTYPE
+             ,SY_INVOICE_HEADER.HEADERKEY
+        ORDER BY 
+              SY_INVOICE_HEADER.CUSTKEY
+              ,SY_INVOICE_HEADER.HEADERKEY
+    </select>     
+    
+    
+    <!-- 납품서 RD 상세(여신) -->
+    <select id="getDlvCostPrintInvoice" resultType="cjfw.wms.wd.dto.WdInvoiceTotalPrintDetailResDto">
+        SELECT /* [wdInvoiceTotalService.sqlx][wdInvoiceTotalService.getDlvCostPrintInvoice][배송비내역 조회][ihkim3][20180730] */
+               T.HEADERKEY                 AS HEADERKEY     /*납품서생성키*/
+              ,NVL(SUM(T.PURCHASEPRICE),0) AS PURCHASEPRICE /*구매단가*/
+              ,NVL(SUM(T.VAT)          ,0) AS VAT           /*부가세*/
+              ,NVL(SUM(T.DELIVERYPRICE),0) AS DELIVERYPRICE /*배송비*/
+        FROM   (SELECT SY_INVOICE_HEADER.CUSTKEY
+                      ,SY_INVOICE_HEADER.HEADERKEY
+                      ,tm_custxcost.deliveryno
+                      ,MAX(TM_CUSTXCOST.PURCHASEPRICE) AS PURCHASEPRICE 
+                      ,MAX(TM_CUSTXCOST.VAT          ) AS VAT
+                      ,MAX(TM_CUSTXCOST.DELIVERYPRICE) AS DELIVERYPRICE
+                FROM SY_INVOICE_HEADER           
+                JOIN MS_CUSTXCOST ON  MS_CUSTXCOST.STORERKEY  = #{gStorerkey}
+                                  AND MS_CUSTXCOST.MNGPLC_ID  = SY_INVOICE_HEADER.DLV_COST_KEY
+                                  AND MS_CUSTXCOST.START_DATE <![CDATA[<=]]> SY_INVOICE_HEADER.DOCDT
+                                  AND MS_CUSTXCOST.END_DATE <![CDATA[>=]]> SY_INVOICE_HEADER.DOCDT
+                LEFT OUTER JOIN TM_CUSTXCOST ON  TM_CUSTXCOST.STORERKEY  = #{gStorerkey}
+                                             AND TM_CUSTXCOST.MNGPLC_ID  = SY_INVOICE_HEADER.DLV_COST_KEY
+                                             AND TM_CUSTXCOST.DELIVERYDT = SY_INVOICE_HEADER.DOCDT
+                                             AND TM_CUSTXCOST.DEL_YN     = 'N'
+                WHERE  SY_INVOICE_HEADER.PROCESSTYPE     = #{processtype}       
+                AND    SY_INVOICE_HEADER.PROCESSCREATOR  = #{gUserId}           
+                AND    SY_INVOICE_HEADER.SPID            = #{gSpid}              
+                AND    SY_INVOICE_HEADER.INVOICEPRINTKEY = #{invoiceprintkey}   
+                AND    EXISTS(SELECT 1
+                              FROM   SY_INVOICE_DETAIL  
+                              WHERE  SY_INVOICE_DETAIL.PROCESSTYPE     = SY_INVOICE_HEADER.PROCESSTYPE          
+                              AND    SY_INVOICE_DETAIL.PROCESSCREATOR  = SY_INVOICE_HEADER.PROCESSCREATOR          
+                              AND    SY_INVOICE_DETAIL.SPID            = SY_INVOICE_HEADER.SPID          
+                              AND    SY_INVOICE_DETAIL.HEADERKEY       = SY_INVOICE_HEADER.HEADERKEY
+                              AND    SY_INVOICE_DETAIL.INVOICEPRINTKEY = SY_INVOICE_HEADER.INVOICEPRINTKEY )
+                GROUP BY SY_INVOICE_HEADER.CUSTKEY
+                        ,SY_INVOICE_HEADER.HEADERKEY
+                        ,tm_custxcost.deliveryno ) T
+        GROUP BY T.HEADERKEY
+        ORDER BY T.HEADERKEY
+    </select>
+    
+    
+    <!-- 엑셀업로드 정보을(를) 등록 -->
+    <insert id="insertTempExcel2" parameterType="java.util.List" >
+        <!-- 
+        <selectKey resultType="int" keyProperty="seq" order="BEFORE">
+        SELECT '1' AS SEQ FROM DUAL
+        </selectKey>
+        -->
+        <foreach collection="list" index="index" item="item" separator=" " open="INSERT ALL" close="SELECT * FROM DUAL">
+              /* [WdInvoiceTotalService.sqlx][insertTempExcel][엑셀데이터임시 Tabele 등록][sss][2025.05.23] */
+              INTO SY_PROCESSTEMP_WD (PROCESSTYPE,PROCESSCREATOR,SPID,ADDWHO,EDITWHO
+                                      /**/
+                                     ,DELIVERYDT
+                                     ,DOCNO
+                                     ,SLIPDT
+                                     ,SLIPNO
+                                     ,CARNO
+                                     /**/
+                                     ,PRIORITY
+                                     ,DELIVERYGROUP
+                                     ,CUSTKEY
+                                     ,PICK_LIST_NO
+                                     /**/
+                                     ,OTHER01
+                                     ,OTHER05
+                                     ,OTHER03
+                                    )
+            VALUES (
+                    #{item.processtype},#{item.gUserId},#{item.gSpid},#{item.gUserId},#{item.gUserId}
+                    /**/
+                    ,#{item.deliverydt}      /*1.납품일자-grid*/
+                    ,#{item.docno}           /*2.문서번호-grid*/
+                    ,#{item.slipdt}          /*3.배송그룹-grid*/
+                    ,#{item.slipno}          /*4.배송그룹-grid*/
+                    ,#{item.carno}           /*5.배송그룹-grid*/
+                    /**/
+                    ,#{item.priority}        /*6.배송그룹-grid*/
+                    ,#{item.deliverygroup}   /*7.배송그룹-grid*/
+                    ,#{item.custkey}         /*8.거래처코드-grid*/
+                    ,#{item.pickListNo}      /*9.피킹리스트번호-ui*/
+                    /**/
+                    ,#{item.invoiceprinttype} /*10.인보이스타입-grid*/
+                    ,#{item.mngplcid}         /*11.분할관리처코드-grid*/
+                    ,#{item.shptoid}          /*12.배송관리처코드-grid*/
+                   )
+        </foreach>
+    </insert>    
+    
+
+    
+</mapper>

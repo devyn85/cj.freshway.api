@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="tmManageEntityService">
+
+    <select id="getDataHeaderlist" resultType="TmManageEntityMasterListResDto">    	
+	   SELECT
+	    /* [tmManageEntityService.sqlx][getDataHeaderlist][정산항목+계산타입 코드명][박진우][20250804] */
+	       A.DCCODE                                  AS DCCODE           /* 센터코드 */
+	     , A.STTL_ITEM_CD                            AS STTLITEMCD       /* 정산항목코드 */
+	     , A.STTL_ITEM_CD							 AS OLDSTTLITEMCD
+	     , NVL(CD.BASEDESCR, A.STTL_ITEM_CD)         AS STTLITEMNAME     /* 정산항목명 */
+	     , A.STTL_ITEM_DESCR                         AS STTLITEMDESCR    /* 정산항목설명 */
+	     , NVL(CD_TM_TYPE.BASEDESCR, CD.DATA1)       AS CALCTYPE         /* 계산타입명 */
+	     , A.ENTRUSTED_CAR_YN                        AS ENTRUSTEDCARYN   /* 지입차적용여부 */
+	     , A.FIX_CAR_YN                              AS FIXCARYN         /* 고정차적용여부 */
+	     , A.TMP_CAR_YN                              AS TMPCARYN         /* 임시차적용여부 */
+	     , A.ACTUAL_COST_CAR_YN                      AS ACTUALCOSTCARYN  /* 실비차적용여부 */
+	     , A.EXTRA_CAR_TYPE1                         AS EXTRACARTYPE1    /* 여분차량분류1 */
+	     , A.EXTRA_CAR_TYPE2                         AS EXTRACARTYPE2    /* 여분차량분류2 */
+	     , A.MM_CONTRACT_YN							 AS MM_CONTRACT_YN  /*월대용차여부*/
+	     , A.ADDDATE                                 AS ADDDATE          /* 최초등록시간 */
+	     , A.EDITDATE                                AS EDITDATE         /* 최종변경시간 */
+	     , A.ADDWHO                                  AS ADDWHO_ID           /* 최초등록자 */
+	     , A.EDITWHO                                 AS EDITWHO_ID          /* 최종변경자 */
+	     , USER1.USER_NM							AS ADDWHO			/* 최초등록자 */
+	     , USER2.USER_NM							AS EDITWHO			/* 최종변경자 */
+
+	      	<choose>
+	    	<when test="importCarrier != null and importCarrier!= ''">
+	    		,#{importCarrier}				AS COURIER
+	    		,#{importCarrier}				AS OLDCOURIER
+	    		,#{importCarrierNm}				AS COURIERNAME
+	    		,'I'							AS ROWSTATUS
+	    	</when>
+	    	<otherwise>
+	     , A.COURIER								AS COURIER
+	     , A.COURIER								AS OLDCOURIER
+	     , B.DESCRIPTION							AS COURIERNAME
+	    	</otherwise>
+	    	</choose>
+	     
+		FROM
+		     TM_TRSP_COST_STTL_ITEM A
+		LEFT JOIN CM_CODE_STORER CD
+		      
+		      ON CD.CODELIST  = 'TM_CALC_ITEM'
+		      AND CD.BASECODE  = A.STTL_ITEM_CD
+		LEFT JOIN CM_CODE_STORER CD_TM_TYPE
+		       ON CD_TM_TYPE.STORERKEY = CD.STORERKEY
+		      AND CD_TM_TYPE.CODELIST  = 'TM_CALC_TYPE'
+		      AND CD_TM_TYPE.BASECODE  = CD.DATA1
+		JOIN   CM_USER_AUTHORITY_STORER
+			 ON CM_USER_AUTHORITY_STORER.USERID = #{gUserId}
+		LEFT JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = A.ADDWHO  /*등록자명*/
+		LEFT JOIN FRAMEONE_USER USER2 ON USER2.USER_ID = A.EDITWHO  /*수정자명*/
+		LEFT JOIN MS_CARRIER B
+			ON A.COURIER = B.CARRIERKEY
+			AND B.CARRIERTYPE = 'LOCAL'
+		WHERE
+		      A.DCCODE = #{dcCode} /* 센터코드 파라미터 */
+		      <if test="courier != null and courier != ''">
+			    <!-- AND A. LIKE || '%' -->
+			    AND A.COURIER IN (
+					           SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS SKU
+					           FROM (SELECT #{courier} AS VAL FROM DUAL)
+					           CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) <![CDATA[ >]]> 0
+					)
+			</if>
+			
+	    ORDER BY	 	
+	    A.COURIER,	  
+	    CASE
+	        WHEN SUBSTR(A.STTL_ITEM_CD, 1, 1) = 'P' THEN 1
+	        WHEN SUBSTR(A.STTL_ITEM_CD, 1, 1) = 'D' THEN 2
+	        WHEN SUBSTR(A.STTL_ITEM_CD, 1, 1) = 'M' THEN 3
+	        ELSE 99
+	    END
+	  	, TO_NUMBER(SUBSTR(A.STTL_ITEM_CD, 2))
+	    </select>
+	    
+	    <!-- [sttlItemService.sqlx][insertSttlItem][정산항목 추가][박진우][20250804] -->
+	<insert id="insertSttlItem">
+	    INSERT /*[tmManageEntityService.sqlx][insertSttlItem][정산항목 삭제][박진우][20250804]*/
+	      INTO TM_TRSP_COST_STTL_ITEM (
+	          DCCODE
+	        , STTL_ITEM_CD
+	        , STTL_ITEM_DESCR
+	        , ENTRUSTED_CAR_YN
+	        , FIX_CAR_YN
+	        , TMP_CAR_YN
+	        , courier
+	        , ACTUAL_COST_CAR_YN
+	        , EXTRA_CAR_TYPE1
+	        , EXTRA_CAR_TYPE2
+	        , ADDDATE
+	        , EDITDATE
+	        , ADDWHO
+	        , EDITWHO
+	        , MM_CONTRACT_YN
+	    ) VALUES (
+	          #{dcCode}            <!-- 센터코드 -->
+	        , #{sttlItemCd}        <!-- 정산항목코드 -->
+	        , #{sttlItemDescr}     <!-- 정산항목설명 -->
+	        , #{entrustedCarYn}    <!-- 지입차적용여부 -->
+	        , #{fixCarYn}          <!-- 고정차적용여부 -->
+	        , #{tmpCarYn}          <!-- 임시차적용여부 -->
+	        , #{courier}
+	        , #{actualCostCarYn}   <!-- 실비차적용여부 -->
+	        , #{extraCarType1}     <!-- 여분차량분류1 -->
+	        , #{extraCarType2}     <!-- 여분차량분류2 -->
+	        , SYSDATE              <!-- 최초등록시간 -->
+	        , SYSDATE              <!-- 최종변경시간 -->
+	        , #{gUserId}            <!-- 최초등록자 -->
+	        , #{gUserId}           <!-- 최종변경자 -->
+	        , #{mmContractYn}
+	    )
+	</insert>
+	
+	<update id="updateSttlItem" >
+	    UPDATE /*[tmManageEntityService.sqlx][updateSttlItem][정산항목 삭제][박진우][20250804]*/
+	    	 TM_TRSP_COST_STTL_ITEM 
+	       SET STTL_ITEM_DESCR     = #{sttlItemDescr}    <!-- 정산항목설명 -->
+	         , ENTRUSTED_CAR_YN    = #{entrustedCarYn}   <!-- 지입차적용여부 -->
+	         , FIX_CAR_YN          = #{fixCarYn}         <!-- 고정차적용여부 -->
+	         , TMP_CAR_YN          = #{tmpCarYn}         <!-- 임시차적용여부 -->
+	         , ACTUAL_COST_CAR_YN  = #{actualCostCarYn}  <!-- 실비차적용여부 -->
+	         , courier			   = #{courier}
+	         , EXTRA_CAR_TYPE1     = #{extraCarType1}    <!-- 여분차량분류1 -->
+	         , EXTRA_CAR_TYPE2     = #{extraCarType2}    <!-- 여분차량분류2 -->
+	         , EDITDATE            = SYSDATE             <!-- 최종변경시간 -->
+	         , EDITWHO             = #{gUserId}          <!-- 최종변경자 -->
+	         , STTL_ITEM_CD		   = #{sttlItemCd}
+	         , MM_CONTRACT_YN =     #{mmContractYn}
+	     WHERE DCCODE              = #{dcCode}           <!-- 센터코드 (PK) -->
+	       AND STTL_ITEM_CD        = #{oldSttlItemCd}       <!-- 정산항목코드 (PK) -->
+	       AND courier			   = #{oldCourier}
+
+	</update>
+	
+	
+		<delete id="deleteSttlItem">
+		    DELETE /*[tmManageEntityService.sqlx][deleteSttlItem][정산항목 삭제][박진우][20250804]*/ 
+		     FROM TM_TRSP_COST_STTL_ITEM
+		     WHERE DCCODE        = #{dcCode}      <!-- 센터코드 (PK) -->
+		       AND STTL_ITEM_CD  = #{sttlItemCd}  <!-- 정산항목코드 (PK) -->
+		</delete>
+		
+		 <select id="insertChk" resultType="TmManageEntityMasterListResDto">    	
+		   SELECT STTL_ITEM_CD
+			FROM TM_TRSP_COST_STTL_ITEM
+			WHERE DCCODE     =  #{dcCode}
+			AND STTL_ITEM_CD = #{sttlItemCd}
+			AND courier = #{courier}
+
+	    </select>
+</mapper>

@@ -1,0 +1,273 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="stStockChainService">
+    <insert id="insertStockChain" parameterType="BatchParamsUtil" >
+        /* [stStockChainBatch.sqlx][stStockChainBatch.insertStockChain][일자별 센터별 상품 plt 재고 계산][김채원][20230207] */
+	    INSERT INTO ST_STOCK_CHAIN_HIS(
+		       SERIALKEY
+		      ,STOCKDATE
+		      ,DCCODE
+		      ,DCNAME
+		      ,SKU
+		      ,SKUNAME
+		      ,STORAGETYPE
+		      ,UOM
+		      ,QTY
+		      ,BOXPERPLT_QTY
+		      ,QTYPERBOX
+		      ,BOXPERPLT
+		      ,REFERENCE15
+		      ,DEL_YN
+		      ,ADDWHO
+		      ,EDITWHO
+		      ,ADDDATE
+		      ,EDITDATE
+        )
+        SELECT
+                SEQ_ST_STOCK_CHAIN_HIS.Nextval
+             , STOCKDATE
+             , DCCODE
+             , DCNAME
+             , SKU
+             , SKUNAME
+             , STORAGETYPE
+             , UOM
+             , QTY
+             , BOXPERPLT_QTY
+             , QTYPERBOX
+             , BOXPERPLT
+             , REFERENCE15
+             , 'N'
+             , 'stStockChainBatch' AS ADDWHO
+             , 'stStockChainBatch' AS EDITWHO
+             , SYSDATE AS ADDDATE
+             , SYSDATE AS EDITDATE
+        FROM (
+                 SELECT
+                     T.STOCKDATE,
+                     T.DCCODE,
+                     T.DCNAME,
+                     T.SKU,
+                     T.SKUNAME,
+                     T.STORAGETYPE,
+                     T.UOM,
+                     SUM(T.QTY) AS QTY,
+                     SUM(T.BOXPERPLT_QTY) AS BOXPERPLT_QTY,
+                     T.QTYPERBOX,
+                     T.BOXPERPLT,
+                     T.REFERENCE15
+                 FROM (
+                          SELECT /* [insertStockDccode.sql][현재고(PLT) 조회]*/
+                              ST_STOCK.DCCODE           																AS DCCODE
+                               , FN_DESCR_DC(ST_STOCK.DCCODE)															AS DCNAME
+                               , TO_CHAR(SYSDATE, 'YYYYMMDD')															AS STOCKDATE
+                               , ST_STOCK.ORGANIZE         																AS ORGANIZE
+                               , FN_CODEDESCR(ST_STOCK.STORERKEY, 'STOCKTYPE', ST_STOCK.STOCKTYPE) 						AS STOCKTYPE
+                               , FN_CODEDESCR(ST_STOCK.STORERKEY, 'STOCKGRADE', ST_STOCK.STOCKGRADE) 					AS STOCKGRADE
+                               , MS_LOCATION.PLT_FLG          															AS PLT_FLG
+                               , ST_STOCK.SKU              																AS SKU
+                               , MS_SKU.DESCRIPTION        																AS SKUNAME
+                               , MS_SKU.STORAGETYPE 																		AS STORAGETYPE
+                               , ST_STOCK.UOM              																AS UOM
+                               , ST_STOCK.QTY              																AS QTY
+                               , MS_SKU.QTYPERBOX 																		AS QTYPERBOX
+                               , MS_SKUCHAIN.BOXPERPLT																	AS BOXPERPLT
+                               , MS_SKU.REFERENCE15																		AS REFERENCE15
+                               , MS_SKUCHAIN_MOQ.MOQ_SKU                       											AS MOQ_SKU
+                               , MS_SKUCHAIN_MOQ.LEADTIME                      											AS LEADTIME
+                               , CASE WHEN MS_LOCATION.PLT_FLG = 'S' THEN 1
+                                      ELSE CEIL(ST_STOCK.QTY / MS_SKU.QTYPERBOX / MS_SKUCHAIN.BOXPERPLT)
+                              END																						AS BOXPERPLT_QTY
+                          FROM MS_SKUCHAIN
+                                   JOIN ST_STOCK
+                                        ON  MS_SKUCHAIN.STORERKEY    = ST_STOCK.STORERKEY
+                                            AND MS_SKUCHAIN.SKU          = ST_STOCK.SKU
+                                   JOIN MS_SKU
+                                        ON  MS_SKU.STORERKEY         = MS_SKUCHAIN.STORERKEY
+                                            AND MS_SKU.SKU               = MS_SKUCHAIN.SKU
+                                   JOIN MS_LOCATION
+                                        ON  MS_LOCATION.DCCODE      = ST_STOCK.DCCODE
+                                            AND MS_LOCATION.LOC         = ST_STOCK.LOC
+                                            AND MS_LOCATION.LOCTYPE     IN ('STAGE','PICK','KEEP','CROSS','FIRSTOUT','LONGSTAY','CANCEL')
+                                            AND ((MS_LOCATION.LOCCATEGORY IN ('RACK','YARD') AND ST_STOCK.DCCODE  <![CDATA[!=]]> '2690') OR (MS_LOCATION.LOCCATEGORY IN ('RACK','YARD','AUTO') AND ST_STOCK.DCCODE in ('2620','2690')))
+                                            AND MS_LOCATION.LOCFLAG     = 'GOOD'
+                                            AND CASE WHEN MS_LOCATION.DCCODE = '2690' AND MS_LOCATION.LOCTYPE='STAGE' THEN 'Y'
+                                                     WHEN MS_LOCATION.DCCODE = '2600' AND MS_LOCATION.LOCTYPE='STAGE' THEN 'Y'
+                                                     ELSE MS_LOCATION.OUT_YN
+                                                    END = 'Y'
+                                            AND MS_LOCATION.DEL_YN      = 'N'
+                                            AND MS_LOCATION.STOCKTYPE   = 'GOOD'
+                                   JOIN CM_LOT
+                                        ON  CM_LOT.STORERKEY        = ST_STOCK.STORERKEY
+                                            AND CM_LOT.LOT              = ST_STOCK.LOT
+                                            AND 'TRUE' = CASE
+                                                             WHEN CM_LOT.LOTTABLE01   = 'STD' OR  MS_SKU.DURATIONTYPE = 'N'
+                                                                 THEN 'TRUE'
+                                                             WHEN MS_SKU.DURATIONTYPE = '1' AND FN_ISDATE(CM_LOT.LOTTABLE01) = 1
+                                                                 AND TO_DATE(CM_LOT.LOTTABLE01,'YYYYMMDD') <![CDATA[<]]> TRUNC(SYSDATE)
+                                                                 THEN 'FALSE'
+                                                             WHEN MS_SKU.DURATIONTYPE IN ('2','3') AND FN_ISDATE(CM_LOT.LOTTABLE01) = 1
+                                                                 AND TO_DATE(CM_LOT.LOTTABLE01,'YYYYMMDD') + MS_SKU.DURATION - 1 <![CDATA[<]]> TRUNC(SYSDATE)
+                                                                 THEN 'FALSE'
+                                                             ELSE 'TRUE'
+                                                END
+                                   LEFT OUTER JOIN MS_SKUCHAIN_MOQ
+                                                   ON MS_SKU.SKU = MS_SKUCHAIN_MOQ.SKU
+                                                       AND MS_SKU.STORERKEY = MS_SKUCHAIN_MOQ.STORERKEY
+                                                       AND MS_LOCATION.DCCODE = MS_SKUCHAIN_MOQ.DCCODE
+                          WHERE 1=1
+                            AND MS_SKU.SERIALYN = 'N'
+                            AND (MS_LOCATION.PLT_FLG = 'P' OR MS_LOCATION.PLT_FLG IS NULL)
+                            AND ST_STOCK.QTY <![CDATA[>]]> 0
+                            AND ST_STOCK.STORERKEY            =  'FW00'
+
+                          UNION ALL
+
+                          SELECT
+                              ST_STOCK.DCCODE                                          AS DCCODE
+                                  , FN_DESCR_DC(ST_STOCK.DCCODE)                             AS DCNAME
+                                  , TO_CHAR(SYSDATE, 'YYYYMMDD')						        AS STOCKDATE
+                                  , MAX(ST_STOCK.ORGANIZE)                                   AS ORGANIZE
+                                  , MAX(FN_CODEDESCR(ST_STOCK.STORERKEY,'STOCKTYPE',ST_STOCK.STOCKTYPE))     AS STOCKTYPE
+                                  , MAX( FN_CODEDESCR(ST_STOCK.STORERKEY,'STOCKGRADE',ST_STOCK.STOCKGRADE))	AS STOCKGRADE
+                                  , MAX( MS_LOCATION.PLT_FLG )                         AS PLT_FLG
+                                  , ST_STOCK.SKU                                       AS SKU
+                                  , MAX( MS_SKU.DESCRIPTION  )                         AS SKUNAME
+                                  , MAX( MS_SKU.STORAGETYPE )               			AS STORAGETYPE
+                                  , MAX( ST_STOCK.UOM)                                 AS UOM
+                                  , SUM(ST_STOCK.QTY )                                 AS QTY
+                                  , MAX( MS_SKU.QTYPERBOX )                          	AS QTYPERBOX
+                                  , MAX( MS_SKUCHAIN.BOXPERPLT)                        AS BOXPERPLT
+                                  , MAX( MS_SKU.REFERENCE15)                          	AS REFERENCE15
+                                  , MAX( MS_SKUCHAIN_MOQ.MOQ_SKU)                      AS MOQ_SKU
+                                  , MAX( MS_SKUCHAIN_MOQ.LEADTIME)                     AS LEADTIME
+                                  , CASE WHEN MAX( MS_LOCATION.PLT_FLG) = 'S' THEN 1
+                              ELSE CEIL(SUM(ST_STOCK.QTY) / MAX( MS_SKU.QTYPERBOX) / MAX( MS_SKUCHAIN.BOXPERPLT))
+                              END                              					AS BOXPERPLT_QTY
+                          FROM MS_SKUCHAIN
+                              JOIN ST_STOCK
+                          ON	   MS_SKUCHAIN.STORERKEY    = ST_STOCK.STORERKEY
+                              AND    MS_SKUCHAIN.SKU          = ST_STOCK.SKU
+                              JOIN   MS_SKU
+                              ON     MS_SKU.STORERKEY         = MS_SKUCHAIN.STORERKEY
+                              AND    MS_SKU.SKU               = MS_SKUCHAIN.SKU
+                              JOIN   MS_LOCATION
+                              ON     MS_LOCATION.DCCODE      = ST_STOCK.DCCODE
+                              AND    MS_LOCATION.LOC         = ST_STOCK.LOC
+                              AND    MS_LOCATION.LOCTYPE     IN ('STAGE','PICK','KEEP','CROSS','FIRSTOUT','LONGSTAY','CANCEL')
+                              AND    ((MS_LOCATION.LOCCATEGORY IN ('RACK','YARD') AND ST_STOCK.DCCODE  <![CDATA[!=]]> '2690') OR (MS_LOCATION.LOCCATEGORY IN ('RACK','YARD','AUTO') AND ST_STOCK.DCCODE in ('2620','2690')))
+                              AND    MS_LOCATION.LOCFLAG     = 'GOOD'
+                              AND    CASE WHEN MS_LOCATION.DCCODE = '2690' AND MS_LOCATION.LOCTYPE='STAGE' THEN 'Y'
+                              WHEN MS_LOCATION.DCCODE = '2600' AND MS_LOCATION.LOCTYPE='STAGE' THEN 'Y'
+                              ELSE MS_LOCATION.OUT_YN
+                              END = 'Y'
+                              AND    MS_LOCATION.DEL_YN      = 'N'
+                              AND    MS_LOCATION.STOCKTYPE   = 'GOOD'
+                              JOIN   CM_LOT
+                              ON     CM_LOT.STORERKEY        = ST_STOCK.STORERKEY
+                              AND    CM_LOT.LOT              = ST_STOCK.LOT
+                              AND    'TRUE' = CASE
+                              WHEN CM_LOT.LOTTABLE01   = 'STD' OR  MS_SKU.DURATIONTYPE = 'N'
+                              THEN 'TRUE'
+
+                              WHEN     MS_SKU.DURATIONTYPE = '1' AND FN_ISDATE(CM_LOT.LOTTABLE01) = 1
+                              AND TO_DATE(CM_LOT.LOTTABLE01,'YYYYMMDD') <![CDATA[<]]> TRUNC(SYSDATE)
+                              THEN 'FALSE'
+
+                              WHEN     MS_SKU.DURATIONTYPE IN ('2','3') AND FN_ISDATE(CM_LOT.LOTTABLE01) = 1
+                              AND TO_DATE(CM_LOT.LOTTABLE01,'YYYYMMDD') + MS_SKU.DURATION - 1 <![CDATA[<]]> TRUNC(SYSDATE)
+                              THEN 'FALSE'
+                              ELSE 'TRUE'
+                              END
+                              LEFT OUTER JOIN MS_SKUCHAIN_MOQ
+                              ON MS_SKU.SKU = MS_SKUCHAIN_MOQ.SKU
+                              AND MS_SKU.STORERKEY = MS_SKUCHAIN_MOQ.STORERKEY
+                              AND MS_LOCATION.DCCODE = MS_SKUCHAIN_MOQ.DCCODE
+                          WHERE  1=1
+                            AND MS_SKU.SERIALYN = 'Y'
+                            AND (MS_LOCATION.PLT_FLG = 'P' OR MS_LOCATION.PLT_FLG IS NULL)
+                            AND ST_STOCK.QTY <![CDATA[>]]> 0
+                            AND ST_STOCK.STORERKEY            =  'FW00'
+                          GROUP BY ST_STOCK.DCCODE, ST_STOCK.SKU
+
+                          UNION ALL
+
+                          SELECT
+                              ST_STOCK.DCCODE                                     AS DCCODE
+                                  ,FN_DESCR_DC(ST_STOCK.DCCODE)                       AS DCNAME
+                                  ,TO_CHAR(SYSDATE, 'YYYYMMDD')						AS STOCKDATE
+                                  ,MAX(ST_STOCK.ORGANIZE)                             AS ORGANIZE
+                                  ,MAX(FN_CODEDESCR(ST_STOCK.STORERKEY,'STOCKTYPE', ST_STOCK.STOCKTYPE))      AS STOCKTYPE
+                                  ,MAX( FN_CODEDESCR(ST_STOCK.STORERKEY,'STOCKGRADE',ST_STOCK.STOCKGRADE))	AS STOCKGRADE
+                                  ,MAX( MS_LOCATION.PLT_FLG )                         AS PLT_FLG
+                                  ,ST_STOCK.SKU                                       AS SKU
+                                  ,MAX( MS_SKU.DESCRIPTION  )                         AS SKUNAME
+                                  ,MAX( MS_SKU.STORAGETYPE)               			AS STORAGETYPE
+                                  ,MAX( ST_STOCK.UOM)                                 AS UOM
+                                  ,SUM(ST_STOCK.QTY )                                 AS QTY
+                                  ,MAX( MS_SKU.QTYPERBOX )                          	AS QTYPERBOX
+                                  ,MAX( MS_SKUCHAIN.BOXPERPLT)                        AS BOXPERPLT
+                                  ,MAX( MS_SKU.REFERENCE15)                          	AS REFERENCE15
+                                  ,MAX( MS_SKUCHAIN_MOQ.MOQ_SKU)                      AS MOQ_SKU
+                                  ,MAX( MS_SKUCHAIN_MOQ.LEADTIME)                     AS LEADTIME
+                                  ,CASE
+                              WHEN MAX( MS_LOCATION.PLT_FLG) = 'S' THEN 1
+                              ELSE CEIL(SUM(ST_STOCK.QTY) / MAX( MS_SKU.QTYPERBOX) / MAX( MS_SKUCHAIN.BOXPERPLT))
+                              END                              					AS BOXPERPLT_QTY
+                          FROM MS_SKUCHAIN
+                              JOIN ST_STOCK
+                          ON	   MS_SKUCHAIN.STORERKEY    = ST_STOCK.STORERKEY
+                              AND    MS_SKUCHAIN.SKU          = ST_STOCK.SKU
+                              JOIN MS_SKU
+                              ON     MS_SKU.STORERKEY         = MS_SKUCHAIN.STORERKEY
+                              AND    MS_SKU.SKU               = MS_SKUCHAIN.SKU
+                              JOIN MS_LOCATION
+                              ON     MS_LOCATION.DCCODE      = ST_STOCK.DCCODE
+                              AND    MS_LOCATION.LOC         = ST_STOCK.LOC
+                              AND    MS_LOCATION.LOCTYPE     IN ('STAGE','PICK','KEEP','CROSS','FIRSTOUT','LONGSTAY','CANCEL')
+                              AND    ((MS_LOCATION.LOCCATEGORY IN ('RACK','YARD') AND ST_STOCK.DCCODE  <![CDATA[!=]]> '2690') OR (MS_LOCATION.LOCCATEGORY IN ('RACK','YARD','AUTO') AND ST_STOCK.DCCODE in ('2620','2690')))
+                              AND    MS_LOCATION.LOCFLAG     = 'GOOD'
+                              AND    CASE WHEN MS_LOCATION.DCCODE = '2690' AND MS_LOCATION.LOCTYPE='STAGE' THEN 'Y'
+                              WHEN MS_LOCATION.DCCODE = '2600' AND MS_LOCATION.LOCTYPE='STAGE' THEN 'Y'
+                              ELSE MS_LOCATION.OUT_YN
+                              END = 'Y'
+                              AND    MS_LOCATION.DEL_YN      = 'N'
+                              AND    MS_LOCATION.STOCKTYPE   = 'GOOD'
+                              JOIN CM_LOT
+                              ON CM_LOT.STORERKEY        = ST_STOCK.STORERKEY
+                              AND CM_LOT.LOT              = ST_STOCK.LOT
+                              AND 'TRUE' = CASE
+                              WHEN CM_LOT.LOTTABLE01   = 'STD' OR  MS_SKU.DURATIONTYPE = 'N'
+                              THEN 'TRUE'
+                              WHEN     MS_SKU.DURATIONTYPE = '1' AND FN_ISDATE(CM_LOT.LOTTABLE01) = 1
+                              AND TO_DATE(CM_LOT.LOTTABLE01,'YYYYMMDD') <![CDATA[<]]> TRUNC(SYSDATE)
+                              THEN 'FALSE'
+                              WHEN     MS_SKU.DURATIONTYPE IN ('2','3') AND FN_ISDATE(CM_LOT.LOTTABLE01) = 1
+                              AND TO_DATE(CM_LOT.LOTTABLE01,'YYYYMMDD') + MS_SKU.DURATION - 1 <![CDATA[<]]> TRUNC(SYSDATE)
+                              THEN 'FALSE'
+                              ELSE 'TRUE'
+                              END
+                              LEFT OUTER JOIN MS_SKUCHAIN_MOQ
+                              ON MS_SKU.SKU = MS_SKUCHAIN_MOQ.SKU
+                              AND MS_SKU.STORERKEY = MS_SKUCHAIN_MOQ.STORERKEY
+                              AND MS_LOCATION.DCCODE = MS_SKUCHAIN_MOQ.DCCODE
+                          WHERE  1=1
+                            AND MS_LOCATION.PLT_FLG = 'S'
+                            AND ST_STOCK.QTY <![CDATA[>]]> 0
+                            AND ST_STOCK.STORERKEY            =  'FW00'
+                          GROUP BY ST_STOCK.DCCODE, ST_STOCK.SKU, ST_STOCK.LOC
+                      ) T
+                 GROUP BY T.STOCKDATE,
+                          T.DCCODE,
+                          T.DCNAME,
+                          T.SKU,
+                          T.SKUNAME,
+                          T.STORAGETYPE,
+                          T.UOM,
+                          T.QTYPERBOX,
+                          T.BOXPERPLT,
+                          T.REFERENCE15
+                 ORDER BY T.STOCKDATE, T.DCCODE, T.SKU)
+    </insert>
+</mapper>

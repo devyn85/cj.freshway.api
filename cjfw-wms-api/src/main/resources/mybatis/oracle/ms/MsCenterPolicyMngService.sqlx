@@ -1,0 +1,331 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="msCenterPolicyMngService">
+	<!-- 센터정책관리 정보 조회(목록) -->
+	<select id="getMasterList" resultType="MsCenterPolicyMngResDto">
+        SELECT  /* [msCenterPolicyMngService.sqlx][msCenterPolicyMngService.getMasterList][센터정책관리 조회(목록)][JeongHyeongCheol][20251020] */
+        		 DCCODE					/* 센터코드*/
+        		,PLCYCODE				/* 정책코드*/
+				,PLCY_NM				/* 정책명*/
+				,APPLY_YN				/* 적용여부*/
+				,PLCY_DESC				/* 정책설명*/
+		FROM MS_DC_PLCY 
+		WHERE DCCODE = #{dccode}
+		<if test='plcyNm != null and plcyNm != ""'>
+	   		AND	MDPC.PLCYCODE	= #{plcyNm}
+	    </if>
+    </select>
+    
+    <!-- 센터정책관리 정보 상세 조회(목록) -->
+	<select id="getDetailList" resultType="MsCenterPolicyMngDetailResDto">
+        SELECT  /* [msCenterPolicyMngService.sqlx][msCenterPolicyMngService.getDetailList][센터정책관리 조회(목록)][JeongHyeongCheol][20251020] */
+        		 CM_CODE.SERIALKEY  AS SERIALKEY        /* 데이터번호 */
+		        ,CM_CODE.STORERKEY  AS STORERKEY        /* 고객사코드 */
+		        ,CM_CODE.CODELIST   AS CODELIST         /* 코드리스트 */
+		        ,CM_CODE.BASECODE   AS COMM_CD          /* 기본코드값 */
+		        ,CM_CODE.BASEDESCR  AS COMM_DESCR       /* 기본코드설명 */
+		        ,CM_CODE.STATUS   	AS STATUS         	/* 상태 */
+		        ,CM_CODE.DEL_YN   	AS DEL_YN         	/* 삭제여부 */
+		        
+		        ,MDPC.CODEDESCR     AS CODEDESCR        /* 코드설명 */
+		        ,MDPC.DCCODE		AS DCCODE			/* 센터코드 */
+		        ,MDPC.PLCYCODE		AS PLCYCODE			/* 정책코드 */
+		        ,MDPC.APPLY_YN		AS APPLY_YN			/* 적용여부 */
+		        ,MDPC.SLCT_YN		AS SLCT_YN			/* 단일선택여부 */
+		        ,MDPC.REF_COMM_CD	AS REF_COMM_CD		/* 연관공통코드 */
+		        ,MDPC.REF_CD_TYPE	AS REF_CD_TYPE		/* 연관코드종류 */
+		        ,MDPC.REF_CNF		AS REF_CNF			/* 연관설정값 */
+		        
+		        ,COALESCE(CC.BASECODE,MDPC.COMM_DTL_CD)		AS COMM_DTL_CD		/* 상세코드값 */
+		        ,CC.BASEDESCR		AS COMM_DTL_DESCR	/* 상세코드명 */
+		        ,CC.DATA1      		AS DATA2            /* 상세코드데이터값 */
+		        
+		        ,CC2.BASEDESCR		AS REF_COMM_DESCR	/* 연관공통코드명 */
+		  FROM 	CM_CODE
+		  JOIN 	MS_DC_PLCY_CNF MDPC
+		    ON 	MDPC.DCCODE  	= #{dccode}
+		   <if test='commCd != null and commCd != ""'>
+		   		AND (UPPER(MDPC.COMM_CD) LIKE '%'||#{commCd}||'%'
+		   		 OR  CM_CODE.BASEDESCR LIKE '%'||#{commCd}||'%')
+		   </if>
+	   	   AND   UPPER(MDPC.COMM_CD) = UPPER(CM_CODE.BASECODE)
+		   <if test='plcycode != null and plcycode != ""'>
+		   		AND	MDPC.PLCYCODE	= #{plcycode}
+		   </if>
+		  LEFT JOIN CM_CODE CC
+    		ON 	CC.CODELIST = CM_CODE.BASECODE
+    		AND CC.BASECODE = MDPC.COMM_DTL_CD
+    	  LEFT JOIN CM_CODE CC2
+    		ON 	CC2.BASECODE = MDPC.REF_COMM_CD
+    	  WHERE CM_CODE.CODELIST = 'CODELIST'
+    	  ORDER BY CM_CODE.BASEDESCR, CC.BASECODE
+    </select>
+    
+    <!-- 센터정책관리 정보 로케이션 조회(목록) -->
+	<select id="getLocationList" resultType="MsCenterPolicyMngLocationResDto">
+        SELECT  /* [msCenterPolicyMngService.sqlx][msCenterPolicyMngService.getLocationList][센터정책관리 조회(목록)][JeongHyeongCheol][20251020] */
+			     CASE
+	                WHEN CM_CODE.CONVCODE = '0' THEN 'FW'
+	                WHEN CM_CODE.CONVCODE = '1' THEN '외부'
+	                ELSE ''
+	             END 									AS CENTER_TYPE		/* 센터유형 */
+	            ,ML.SERIALKEY							AS SERIALKEY		/* SERIALKEY */
+			    ,ML.DCCODE                              AS DCCODE			/* 물류센터코드 */
+			    ,CM_DC.DCNAME                       	AS DCNAME			/* 물류센터명 */
+			    ,ML.LOC                                 AS LOC				/* 로케이션 */
+			    ,NVL(CM_FLOOR.BASEDESCR, CM_FLOOR.BASECODE)                         AS WHAREAFLOOR		/* 창고층 */
+			    ,ML.MULTI_LOC_YN                        AS MULTI_LOC_YN		/* 멀티적용 */
+		FROM MS_LOCATION ML
+		LEFT JOIN CM_DC
+			   ON CM_DC.DCCODE = ML.DCCODE
+		LEFT JOIN CM_CODE
+			   ON CM_CODE.BASECODE = ML.DCCODE
+			  AND CM_CODE.CODELIST = 'WMS_MNG_DC'
+		LEFT JOIN (
+				SELECT 	 CODELIST
+						,BASECODE
+						,BASEDESCR
+						,ROW_NUMBER() OVER (
+									PARTITION BY CODELIST, BASECODE
+	             					ORDER BY DECODE(
+													 STORERKEY
+													,#{gStorerkey}
+													,1
+													,'STD'
+													,2
+													,'%'
+													,2
+													,''
+													,2
+													,9 )) AS RN
+	           
+				FROM  CM_CODE_STORER
+		    	WHERE CODELIST = 'WHAREAFLOOR'
+				  AND STORERKEY IN ('%', 'STD', '', #{gStorerkey})
+		  		) CM_FLOOR
+			   	ON  CM_FLOOR.BASECODE = ML.WHAREAFLOOR
+			  	AND CM_FLOOR.RN = 1
+	    WHERE ML.DCCODE = #{dccode}
+    </select>
+    
+    <!-- 기타설정 코드 validation -->
+	<select id="validateCodeList" resultType="MsCenterPolicyMngDetailResDto">
+		SELECT  /* [msCenterPolicyMngService.sqlx][msCenterPolicyMngService.validateCodeList][기타설정 코드 유효성검사][JeongHyeongCheol][20251020] */
+	  		(SELECT COUNT(1)
+				FROM   CM_CODE
+				WHERE  CM_CODE.BASECODE 	= #{commCd}
+				AND    CM_CODE.BASEDESCR 	= #{commDescr}				
+			 ) AS CODE_CHK
+	  		,(SELECT COUNT(1)
+				FROM   CM_CODE
+				WHERE  CM_CODE.CODELIST		= #{commCd}
+				AND	   CM_CODE.BASECODE 	= #{commDtlCd}
+				AND    CM_CODE.BASEDESCR 	= #{commDtlDescr}				
+			 ) AS DETAIL_CODE_CHK
+			 ,(SELECT COUNT(1)
+				FROM   CM_CODE
+				WHERE  CM_CODE.BASECODE 	= #{refCommCd}
+				AND    CM_CODE.BASEDESCR 	= #{refCommDescr}				
+			 ) AS REF_CODE_CHK
+		FROM   DUAL
+    </select>
+    
+    <!-- plcycode -->
+	<select id="getPlcycode" resultType="String">
+		SELECT  /* [msCenterPolicyMngService.sqlx][msCenterPolicyMngService.getPlcycode][정책코드 조회][JeongHyeongCheol][20251020] */
+			'P' || LPAD(TO_CHAR(NVL(MAX(TO_NUMBER(SUBSTR(PLCYCODE, 2))), 0) + 1), 2, '0')
+		FROM MS_DC_PLCY
+    </select>
+    <select id="checkPolicyExists" resultType="int">
+    /* [MsCenterPolicyMngService.sqlx][checkPolicyExists][정책코드 중복 체크] */
+    SELECT COUNT(1)
+    FROM MS_DC_PLCY
+    WHERE PLCYCODE = #{plcycode}
+     </select>
+      
+    <!-- 센터정책관리 insert -->
+    <insert id="insertMaster">
+		INSERT INTO MS_DC_PLCY
+		    (DCCODE
+		    ,PLCYCODE
+		    ,PLCY_NM
+		    ,APPLY_YN
+		    ,PLCY_DESC
+		    ,ADDWHO
+		    ,EDITWHO)
+		SELECT
+		     DC.DCCODE
+		    ,#{plcycode}
+		    ,#{plcyNm}
+		    ,#{applyYn}
+		    ,#{plcyDesc}
+		    ,#{gUserId}
+		    ,#{gUserId}
+		FROM CM_DC DC
+		WHERE 
+		    DC.DEL_YN = 'N'		    
+		    AND NOT EXISTS (
+		        SELECT 1 
+		        FROM MS_DC_PLCY T
+		        WHERE T.DCCODE = DC.DCCODE
+		          AND T.PLCYCODE = #{plcycode}
+		    )
+    </insert>
+        
+    <!-- 센터정책관리 update -->
+    <update id="updateMaster">
+		UPDATE  MS_DC_PLCY
+		   SET  APPLY_YN  = #{applyYn}
+			   ,PLCY_DESC = #{plcyDesc}
+			   ,EDITWHO   = #{gUserId}
+			   ,EDITDATE  = SYSDATE
+		 WHERE  DCCODE    = #{dccode}
+		   AND  PLCYCODE  = #{plcycode}
+    </update>
+    <!-- 센터정책관리 상세 insert -->
+    <insert id="insertDetailList">
+        INSERT INTO MS_DC_PLCY_CNF
+				    (DCCODE
+				    ,PLCYCODE
+				    ,COMM_CD
+				    ,COMM_DTL_CD
+				    ,SLCT_YN
+				    ,REF_COMM_CD
+				    ,REF_CD_TYPE
+				    ,ADDWHO
+				    ,EDITWHO )
+				VALUES (
+				     #{dccode}
+				    ,#{plcycode}
+				    ,#{commCd}
+				    ,#{commDtlCd}
+				    ,#{slctYn}
+				    ,#{refCommCd}
+				    ,#{refCdType}
+				    ,#{gUserId}
+				    ,#{gUserId} )
+    </insert>
+        <!-- 센터정책관리 상세 update -->
+    <update id="updateDetailList">
+        UPDATE   MS_DC_PLCY_CNF
+		   SET   REF_COMM_CD = #{refCommCd}
+			    ,SLCT_YN     = #{slctYn}
+			    ,REF_CD_TYPE = #{refCdType}
+			    ,EDITWHO     = #{gUserId}
+			    ,EDITDATE  	 = SYSDATE
+		 WHERE   PLCYCODE    = #{plcycode}
+		   AND 	 COMM_CD     = #{commCd}
+		   AND   COMM_DTL_CD = #{commDtlCd}
+		   AND   DCCODE 	 = #{dccode}
+    </update>
+    <!-- 센터정책관리 상세 insert 기존쿼리백업-->
+    <insert id="insertDetailList1">
+        INSERT INTO MS_DC_PLCY_CNF
+				    (DCCODE
+				    ,PLCYCODE
+				    ,COMM_CD
+				    ,COMM_DTL_CD
+				    ,APPLY_YN
+				    ,SLCT_YN
+				    ,REF_COMM_CD
+				    ,REF_CD_TYPE
+				    ,REF_CNF
+				    ,CODEDESCR
+				    ,ADDWHO
+				    ,EDITWHO)
+				SELECT
+				     DC.DCCODE
+				    ,#{plcycode}
+				    ,#{commCd}
+				    ,#{commDtlCd}
+				    ,#{applyYn}
+				    ,#{slctYn}
+				    ,#{refCommCd}
+				    ,#{refCdType}
+				    ,#{refCnf}
+				    ,#{codedescr}
+				    ,#{gUserId}
+				    ,#{gUserId}
+				FROM CM_DC DC
+				WHERE 
+				    DC.DEL_YN = 'N'
+				    AND NOT EXISTS (
+				        SELECT 1 
+				        FROM MS_DC_PLCY_CNF T
+				        WHERE T.DCCODE      = DC.DCCODE
+				          AND T.PLCYCODE    = #{plcycode}
+				          AND T.COMM_CD     = #{commCd}
+				          AND T.COMM_DTL_CD = #{commDtlCd}
+				    )
+    </insert>
+    
+    <!-- 센터정책관리 상세 update 기존쿼리백업-->
+    <update id="updateDetailList1">
+        UPDATE   MS_DC_PLCY_CNF
+		   SET   APPLY_YN    = #{applyYn}
+			    ,SLCT_YN     = #{slctYn}
+			    ,REF_COMM_CD = #{refCommCd}
+			    ,REF_CD_TYPE = #{refCdType}
+			    ,REF_CNF     = #{refCnf}
+			    ,CODEDESCR	 = #{codedescr}
+			    ,EDITWHO     = #{gUserId}
+			    ,EDITDATE  	 = SYSDATE
+		 WHERE   PLCYCODE    = #{plcycode}
+		   AND 	 COMM_CD     = #{commCd}
+		   AND   COMM_DTL_CD = #{commDtlCd}
+		   AND   DCCODE 	 = #{dccode}
+    </update>
+    
+    <!-- 멀티로케이션 멀티적용 update -->
+    <select id="updateLocationList" statementType="CALLABLE" resultType="MsCenterPolicyMngEntity">
+		<![CDATA[
+        {
+        	CALL  /* [msCenterPolicyMngService.sqlx][msCenterPolicyMngService.updateLocationList][멀티로케이션 멀티적용 update][JeongHyeongCheol][2025.08.20] */
+        	DECLARE
+        		V_AFTER     MS_LOCATION%rowtype;
+                O_SUCCESS   NUMBER         :=  1;      /* 성공여부(1이면 성공) */
+                O_ERRCODE   NUMBER         :=  0;      /* 오류 코드 */
+                O_ERRMSG    VARCHAR2(4000) := '';      /* 오류 메세지 */
+                SQL_ERROR 	EXCEPTION;
+                
+            BEGIN
+            	BEGIN
+	        		SELECT  *
+	                INTO    V_AFTER
+	                FROM    MS_LOCATION
+	                WHERE   SERIALKEY 	= #{serialkey};	    			
+					
+					V_AFTER.MULTI_LOC_YN 			:= #{multiLocYn};	    			
+					
+					V_AFTER.EDITDATE 				:= SYSDATE;
+					V_AFTER.EDITWHO 				:= #{gUserId};			
+	
+	                TRMS_LOCATION.TR_UPDATE(
+	                         V_AFTER
+	                     ,   O_SUCCESS
+	                     ,   O_ERRCODE
+	                     ,   O_ERRMSG
+	                );
+                	
+                	IF O_ERRCODE = -20001 THEN
+	                	RAISE_APPLICATION_ERROR (-20001, NVL(O_ERRMSG, SQLERRM));
+	                ELSIF O_ERRCODE != 0 THEN
+					    RAISE SQL_ERROR;
+		            END IF;
+			        
+			        EXCEPTION WHEN OTHERS THEN
+			        	O_ERRCODE := SQLCODE;
+						O_ERRMSG := NVL(O_ERRMSG, SQLERRM);
+
+                END;
+                
+				#{success, mode=OUT, jdbcType=INTEGER, javaType=int}    :=  O_SUCCESS;
+				#{err, mode=OUT, jdbcType=INTEGER, javaType=int}        :=  O_ERRCODE;
+				#{errmsg, mode=OUT, jdbcType=VARCHAR, javaType=String}  :=  O_ERRMSG;
+                
+        	END
+        }
+        ]]> 
+    </select>
+
+</mapper>

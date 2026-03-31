@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="sysAuthorityService">
+
+	<select id="getAuthorityGroupList" resultType="SysAuthorityResDto">
+        SELECT /* [SysAuthorityService.sqlx][getAuthorityGroupList][권한그룹 조회][JGS][2025.05.15] */
+		     FRAMEONE_AUTHORITY.AUTH_CD																	/* 권한그룹코드 */
+		    ,FRAMEONE_AUTHORITY.AUTH_NM																	/* 권한그룹명 */
+		    ,FRAMEONE_AUTHORITY.AUTH_CL																	/* 권한그룹구분 */
+		    ,FRAMEONE_AUTHORITY.SYSTEM_CL																/* 시스템구분 */
+		    ,FRAMEONE_AUTHORITY.USE_YN																	/* 사용여부 */
+		    ,FRAMEONE_AUTHORITY.REG_ID																	/* 등록자ID */
+		    ,FRAMEONE_AUTHORITY.REG_DTM																	/* 등록일시 */
+		    ,FRAMEONE_AUTHORITY.UPD_ID																	/* 수정자ID */
+		    ,FRAMEONE_AUTHORITY.UPD_DTM																	/* 수정일시 */
+		    ,FRAMEONE_AUTHORITY.UP_AUTH_GROUP_CD														/* 상위권한그룹코드 */
+		    ,DECODE(FRAMEONE_AUTHORITY.UP_AUTH_GROUP_CD, 'WAYLO', 'N', 'Y') 		AS LOW_AUTH_YN      /* 하위권한그룹여부 */
+		    ,USER1.USER_NM 															AS REG_NM			/* 등록자명 */
+    		,USER2.USER_NM 															AS UPD_NM			/* 수정자명 */
+		FROM FRAMEONE_AUTHORITY
+		LEFT JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = FRAMEONE_AUTHORITY.REG_ID  /*등록자명*/
+		LEFT JOIN FRAMEONE_USER USER2 ON USER2.USER_ID = FRAMEONE_AUTHORITY.UPD_ID  /*수정자명*/
+		WHERE 1 = 1
+		    AND FRAMEONE_AUTHORITY.AUTH_CL = '1'
+		    AND FRAMEONE_AUTHORITY.SYSTEM_CL = 'LOGISONE'
+		    <if test="gEmptype != '01'">
+		    	/* 정직원이 아닐 경우 하위 권한 있는 목록만 조회 */
+		    	AND FRAMEONE_AUTHORITY.UP_AUTH_GROUP_CD IN 
+		    	<foreach collection="gRoles" item="role" open="(" separator="," close=")">
+		            #{role}
+		        </foreach>
+		    </if>
+		    <if test='authCd != null and authCd != ""'>
+				AND FRAMEONE_AUTHORITY.AUTH_CD LIKE '%'||#{authCd}||'%'
+			</if>
+		    <if test='upAuthGroupCd != null and upAuthGroupCd != ""'>
+				AND FRAMEONE_AUTHORITY.UP_AUTH_GROUP_CD LIKE '%'||#{upAuthGroupCd}||'%'
+			</if>
+			<if test='lowAuthYn != null and lowAuthYn != ""'>
+				AND DECODE(FRAMEONE_AUTHORITY.UP_AUTH_GROUP_CD, 'WAYLO', 'N', 'Y') = #{lowAuthYn}
+			</if>
+			<if test='gCustkey != null and gCustkey != ""'>
+				AND FRAMEONE_AUTHORITY.CUSTKEY = #{gCustkey}
+			</if>
+		ORDER BY FRAMEONE_AUTHORITY.AUTH_CD ASC
+    </select>
+    
+    <insert id="insertAuthority">
+        INSERT /* [SysAuthorityService.sqlx][insertAuthority][권한그룹 등록][JGS][2025.05.15] */ INTO FRAMEONE_AUTHORITY
+        (
+             AUTH_CD
+            ,AUTH_NM
+            ,AUTH_CL
+            ,SYSTEM_CL
+            ,USE_YN
+            ,REG_ID
+            ,REG_DTM
+            ,UPD_ID
+            ,UPD_DTM
+            ,UP_AUTH_GROUP_CD
+        )
+        VALUES
+        (
+             #{authCd}
+            ,#{authNm}
+            ,'1'
+            ,'LOGISONE'
+            ,'1'
+            ,#{regId}
+            ,SYSDATE
+            ,#{regId}
+            ,SYSDATE
+            ,'WAYLO'
+        )
+    </insert>
+    
+    <insert id="insertAuthorityChild">
+	    <selectKey keyProperty="authCd" order="BEFORE" resultType="string">
+	        SELECT 'WAYLO_' || #{upAuthGroupCd} || (SELECT LPAD(NVL(COUNT(AUTH_CD),0)+1, 3, 0) FROM FRAMEONE_AUTHORITY WHERE UP_AUTH_GROUP_CD = 'WAYLO_' || #{upAuthGroupCd}) FROM DUAL
+	    </selectKey>
+	    
+        INSERT /* [SysAuthorityService.sqlx][insertAuthority][권한그룹 등록][JGS][2025.05.15] */ INTO FRAMEONE_AUTHORITY
+        (
+             AUTH_CD
+            ,AUTH_NM
+            ,AUTH_CL
+            ,SYSTEM_CL
+            ,USE_YN
+            ,REG_ID
+            ,REG_DTM
+            ,UPD_ID
+            ,UPD_DTM
+            ,UP_AUTH_GROUP_CD
+            ,CUSTKEY
+        )
+        VALUES
+        (
+             #{authCd}
+            ,#{authNm}
+            ,'1'
+            ,'LOGISONE'
+            ,'1'
+            ,#{regId}
+            ,SYSDATE
+            ,#{regId}
+            ,SYSDATE
+            ,'WAYLO_' || #{upAuthGroupCd}
+            ,#{custKey}
+        )
+    </insert>
+    
+    <update id="updateAuthority">
+        UPDATE /* [SysAuthorityService.sqlx][updateAuthority][권한그룹 수정][JGS][2025.05.15] */ FRAMEONE_AUTHORITY
+		SET		
+			 AUTH_NM = #{authNm}
+            ,UPD_ID	= #{regId}
+            ,UPD_DTM = SYSDATE
+		WHERE AUTH_CD = #{authCd}
+     </update>
+     
+     <insert id="insertAutoMultilingualAuthority">
+		INSERT /* [SysAuthorityService.sqlx][insertAutoMultilingualAuthority][권한그룹 다국어 자동생성][JGS][2025.05.15] */ INTO  FRAMEONE_AUTHORITY_LANGUAGE
+		(
+	  		 AUTH_CD
+	      	,AUTH_NM
+		  	,AUTH_CL
+		  	,SYSTEM_CL
+		  	,LANG_CL
+		  	,REG_ID
+			,REG_DTM
+			,UPD_ID
+			,UPD_DT
+		)
+		SELECT	
+			 #{authCd}			/* 권한그룹코드 */
+		  	,#{authNm}			/* 다국어 권한그룹명 */
+		  	,#{authCl}			/* 권한그룹구분 */
+		  	,#{systemCl}		/* 시스템구분 */
+          	,COMM_CD			/* 언어구분 */
+          	,#{regId}
+          	,SYSDATE
+          	,#{regId}
+          	,SYSDATE
+		FROM FRAMEONE_CODE
+		WHERE COMM_CL_CD = 'FRAMEONE008'
+	</insert>
+	
+	<insert id="insertAuthChgLog">
+		INSERT /* [SysAuthorityService.sqlx][insertAuthChgLog][권한 변경 로그 기록][JGS][2025.11.17] */ INTO FRAMEONE_AUTH_CHG_LOG
+		(
+	  		 TGT_USER_ID
+	      	,PRE_AUTH_CD
+		  	,CHG_AUTH_CD
+		  	,ACTION_TYPE
+		  	,GRANT_USER_ID
+		  	,GRANT_DT
+			,REG_ID
+			,UPD_ID
+		)
+		VALUES
+        (
+             #{tgtUserId}			/* 대상사용자ID */
+		  	,#{preAuthCd}			/* 기존권한그룹코드 */
+		  	,#{chgAuthCd}			/* 변경권한그룹코드 */
+		  	,#{actionType}			/* 행위유형(C/R/U/D) */
+          	,#{regId}				/* 권한부여자ID */
+          	,SYSDATE				/* 부여일시 */
+          	,#{regId}
+          	,#{regId}
+        )
+	</insert>
+    
+</mapper>

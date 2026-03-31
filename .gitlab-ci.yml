@@ -1,0 +1,169 @@
+# 기본 ssh 용도 alpine image
+default:
+  image: $PIPELINE_CONTAINER_IMAGES/alpine:3.14.0-openssh
+  tags:
+    - fw-wms-runner
+
+# 변수
+variables:
+  GIT_STRATEGY: none
+  KUBERNETES_NODE_TOLERATIONS_1: "gitlab-runner=only:NoSchedule" # 이 내용은 필수입니다
+  DEV_WAS_DEPLOY_PATH: "/app"
+  QA_WAS_DEPLOY_PATH: "/app"
+  PRD_WAS_DEPLOY_PATH_1: "/app"
+  PRD_WAS_DEPLOY_PATH_2: "/app"
+  SONAR_CLASSES: "**/build/classes/java/main" # Sonarqube 변수 (Multi Module)
+  #SONAR_CLASSES: "build/classes/java/main" # Sonarqube 변수 (Single Module)
+  SONAR_SRC: "$CI_PROJECT_DIR/src" # Sonarqube 변수 (Multi Module)
+
+workflow:
+  rules:
+    - if: $CI_COMMIT_BRANCH == "develop"
+      variables:
+        BUILD_ENV: "dev"
+        DEPLOY_IP: "${DEV_WAS_IP_64}"
+        DEPLOY_USER: "${DEV_WAS_USER_64}"
+        DEPLOY_PATH: "${DEV_WAS_DEPLOY_PATH}"
+        DEPLOY_LTX: "dltx"
+        DEPLOY_BATCH: "dbatch"
+        DEPLOY_WAYLO: "dwaylo"
+        DEPLOY_RSA: "${DEV_WAS_ID_RSA}"
+
+    - if: $CI_COMMIT_BRANCH == "qa"
+      variables:
+        BUILD_ENV: "qa"
+        DEPLOY_IP: "${DEV_WAS_IP_64}"
+        DEPLOY_USER: "${DEV_WAS_USER_64}"
+        DEPLOY_PATH: "${QA_WAS_DEPLOY_PATH}"
+        DEPLOY_LTX: "qltx"
+        DEPLOY_BATCH: "qbatch"
+        DEPLOY_WAYLO: "qwaylo"
+        DEPLOY_RSA: "${DEV_WAS_ID_RSA}"
+
+    - if: $CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "feature/cicd"
+      variables:
+        BUILD_ENV: "prd"
+    - if: $CI_COMMIT_BRANCH == "master"
+      variables:
+        BUILD_ENV: "prd"
+
+
+# ssh 명령 처리를 위한 helper
+include:
+  - project: 'templates/ci'
+    file: 
+      - '.ci-ssh-helper-1.0.yml'
+      - '.gitops-1.0.yml'
+      - '.sonar-helper-1.1.yml'
+  - local: '.ci/*.yml'  # PRD 배포 파이프라인
+
+cache:
+  paths:
+    - .gradle/wrapper
+    - .gradle/caches
+
+# 각 job이 실행될 stage 선언
+stages:
+  - build
+  - sonarqube
+  - deploy
+  - WAS
+  - LTX
+  - BATCH
+
+
+# Step1. Build
+build:
+  image: $PIPELINE_CONTAINER_IMAGES/gradle:8.7-jdk17 # 변경필요
+  stage: build
+  cache:
+    paths:
+      - .gradle/wrapper
+      - .gradle/caches
+  variables:
+    GIT_STRATEGY: fetch
+    GRADLE_USER_HOME: "$CI_PROJECT_DIR/.gradle"
+  script:
+    - echo "Started build"
+    - chmod +x ./gradlew
+    - ./gradlew clean build -Dspring.profiles.active=$BUILD_ENV
+    - echo "Completed build"
+  artifacts:
+    paths:
+      - "./cjfw-wms-api/build/libs/*.jar"
+      - "./cjfw-wms-batch/build/libs/*.jar" 
+      - $SONAR_CLASSES
+    expire_in: 0.5 hrs
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "api"'
+      when: never
+    - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master" || $CI_COMMIT_BRANCH == "feature/cicd"'
+      when: manual   
+    - if: '$CI_COMMIT_BRANCH == "qa"'
+      when: manual    
+    - if: '$CI_COMMIT_BRANCH == "develop" && $CI_PIPELINE_SOURCE == "schedule"'
+      when: always   
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+      when: manual
+
+
+# Step1-2. Sonarqube 시작 (Develop Branch)
+sonarqube_all: !reference [.sonarqube, sonarqube_all]
+# Step1-2. Sonarqube 종료 (Develop Branch)
+
+
+# Step2. DEV Deploy
+.deploy-template:
+  stage: deploy
+  needs:
+   - job: build
+  variables:
+    GIT_STRATEGY: none
+  before_script:
+    - !reference [.ssh_helper, script]
+    - ssh_init "$DEPLOY_RSA" "$DEPLOY_IP"
+  script:
+    - echo "Started ${BUILD_ENV} deploy"
+    - |
+      if [ -z "$DEPLOY_PATH" ]; then
+        echo "Error: DEPLOY_PATH is not set or is empty"
+        exit 1
+      fi
+      echo "The value of DEPLOY_PATH is: $DEPLOY_PATH"
+
+    - scp_run "$DEPLOY_USER" "$DEPLOY_IP" "-rp ./cjfw-wms-api/build/libs/*.jar" "$DEPLOY_PATH/" # api
+    - scp_run "$DEPLOY_USER" "$DEPLOY_IP" "-rp ./cjfw-wms-batch/build/libs/*.jar" "/app/deploy/${DEPLOY_BATCH}/" # batch
+    - scp_run "$DEPLOY_USER" "$DEPLOY_IP" "-rp ./cjfw-wms-api/build/libs/*.jar" "/app/deploy/${DEPLOY_LTX}/" # ltx
+
+    - ssh_run "$DEPLOY_USER" "$DEPLOY_IP" "ls -al $DEPLOY_PATH" 
+    - ssh_run "$DEPLOY_USER" "$DEPLOY_IP" "ls -al /app/deploy/${DEPLOY_BATCH}" 
+    - ssh_run "$DEPLOY_USER" "$DEPLOY_IP" "ls -al /app/deploy/${DEPLOY_LTX}" 
+
+    - ssh_run "$DEPLOY_USER" "$DEPLOY_IP" "source ~/.bash_profile && /app/scripts/${DEPLOY_WAYLO}/restart.sh"
+
+    - ssh_run "$DEPLOY_USER" "$DEPLOY_IP" "sleep 5" 
+    - ssh_run "$DEPLOY_USER" "$DEPLOY_IP" "source ~/.bash_profile && /app/scripts/${DEPLOY_LTX}/restart.sh"
+
+    - ssh_run "$DEPLOY_USER" "$DEPLOY_IP" "sleep 5" 
+    - ssh_run "$DEPLOY_USER" "$DEPLOY_IP" "source ~/.bash_profile && /app/scripts/${DEPLOY_BATCH}/restart.sh" 
+
+    - echo "Completed ${BUILD_ENV} deploy"
+
+dev:deploy:
+  extends: .deploy-template
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "develop" && $CI_PIPELINE_SOURCE == "schedule"'
+      when: on_success    
+    - if: $CI_COMMIT_BRANCH == "develop"
+      when: manual
+
+
+qa:deploy:
+  extends: .deploy-template
+  rules:
+    - if: $CI_COMMIT_BRANCH == "qa"
+      when: manual
+
+
+
+ 

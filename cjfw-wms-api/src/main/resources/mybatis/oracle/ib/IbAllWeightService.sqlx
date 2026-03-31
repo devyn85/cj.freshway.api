@@ -1,0 +1,802 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ibAllWeightService">
+    <!-- 정산확정 헤더  -->
+    <select id="getMasterList" resultType="cjfw.wms.ib.dto.IbAllWeightResDto">
+    <!--AUI 그리드에서 트리구조로보여주기위해 계층형쿼리필요 총공급가액은 JS에서 생성 -->
+    SELECT /* [ibAllWeightService.sqlx][getMasterList][센터별 물동량 정산 조회][kdh][20250715]*/
+        LEVEL
+        ,AAA.*
+    FROM (SELECT AA.UPPER_ID <!-- 하위항목 -->
+            ,AA.VIEW_NAME
+            ,null AS ID
+            ,MAX(AA.PRICE_CL) AS PRICE_CL
+            ,ROUND(NVL(SUM(AA.AMT),0)) AS AMT
+            ,ROUND(NVL(SUM(AA.PRICE),0)) AS PRICE
+            ,ROUND(NVL(SUM(AA.QTY),0)) AS QTY
+        FROM (
+            SELECT
+                CD1.DATA1 AS UPPER_ID
+                ,CASE WHEN CD1.DATA1 = '물동급' 
+                        THEN FN_CODEDESCR(A.STORERKEY,'MS_MULDONG_BASE1', A.LCL_CD) || ' ' || FN_CODEDESCR(A.STORERKEY,'MS_MULDONG_BASE2', A.MCL_CD)
+                    WHEN CD1.DATA1 = '고정급'
+                        THEN FN_CODEDESCR(A.STORERKEY,'MS_MULDONG_BASE1', A.LCL_CD)
+                    WHEN CD1.DATA1 = 'SLA'
+                        THEN FN_CODEDESCR(A.STORERKEY,'MS_MULDONG_BASE2', A.MCL_CD)
+                    ELSE ''
+                END AS VIEW_NAME
+                ,A.PRICE_CL AS PRICE_CL
+                ,NVL(CASE WHEN A.PRICE_CL IN ('60','50','40','30')    THEN -- 추가비용, 임대료, SLA, 고정급
+                       A.PRICE * A.UOM_QTY 
+                     WHEN A.PRICE_CL = '20' THEN  -- 물동급 라벨 
+                       CASE  WHEN   A.STORAGETYPE ='2' THEN 
+                                    (SELECT SUM(BAR_CNT) BAR_CNT  FROM V_SRMFWLABEL WHERE RD_DATE BETWEEN #{yyyymm} || '01' AND #{yyyymm} || '31' AND REAL_ORG_CD =#{fixdccode} AND TRANS_CLS =140 )
+                                     *  A.PRICE 
+                             WHEN  A.STORAGETYPE ='3' THEN  
+                                  (SELECT SUM(BAR_CNT) BAR_CNT  FROM V_SRMFWLABEL WHERE RD_DATE BETWEEN #{yyyymm} || '01' AND #{yyyymm} || '31' AND REAL_ORG_CD =#{fixdccode} AND TRANS_CLS =150 )
+                                   *  A.PRICE 
+                         END 
+                      WHEN A.PRICE_CL ='10' THEN --물동급KG 
+                            CASE WHEN A.LCL_CD = 'C' THEN -- 군납  저장
+                                CASE WHEN   A.STORAGETYPE ='1' THEN
+                                    (  SELECT (IB_DC_FLOW_SUM.EX_QTY2  )
+                                            FROM IB_DC_FLOW_SUM
+                                            WHERE FROM_DCCODE =#{fixdccode}
+                                            AND FLOW_TYPE ='SO'
+                                            AND STORAGETYPE ='1'
+                                            AND YYYYMMDD like #{yyyymm} || '%')   * A.PRICE
+                                    ELSE
+                                      (  SELECT (IB_DC_FLOW_SUM.EX_QTY2  )
+                                            FROM IB_DC_FLOW_SUM
+                                            WHERE FROM_DCCODE =#{fixdccode}
+                                            AND FLOW_TYPE ='SO'
+                                            AND STORAGETYPE ='2'
+                                            AND YYYYMMDD like #{yyyymm} || '%')   * A.PRICE
+                                END
+                            ELSE
+                                (SELECT (IB_DC_FLOW_SUM.FLOW_QTY  - EXPT_CUST_QTY )
+                                          FROM IB_DC_FLOW_SUM
+                                          WHERE FROM_DCCODE =#{fixdccode}
+                                          AND FLOW_TYPE ='SO'
+                                          AND STORAGETYPE ='1'
+                                          AND YYYYMMDD like #{yyyymm} || '%') * A.PRICE
+                            END
+                   END, 0)  AS  AMT
+                 ,A.PRICE 
+                 ,NVL(CASE WHEN A.PRICE_CL IN ('60','50','40','30')    THEN -- 추가비용, 임대료, SLA, 고정급
+                         A.UOM_QTY 
+                       WHEN A.PRICE_CL = '20'  THEN  
+                               CASE WHEN A.STORAGETYPE ='1' THEN 
+                                            (SELECT (FLOW_QTY  - EXPT_CUST_QTY ) 
+                                            FROM IB_DC_FLOW_SUM
+                                            WHERE FROM_DCCODE =#{fixdccode}
+                                            AND FLOW_TYPE ='SO'
+                                            AND STORAGETYPE ='1'
+                                            AND YYYYMMDD like #{yyyymm} || '%')
+                                     WHEN   A.STORAGETYPE ='2' THEN 
+                                            (SELECT SUM(BAR_CNT) BAR_CNT  FROM V_SRMFWLABEL WHERE RD_DATE BETWEEN #{yyyymm} || '01' AND #{yyyymm} || '31' AND REAL_ORG_CD =#{fixdccode} AND TRANS_CLS =140 )
+                                     WHEN  A.STORAGETYPE ='3' THEN  
+                                          (SELECT SUM(BAR_CNT) BAR_CNT  FROM V_SRMFWLABEL WHERE RD_DATE BETWEEN #{yyyymm} || '01' AND #{yyyymm} || '31' AND REAL_ORG_CD =#{fixdccode} AND TRANS_CLS =150 )
+                                     END
+                        WHEN A.PRICE_CL = '10'  THEN  
+                            CASE WHEN A.LCL_CD = 'C' THEN -- 군납  저장
+                                CASE WHEN   A.STORAGETYPE ='1' THEN
+                                    (  SELECT (IB_DC_FLOW_SUM.EX_QTY2  )
+                                            FROM IB_DC_FLOW_SUM
+                                            WHERE FROM_DCCODE =#{fixdccode}
+                                            AND FLOW_TYPE ='SO'
+                                            AND STORAGETYPE ='1'
+                                            AND YYYYMMDD like #{yyyymm} || '%')
+                                    ELSE
+                                      (  SELECT (IB_DC_FLOW_SUM.EX_QTY2  )
+                                            FROM IB_DC_FLOW_SUM
+                                            WHERE FROM_DCCODE =#{fixdccode}
+                                            AND FLOW_TYPE ='SO'
+                                            AND STORAGETYPE ='2'
+                                            AND YYYYMMDD like #{yyyymm} || '%')
+                                END
+                            ELSE
+                                (SELECT (IB_DC_FLOW_SUM.FLOW_QTY  - EXPT_CUST_QTY )
+                                          FROM IB_DC_FLOW_SUM
+                                          WHERE FROM_DCCODE =#{fixdccode}
+                                          AND FLOW_TYPE ='SO'
+                                          AND STORAGETYPE ='1'
+                                          AND YYYYMMDD like #{yyyymm} || '%')
+                            END
+                     END, 0)  AS  QTY
+            FROM MS_STTL_STD A
+            LEFT JOIN CM_CODE CD1
+                ON CD1.CODELIST = 'MS_MULDONG_BASE3'
+                AND CD1.BASECODE = A. PRICE_CL
+            WHERE 1=1
+            <!--임대료, 추가비용은 합계에서만보임 -->
+            AND A.PRICE_CL NOT IN ('50','60')
+            AND FROM_STTL_BASE_DATE like #{yyyymm} || '%'
+            AND A.DCCODE = #{fixdccode}
+             <if test="custkeyMulti != null and custkeyMulti != '' ">
+                <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                    <foreach collection="custkeyMulti" item="item">
+                        OR A.CUSTKEY IN
+                        <foreach collection="item" item="code" open="(" close=")" separator=",">
+                            #{code}
+                        </foreach>
+                    </foreach>
+                </trim>
+            </if>
+        ) AA
+        GROUP BY AA.UPPER_ID, AA.VIEW_NAME
+        UNION ALL 
+        SELECT <!-- 합계항목 -->
+            '0' AS UPPER_ID
+            ,CD1.DATA1 AS VIEW_NAME
+            ,CD1.DATA1 AS ID
+            ,MAX(A.PRICE_CL) AS PRICE_CL
+            ,ROUND(SUM(NVL(CASE WHEN A.PRICE_CL IN ('60','50','40','30')    THEN -- 추가비용, 임대료, SLA, 고정급
+                                    A.PRICE * A.UOM_QTY
+                                WHEN A.PRICE_CL = '20' THEN  -- 물동급 라벨
+                                    CASE  WHEN   A.STORAGETYPE ='2' THEN
+                                             (SELECT SUM(BAR_CNT) BAR_CNT  FROM V_SRMFWLABEL WHERE RD_DATE BETWEEN #{yyyymm} || '01' AND #{yyyymm} || '31' AND REAL_ORG_CD =#{fixdccode} AND TRANS_CLS =140 ) *  A.PRICE
+                                          WHEN  A.STORAGETYPE ='3' THEN
+                                             (SELECT SUM(BAR_CNT) BAR_CNT  FROM V_SRMFWLABEL WHERE RD_DATE BETWEEN #{yyyymm} || '01' AND #{yyyymm} || '31' AND REAL_ORG_CD =#{fixdccode} AND TRANS_CLS =150 ) *  A.PRICE
+                                    END
+                                WHEN A.PRICE_CL ='10' THEN --물동급KG
+                                   CASE WHEN A.LCL_CD = 'C' THEN -- 군납  저장
+                                        CASE WHEN   A.STORAGETYPE ='1' THEN
+                                            (  SELECT (IB_DC_FLOW_SUM.EX_QTY2  )
+                                                    FROM IB_DC_FLOW_SUM
+                                                    WHERE FROM_DCCODE =#{fixdccode}
+                                                    AND FLOW_TYPE ='SO'
+                                                    AND STORAGETYPE ='1'
+                                                    AND YYYYMMDD like #{yyyymm} || '%')   * A.PRICE
+                                            ELSE
+                                              (  SELECT (IB_DC_FLOW_SUM.EX_QTY2  )
+                                                    FROM IB_DC_FLOW_SUM
+                                                    WHERE FROM_DCCODE =#{fixdccode}
+                                                    AND FLOW_TYPE ='SO'
+                                                    AND STORAGETYPE ='2'
+                                                    AND YYYYMMDD like #{yyyymm} || '%')   * A.PRICE
+                                        END
+                                  ELSE
+                                     (SELECT (IB_DC_FLOW_SUM.FLOW_QTY  - EXPT_CUST_QTY )
+                                                  FROM IB_DC_FLOW_SUM
+                                                  WHERE FROM_DCCODE =#{fixdccode}
+                                                  AND FLOW_TYPE ='SO'
+                                                  AND STORAGETYPE ='1'
+                                                  AND YYYYMMDD like #{yyyymm} || '%') * A.PRICE
+                                 END
+                            END, 0)))  AS  AMT
+               ,0 AS PRICE       
+               ,0 AS QTY
+        FROM MS_STTL_STD A
+        LEFT JOIN CM_CODE CD1
+            ON CD1.CODELIST = 'MS_MULDONG_BASE3'
+            AND CD1.BASECODE = A.PRICE_CL
+        WHERE FROM_STTL_BASE_DATE like #{yyyymm} || '%'
+        AND A.DCCODE = #{fixdccode}
+         <if test="custkeyMulti != null and custkeyMulti != '' ">
+			<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+				<foreach collection="custkeyMulti" item="item">
+					OR A.CUSTKEY IN
+					<foreach collection="item" item="code" open="(" close=")" separator=",">
+						#{code}
+		      		</foreach>
+		    	</foreach>
+		  	</trim>
+	    </if>
+        GROUP BY CD1.DATA1) AAA
+    START WITH UPPER_ID = '0'
+    CONNECT BY PRIOR VIEW_NAME = UPPER_ID
+    ORDER SIBLINGS BY PRICE_CL
+    </select>
+
+	<!-- 센터별 물동량 정산.기준정보 조회 -->
+	<select id="getMasterList2" resultType="cjfw.wms.ib.dto.IbAllWeightResDto">
+        SELECT /* [stStockService.sqlx][getMasterList2][센터별 물동량 정산.기준정보 조회][kdh][20250715]*/
+		       MS_STTL_STD.DCCODE                                                                        AS DCCODE                  /*센터코드*/
+		      ,CM_DC.DCNAME                                                                              AS DCNAME                  /*센터명*/
+		      ,MS_STTL_STD.CUSTKEY                                                                       AS CUSTKEY                 /*거래처*/
+		      ,MS_CUST.DESCRIPTION                                                                       AS CUSTNAME                /*거래처명*/
+		      ,MS_STTL_STD.PRICE_CL                                                                      AS PRICE_CL                /*단가구분*/
+		      ,MS_STTL_STD.LCL_CD                                                                        AS LCL_CD                  /*대분류*/
+		      ,LOGISONESVC.FN_CODEDESCR(MS_STTL_STD.STORERKEY, 'MS_MULDONG_BASE1', MS_STTL_STD.LCL_CD)   AS LCL_CD_NM               /*대분류명*/
+		      ,MS_STTL_STD.MCL_CD                                                                        AS MCL_CD                  /*중분류*/
+		      ,LOGISONESVC.FN_CODEDESCR(MS_STTL_STD.STORERKEY, 'MS_MULDONG_BASE2', MS_STTL_STD.MCL_CD)   AS MCL_CD_NM               /*중분류명*/
+		      ,MS_STTL_STD.STORAGETYPE                                                                   AS STORAGETYPE             /*보관유형*/
+		      ,LOGISONESVC.FN_CODEDESCR(MS_STTL_STD.STORERKEY, 'PUTAWAYTYPE', MS_STTL_STD.STORAGETYPE)   AS STORAGETYPE_NM          /*보관유형명*/
+		      ,NVL(MS_STTL_STD.PRICE,0)                                                                  AS PRICE                   /*단가*/
+		      ,MS_STTL_STD.UOM_STD                                                                       AS UOM_STD                 /*단위*/
+		      ,LOGISONESVC.FN_CODEDESCR(MS_STTL_STD.STORERKEY, 'MS_MULDONG_BASE4', MS_STTL_STD.UOM_STD)  AS UOM_STD_NM              /*단위명*/
+		      ,MS_STTL_STD.UOM_QTY                                                                       AS UOM_QTY                 /*단위수량*/
+		      ,NVL(MS_STTL_STD.PRICE,0) * MS_STTL_STD.UOM_QTY                                            AS AMOUNT                  /*금액*/
+		      ,MS_STTL_STD.COST_ALLOC_RATE                                                               AS COST_ALLOC_RATE         /*분담율*/
+		      ,MS_STTL_STD.PPM                                                                           AS PPM                     /*PPM*/
+		      ,LOGISONESVC.FN_CODEDESCR(MS_STTL_STD.STORERKEY, 'MS_MULDONG_BASE3', MS_STTL_STD.PRICE_CL) AS PRICE_CL_NM             /*단가구분명*/
+		      ,MS_STTL_STD.FROM_STTL_BASE_DATE                                                           AS ORG_FROM_STTL_BASE_DATE /*원본_정산기준시작일자*/
+		      ,MS_STTL_STD.TO_STTL_BASE_DATE                                                             AS ORG_TO_STTL_BASE_DATE   /*원본_정산기준종료일자*/
+		      ,MS_STTL_STD.DCCODE                                                                        AS ORG_DCCODE              /*원본_센터코드*/
+		      ,CM_DC.DCNAME                                                                              AS ORG_DCNAME              /*원본_센터명*/
+		      ,MS_STTL_STD.STORERKEY                                                                     AS ORG_STORERKEY           /*원본_보관업체*/
+		      ,MS_STTL_STD.CUSTKEY                                                                       AS ORG_CUSTKEY             /*원본_거래처*/
+		      ,MS_STTL_STD.LCL_CD                                                                        AS ORG_LCL_CD              /*원본_대분류*/
+		      ,MS_STTL_STD.MCL_CD                                                                        AS ORG_MCL_CD              /*원본_중분류*/
+		      ,MS_STTL_STD.STORAGETYPE                                                                   AS ORG_STORAGETYPE         /*원본_보관유형*/
+		      ,MS_STTL_STD.PRICE_CL                                                                      AS ORG_PRICE_CL            /*원본_단가구분*/
+		      ,MS_STTL_STD.QTY                                                                           AS QTY                     /*수량*/
+		      ,MS_STTL_STD.DC_MERGE                                                                      AS DC_MERGE                /*센터통합여부*/
+		      ,MS_STTL_STD.RMK                                                                           AS RMK                     /*비고*/
+		      ,MS_STTL_STD.ADDDATE                                                                       AS ADDDATE                 /*등록일*/
+		      ,MS_STTL_STD.EDITDATE                                                                      AS EDITDATE                /*수정일*/
+		      ,MS_STTL_STD.ADDWHO                                                                        AS ADDWHO                  /*등록자*/
+		      ,MS_STTL_STD.EDITWHO                                                                       AS EDITWHO                 /*수정자*/
+		      ,FRAMEONE_USER1.USER_NM                                                                    AS ADDWHO_NAME             /*예외입력자 이름*/
+		      ,FRAMEONE_USER2.USER_NM                                                                    AS EDITWHO_NAME            /*예외입력자 이름*/
+			  ,MS_STTL_STD.FROM_STTL_BASE_DATE                                                           AS FROM_STTL_BASE_DATE     /*정산기준시작일자*/
+		      ,MS_STTL_STD.TO_STTL_BASE_DATE                                                             AS TO_STTL_BASE_DATE       /*정산기준종료일자*/
+		      ,MS_STTL_STD.STORERKEY                                                                     AS STORERKEY               /*회사코드*/
+          FROM MS_STTL_STD
+     LEFT JOIN CM_DC
+            ON CM_DC.DCCODE     = MS_STTL_STD.DCCODE
+          JOIN MS_CUST
+            ON MS_CUST.STORERKEY = MS_STTL_STD.STORERKEY
+           AND MS_CUST.CUSTKEY   = MS_STTL_STD.CUSTKEY
+           AND MS_CUST.CUSTTYPE  = 'P'
+     LEFT JOIN FRAMEONE_USER FRAMEONE_USER1
+            ON FRAMEONE_USER1.USER_ID = MS_STTL_STD.ADDWHO
+     LEFT JOIN FRAMEONE_USER FRAMEONE_USER2
+            ON FRAMEONE_USER2.USER_ID = MS_STTL_STD.EDITWHO
+         WHERE MS_STTL_STD.DCCODE = #{fixdccode}
+           AND MS_STTL_STD.FROM_STTL_BASE_DATE <![CDATA[<=]]> #{slipdtTo}
+           AND MS_STTL_STD.TO_STTL_BASE_DATE <![CDATA[>=]]> #{slipdtFrom}
+        
+        <!-- 협력사-다중OR 검색 -->  
+        <if test="custkeyMulti != null and custkeyMulti != '' ">
+			<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+				<foreach collection="custkeyMulti" item="item">
+					OR MS_STTL_STD.CUSTKEY IN
+					<foreach collection="item" item="code" open="(" close=")" separator=",">
+						#{code}
+		      		</foreach>
+		    	</foreach>
+		  	</trim>
+	    </if>
+	    
+    </select>
+
+    <select id="getGojeongStoList" resultType="cjfw.wms.ib.dto.IbStoWeightResDto">
+        SELECT /* [stStockService.sqlx][getGojeongStoList][센터별 물동량 정산.고정비 조회][kdh][20250715]*/
+              IB_DC_FLOW_SUM.FROM_DCCODE AS DCCODE
+            , CM_DC.DCNAME               AS DCNAME
+            , IB_DC_FLOW_SUM.TO_DCCODE   AS TO_CUSTKEY
+            , CM_DC2.DCNAME              AS TO_CUSTNAME
+            , IB_DC_FLOW_SUM.STORAGETYPE AS CHANNEL
+            , FN_CODEDESCR('FW00','PUTAWAYTYPE',IB_DC_FLOW_SUM.STORAGETYPE) AS CHANNEL_NAME
+            , SUM(IB_DC_FLOW_SUM.FLOW_QTY) AS CONFIRMWEIGHT
+        FROM IB_DC_FLOW_SUM
+       LEFT JOIN CM_DC
+              ON CM_DC.DCCODE = IB_DC_FLOW_SUM.FROM_DCCODE
+       LEFT JOIN CM_DC CM_DC2
+              ON CM_DC2.DCCODE = IB_DC_FLOW_SUM.TO_DCCODE
+       WHERE IB_DC_FLOW_SUM.FROM_DCCODE = #{fixdccode}
+            AND IB_DC_FLOW_SUM.YYYYMMDD LIKE #{yyyymm} || '%'
+            AND IB_DC_FLOW_SUM.FLOW_TYPE = 'STO'
+       GROUP BY IB_DC_FLOW_SUM.FROM_DCCODE
+            ,CM_DC.DCNAME
+            ,IB_DC_FLOW_SUM.TO_DCCODE
+            ,CM_DC2.DCNAME
+            ,IB_DC_FLOW_SUM.STORAGETYPE
+       ORDER BY IB_DC_FLOW_SUM.STORAGETYPE
+            ,IB_DC_FLOW_SUM.TO_DCCODE
+    </select>
+
+    <select id="getGammoList" resultType="cjfw.wms.ib.dto.IbStoWeightResDto">
+        SELECT
+               AJ_APPRREQUEST.DCCODE                                                                                                  AS DCCODE
+             , AJ_APPRREQUEST.STORERKEY                                                                                               AS STORERKEY
+             , AJ_APPRREQUEST.ORGANIZE                                                                                                AS ORGANIZE
+             , AJ_INPLAN.AREA                                                                                                         AS AREA
+             , AJ_INPLAN.DOCTYPE                                                                                                      AS DOCTYPE
+             , AJ_INPLAN.DOCDT                                                                                                        AS DOCDT
+             , AJ_INPLAN.DOCNO                                                                                                        AS DOCNO
+             , AJ_INPLAN.DOCLINE                                                                                                      AS DOCLINE
+             , AJ_INPLAN.SLIPDT                                                                                                       AS SLIPDT
+             , AJ_INPLAN.SLIPNO                                                                                                       AS SLIPNO
+             , AJ_INPLAN.SLIPLINE                                                                                                     AS SLIPLINE
+             , AJ_INPLAN.ORDERTYPE                                                                                                    AS ORDERTYPE
+             , AJ_INPLAN.IOTYPE                                                                                                       AS IOTYPE
+             , AJ_INPLAN.SLIPTYPE                                                                                                     AS SLIPTYPE
+             , FN_CODEDESCR(AJ_APPRREQUEST.STORERKEY, 'STOCKTYPE', ST_STOCK.STOCKTYPE)                                                AS STOCKTYPENM
+             , ST_STOCK.STOCKTYPE                                                                                                     AS STOCKTYPE
+             , AJ_INPLAN.STOCKGRADE                                                                                                   AS STOCKGRADE
+             , FN_CODEDESCR(AJ_APPRREQUEST.STORERKEY, 'STOCKGRADE', AJ_INPLAN.STOCKGRADE)                                             AS STOCKGRADENAME
+             , MS_LOCATION.ZONE                                                                                                       AS ZONE
+             , AJ_INPLAN.LOC                                                                                                          AS LOC
+             , AJ_INPLAN.SKU                                                                                                          AS SKU
+             , MS_SKU.DESCRIPTION                                                                                                     AS SKUNAME
+             , AJ_INPLAN.LOT                                                                                                          AS LOT
+             , AJ_INPLAN.UOM                                                                                                          AS UOM
+             , AJ_INPLAN.ORDERQTY                                                                                                     AS TRANQTY
+             , AJ_APPRREQUEST.DEL_YN                                                                                                  AS DEL_YN
+             , AJ_INPLAN.OTHER02                                                                                                      AS DECREASETYPE
+             , FN_CODEDESCR(AJ_INPLAN.STORERKEY, 'DECREASETYPE', AJ_INPLAN.OTHER02)                                                   AS DECREASETYPENAME
+             , AJ_INPLAN.REASONCODE                                                                                                   AS REASONCODE
+             , FN_CODEDESCR(AJ_INPLAN.STORERKEY, 'REASONCODE_AJ', AJ_INPLAN.REASONCODE)                                               AS REASONCODENAME
+             , FN_CODEDESCR(AJ_INPLAN.STORERKEY, 'OTHER01_DMD', AJ_INPLAN.OTHER01)                                                    AS IMPUTETYPE
+             , FN_CODEDESCR(AJ_INPLAN.STORERKEY, 'OTHER01_DMD', AJ_INPLAN.OTHER01)                                                    AS IMPUTETYPENAME
+             , FN_CODEDESCR(AJ_INPLAN.STORERKEY, 'OTHER05_DMD', AJ_INPLAN.OTHER05)                                                    AS PROCESSMAIN
+             , AJ_INPLAN.OTHER04                                                                                                      AS COSTCD
+             , MS_COST.DESCRIPTION                                                                                                    AS COSTCDNAME
+             , NVL(TRIM(FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01, 'Y')),'N') AS NEARDURATIONYN /** 유통기한임박여부 */
+             , CM_LOT.LOTTABLE01                                                                                                      AS LOTTABLE01
+             /*
+              * 기준일(제조) ~까지 : DURATIONTYPE = 1 일때 LOTTABLE01 - DURATION
+              *                  DURATIONTYPE = 2 일때 LOTTABLE01
+              * 기준일(소비) ~부터 : DURATIONTYPE = 1 일때 LOTTABLE01
+              *                  DURATIONTYPE = 2 일때 LOTTABLE01 + DURATION  -1
+              */
+              , CASE WHEN VALIDATE_CONVERSION(CM_LOT.LOTTABLE01 AS DATE, 'YYYYMMDD') = 1
+                     THEN (CASE WHEN MS_SKU.DURATIONTYPE = '1'
+                                THEN TO_CHAR(TO_DATE(REPLACE(CM_LOT.LOTTABLE01,'-',''),'YYYYMMDD') - (MS_SKU.DURATION-1), 'YYYY-MM-DD')
+                                WHEN MS_SKU.DURATIONTYPE = '2'
+                                THEN TO_CHAR(TO_DATE(REPLACE(CM_LOT.LOTTABLE01,'-',''),'YYYYMMDD'),'YYYY-MM-DD')
+                                ELSE ''
+                            END)
+                     ELSE ''
+                 END                                                                                                                  AS MANUFACTUREDT   /*제조일자*/
+              , CASE WHEN VALIDATE_CONVERSION(CM_LOT.LOTTABLE01 AS DATE, 'YYYYMMDD') = 1
+                     THEN (CASE WHEN MS_SKU.DURATIONTYPE = '1'
+                                THEN TO_CHAR(TO_DATE(REPLACE(CM_LOT.LOTTABLE01,'-',''),'YYYYMMDD'),'YYYY-MM-DD')
+                                WHEN MS_SKU.DURATIONTYPE = '2'
+                                THEN TO_CHAR(TO_DATE(REPLACE(CM_LOT.LOTTABLE01,'-',''),'YYYYMMDD') + (MS_SKU.DURATION-1), 'YYYY-MM-DD')
+                                ELSE ''
+                            END)
+                     ELSE ''
+                 END                                                                                                                  AS EXPIREDT         /*소비일자*/
+             , FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01, 'N0') ||'/'|| MS_SKU.DURATION AS DURATION_TERM
+             , AJ_INPLAN.STOCKID                                                                                                      AS STOCKID
+             , ST_SNINFO.SERIALNO                                                                                                     AS SERIALNO
+             , ST_SNINFO.CONVSERIALNO                                                                                                 AS CONVSERIALNO
+             , ST_SNINFO.SERIALLEVEL                                                                                                  AS SERIALLEVEL
+             , ST_SNINFO.SERIALTYPE                                                                                                   AS SERIALTYPE
+             , ST_SNINFO.FACTORYNAME                                                                                                  AS FACTORYNAME
+             , MS_SKU.COLORDESCR                                                                                                      AS COLORDESCR
+             , ST_SNINFO.PLACEOFORIGIN                                                                                                AS PLACEOFORIGIN
+             , MS_SKU.DURATION                                                                                                        AS DURATION
+             , MS_SKU.DURATIONTYPE                                                                                                    AS DURATIONTYPE
+             , ST_SNINFO.BUTCHERYDT                                                                                                   AS BUTCHERYDT
+             , ST_SNINFO.CONTRACTCUSTKEY                                                                                              AS CONTRACTCOMPANY
+             , (SELECT DESCRIPTION
+                  FROM MS_CUST
+                 WHERE MS_CUST.STORERKEY = ST_SNINFO.STORERKEY
+                   AND MS_CUST.CUSTKEY   = ST_SNINFO.CONTRACTCUSTKEY
+                   AND ROWNUM            = 1 )                                                                                        AS CONTRACTCOMPANYNAME
+             , ST_SNINFO.FROMVALIDDT                                                                                                  AS FROMVALIDDT
+             , ST_SNINFO.TOVALIDDT                                                                                                    AS TOVALIDDT
+             , FN_CODEDESCR(AJ_APPRREQUEST.STORERKEY,'CONTRACTTYPE_SN', ST_SNINFO.CONTRACTTYPE)                                       AS CONTRACTTYPE
+             , ST_SNINFO.STOCKID                                                                                                      AS BARCODE
+             , AJ_APPRREQUEST.APPROVALSTATUS                                                                                          AS APPROVALSTATUS
+             , FN_CODEDESCR(AJ_APPRREQUEST.STORERKEY,'APPROVALSTATUS', AJ_APPRREQUEST.APPROVALSTATUS)                                 AS APPROVALSTATUSNAME
+             , AJ_APPRREQUEST.EDITDATE                                                                                                AS APPROVALDATE
+             , AJ_APPRREQUEST.APPROVALREQNO                                                                                           AS APPROVALREQNO
+             , AJ_APPRREQUEST.APPROVALNO                                                                                              AS APPROVALNO
+             , AJ_APPRREQUEST.APPROVALDT                                                                                              AS APPROVALDT
+             , CASE WHEN AJ_APPRREQUEST.APPROVALSTATUS = '3' AND AJ_INPLAN.STATUS  <![CDATA[<]]>  '90' THEN UNISTR('S')
+                    WHEN AJ_APPRREQUEST.APPROVALSTATUS = '0' AND AJ_INPLAN.STATUS  <![CDATA[<]]>  '90' THEN UNISTR('S')
+                    ELSE UNISTR('E')
+                END                                                                                                                   AS CHKFLAG
+             , FN_CODEDESCR(AJ_INPLAN.STORERKEY, 'STATUS_AJ', AJ_INPLAN.STATUS )                                                      AS STATUS_AJ
+             , CASE WHEN TO_NUMBER(NVL(MS_SKU.LINE02,0))  !=  0 AND AJ_INPLAN.DCCODE = '2170' AND NVL(MS_SKU.LINE01,'N') = 'Y'
+                    THEN TO_NUMBER(NVL(MS_SKU.LINE02,0))
+                    ELSE 0
+                END                                                                                                                   AS AVGWEIGHT       /* 평균중량    */
+             , ROUND(CASE WHEN TO_NUMBER(NVL(MS_SKU.LINE02,0))  !=  0 AND AJ_INPLAN.DCCODE = '2170' AND NVL(MS_SKU.LINE01,'N') = 'Y'
+                          THEN (AJ_INPLAN.ORDERQTY) / TO_NUMBER(NVL(MS_SKU.LINE02,0))
+                          ELSE 0
+                      END, 2)                                                                                                         AS CALBOX          /* 환산박스    */
+             , CASE WHEN AJ_INPLAN.DCCODE = '2170' AND NVL(MS_SKU.LINE01,'N') = 'Y'
+                    THEN NVL(AJ_INPLAN.ETCQTY1,0)
+                    ELSE 0
+                END                                                                                                                   AS REALORDERBOX    /* 실박스예정 */
+             , CASE WHEN AJ_INPLAN.DCCODE = '2170' AND NVL(MS_SKU.LINE01,'N') = 'Y'
+                    THEN NVL(AJ_INPLAN.ETCQTY2,0)
+                    ELSE 0
+                END                                                                                                                   AS REALCFMBOX      /* 실박스확정 */
+             , CASE WHEN NVL(AJ_INPLAN.ETCQTY2,0) = 0
+                    THEN NVL(AJ_INPLAN.ETCQTY1,0)
+                    ELSE 0
+                END                                                                                                                   AS TRANBOX         /* 작업박스    */
+             , CASE WHEN AJ_INPLAN.DCCODE = '2170' AND NVL(MS_SKU.LINE01,'N') = 'Y'
+                    THEN 'Y'
+                    ELSE 'N'
+                END                                                                                                                   AS BOXFLAG         /* 박스처리유무    */
+             , AJ_INPLAN.ADDDATE                                                                                                      AS ADDDATE         /* 감모/역감모 생성일자 */
+             , AJ_INPLAN.ADDWHO || CASE WHEN FN_GETUSERNAME(AJ_INPLAN.ADDWHO) NOT IN ('NOT FOUND','UNKNOWN')
+                                        THEN '(' || FN_GETUSERNAME(AJ_INPLAN.ADDWHO) || ')'
+                                    END                                                                                               AS ADDWHO          /* 감모/역감모 생성자 */
+             , ''                                                                                                                     AS CUSTKEY         /* 외부창고 거래처코드 */
+             , ''                                                                                                                     AS CUSTNAME        /* 외부창고 거래처명 */
+             , ''                                                                                                                     AS REFERENCE01     /* 외부창고 비고 */
+             , MS_SKU.STORAGETYPE AS STORAGETYPE
+             , FN_CODEDESCR(MS_SKU.STORERKEY,'STORAGETYPE', MS_SKU.STORAGETYPE)                AS STORAGETYPE_NAME
+        FROM AJ_APPRREQUEST
+        JOIN AJ_INPLAN
+            ON AJ_APPRREQUEST.DCCODE    = AJ_INPLAN.DCCODE
+            AND AJ_APPRREQUEST.STORERKEY = AJ_INPLAN.STORERKEY
+            AND AJ_APPRREQUEST.ORGANIZE  = AJ_INPLAN.ORGANIZE
+            AND AJ_APPRREQUEST.DOCTYPE   = AJ_INPLAN.DOCTYPE
+            AND AJ_APPRREQUEST.DOCDT     = AJ_INPLAN.DOCDT
+            AND AJ_APPRREQUEST.DOCNO     = AJ_INPLAN.DOCNO
+            AND AJ_APPRREQUEST.SLIPDT    = AJ_INPLAN.SLIPDT
+            AND AJ_APPRREQUEST.SLIPNO    = AJ_INPLAN.SLIPNO
+            AND AJ_INPLAN.STOCKGRADE  !=  'S3'   /* 폐기가 아닌것 */
+            AND AJ_INPLAN.ORDERTYPE != 'KITAJ'            /* 밀키트제외*/
+        JOIN DM_DOCUMENT_D
+            ON AJ_INPLAN.DCCODE = DM_DOCUMENT_D.DCCODE
+            AND AJ_INPLAN.STORERKEY  = DM_DOCUMENT_D.STORERKEY
+            AND AJ_INPLAN.ORGANIZE   = DM_DOCUMENT_D.ORGANIZE
+            AND AJ_INPLAN.AREA       = DM_DOCUMENT_D.AREA
+            AND AJ_INPLAN.DOCTYPE    = DM_DOCUMENT_D.DOCTYPE
+            AND AJ_INPLAN.DOCDT      = DM_DOCUMENT_D.DOCDT
+            AND AJ_INPLAN.DOCNO      = DM_DOCUMENT_D.DOCNO
+            AND AJ_INPLAN.DOCLINE    = DM_DOCUMENT_D.DOCLINE
+        JOIN DM_DOCUMENT_H
+            ON DM_DOCUMENT_D.DCCODE = DM_DOCUMENT_H.DCCODE
+            AND DM_DOCUMENT_D.STORERKEY  = DM_DOCUMENT_H.STORERKEY
+            AND DM_DOCUMENT_D.ORGANIZE   = DM_DOCUMENT_H.ORGANIZE
+            AND DM_DOCUMENT_D.DOCTYPE    = DM_DOCUMENT_H.DOCTYPE
+            AND DM_DOCUMENT_D.DOCDT      = DM_DOCUMENT_H.DOCDT
+            AND DM_DOCUMENT_D.DOCNO      = DM_DOCUMENT_H.DOCNO
+        JOIN MS_SKU
+            ON MS_SKU.STORERKEY = AJ_INPLAN.STORERKEY
+            AND MS_SKU.SKU       = AJ_INPLAN.SKU
+            AND MS_SKU.DEL_YN    = 'N'
+        JOIN CM_LOT
+            ON CM_LOT.STORERKEY = AJ_INPLAN.STORERKEY
+            AND CM_LOT.LOT = AJ_INPLAN.LOT
+            AND CM_LOT.DEL_YN = 'N'
+        JOIN MS_LOCATION
+            ON MS_LOCATION.DCCODE = AJ_INPLAN.DCCODE
+            AND MS_LOCATION.LOC = AJ_INPLAN.LOC
+        LEFT OUTER JOIN ST_STOCK
+            ON AJ_INPLAN.DCCODE     = ST_STOCK.DCCODE
+            AND AJ_INPLAN.STORERKEY  = ST_STOCK.STORERKEY
+            AND AJ_INPLAN.ORGANIZE   = ST_STOCK.ORGANIZE
+            AND AJ_INPLAN.AREA       = ST_STOCK.AREA
+            AND AJ_INPLAN.SKU        = ST_STOCK.SKU
+            AND AJ_INPLAN.LOC        = ST_STOCK.LOC
+            AND AJ_INPLAN.LOT        = ST_STOCK.LOT
+            AND AJ_INPLAN.STOCKID    = ST_STOCK.STOCKID
+            AND AJ_INPLAN.STOCKGRADE = ST_STOCK.STOCKGRADE
+        LEFT OUTER JOIN ST_SNINFO
+            ON ST_STOCK.STORERKEY = ST_SNINFO.STORERKEY
+            AND ST_STOCK.SKU       = ST_SNINFO.SKU
+            AND ST_STOCK.STOCKID   = ST_SNINFO.STOCKID
+        LEFT OUTER JOIN MS_COST
+            ON AJ_INPLAN.STORERKEY = MS_COST.STORERKEY
+            AND AJ_INPLAN.OTHER04   = MS_COST.COSTCODE
+            AND AJ_INPLAN.SLIPDT  <![CDATA[>=]]>  MS_COST.FROMDATE
+            AND AJ_INPLAN.SLIPDT  <![CDATA[<=]]>  MS_COST.TODATE
+            AND MS_COST.DEL_YN      = 'N'
+        WHERE 1=1
+            AND AJ_APPRREQUEST.STORERKEY = #{gStorerkey}
+            AND AJ_APPRREQUEST.DCCODE = #{fixdccode}
+            AND AJ_INPLAN.SLIPDT LIKE #{yyyymm} || '%'
+            AND AJ_APPRREQUEST.APPROVALSTATUS  !=  '9'
+        ORDER BY AJ_APPRREQUEST.DCCODE
+            , AJ_APPRREQUEST.ORGANIZE
+            , AJ_INPLAN.LOC
+            , AJ_INPLAN.SKU
+    </select>
+
+    <select id="getPyegiList" resultType="cjfw.wms.ib.dto.IbStoWeightResDto">
+        SELECT
+	           AJ_APPRREQUEST.DCCODE                       AS DCCODE                 /**센터코드*/
+	         , AJ_APPRREQUEST.STORERKEY                    AS STORERKEY              /**화주코드*/
+	         , AJ_APPRREQUEST.ORGANIZE                     AS ORGANIZE               /**조직*/
+	         , AJ_INPLAN.AREA                              AS AREA                   /**구역*/
+	         , AJ_INPLAN.DOCTYPE                           AS DOCTYPE                /**문서유형*/
+	         , AJ_INPLAN.DOCDT                             AS DOCDT                  /**문서일자*/
+	         , AJ_INPLAN.DOCNO                             AS DOCNO                  /**문서번호*/
+	         , AJ_INPLAN.DOCLINE                           AS DOCLINE                /**문서라인*/
+	         , AJ_INPLAN.SLIPDT                            AS SLIPDT                 /**전표일자*/
+	         , AJ_INPLAN.SLIPNO                            AS SLIPNO                 /**전표번호*/
+	         , AJ_INPLAN.SLIPLINE                          AS SLIPLINE               /**전표라인*/
+	         , AJ_INPLAN.ORDERTYPE                         AS ORDERTYPE              /**오더유형*/
+	         , AJ_INPLAN.IOTYPE                            AS IOTYPE                 /**입출유형*/
+	         , AJ_INPLAN.SLIPTYPE                          AS SLIPTYPE               /**전표유형*/
+	         , FN_CODEDESCR(AJ_APPRREQUEST.STORERKEY, 'STOCKTYPE', ST_STOCK.STOCKTYPE) AS STOCKTYPENM /**재고유형명*/
+	         , ST_STOCK.STOCKTYPE                          AS STOCKTYPE              /**재고유형*/
+	         , AJ_INPLAN.STOCKGRADE                        AS STOCKGRADE             /**재고등급*/
+	         , FN_CODEDESCR(AJ_APPRREQUEST.STORERKEY, 'STOCKGRADE', AJ_INPLAN.STOCKGRADE) AS STOCKGRADENAME /**재고등급명*/
+	         , MS_LOCATION.ZONE                            AS ZONE                   /**존*/
+	         , AJ_INPLAN.LOC                               AS LOC                    /**로케이션*/
+	         , AJ_INPLAN.SKU                               AS SKU                    /**상품코드*/
+	         , MS_SKU.DESCRIPTION                          AS SKUNAME                /**상품명*/
+	         , AJ_INPLAN.LOT                               AS LOT                    /**로트*/
+	         , AJ_INPLAN.UOM                               AS UOM                    /**단위*/
+	         , AJ_INPLAN.ORDERQTY                          AS TRANQTY                /**조정수량*/
+	         , AJ_INPLAN.OTHER02                           AS DISUSETYPE             /**폐기유형*/
+	         , FN_CODEDESCR(AJ_INPLAN.STORERKEY, 'DISUSETYPE', AJ_INPLAN.OTHER02) AS DISUSETYPENAME /**폐기유형명*/
+	         , AJ_INPLAN.REASONCODE                        AS REASONCODE             /**사유코드*/
+	         , FN_CODEDESCR(AJ_INPLAN.STORERKEY, 'REASONCODE_AJ', AJ_INPLAN.REASONCODE) AS REASONCODENAME /**사유코드명*/
+	         , AJ_INPLAN.OTHER01                           AS IMPUTETYPE              /**귀책*/
+	         , FN_CODEDESCR(AJ_INPLAN.STORERKEY, 'OTHER01_DMD', AJ_INPLAN.OTHER01) AS IMPUTETYPENAME /**귀책명*/
+	         , AJ_INPLAN.OTHER05                           AS PROCESSMAIN            /**물류비귀책여부*/
+	         , AJ_INPLAN.OTHER04                           AS COSTCD                 /**귀속부서*/
+	         , MS_COST.DESCRIPTION                         AS COSTCDNAME             /**귀속부서명*/
+	         , DM_DOCUMENT_D.VENDOR                        AS CUSTKEY                /**거래처코드*/
+	         , MS_CUST.DESCRIPTION                         AS CUSTNAME               /**거래처명*/
+	         , FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01, 'Y') AS NEARDURATIONYN /**유통기한임박여부*/
+	         , CM_LOT.LOTTABLE01                           AS LOTTABLE01             /**유통기한*/
+	         , FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01, 'N') || '/' || MS_SKU.DURATION AS DURATION_TERM /**유통기간(잔여/전체)*/
+	         , AJ_INPLAN.STOCKID                           AS STOCKID                /**재고ID*/
+	         , ST_SNINFO.SERIALNO                          AS SERIALNO               /**이력번호*/
+	         , ST_SNINFO.CONVSERIALNO                      AS CONVSERIALNO           /**B/L번호*/
+	         , ST_SNINFO.SERIALLEVEL                       AS SERIALLEVEL            /**이력레벨*/
+	         , ST_SNINFO.SERIALTYPE                        AS SERIALTYPE             /**이력타입*/
+	         , ST_SNINFO.FACTORYNAME                       AS FACTORYNAME            /**공장명*/
+	         , MS_SKU.COLORDESCR                           AS COLORDESCR             /**색상명*/
+	         , ST_SNINFO.PLACEOFORIGIN                     AS PLACEOFORIGIN          /**원산지*/
+	         , MS_SKU.DURATION                             AS DURATION               /**유통기한기간*/
+	         , MS_SKU.DURATIONTYPE                         AS DURATIONTYPE           /**유통기한구분*/
+	         , ST_SNINFO.BUTCHERYDT                        AS BUTCHERYDT             /**도축일자*/
+	         , ST_SNINFO.CONTRACTCUSTKEY                   AS CONTRACTCOMPANY        /**계약거래처*/
+	         , (SELECT DESCRIPTION FROM MS_CUST WHERE MS_CUST.STORERKEY = ST_SNINFO.STORERKEY AND MS_CUST.CUSTKEY = ST_SNINFO.CONTRACTCUSTKEY AND ROWNUM = 1) AS CONTRACTCOMPANYNAME /**계약거래처명*/
+	         , ST_SNINFO.FROMVALIDDT                       AS FROMVALIDDT            /**유효일자*/
+	         , ST_SNINFO.TOVALIDDT                         AS TOVALIDDT              /**유효일자2*/
+	         , FN_CODEDESCR(AJ_APPRREQUEST.STORERKEY, 'CONTRACTTYPE_SN', ST_SNINFO.CONTRACTTYPE) AS CONTRACTTYPE /**계약유형*/
+	         , ST_SNINFO.STOCKID                           AS BARCODE                /**바코드*/
+	         , AJ_APPRREQUEST.APPROVALSTATUS               AS APPROVALSTATUS         /**결재상태*/
+	         , FN_CODEDESCR(AJ_APPRREQUEST.STORERKEY, 'APPROVALSTATUS', AJ_APPRREQUEST.APPROVALSTATUS) AS APPROVALSTATUSNAME /**결재상태명*/
+	         , AJ_APPRREQUEST.APPROVALREQNO                AS APPROVALREQNO          /**결재요청번호*/
+	         , AJ_APPRREQUEST.APPROVALNO                   AS APPROVALNO             /**결재번호*/
+	         , AJ_APPRREQUEST.EDITDATE                     AS APPROVALDATE           /**결재일자*/
+	         , CASE WHEN AJ_APPRREQUEST.APPROVALSTATUS = '3' AND AJ_INPLAN.STATUS  <![CDATA[<]]>  '90' THEN ('S') WHEN AJ_APPRREQUEST.APPROVALSTATUS = '0' AND AJ_INPLAN.STATUS  <![CDATA[<]]>  '90' THEN ('S') ELSE ('E') END AS CHKFLAG /**체크플래그*/
+	         , FN_CODEDESCR(AJ_INPLAN.STORERKEY, 'STATUS_AJ', AJ_INPLAN.STATUS) AS STATUS_AJ /**상태명*/
+	         , FN_CONV_UOM(AJ_INPLAN.STORERKEY, AJ_INPLAN.SKU, AJ_INPLAN.UOM, 'KG', 1) AS AVGWEIGHT /**평균중량*/
+	         , CASE WHEN NVL(MS_SKU.LINE01,'N') = 'Y' THEN ROUND((AJ_INPLAN.ORDERQTY) / TO_NUMBER(NVL(FN_CONV_UOM(AJ_INPLAN.STORERKEY, AJ_INPLAN.SKU, AJ_INPLAN.UOM, 'KG', 1),0)),2) ELSE 0 END  AS CALBOX /**환산박스*/
+	         , CASE WHEN NVL(MS_SKU.LINE01,'N') = 'Y' THEN NVL(AJ_INPLAN.ETCQTY1,0) ELSE 0 END AS REALORDERBOX /**실박스예정*/
+	         , CASE WHEN NVL(MS_SKU.LINE01,'N') = 'Y' THEN NVL(AJ_INPLAN.ETCQTY2,0) ELSE 0 END AS REALCFMBOX /**실박스확정*/
+	         , CASE WHEN NVL(AJ_INPLAN.ETCQTY2,0) = 0 THEN NVL(AJ_INPLAN.ETCQTY1,0) ELSE 0 END AS TRANBOX /**작업박스*/
+	         , CASE WHEN AJ_INPLAN.DCCODE = '2170' AND NVL(MS_SKU.LINE01,'N') = 'Y' THEN 'Y' ELSE 'N' END AS BOXFLAG /**박스처리유무*/
+	         , NVL(DM_DOCUMENT_D.REFERENCE08,0)            AS REFERENCE08             /**보관료*/
+	         , NVL(DM_DOCUMENT_D.REFERENCE09,0)            AS REFERENCE09             /**보관료확정*/
+	         , NVL(DM_DOCUMENT_D.REFERENCE10,0)            AS REFERENCE10             /**운송료*/
+	         , (SELECT USERNAME FROM CM_USER WHERE USERID = AJ_INPLAN.ADDWHO AND ROWNUM = 1) AS ADDWHO /**등록자*/
+             ,'' AS REFERENCE01
+             , CD.DATA1 AS DISUSE_COST
+             , MS_SKU.NETWEIGHT AS NETWEIGHT
+             , MS_SKU.STORAGETYPE AS STORAGETYPE
+             , FN_CODEDESCR(MS_SKU.STORERKEY,'STORAGETYPE', MS_SKU.STORAGETYPE)                AS STORAGETYPE_NAME
+             , DM_DOCUMENT_D.CHANNEL AS CHANNEL
+             , FN_CODEDESCR(AJ_INPLAN.STORERKEY,'PUTAWAYTYPE', DM_DOCUMENT_D.CHANNEL)                AS CHANNEL_NAME  /* 저장유무명 */
+	    FROM AJ_APPRREQUEST
+	    JOIN AJ_INPLAN
+	        ON AJ_APPRREQUEST.DCCODE = AJ_INPLAN.DCCODE
+	        AND AJ_APPRREQUEST.STORERKEY = AJ_INPLAN.STORERKEY
+	        AND AJ_APPRREQUEST.ORGANIZE = AJ_INPLAN.ORGANIZE
+	        AND AJ_APPRREQUEST.DOCTYPE = AJ_INPLAN.DOCTYPE
+	        AND AJ_APPRREQUEST.DOCDT = AJ_INPLAN.DOCDT
+	        AND AJ_APPRREQUEST.DOCNO = AJ_INPLAN.DOCNO
+	        AND AJ_APPRREQUEST.SLIPDT = AJ_INPLAN.SLIPDT
+	        AND AJ_APPRREQUEST.SLIPNO = AJ_INPLAN.SLIPNO
+	        AND AJ_INPLAN.STOCKGRADE = 'S3'
+	    JOIN DM_DOCUMENT_D
+	        ON AJ_INPLAN.DCCODE = DM_DOCUMENT_D.DCCODE
+	        AND AJ_INPLAN.STORERKEY = DM_DOCUMENT_D.STORERKEY
+	        AND AJ_INPLAN.ORGANIZE = DM_DOCUMENT_D.ORGANIZE
+	        AND AJ_INPLAN.AREA = DM_DOCUMENT_D.AREA
+	        AND AJ_INPLAN.DOCTYPE = DM_DOCUMENT_D.DOCTYPE
+	        AND AJ_INPLAN.DOCDT = DM_DOCUMENT_D.DOCDT
+	        AND AJ_INPLAN.DOCNO = DM_DOCUMENT_D.DOCNO
+	        AND AJ_INPLAN.DOCLINE = DM_DOCUMENT_D.DOCLINE
+	    JOIN DM_DOCUMENT_H
+	        ON DM_DOCUMENT_D.DCCODE = DM_DOCUMENT_H.DCCODE
+	        AND DM_DOCUMENT_D.STORERKEY = DM_DOCUMENT_H.STORERKEY
+	        AND DM_DOCUMENT_D.ORGANIZE = DM_DOCUMENT_H.ORGANIZE
+	        AND DM_DOCUMENT_D.DOCTYPE = DM_DOCUMENT_H.DOCTYPE
+	        AND DM_DOCUMENT_D.DOCDT = DM_DOCUMENT_H.DOCDT
+	        AND DM_DOCUMENT_D.DOCNO = DM_DOCUMENT_H.DOCNO
+	    JOIN MS_SKU
+	        ON MS_SKU.STORERKEY = AJ_INPLAN.STORERKEY
+	        AND MS_SKU.SKU = AJ_INPLAN.SKU
+	        AND MS_SKU.DEL_YN = 'N'
+	    JOIN CM_LOT
+	        ON CM_LOT.STORERKEY = AJ_INPLAN.STORERKEY
+	        AND CM_LOT.LOT = AJ_INPLAN.LOT
+	        AND CM_LOT.DEL_YN = 'N'
+	    JOIN MS_LOCATION
+	        ON MS_LOCATION.DCCODE = AJ_INPLAN.DCCODE
+	        AND MS_LOCATION.LOC = AJ_INPLAN.LOC
+	    LEFT OUTER JOIN ST_STOCK
+	        ON AJ_INPLAN.DCCODE = ST_STOCK.DCCODE
+	        AND AJ_INPLAN.STORERKEY = ST_STOCK.STORERKEY
+	        AND AJ_INPLAN.ORGANIZE = ST_STOCK.ORGANIZE
+	        AND AJ_INPLAN.AREA = ST_STOCK.AREA
+	        AND AJ_INPLAN.SKU = ST_STOCK.SKU
+	        AND AJ_INPLAN.LOC = ST_STOCK.LOC
+	        AND AJ_INPLAN.LOT = ST_STOCK.LOT
+	        AND AJ_INPLAN.STOCKID = ST_STOCK.STOCKID
+	        AND AJ_INPLAN.STOCKGRADE = ST_STOCK.STOCKGRADE
+        LEFT OUTER JOIN ST_SNINFO
+	            ON ST_STOCK.STORERKEY = ST_SNINFO.STORERKEY
+	            AND ST_STOCK.SKU = ST_SNINFO.SKU
+	            AND ST_STOCK.STOCKID = ST_SNINFO.STOCKID
+	    LEFT OUTER JOIN MS_COST
+	        ON AJ_INPLAN.STORERKEY = MS_COST.STORERKEY
+	        AND AJ_INPLAN.OTHER04 = MS_COST.COSTCODE
+	        AND AJ_INPLAN.SLIPDT  <![CDATA[>=]]>  MS_COST.FROMDATE
+	        AND AJ_INPLAN.SLIPDT  <![CDATA[<=]]>  MS_COST.TODATE
+	        AND MS_COST.DEL_YN = 'N'
+	    LEFT OUTER JOIN MS_CUST
+	        ON DM_DOCUMENT_D.STORERKEY = MS_CUST.STORERKEY
+	        AND DM_DOCUMENT_D.VENDOR = MS_CUST.CUSTKEY
+	        AND MS_CUST.CUSTTYPE = 'C'
+	        AND MS_CUST.DEL_YN = 'N'
+        LEFT JOIN CM_CODE_STORER CD ON CD.STORERKEY = 'FW00' AND CD.CODELIST = 'DISUSE_COST' AND CD.BASECODE = '10'                     /*폐기비용-kg당 단가*/
+	    WHERE 1=1
+		    AND AJ_APPRREQUEST.DCCODE    = #{fixdccode}  /*센터*/
+		    AND AJ_APPRREQUEST.STORERKEY = #{gStorerkey} /*고객사*/
+		    <!-- START.권한센터 -->
+		    AND EXISTS (SELECT 1
+                        FROM CM_USER_AUTHORITY
+                        WHERE CM_USER_AUTHORITY.DCCODE = AJ_APPRREQUEST.DCCODE
+                        AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey}
+                        AND CM_USER_AUTHORITY.USERID = #{gUserId}
+                        AND CM_USER_AUTHORITY.DCCODE = #{fixdccode}
+                        AND CM_USER_AUTHORITY.AREA = #{gArea}
+                        )
+            AND AJ_INPLAN.SLIPDT  LIKE #{yyyymm} || '%'
+	    ORDER BY AJ_APPRREQUEST.STATUS, AJ_APPRREQUEST.DCCODE, AJ_APPRREQUEST.ORGANIZE, AJ_INPLAN.LOC, AJ_INPLAN.SKU
+    </select>
+
+    <insert id="insertMaster2" parameterType="cjfw.wms.ib.dto.IbAllWeightResDto">
+        INSERT /* [stStockService.sqlx][insertMaster2][센터별 물동량 정산.기준정보 등록][kdh][20250715]*/
+          INTO MS_STTL_STD (
+            FROM_STTL_BASE_DATE
+            , TO_STTL_BASE_DATE
+            , DCCODE
+            , STORERKEY
+            , CUSTKEY
+            , LCL_CD
+            , MCL_CD
+            , STORAGETYPE
+            , PRICE_CL
+            , PRICE
+            , UOM_QTY
+            , UOM_STD
+            , DC_MERGE
+            , RMK
+            , ADDDATE
+            , EDITDATE
+            , ADDWHO
+            , EDITWHO
+        )
+        VALUES (
+              #{fromSttlBaseDate}
+            , #{toSttlBaseDate}
+            , #{dccode}
+            , #{storerkey}
+            , #{custkey}
+            , #{lclCd}
+            , #{mclCd}
+            , #{storagetype}
+            , #{priceCl}
+            , #{price}
+            , #{uomQty}
+            , #{uomStd}
+            , #{dcMerge}
+            , #{rmk}
+            , SYSDATE
+            , SYSDATE
+            , #{editwho}
+            , #{editwho}
+        )
+    </insert>
+
+    <update id="updateMaster2" parameterType="cjfw.wms.ib.dto.IbAllWeightResDto">
+        UPDATE /* [stStockService.sqlx][updateMaster2][센터별 물동량 정산.기준정보 수정][kdh][20250715]*/
+               MS_STTL_STD
+           SET FROM_STTL_BASE_DATE = #{fromSttlBaseDate}
+             , TO_STTL_BASE_DATE   = #{toSttlBaseDate}
+             , DCCODE              = #{dccode}
+             , CUSTKEY             = #{custkey}
+             , LCL_CD              = #{lclCd}
+             , MCL_CD              = #{mclCd}
+             , STORAGETYPE         = #{storagetype}
+             , PRICE_CL            = #{priceCl}
+             , PRICE               = #{price}
+             , UOM_QTY             = #{uomQty}
+             , UOM_STD             = #{uomStd}
+             , DC_MERGE            = #{dcMerge}
+             , COST_ALLOC_RATE     = #{costAllocRate} /*분담율*/
+             , PPM                 = #{ppm}           /*ppm*/
+             , RMK                 = #{rmk}
+             , EDITDATE            = SYSDATE
+             , EDITWHO             = #{editwho}
+         WHERE FROM_STTL_BASE_DATE = #{orgFromSttlBaseDate}
+           AND TO_STTL_BASE_DATE   = #{orgToSttlBaseDate}
+           AND DCCODE      = #{orgDccode}
+           AND STORERKEY   = #{orgStorerkey}
+           AND CUSTKEY     = #{orgCustkey}
+           AND LCL_CD      = #{orgLclCd}
+           AND MCL_CD      = #{orgMclCd}
+           AND STORAGETYPE = #{orgStoragetype}
+           AND PRICE_CL    = #{orgPriceCl}
+    </update>
+
+    <delete id="deleteMaster2" parameterType="cjfw.wms.ib.dto.IbAllWeightResDto">
+        DELETE /* [ibAllWeightService.sqlx][updateMaster2][센터별 물동량 정산.기준정보 삭제][kdh][20250715]*/
+               FROM MS_STTL_STD
+         WHERE FROM_STTL_BASE_DATE = #{fromSttlBaseDate}
+           AND TO_STTL_BASE_DATE = #{toSttlBaseDate}
+           AND DCCODE      = #{dccode}
+           AND STORERKEY   = #{storerkey}
+           AND CUSTKEY     = #{custkey}
+           AND LCL_CD      = #{lclCd}
+           AND MCL_CD      = #{mclCd}
+           AND STORAGETYPE = #{storagetype}
+           AND PRICE_CL    = #{priceCl}
+    </delete>
+
+    <update id="copyMasterList2" parameterType="cjfw.wms.ib.dto.IbAllWeightReqDto">
+        INSERT /* [ibAllWeightService.sqlx][copyMasterList2][센터별 물동량 정산.기준정보 등록][kdh][20250715]*/
+          INTO MS_STTL_STD (
+            FROM_STTL_BASE_DATE
+            , TO_STTL_BASE_DATE
+            , DCCODE
+            , STORERKEY
+            , CUSTKEY
+            , LCL_CD
+            , MCL_CD
+            , STORAGETYPE
+            , PRICE_CL
+            , PRICE
+            , UOM_QTY
+            , UOM_STD
+            , DC_MERGE
+            , RMK
+            , ADDDATE
+            , EDITDATE
+            , ADDWHO
+            , EDITWHO
+        )
+        SELECT
+              #{fromSttlBaseDate}                  AS FROM_STTL_BASE_DATE
+            , #{toSttlBaseDate}                  AS TO_STTL_BASE_DATE
+            , DCCODE
+            , STORERKEY
+            , CUSTKEY
+            , LCL_CD
+            , MCL_CD
+            , STORAGETYPE
+            , PRICE_CL
+            , PRICE
+            , UOM_QTY
+            , UOM_STD
+            , DC_MERGE
+            , RMK
+            , SYSDATE                      AS ADDDATE
+            , SYSDATE                      AS EDITDATE
+            , #{gUserId}                   AS ADDWHO
+            , #{gUserId}                   AS EDITWHO
+        FROM MS_STTL_STD
+        WHERE STTL_YM   = #{yyyymm}
+          AND DCCODE    = #{fixdccode}
+          AND STORERKEY = #{gStorerkey}
+            <if test="custkey != null and custkey != '' ">
+              AND CUSTKEY   = #{custkey}
+            </if>
+    </update>
+
+    <delete id="deleteMasterList2" parameterType="cjfw.wms.ib.dto.IbAllWeightResDto">
+        DELETE FROM MS_STTL_STD
+         WHERE FROM_STTL_BASE_DATE     = #{fromSttlBaseDate}
+           AND TO_STTL_BASE_DATE     = #{toSttlBaseDate}
+           AND DCCODE      = #{fixdccode}
+           <if test="custkey != null and custkey != '' ">
+             AND CUSTKEY   = #{custkey}
+           </if>
+    </delete>
+</mapper>

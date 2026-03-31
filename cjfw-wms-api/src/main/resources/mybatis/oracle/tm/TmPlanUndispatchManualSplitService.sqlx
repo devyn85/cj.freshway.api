@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="tmPlanUndispatchManualSplitService">
+
+	<select id="getMasterList" resultType="TmPlanUndispatchManualSplitResDto">
+		SELECT /* [tmPlanUndispatchManualSplitService.sqlx][getMasterList][실착지 기준 수동 분할 목록 조회][최화랑][2026.02.14] */
+		      TM_INPLAN.CUSTKEY -- 거래처코드
+		    , FN_DESCR_CUST(TM_INPLAN.STORERKEY, TM_INPLAN.CUSTKEY) AS CUSTNAME -- 거래처명
+		    , TM_INPLAN.TRUTHCUSTKEY -- 실착지코드
+		    , FN_DESCR_CUST(TM_INPLAN.STORERKEY, TM_INPLAN.TRUTHCUSTKEY) AS TRUTHCUSTNAME -- 실착지명
+		    , MS_SKU.DESCRIPTION  AS SKUDESCR -- 상품명
+		    , TM_INPLAN.DCCODE -- 물류센터
+		    , TM_INPLAN.SLIPDT
+		    , TM_INPLAN.SLIPNO -- 전표번호
+		    , WD_INPLAN.SLIPLINE -- 전표라인
+		    , WD_INPLAN.ORDERQTY -- 수량
+		    , FN_CODEDESCR(TM_INPLAN.STORERKEY, 'STORAGETYPE', MS_SKU.STORAGETYPE) AS STORAGETYPEDESC -- 저장조건
+		    , WD_INPLAN.SKU -- 상품코드
+		    , WD_INPLAN.UOM -- 단위
+            , FN_CONV_UOM(WD_INPLAN.STORERKEY, WD_INPLAN.SKU, WD_INPLAN.UOM, DECODE(WD_INPLAN.UOM, 'KG', 'BASE', 'KG'), WD_INPLAN.ORDERQTY) AS WEIGHT -- 중량(kg)
+            , TRUNC(NVL((WD_INPLAN.ORDERQTY * (MS_UOM.BUNJA / MS_UOM.BUNMO) * MS_UOM.CUBE), 0) / POWER(10, 9), 5) AS CUBE -- 체적(m³)
+		FROM TM_INPLAN
+		INNER JOIN WD_INPLAN
+		     ON  WD_INPLAN.SLIPNO = TM_INPLAN.SLIPNO
+		     AND WD_INPLAN.SLIPDT = TM_INPLAN.SLIPDT
+		     AND WD_INPLAN.DCCODE = TM_INPLAN.DCCODE
+		INNER JOIN DM_DOCUMENT_D
+  		     ON  DM_DOCUMENT_D.DCCODE       = WD_INPLAN.DCCODE
+  		     AND DM_DOCUMENT_D.DOCTYPE      = WD_INPLAN.DOCTYPE
+  		     AND DM_DOCUMENT_D.DELIVERYDATE = WD_INPLAN.SLIPDT
+  		     AND DM_DOCUMENT_D.DOCNO        = WD_INPLAN.DOCNO
+  		     AND DM_DOCUMENT_D.DOCLINE      = WD_INPLAN.DOCLINE
+  		     AND DM_DOCUMENT_D.DEL_YN       = 'N'
+		LEFT OUTER JOIN MS_SKU
+		     ON  MS_SKU.STORERKEY = WD_INPLAN.STORERKEY
+		     AND MS_SKU.SKU       = WD_INPLAN.SKU
+        LEFT JOIN MS_UOM
+             ON  MS_UOM.STORERKEY = WD_INPLAN.STORERKEY
+             AND MS_UOM.SKU       = WD_INPLAN.SKU
+             AND MS_UOM.UOM       = DECODE(WD_INPLAN.UOM, 'KG', 'BASE', 'KG')
+		WHERE TM_INPLAN.DCCODE          = #{dccode}
+		  AND TM_INPLAN.DELIVERYDT      = #{deliveryDate}
+		  AND TM_INPLAN.SLIPDT          = #{deliveryDate}
+		  AND TM_INPLAN.TM_DELIVERYTYPE = #{tmDeliveryType}
+		  AND TM_INPLAN.TRUTHCUSTKEY    = #{truthCustkey}
+		  AND TM_INPLAN.DEL_YN          = 'N'
+		  <if test="dispatchStatus != null and dispatchStatus != ''">
+		  AND TM_INPLAN.STATUS IN
+		  <foreach collection="dispatchStatus.split(',')" item="item" open="(" separator="," close=")">
+		  	#{item}
+		  </foreach>
+		  </if>
+	</select>
+    
+</mapper>

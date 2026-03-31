@@ -1,0 +1,519 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="tmAmountDailyService">
+
+    <select id="getMasterList" resultType="TmAmountDailyResDto" parameterType="TmAmountDailyReqDto">
+		SELECT /* [TmAmountDailyService.sqlx][getMasterList][일자별 수당목록 조회][KwonJungyun][2025.08.01] */
+			   'R'                                AS ROW_STATUS
+			,  TM_DAY_ALLOWANCE.SERIALKEY         AS SERIALKEY			
+			,  TM_DAY_ALLOWANCE.DCCODE            AS DCCODE
+			,  TM_DAY_ALLOWANCE.COURIER           AS COURIER
+			,  MS_CARRIER.DESCRIPTION             AS COURIERNAME
+			,  TM_DAY_ALLOWANCE.CARNO             AS CARNO
+			,  TM_DAY_ALLOWANCE.STTL_ITEM_CD      AS STTL_ITEM_CD		
+			,  TM_DAY_ALLOWANCE.AMOUNT            AS AMOUNT
+			,  TM_DAY_ALLOWANCE.ALLOWANCE_DATE    AS ALLOWANCE_DATE
+			,  TM_DAY_ALLOWANCE.RMK               AS RMK
+			,  TM_DAY_ALLOWANCE.ADDDATE           AS ADDDATE
+			,  TM_DAY_ALLOWANCE.EDITDATE          AS EDITDATE
+			,  TM_DAY_ALLOWANCE.ADDWHO            AS ADDWHO
+			,  TM_DAY_ALLOWANCE.EDITWHO           AS EDITWHO
+			,  CM_CAR.CARCAPACITY                 AS CARCAPACITY
+			,  CM_CAR.CARAGENTKEY                 AS CARAGENTKEY
+			,  CAR_AGENT.DESCRIPTION              AS CARAGENTNAME
+			,  TM_DAY_ALLOWANCE.SLAVE_COURIER     AS CARAGENTCD
+			,  CM_CAR.CONTRACTTYPE                AS CONTRACTTYPE
+			,  USER1.USER_NM                      AS ADDWHONAME       /* 등록자명 */
+			,  USER2.USER_NM                      AS EDITWHONAME      /* 수정자명 */	
+			,  NVL((SELECT COUNT(*)
+					FROM TM_DAY_ALLOWANCE_DOC A
+					WHERE 1=1
+					AND A.DOC_NAME    = 'TRSP_DAILY'
+					AND A.SERIALKEY_H = TM_DAY_ALLOWANCE.SERIALKEY)
+				, 0)                             AS ATTACHMENT
+		FROM TM_DAY_ALLOWANCE
+		JOIN CM_CAR ON TM_DAY_ALLOWANCE.CARNO = CM_CAR.CARNO
+		LEFT OUTER JOIN MS_CARRIER
+		     ON MS_CARRIER.CARRIERKEY = TM_DAY_ALLOWANCE.COURIER 
+		    AND MS_CARRIER.DEL_YN = 'N'
+		    AND MS_CARRIER.CARRIERTYPE = 'LOCAL'
+		LEFT OUTER JOIN MS_CARRIER CAR_AGENT
+		     ON CAR_AGENT.CARRIERKEY = TM_DAY_ALLOWANCE.SLAVE_COURIER 
+		    AND CAR_AGENT.DEL_YN = 'N'
+		    AND CAR_AGENT.CARRIERTYPE = 'SUBC'
+		LEFT JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = TM_DAY_ALLOWANCE.ADDWHO  /*등록자명*/
+		LEFT JOIN FRAMEONE_USER USER2 ON USER2.USER_ID = TM_DAY_ALLOWANCE.EDITWHO /*수정자명*/
+		LEFT JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = TM_DAY_ALLOWANCE.ADDWHO  /*등록자명*/
+		LEFT JOIN FRAMEONE_USER USER2 ON USER2.USER_ID = TM_DAY_ALLOWANCE.EDITWHO /*수정자명*/
+		<where>
+		<if test="fromdt != null and fromdt != ''">
+		    AND TM_DAY_ALLOWANCE.ALLOWANCE_DATE <![CDATA[>=]]> #{fromdt}
+		</if>
+		<if test="todt != null and todt != ''">
+		    AND TM_DAY_ALLOWANCE.ALLOWANCE_DATE <![CDATA[<=]]> #{todt}
+		</if>
+		<if test="sttlitemcd != null and sttlitemcd != ''">
+		    AND TM_DAY_ALLOWANCE.STTL_ITEM_CD = #{sttlitemcd}
+		</if>
+		<if test="courier != null and courier != ''">
+		    AND TM_DAY_ALLOWANCE.COURIER IN (
+				SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL))
+				FROM (SELECT #{courier} AS VAL FROM DUAL)
+				CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) > 0
+			)
+		</if>
+		<if test="carno != null and carno != ''">
+		    AND TM_DAY_ALLOWANCE.CARNO IN (
+				SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) 
+				FROM (SELECT #{carno} AS VAL FROM DUAL)
+				CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) > 0
+			)
+		</if>
+		<if test="carcapacity != null and carcapacity != ''">
+		    AND CM_CAR.CARCAPACITY = #{carcapacity}
+		</if>
+		<if test="fixdccode != null and fixdccode != ''">
+		    AND TM_DAY_ALLOWANCE.DCCODE = #{fixdccode}
+		</if>
+		<if test="contractType != null and contractType != ''">
+		    AND CM_CAR.CONTRACTTYPE = #{contractType}
+		</if>
+		</where>
+		ORDER BY
+		   TM_DAY_ALLOWANCE.COURIER 
+		  ,TM_DAY_ALLOWANCE.ALLOWANCE_DATE
+		  ,TM_DAY_ALLOWANCE.CARNO			
+    </select>
+    
+    <select id="getCarInfo" resultType="TmAmountDailyResDto">
+	   SELECT  /* [TmAmountDailyService.sqlx][getCarInfo][차량정보 조회][KwonJungyun][2025.08.01] */
+			    A.COURIER        AS COURIER
+			  , A.CARNO          AS CARNO
+			  , A.CARCAPACITY    AS CARCAPACITY
+			  , A.CONTRACTTYPE   AS CONTRACTTYPE 
+			  , C.DESCRIPTION    AS CARAGENTNAME
+			  , A.CARAGENTKEY    AS CARAGENTCD
+			  , B.DESCRIPTION    AS COURIERNAME
+			  , A.DEF_DCCODE     AS DCCODE
+			  , B.DESCRIPTION    AS DESCRIPTION
+		FROM CM_CAR A
+		LEFT JOIN MS_CARRIER B
+		        ON A.COURIER = B.CARRIERKEY
+		       AND B.CARRIERTYPE = 'LOCAL'
+		       AND B.DEL_YN = 'N'
+		LEFT JOIN MS_CARRIER C
+			    ON A.CARAGENTKEY = C.CARRIERKEY
+			   AND C.CARRIERTYPE = 'SUBC'
+			   AND C.DEL_YN = 'N'
+		LEFT JOIN CM_CODE_STORER CD_CLOSETYPE
+		        ON CD_CLOSETYPE.CODELIST = 'CUSTORDERCLOSETYPE'
+		       AND TRIM(TO_CHAR(A.OTHER03)) = TRIM(CD_CLOSETYPE.BASECODE)
+		WHERE A.CARNO = #{carno}
+    </select>
+       
+    <select id="trspCloseChk" resultType="TmAmountDailyResDto">
+	    SELECT
+	 	      FN_CHECK_TRSP_CLOSE( #{dccode},#{courier},#{allowanceDate})    AS VALCHK
+	 	    , #{courier}                                                     AS COURIER
+	 	    , MS_CARRIER.DESCRIPTION                                         AS COURIERNAME
+	 	    , TO_CHAR(TO_DATE(#{allowanceDate},'YYYY-MM-DD'),'YYYY-MM-DD')   AS ALLOWANCE_DATE
+		FROM DUAL
+		JOIN MS_CARRIER 
+		   ON MS_CARRIER.CARRIERKEY  = #{courier}
+		  AND MS_CARRIER.CARRIERTYPE = 'LOCAL'
+		  AND MS_CARRIER.DEL_YN      = 'N'
+    </select>
+    
+	<insert id="insertMaster" parameterType="TmAmountDailyResDto">
+	    INSERT /* [TmAmountDailyService.sqlx][insertMaster][일자별 수당관리 저장][KwonJungyun][2025.08.01] */
+	    INTO TM_DAY_ALLOWANCE (
+	          DCCODE
+	        , COURIER
+	        , CARNO
+	        , STTL_ITEM_CD
+	        , AMOUNT
+	        , ALLOWANCE_DATE
+	        , RMK
+	        , ADDDATE
+	        , EDITDATE
+	        , ADDWHO
+	        , EDITWHO
+	        , SLAVE_COURIER
+	    ) VALUES
+	    (
+	          #{dccode}
+	        , #{courier}
+	        , #{carno}
+	        , #{sttlItemCd}
+	        , #{amount}
+	        , #{allowanceDate}
+	        , #{rmk}
+	        , SYSDATE
+	        , SYSDATE
+	        , #{gUserId}
+	        , #{gUserId}
+	        , #{caragentcd}
+	     )
+	</insert>
+	
+	<select id="getDayAllowance" resultType="HashMap" parameterType="TmAmountDailyReqDto">
+	       SELECT /* [TmAmountDailyService.sqlx][getDayAllowance][일자별 수당 한 건 조회][KwonJungyun][2025.08.01] */
+	              TM_DAY_ALLOWANCE.SERIALKEY         AS SERIALKEY 
+	           ,  TM_DAY_ALLOWANCE.DCCODE            AS DCCODE
+	           ,  TM_DAY_ALLOWANCE.COURIER           AS COURIER
+	           ,  TM_DAY_ALLOWANCE.CARNO             AS CARNO
+	           ,  TM_DAY_ALLOWANCE.ALLOWANCE_DATE    AS ALLOWANCE_DATE
+	       FROM TM_DAY_ALLOWANCE
+	       WHERE TM_DAY_ALLOWANCE.SERIALKEY = #{serialkeyH}
+	</select>    
+	
+	<update id="updateMaster" parameterType="TmAmountDailyResDto">
+	    UPDATE /* [TmAmountDailyService.sqlx][updateMaster][일자별 수당관리 수정][KwonJungyun][2025.08.01] */
+	    TM_DAY_ALLOWANCE
+	    SET
+	        COURIER        = #{courier},
+	        CARNO          = #{carno},
+	        STTL_ITEM_CD   = #{sttlItemCd},
+	        AMOUNT         = #{amount},
+	        ALLOWANCE_DATE = #{allowanceDate},
+	        RMK            = #{rmk},
+	        EDITDATE       = SYSDATE,
+	        EDITWHO        = #{gUserId},
+	        SLAVE_COURIER  = #{caragentcd}
+	    WHERE
+	       SERIALKEY = #{serialkey}
+	</update>
+	
+	<delete id="deleteMaster" parameterType="TmAmountDailyResDto">
+	    DELETE /* [TmAmountDailyService.sqlx][deleteMaster][일자별 수당관리 삭제][KwonJungyun][2025.08.01] */
+	    FROM TM_DAY_ALLOWANCE
+	    WHERE
+	       SERIALKEY = #{serialkey}
+	</delete>
+	
+	<select id="getExcelValChk" parameterType="java.util.List" resultType="TmAmountDailyResDto">
+		WITH TEMP AS (    /* [TmAmountDailyService.sqlx][getExcelValChk][엑셀업로드 검증][sunho.kim][2025.05.22] */
+		<foreach collection="list" item="item" separator="UNION ALL">
+			SELECT
+	               REGEXP_REPLACE(#{item.dccode}, '[^0-9]', '')                          AS DCCODE             /* 물류센터 */
+	             , #{item.courier}                                                       AS COURIERNAME        /* 택배사명 */
+	             , #{item.courier}                                                       AS COURIER            /* 운송업체명 */
+	             , REPLACE(#{item.allowanceDate}, '-', '')                               AS ALLOWANCE_DATE     /* 종료일자 */
+	             , #{item.carno}                                                         AS CARNO              /* 차량번호 */
+	             , SUBSTR(#{item.caragentname}, INSTR(#{item.caragentname}, ']') + 1)    AS CARAGENTNAME       /* 2차운송사명 */
+	             , #{item.caragentcd}                                                    AS SLAVE_COURIER      /* 2차운송사 */  
+	             , #{item.sttlItemCd}                                                    AS STTLITEMCD         /* 정산항목코드 */
+	             , #{item.amount}                                                        AS AMOUNT             /* 금액 */
+	             , #{item.rmk}                                                           AS RMK                /* 비고 */
+			FROM DUAL
+		</foreach>
+		)
+		,NORM AS (
+            SELECT 
+	                T.DCCODE
+	              , T.ALLOWANCE_DATE
+	              , T.CARNO
+	              , T.SLAVE_COURIER
+	              , T.AMOUNT
+	              , T.RMK
+	              , NVL(A.DESCRIPTION, CAR.DESCRIPTION)        AS COURIERNAME       /* 운송사명 */
+	              , NVL(A.CARRIERKEY, CAR.COURIER)             AS COURIER           /* 운송사 */
+	              , NVL(B.DESCRIPTION, CAR.CARAGENTNAME)       AS CARAGENTNAME      /* 2차운송사명 */
+	              , NVL(B.CARRIERKEY,CAR.CARAGENTCD)           AS CARAGENTCD        /* 2차운송사 */
+	              , NVL(CD1.BASECODE,'')                       AS STTLITEMCD        /* 정산항목코드 */
+	              , CAR.CONTRACTTYPE                           AS CONTRACTTYPE      /* 계약유형 */
+	              , CAR.CARCAPACITY                            AS CARCAPACITY       /* 톤수 */
+	              , CASE
+	                   WHEN CAR.CONTRACTTYPE = 'DELIVERY'      THEN NVL(LIST1.DELIVERY     ,'N')
+	                   WHEN CAR.CONTRACTTYPE = 'FIX'           THEN NVL(LIST1.FIX          ,'N')
+	                   WHEN CAR.CONTRACTTYPE = 'FIXTEMPORARY'  THEN NVL(LIST1.FIXTEMPORARY ,'N')
+	                   WHEN CAR.CONTRACTTYPE = 'TEMPORARY'     THEN NVL(LIST1.TEMPORARY    ,'N')
+	                   WHEN CAR.CONTRACTTYPE = 'MONTHLY'       THEN NVL(LIST1.MONTHLY      ,'N')
+	                   ELSE 'N'
+	               END           AS LIST1_CONTRACT_YN
+	       FROM TEMP T
+            /* 1차 운송사 조인 */
+            LEFT JOIN MS_CARRIER A
+              ON A.DESCRIPTION = T.COURIERNAME 
+             AND A.CARRIERTYPE = 'LOCAL'
+            /* 2차 운송사 조인 */
+            LEFT JOIN MS_CARRIER B
+              ON B.DESCRIPTION = T.CARAGENTNAME 
+             AND B.CARRIERTYPE = 'SUBC'
+            /* 정산항목코드 매핑 */
+            LEFT OUTER JOIN CM_CODE_STORER CD1
+              ON CD1.STORERKEY  = 'FW00' 
+             AND CD1.CODELIST   = 'TM_CALC_ITEM'
+             AND CD1.BASEDESCR  = T.STTLITEMCD
+             
+           LEFT OUTER JOIN (	  
+				SELECT 
+					  A.COURIER        AS COURIER
+					, A.CARNO          AS CARNO
+					, A.CARCAPACITY    AS CARCAPACITY
+					, A.CONTRACTTYPE   AS CONTRACTTYPE
+					, C.DESCRIPTION    AS CARAGENTNAME
+					, C.CARRIERKEY     AS CARAGENTCD
+					, B.DESCRIPTION    AS COURIERNAME
+					, A.DEF_DCCODE     AS DCCODE
+					, B.DESCRIPTION    AS DESCRIPTION 
+				FROM CM_CAR A
+				LEFT JOIN MS_CARRIER B
+				   ON A.COURIER = B.CARRIERKEY
+				  AND B.CARRIERTYPE = 'LOCAL' 
+				LEFT JOIN MS_CARRIER C
+				   ON A.CARAGENTKEY = C.CARRIERKEY
+				  AND C.CARRIERTYPE = 'SUBC' 
+				LEFT JOIN CM_CODE_STORER CD_CLOSETYPE
+				   ON CD_CLOSETYPE.CODELIST = 'CUSTORDERCLOSETYPE'
+				  AND TRIM(TO_CHAR(A.CAR_ORDERCLOSE_CD)) = TRIM(CD_CLOSETYPE.BASECODE)
+			) CAR
+			ON CAR.CARNO = T.CARNO
+			LEFT OUTER JOIN CM_CODE_STORER CD4
+			     ON CD4.STORERKEY  = 'FW00' 
+			    AND CD4.CODELIST   = 'CONTRACTTYPE'
+			    AND CD4.BASEDESCR  = CAR.CONTRACTTYPE
+			LEFT OUTER JOIN CM_CODE_STORER CD5
+			     ON CD5.STORERKEY  = 'STD' 
+			    AND CD5.CODELIST   = 'CONTRACTTYPE'
+			    AND CD5.BASEDESCR  = CAR.CONTRACTTYPE
+	<!-- LEFT OUTER JOIN (
+                 SELECT 
+                     NVL(ENTRUSTED_CAR_YN, 'N') AS DELIVERY
+                   , NVL(FIX_CAR_YN, 'N') AS FIX
+                   , NVL(TMP_CAR_YN, 'N') AS FIXTEMPORARY
+                   , NVL(ACTUAL_COST_CAR_YN,'N') AS TEMPORARY
+                   , NVL(MM_CONTRACT_YN,'N')  AS MONTHLY
+                   , COURIER AS COURIER
+                   , STTL_ITEM_CD
+                   , DCCODE
+                   FROM TM_TRSP_COST_STTL_ITEM
+                  
+            ) LIST1 -->
+		LEFT OUTER JOIN (
+			SELECT DISTINCT
+		           X.DELIVERY
+		         , X.FIX
+		         , X.FIXTEMPORARY
+		         , X.TEMPORARY
+		         , X.MONTHLY
+		         , X.COURIER
+		         , X.STTL_ITEM_CD
+		         , X.DCCODE
+		    FROM (
+		            SELECT
+		                   NVL(A.ENTRUSTED_CAR_YN, 'N')    AS DELIVERY
+		                 , NVL(A.FIX_CAR_YN, 'N')          AS FIX
+		                 , NVL(A.TMP_CAR_YN, 'N')          AS FIXTEMPORARY
+		                 , NVL(A.ACTUAL_COST_CAR_YN, 'N')  AS TEMPORARY
+		                 , NVL(A.MM_CONTRACT_YN, 'N')      AS MONTHLY
+		                 , A.COURIER                       AS COURIER
+		                 , A.STTL_ITEM_CD                  AS STTL_ITEM_CD
+		                 , A.DCCODE                        AS DCCODE
+		              FROM TM_TRSP_COST_STTL_ITEM A
+		
+		            UNION ALL
+		
+		            SELECT
+		                   NVL(A.ENTRUSTED_CAR_YN, 'N')    AS DELIVERY
+		                 , NVL(A.FIX_CAR_YN, 'N')          AS FIX
+		                 , NVL(A.TMP_CAR_YN, 'N')          AS FIXTEMPORARY
+		                 , NVL(A.ACTUAL_COST_CAR_YN, 'N')  AS TEMPORARY
+		                 , NVL(A.MM_CONTRACT_YN, 'N')      AS MONTHLY
+		                 , A.COURIER                       AS COURIER
+		                 , 'P10'                           AS STTL_ITEM_CD
+		                 , A.DCCODE                        AS DCCODE
+		              FROM TM_TRSP_COST_STTL_ITEM A
+		             WHERE A.STTL_ITEM_CD = 'P09'
+		
+		            UNION ALL
+		
+		            SELECT
+		                   NVL(A.ENTRUSTED_CAR_YN, 'N')    AS DELIVERY
+		                 , NVL(A.FIX_CAR_YN, 'N')          AS FIX
+		                 , NVL(A.TMP_CAR_YN, 'N')          AS FIXTEMPORARY
+		                 , NVL(A.ACTUAL_COST_CAR_YN, 'N')  AS TEMPORARY
+		                 , NVL(A.MM_CONTRACT_YN, 'N')      AS MONTHLY
+		                 , A.COURIER                       AS COURIER
+		                 , 'P11'                           AS STTL_ITEM_CD
+		                 , A.DCCODE                        AS DCCODE
+		              FROM TM_TRSP_COST_STTL_ITEM A
+		             WHERE A.STTL_ITEM_CD = 'P09'
+		
+		            UNION ALL
+		
+		            SELECT
+		                   NVL(A.ENTRUSTED_CAR_YN, 'N')    AS DELIVERY
+		                 , NVL(A.FIX_CAR_YN, 'N')          AS FIX
+		                 , NVL(A.TMP_CAR_YN, 'N')          AS FIXTEMPORARY
+		                 , NVL(A.ACTUAL_COST_CAR_YN, 'N')  AS TEMPORARY
+		                 , NVL(A.MM_CONTRACT_YN, 'N')      AS MONTHLY
+		                 , A.COURIER                       AS COURIER
+		                 , 'P16'                           AS STTL_ITEM_CD
+		                 , A.DCCODE                        AS DCCODE
+		              FROM TM_TRSP_COST_STTL_ITEM A
+		             WHERE A.STTL_ITEM_CD = 'P15'
+		
+		            UNION ALL
+		
+		            SELECT
+		                   NVL(A.ENTRUSTED_CAR_YN, 'N')    AS DELIVERY
+		                 , NVL(A.FIX_CAR_YN, 'N')          AS FIX
+		                 , NVL(A.TMP_CAR_YN, 'N')          AS FIXTEMPORARY
+		                 , NVL(A.ACTUAL_COST_CAR_YN, 'N')  AS TEMPORARY
+		                 , NVL(A.MM_CONTRACT_YN, 'N')      AS MONTHLY
+		                 , A.COURIER                       AS COURIER
+		                 , 'P17'                           AS STTL_ITEM_CD
+		                 , A.DCCODE                        AS DCCODE
+		              FROM TM_TRSP_COST_STTL_ITEM A
+		             WHERE A.STTL_ITEM_CD = 'P15'
+		
+		            UNION ALL
+		
+		            SELECT
+		                   NVL(A.ENTRUSTED_CAR_YN, 'N')    AS DELIVERY
+		                 , NVL(A.FIX_CAR_YN, 'N')          AS FIX
+		                 , NVL(A.TMP_CAR_YN, 'N')          AS FIXTEMPORARY
+		                 , NVL(A.ACTUAL_COST_CAR_YN, 'N')  AS TEMPORARY
+		                 , NVL(A.MM_CONTRACT_YN, 'N')      AS MONTHLY
+		                 , A.COURIER                       AS COURIER
+		                 , 'P18'                           AS STTL_ITEM_CD
+		                 , A.DCCODE                        AS DCCODE
+		              FROM TM_TRSP_COST_STTL_ITEM A
+		             WHERE A.STTL_ITEM_CD = 'P15'
+		             
+		            UNION ALL
+		
+		            SELECT
+		                   NVL(A.ENTRUSTED_CAR_YN, 'N')    AS DELIVERY
+		                 , NVL(A.FIX_CAR_YN, 'N')          AS FIX
+		                 , NVL(A.TMP_CAR_YN, 'N')          AS FIXTEMPORARY
+		                 , NVL(A.ACTUAL_COST_CAR_YN, 'N')  AS TEMPORARY
+		                 , NVL(A.MM_CONTRACT_YN, 'N')      AS MONTHLY
+		                 , A.COURIER                       AS COURIER
+		                 , 'P12'                           AS STTL_ITEM_CD
+		                 , A.DCCODE                        AS DCCODE
+		              FROM TM_TRSP_COST_STTL_ITEM A
+		             WHERE A.STTL_ITEM_CD = 'P12'
+		             
+		            UNION ALL
+		
+		            SELECT
+		                   NVL(A.ENTRUSTED_CAR_YN, 'N')    AS DELIVERY
+		                 , NVL(A.FIX_CAR_YN, 'N')          AS FIX
+		                 , NVL(A.TMP_CAR_YN, 'N')          AS FIXTEMPORARY
+		                 , NVL(A.ACTUAL_COST_CAR_YN, 'N')  AS TEMPORARY
+		                 , NVL(A.MM_CONTRACT_YN, 'N')      AS MONTHLY
+		                 , A.COURIER                       AS COURIER
+		                 , 'P25'                           AS STTL_ITEM_CD
+		                 , A.DCCODE                        AS DCCODE
+		              FROM TM_TRSP_COST_STTL_ITEM A
+		             WHERE A.STTL_ITEM_CD = 'P25'
+		           ) X
+			) LIST1
+				 ON LIST1.COURIER = A.CARRIERKEY
+				AND LIST1.STTL_ITEM_CD = CD1.BASECODE 
+				AND LIST1.DCCODE = T.DCCODE  
+		)
+		,VALCHK AS( SELECT
+					N.*
+					,CASE
+					  WHEN N.COURIER IS NULL THEN '운송사 미입력'
+					  WHEN N.DCCODE  IS NULL THEN '물류센터 미입력'
+					  WHEN N.CARNO IS NULL THEN '차량번호 미입력'
+					  WHEN N.STTLITEMCD IS NULL THEN '관리항목 미입력'
+					  WHEN N.AMOUNT IS NULL THEN '금액 미입력'
+					  WHEN N.ALLOWANCE_DATE IS NULL THEN '일자 미입력'
+					  WHEN N.CARAGENTNAME IS NULL THEN '2차운송사 미입력'
+					  WHEN N.CONTRACTTYPE = 'TEMPORARY' AND (N.CARAGENTCD IS NULL or N.CARAGENTNAME IS NULL) THEN '2차 운송사 미입력'
+					  WHEN FN_CHECK_TRSP_CLOSE( N.DCCODE,N.COURIER,N.ALLOWANCE_DATE) = 'Y' THEN '해당 월의 운송비가 마감되어 등록할 수 없습니다.'
+					  WHEN LIST1_CONTRACT_YN = 'N' THEN '해당 항목은 등록되지 않은 항목입니다.'
+					  WHEN (
+					        SELECT COUNT(1)
+					          FROM TM_DAY_ALLOWANCE
+					         WHERE DCCODE = N.DCCODE
+					           AND COURIER = N.COURIER
+					           AND CARNO = N.CARNO
+					           AND ALLOWANCE_DATE = N.ALLOWANCE_DATE
+					           AND STTL_ITEM_CD = N.STTLITEMCD
+					       ) <![CDATA[>]]>0 THEN '중복 데이터 존재'
+					  ELSE NULL
+					END AS ERRMSG
+				FROM NORM N
+		)
+		
+		SELECT 
+			 A.* 
+			,CASE WHEN A.ERRMSG IS NOT NULL THEN 'Y' ELSE 'N' END AS ERRYN
+		FROM VALCHK A
+	</select>
+	
+    <select id="getPopupUploadFileList" resultType="TmAmountDailyFilePopupResDto">
+        SELECT  /* [TmAmountDailyService.sqlx][getPopupUploadFileList][증빙첨부 Popup Upload File List 조회][sunho.kim][2026.03.04] */
+                SERIALKEY              AS SERIALKEY             /* 일련번호 */
+               ,SERIALKEY_H            AS SERIALKEY_H           /* 헤더ID */ 
+               ,DOC_NAME               AS DOC_NAME              /* 문서구분명 */
+               ,COURIER                AS COURIER               /* 운송사코드 */
+               ,CARNO                  AS CARNO                 /* 차량번호 */
+               ,FILE_NAME              AS FILE_NM               /* 파일명 */  
+               ,FILE_EXTENSION         AS ATTCH_FILE_EXT_NM     /* 파일확장자 */ 
+               ,FILE_LOCATION          AS FILE_LOCATION         /* 업로드 대상 파일 경로 */    
+               ,FILE_SIZE_BYTES        AS ATTCH_FILE_SZ         /* 파일크기(byte) */ 
+               ,UPLOAD_FILE_NAME       AS UPLOAD_FILE_NAME      /* 변환 후 업로드된 파일명 */
+               ,STATUS                 AS STATUS                /* 상태 */ 
+               ,ADDWHO                 AS ADDWHO                /* 최초등록자 */ 
+               ,ADDDATE                AS ADDDATE               /* 최초등록시간 */ 
+               ,EDITWHO                AS EDITWHO               /* 최종변경자 */ 
+               ,EDITDATE               AS EDITDATE              /* 최종변경시간 */
+        FROM    TM_DAY_ALLOWANCE_DOC
+        WHERE   SERIALKEY_H = #{serialkeyH}
+        <if test="serialkey != null and serialkey !=''">
+          AND   SERIALKEY   = #{serialkey}
+        </if>
+          AND   STATUS      = 'Y'
+    </select>
+    
+    <insert id="insertUploadFile">
+        INSERT  /* [TmAmountDailyService.sqlx][insertUploadFile][증빙첨부 저장][sunho.kim][2025.08.04] */ 
+        INTO TM_DAY_ALLOWANCE_DOC 
+               (   
+                 SERIALKEY_H  
+               , DOC_NAME  
+               , COURIER
+               , CARNO
+               , FILE_NAME  
+               , FILE_EXTENSION  
+               , FILE_LOCATION  
+               , FILE_SIZE_BYTES  
+               , UPLOAD_FILE_NAME  
+               , STATUS 
+               , ADDWHO
+               , ADDDATE
+               , EDITWHO
+               , EDITDATE
+               )
+        VALUES (    
+                 #{serialkeyH}
+               , #{docName}
+               , #{courier}
+               , #{carno} 
+               , #{fileNm} 
+               , #{attchFileExtNm}
+               , #{fileLocation}
+               , #{attchFileSz} 
+               , #{uploadFileName}
+               , 'Y'   
+               , #{gUserId}
+               , SYSDATE 
+               , #{gUserId} 
+               , SYSDATE 
+             )  
+    </insert> 
+    	
+    <delete id="deleteUploadFile">
+        DELETE  /* [TmAmountDailyService.sqlx][deleteUploadFile][증빙첨부 삭제][sunho.kim][2025.08.04] */ 
+        TM_DAY_ALLOWANCE_DOC
+        WHERE  SERIALKEY            = #{serialkey}  
+    </delete>	
+    
+</mapper>

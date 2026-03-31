@@ -1,0 +1,261 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="kxStorageFeeService">
+
+    <!-- (20260106) KX_STORAGEFEE 테이블에 I/U 트리거 존재함 (TOBE는 트리거 분리됨)
+         : TRKX_STORAGEFEE.TR_INSERT 내부의 체크로직(수불마감일자 체크) 발췌하여 미리 수행후 INSERT 작업 진행함.  
+         : STORERKEY(FW00),DCCODE(1000) 고정값 사용 / STOCKDATE = SYSDATE 임
+    -->
+
+    <select id="selectMagamYn" parameterType="BatchParamsUtil" resultType="String">
+        SELECT /* [kxStorageFeeService.sqlx][selectMagamYn][수불마감여부체크(트리거내부로직)][김환수][20260105] */
+               CASE WHEN FN_GETSUBULCLOSEDATE('1000', 'FW00') <![CDATA[>=]]> TO_CHAR(SYSDATE, 'YYYYMMDD')
+                    THEN FN_GETSUBULCLOSEDATE('1000', 'FW00')
+                    ELSE 'N'
+               END AS MAGAM_YN
+          FROM DUAL
+         WHERE 1=1
+    </select>
+
+    <insert id="insertKxStorageFee" parameterType="BatchParamsUtil" >
+        INSERT INTO /* [kxStorageFeeService.sqlx][insertKxStorageFee][일자별 상품별 보관료 계산 배치][김채원][20240311] */ KX_STORAGEFEE
+        (   /* SERIALKEY */ <!-- DEFAULT VALUE --> 
+		       STOCKDATE
+		      ,DCCODE
+		      ,ORGANIZE
+		      ,DCNAME
+		      ,ZCAT
+		      ,SKU
+		      ,SKUNAME
+		      ,PLT_CNT
+		      ,PRICE_PLT
+		      ,UOM
+		      ,QTY
+          	  ,PRICE_PER_PLT
+		      ,QTYPERBOX
+		      ,BOXPERPLT
+		      ,DEL_YN
+		      ,ADDWHO
+		      ,EDITWHO
+		      ,ADDDATE
+		      ,EDITDATE
+        )
+        SELECT
+            /* SEQ_KX_STORAGEFEE.Nextval */
+               STOCKDATE
+             , DCCODE
+             , ORGANIZE
+             , DCNAME
+             , ZCAT
+             , SKU
+             , SKUNAME
+             , PLT_CNT
+             , PLT_CNT * TO_NUMBER(PRICE_PER_PLT) AS PRICE_PLT
+             , UOM
+             , QTY
+             , PRICE_PER_PLT
+             , QTYPERBOX
+             , BOXPERPLT
+             , 'N'
+             , 'insertKxStorageFee' AS ADDWHO
+             , 'insertKxStorageFee' AS EDITWHO
+             , SYSDATE AS ADDDATE
+             , SYSDATE AS EDITDATE
+        FROM (
+                 SELECT
+                     ST_STOCK.DCCODE                                                           	AS DCCODE
+                      , ST_STOCK.ORGANIZE                                                           AS ORGANIZE
+                      , FN_DESCR_ORGANIZE(ST_STOCK.DCCODE,ST_STOCK.ORGANIZE)                        AS DCNAME
+                      , TO_CHAR(SYSDATE, 'YYYYMMDD')                                                AS STOCKDATE
+                      , 'S'                                                							AS ZCAT
+                      , ST_STOCK.SKU                                                              	AS SKU
+                      , MS_SKU.DESCRIPTION                                                        	AS SKUNAME
+                      , MS_SKU.STORAGETYPE                                                     		AS STORAGETYPE
+                      , ST_STOCK.UOM                                                              	AS UOM
+                      , SUM(ST_STOCK.QTY)                                                           AS QTY
+                      , MS_SKU.QTYPERBOX                                                     		AS QTYPERBOX
+                      , NVL(FN_CODEVALUE('FW00','KX_STORAGEFEE_SKU_LIST',ST_STOCK.SKU, 'CONVCODE'), MS_SKU.BOXPERPLT) AS BOXPERPLT
+                      , CEIL(SUM(ST_STOCK.QTY) / DECODE(MS_SKU.QTYPERBOX, 0, 1, MS_SKU.QTYPERBOX) / NVL(FN_CODEVALUE('FW00','KX_STORAGEFEE_SKU_LIST',ST_STOCK.SKU, 'CONVCODE'), DECODE(MS_SKU.BOXPERPLT, '0','1',MS_SKU.BOXPERPLT))) AS PLT_CNT
+                      , NVL(FN_CODEVALUE('FW00','KX_STORAGEFEE_PLT_S',ST_STOCK.ORGANIZE, 'DATA1'),FN_CODEVALUE('FW00','KX_STORAGEFEE_PLT_S','STD', 'DATA1')) AS PRICE_PER_PLT
+                 FROM ST_STOCK
+                          JOIN MS_SKU
+                               ON MS_SKU.STORERKEY        = ST_STOCK.STORERKEY
+                                   AND MS_SKU.SKU              = ST_STOCK.SKU
+                                   AND	MS_SKU.DEL_YN			= 'N'
+                 WHERE  1=1
+                   AND ST_STOCK.QTY <![CDATA[>]]> 0
+                   AND ST_STOCK.STORERKEY     	=  'FW00'
+                   AND ST_STOCK.DCCODE 		= '1000'
+                   AND EXISTS (SELECT * FROM LOGISONE.CM_CODE B
+                     WHERE B.CODELIST = 'KX_STORAGEFEE_SKU_LIST'
+                   AND B.BASECODE = ST_STOCK.SKU
+                   AND B.DEL_YN = 'N')
+                   AND EXISTS (SELECT * FROM LOGISONE.CM_CODE B
+                     WHERE B.CODELIST = 'KX_STORAGEFEE_PLT_S'
+                   AND B.BASECODE = ST_STOCK.ORGANIZE
+                   AND B.DEL_YN = 'N')
+                 GROUP BY ST_STOCK.DCCODE
+                         , ST_STOCK.ORGANIZE
+                         , FN_DESCR_DC(ST_STOCK.DCCODE)
+                         , TO_CHAR(SYSDATE, 'YYYYMMDD')
+                         , ST_STOCK.SKU
+                         , MS_SKU.DESCRIPTION
+                         , MS_SKU.STORAGETYPE
+                         , ST_STOCK.UOM
+                         , MS_SKU.QTYPERBOX
+                         , MS_SKU.BOXPERPLT
+
+                 UNION ALL
+
+                 SELECT
+                     DM_DOCUMENT_D.DCCODE                                                        AS DCCODE
+                         , DM_DOCUMENT_D.ORGANIZE                                                      AS ORGANIZE
+                         , FN_DESCR_ORGANIZE(DM_DOCUMENT_D.DCCODE,DM_DOCUMENT_D.ORGANIZE)              AS DCNAME
+                         , DM_DOCUMENT_D.DELIVERYDATE                                                	AS STOCKDATE
+                         , 'I'                                                							AS ZCAT
+                         , DM_DOCUMENT_D.SKU                                                              	AS SKU
+                         , MS_SKU.DESCRIPTION                                                        	AS SKUNAME
+                         , MS_SKU.STORAGETYPE                                                     		AS STORAGETYPE
+                         , DM_DOCUMENT_D.UOM                                                              	AS UOM
+                         , SUM(DM_DOCUMENT_D.CONFIRMQTY)                                                           AS QTY
+                         , MS_SKU.QTYPERBOX                                                     		AS QTYPERBOX
+                         , NVL(FN_CODEVALUE('FW00','KX_STORAGEFEE_SKU_LIST',DM_DOCUMENT_D.SKU, 'CONVCODE'), MS_SKU.BOXPERPLT) AS BOXPERPLT
+                         , CEIL(SUM(DM_DOCUMENT_D.CONFIRMQTY) / DECODE(MS_SKU.QTYPERBOX, 0, 1, MS_SKU.QTYPERBOX) / NVL(FN_CODEVALUE('FW00','KX_STORAGEFEE_SKU_LIST',DM_DOCUMENT_D.SKU, 'CONVCODE'), DECODE(MS_SKU.BOXPERPLT, '0','1',MS_SKU.BOXPERPLT))) AS PLT_CNT
+                         , NVL(FN_CODEVALUE('FW00','KX_STORAGEFEE_PLT_I',DM_DOCUMENT_D.ORGANIZE, 'DATA1'),'1') AS PRICE_PER_PLT
+                 FROM DM_DOCUMENT_D
+                     JOIN MS_SKU
+                 ON MS_SKU.STORERKEY        = DM_DOCUMENT_D.STORERKEY
+                     AND MS_SKU.SKU              = DM_DOCUMENT_D.SKU
+                     AND	MS_SKU.DEL_YN			= 'N'
+                 WHERE 1=1
+                   AND DM_DOCUMENT_D.CONFIRMQTY <![CDATA[>]]> 0
+                   AND DM_DOCUMENT_D.STORERKEY     	=  'FW00'
+                   AND DM_DOCUMENT_D.DCCODE 		= '1000'
+                   AND DM_DOCUMENT_D.DELIVERYDATE = TO_CHAR(SYSDATE, 'YYYYMMDD')
+                   AND DM_DOCUMENT_D.DOCTYPE = 'DP'
+                   AND DM_DOCUMENT_D.DEL_YN = 'N'
+                   AND EXISTS (SELECT * FROM LOGISONE.CM_CODE B
+                     WHERE B.CODELIST = 'KX_STORAGEFEE_SKU_LIST'
+                   AND B.BASECODE = DM_DOCUMENT_D.SKU
+                   AND B.DEL_YN = 'N')
+                   AND EXISTS (SELECT * FROM LOGISONE.CM_CODE B
+                     WHERE B.CODELIST = 'KX_STORAGEFEE_PLT_I'
+                   AND B.BASECODE = DM_DOCUMENT_D.ORGANIZE
+                   AND B.DEL_YN = 'N')
+                 GROUP BY DM_DOCUMENT_D.DCCODE
+                         , DM_DOCUMENT_D.ORGANIZE
+                         , FN_DESCR_DC(DM_DOCUMENT_D.DCCODE)
+                         , DM_DOCUMENT_D.DELIVERYDATE
+                         , DM_DOCUMENT_D.SKU
+                         , MS_SKU.DESCRIPTION
+                         , MS_SKU.STORAGETYPE
+                         , DM_DOCUMENT_D.UOM
+                         , MS_SKU.QTYPERBOX
+                         , MS_SKU.BOXPERPLT
+
+                 UNION ALL
+
+                 SELECT
+                     DM_DOCUMENT_D.DCCODE                                                        AS DCCODE
+                         , DM_DOCUMENT_D.ORGANIZE                                                      AS ORGANIZE
+                         , FN_DESCR_ORGANIZE(DM_DOCUMENT_D.DCCODE,DM_DOCUMENT_D.ORGANIZE)              AS DCNAME
+                         , DM_DOCUMENT_D.DELIVERYDATE                                                	AS STOCKDATE
+                         , 'W'                                                							AS ZCAT
+                         , DM_DOCUMENT_D.SKU                                                              	AS SKU
+                         , MS_SKU.DESCRIPTION                                                        	AS SKUNAME
+                         , MS_SKU.STORAGETYPE                                                     		AS STORAGETYPE
+                         , DM_DOCUMENT_D.UOM                                                              	AS UOM
+                         , SUM(DM_DOCUMENT_D.CONFIRMQTY)                                                           AS QTY
+                         , MS_SKU.QTYPERBOX                                                     		AS QTYPERBOX
+                         , NVL(FN_CODEVALUE('FW00','KX_STORAGEFEE_SKU_LIST',DM_DOCUMENT_D.SKU, 'CONVCODE'), MS_SKU.BOXPERPLT) AS BOXPERPLT
+                         , CEIL(SUM(DM_DOCUMENT_D.CONFIRMQTY) / DECODE(MS_SKU.QTYPERBOX, 0, 1, MS_SKU.QTYPERBOX) / NVL(FN_CODEVALUE('FW00','KX_STORAGEFEE_SKU_LIST',DM_DOCUMENT_D.SKU, 'CONVCODE'), DECODE(MS_SKU.BOXPERPLT, '0','1',MS_SKU.BOXPERPLT))) AS PLT_CNT
+                         , NVL(FN_CODEVALUE('FW00','KX_STORAGEFEE_PLT_W',DM_DOCUMENT_D.ORGANIZE, 'DATA1'),'1') AS PRICE_PER_PLT
+                 FROM DM_DOCUMENT_D
+                     JOIN MS_SKU
+                 ON MS_SKU.STORERKEY        = DM_DOCUMENT_D.STORERKEY
+                     AND MS_SKU.SKU              = DM_DOCUMENT_D.SKU
+                     AND	MS_SKU.DEL_YN			= 'N'
+                 WHERE 1=1
+                   AND DM_DOCUMENT_D.CONFIRMQTY <![CDATA[>]]> 0
+                   AND DM_DOCUMENT_D.STORERKEY     	=  'FW00'
+                   AND DM_DOCUMENT_D.DCCODE 		= '1000'
+                   AND DM_DOCUMENT_D.DELIVERYDATE = TO_CHAR(SYSDATE, 'YYYYMMDD')
+                   AND DM_DOCUMENT_D.DOCTYPE = 'WD'
+                   AND DM_DOCUMENT_D.DEL_YN = 'N'
+                   AND EXISTS (SELECT * FROM LOGISONE.CM_CODE B
+                     WHERE B.CODELIST = 'KX_STORAGEFEE_SKU_LIST'
+                   AND B.BASECODE = DM_DOCUMENT_D.SKU
+                   AND B.DEL_YN = 'N')
+                   AND EXISTS (SELECT * FROM LOGISONE.CM_CODE B
+                     WHERE B.CODELIST = 'KX_STORAGEFEE_PLT_W'
+                   AND B.BASECODE = DM_DOCUMENT_D.ORGANIZE
+                   AND B.DEL_YN = 'N')
+                 GROUP BY DM_DOCUMENT_D.DCCODE
+                         , DM_DOCUMENT_D.ORGANIZE
+                         , FN_DESCR_DC(DM_DOCUMENT_D.DCCODE)
+                         , DM_DOCUMENT_D.DELIVERYDATE
+                         , DM_DOCUMENT_D.SKU
+                         , MS_SKU.DESCRIPTION
+                         , MS_SKU.STORAGETYPE
+                         , DM_DOCUMENT_D.UOM
+                         , MS_SKU.QTYPERBOX
+                         , MS_SKU.BOXPERPLT
+             )
+    </insert>
+
+    <insert id="insertIfKxStorageFee" parameterType="BatchParamsUtil" >
+        INSERT INTO /* [kxStorageFeeService.sqlx][insertIfKxStorageFee][일자별 상품별 보관료 계산 배치][김채원][20240311] */ IF_KX_STORAGEFEE 
+        ( /* SERIALKEY */ <!-- DEFAULT VALUE --> 
+             WERKS
+            ,STORERKEY
+            ,ZCAT
+            ,MATNR
+            ,MAKTX
+            ,BUDAT
+            ,ZWRBTR
+            ,MENGE
+            ,BSTME
+            ,IF_ID
+            ,IF_DESTINATION
+            ,IF_FLAG
+            ,IF_DATE
+            ,ADDDATE
+            ,ADDWHO
+            ,EDITDATE
+            ,EDITWHO
+        )
+        SELECT /* SEQ_IF_KX_STORAGEFEE.NEXTVAL */
+                DCCODE
+             , 'FW00'
+             , 'S'
+             , SKU
+             , SKUNAME
+             , STOCKDATE
+             , ZWRBTR
+             , MENGE
+             , BSTME
+             , 'SCM0830'
+             , 'MM'
+             , 'N'
+             , SYSDATE
+             , SYSDATE
+             , 'SYSTEM'
+             , SYSDATE
+             , 'SYSTEM'
+        FROM (
+                 SELECT
+                     DCCODE             AS DCCODE
+                      ,SKU                AS SKU
+                      ,SKUNAME            AS SKUNAME
+                      ,STOCKDATE          AS STOCKDATE
+                      ,SUM(PRICE_PLT)     AS ZWRBTR
+                      ,SUM(QTY)           AS MENGE
+                      ,MAX(UOM)           AS BSTME
+                 FROM KX_STORAGEFEE
+                 WHERE DCCODE       = '1000'
+                   AND STOCKDATE    = TO_CHAR(SYSDATE ,'YYYYMMDD')
+                 GROUP BY DCCODE, SKU, SKUNAME, STOCKDATE
+             )
+    </insert>
+
+</mapper>

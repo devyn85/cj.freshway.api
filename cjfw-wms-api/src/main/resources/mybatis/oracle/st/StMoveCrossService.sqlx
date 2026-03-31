@@ -1,0 +1,222 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+  PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+  "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="stMoveCrossService">
+
+    <select id="getMasterList" resultType="cjfw.wms.st.dto.StMoveCrossResDto">
+	    SELECT /* [stMoveCrossService.sqlx][stMoveCrossService.getDataHeaderList][CROSS재고헤더] */
+	           '0'                                                      AS CHECKYN         /** 체크여부 */
+	         , ST_STOCK.DCCODE                                          AS DCCODE          /** 센터코드 */
+	         , ST_STOCK.ORGANIZE                                        AS ORGANIZE        /** 조직 */
+	         , ST_STOCK.STORERKEY                                       AS STORERKEY       /** 화주코드 */
+	         , ST_STOCK.AREA                                            AS AREA            /** 구역 */
+	         , ST_STOCK.LOC                                             AS LOC             /** 로케이션 */
+	         , ST_STOCK.STOCKGRADE                                      AS STOCKGRADE      /** 재고등급 */
+	         , FN_CODEDESCR(ST_STOCK.STORERKEY, 'STOCKGRADE', ST_STOCK.STOCKGRADE) AS STOCKGRADENM /** 재고등급명 */
+	         , ST_STOCK.SKU                                             AS SKU             /** 상품코드 */
+	         , MS_SKU.DESCRIPTION                                       AS SKUNAME         /** 상품명 */
+	         , MS_SKU.STORAGETYPE                                       AS STORAGETYPE     /** 보관유형 */
+	         , FN_CODEDESCR(MS_SKU.STORERKEY, 'STORAGETYPE', MS_SKU.STORAGETYPE) AS STORAGETYPENM /** 보관유형명 */
+	         , ST_STOCK.UOM                                             AS UOM             /** 단위 */
+	         , ST_STOCK.QTY                                             AS QTY             /** 수량 */
+	         , ST_STOCK.QTYALLOCATED                                    AS QTYALLOCATED    /** 할당수량 */
+	         , ST_STOCK.QTYPICKED                                       AS QTYPICKED       /** 피킹수량 */
+	         , (ST_STOCK.QTYALLOCATED + ST_STOCK.QTYPICKED) - ST_STOCK.QTY AS NQTY         /** 부족수량 */
+	         , CM_LOT.LOTTABLE01                                        AS LOTTABLE01      /** 유통기한 */
+	         , FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01, 'N') || '/' || MS_SKU.DURATION AS DURATION_TERM /** 유통기한/기준 */
+	         , ST_STOCK.STOCKID                                         AS STOCKID         /** 재고ID */
+	         , ST_STOCK.LOT                                             AS LOT             /** 로트 */
+	    FROM   ST_STOCK
+	    JOIN   MS_SKU
+	           ON MS_SKU.STORERKEY = ST_STOCK.STORERKEY
+	           AND MS_SKU.SKU = ST_STOCK.SKU
+	           AND MS_SKU.DEL_YN = 'N'
+	    JOIN   CM_LOT
+	           ON CM_LOT.STORERKEY = ST_STOCK.STORERKEY
+	           AND CM_LOT.LOT = ST_STOCK.LOT
+	           AND CM_LOT.DEL_YN = 'N'
+	    WHERE  1=1
+	        AND ST_STOCK.DCCODE    = #{fixdccode}  /*센터*/
+		    AND ST_STOCK.STORERKEY = #{gStorerkey} /*고객사*/
+		    <!-- START.권한센터 -->
+		    AND EXISTS (SELECT 1
+	                      FROM CM_USER_AUTHORITY 
+	                     WHERE CM_USER_AUTHORITY.DCCODE    = ST_STOCK.DCCODE       
+	                       AND CM_USER_AUTHORITY.STORERKEY = ST_STOCK.STORERKEY    
+	                       AND CM_USER_AUTHORITY.ORGANIZE  = ST_STOCK.ORGANIZE     
+	                       AND CM_USER_AUTHORITY.AREA      = ST_STOCK.AREA         
+	                       AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey}
+	                       AND CM_USER_AUTHORITY.USERID    = #{gUserId}
+	                       AND CM_USER_AUTHORITY.DCCODE    = #{fixdccode}
+	                       AND CM_USER_AUTHORITY.AREA      = #{gArea}   
+				           <!-- 창고.다중검색 -->
+				           <if test='gOrganizeMulti != null and gOrganizeMulti.length > 0'>
+					           AND CM_USER_AUTHORITY.ORGANIZE IN
+					           <foreach collection="gOrganizeMulti" item="code" open="(" close=")" separator=",">
+					             #{code}
+					           </foreach>
+				           </if>                       
+	                   )
+		    <!-- END.권한센터	-->		
+		        
+	           AND (ST_STOCK.QTYALLOCATED + ST_STOCK.QTYPICKED - ST_STOCK.QTY) <![CDATA[> 0]]> 
+	           AND ST_STOCK.LOC = 'CROSS'
+	           AND ST_STOCK.STOCKGRADE = 'STD'
+	           AND CM_LOT.LOTTABLE01 = 'STD'
+	           <if test="storagetype != null and storagetype != ''">
+	               AND MS_SKU.STORAGETYPE LIKE #{storagetype}
+	           </if>
+	           
+		        <!-- START.상품.다중OR검색 -->
+		        <if test="skuMulti != null and skuMulti != '' ">
+					<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+						<foreach collection="skuMulti" item="item">
+							OR MS_SKU.SKU IN
+							<foreach collection="item" item="code" open="(" close=")" separator=",">
+								#{code} 	 
+				      		</foreach>
+				    	</foreach>
+				  	</trim>			                                    
+		        </if>
+		        <!-- END.상품.다중OR검색 -->     
+		                  
+	    ORDER BY ST_STOCK.DCCODE, ST_STOCK.LOC, ST_STOCK.STORERKEY, ST_STOCK.SKU
+	</select>
+
+    <select id="getDetailList" resultType="cjfw.wms.st.dto.StMoveCrossResDetailDto">
+	    SELECT /* [stMoveCrossService.sqlx][stMoveCrossService.getDataDetaillist][Hyeongmin Ju][20150407] */
+	           '0'                                   AS CHECKYN              /** 체크여부 */
+	         , ST_STOCK.STOCKTYPE                    AS FROM_STOCKTYPE       /** 출고재고유형 */
+	         , FN_CODEDESCR(ST_STOCK.STORERKEY, 'STOCKTYPE', ST_STOCK.STOCKTYPE)
+	                                               AS STOCKTYPENM           /** 출고재고유형명 */
+	         , ST_STOCK.STOCKGRADE                   AS FROM_STOCKGRADE      /** 출고재고등급 */
+	         , FN_CODEDESCR(ST_STOCK.STORERKEY, 'STOCKGRADE', ST_STOCK.STOCKGRADE)
+	                                               AS STOCKGRADENM          /** 출고재고등급명 */
+	         , ST_STOCK.LOC                          AS FROM_LOC             /** 출고로케이션 */
+	         , ST_STOCK.SKU                          AS FROM_SKU             /** 출고SKU */
+	         , MS_SKU.DESCRIPTION                    AS SKUNAME              /** 상품명 */
+	         , MS_SKU.STORAGETYPE                    AS STORAGETYPE          /** 보관유형 */
+	         , FN_CODEDESCR(MS_SKU.STORERKEY, 'STORAGETYPE', MS_SKU.STORAGETYPE)
+	                                               AS STORAGETYPENM         /** 보관유형명 */
+	         , ST_STOCK.UOM                          AS FROM_UOM             /** 출고단위 */
+	         , ST_STOCK.QTY                          AS FROM_ORDERQTY        /** 출고수량 */
+	         , ST_STOCK.QTYALLOCATED                 AS ETCQTY1              /** 할당수량 */
+	         , ST_STOCK.QTYPICKED                    AS ETCQTY2              /** 피킹수량 */
+	         , ST_STOCK.OPENQTY                      AS OPENQTY              /** 가용수량 */
+	         , 0                                     AS TO_ORDERQTY          /** 입고수량 */
+	         , CM_LOT.LOTTABLE01                     AS LOTTABLE01           /** 유통기한 */
+	         , FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01, 'N')
+	           || '/' || MS_SKU.DURATION             AS DURATION_TERM        /** 유통기한/기준 */
+	         , ST_STOCK.DCCODE                       AS FROM_DCCODE          /** 출고센터코드 */
+	         , ST_STOCK.STORERKEY                    AS FROM_STORERKEY       /** 출고화주코드 */
+	         , ST_STOCK.ORGANIZE                     AS FROM_ORGANIZE        /** 출고조직 */
+	         , ST_STOCK.AREA                         AS FROM_AREA            /** 출고구역 */
+	         , ST_STOCK.LOT                          AS FROM_LOT             /** 출고로트 */
+	         , ST_STOCK.STOCKID                      AS FROM_STOCKID         /** 출고재고ID */
+	         , ST_STOCK.DCCODE                       AS TO_DCCODE            /** 입고센터코드 */
+	         , ST_STOCK.STORERKEY                    AS TO_STORERKEY         /** 입고화주코드 */
+	         , ST_STOCK.ORGANIZE                     AS TO_ORGANIZE          /** 입고조직 */
+	         , ST_STOCK.AREA                         AS TO_AREA              /** 입고구역 */
+	         , ST_STOCK.SKU                          AS TO_SKU               /** 입고SKU */
+	         , #{loc}                                AS TO_LOC               /** 입고로케이션 */
+	         , #{lot}                                AS TO_LOT               /** 입고로트 */
+	         , ST_STOCK.STOCKID                      AS TO_STOCKID           /** 입고재고ID */
+	         , ST_STOCK.STOCKGRADE                   AS TO_STOCKGRADE        /** 입고재고등급 */
+	         , #{uom}                                AS TO_UOM               /** 입고단위 */
+	    FROM   ST_STOCK
+	    JOIN   MS_SKU
+	           ON MS_SKU.STORERKEY = ST_STOCK.STORERKEY
+	          AND MS_SKU.SKU = ST_STOCK.SKU
+	          AND MS_SKU.DEL_YN = 'N'
+	    JOIN   CM_LOT
+	           ON CM_LOT.STORERKEY = ST_STOCK.STORERKEY
+	          AND CM_LOT.LOT = ST_STOCK.LOT
+	          AND CM_LOT.DEL_YN = 'N'
+	    WHERE  1 = 1
+	      AND  ST_STOCK.OPENQTY <![CDATA[>]]> 0
+	      AND  ST_STOCK.DCCODE = #{dccode}
+	      AND  ST_STOCK.STORERKEY = #{storerkey}
+	      AND  ST_STOCK.ORGANIZE = #{organize}
+	      AND  ST_STOCK.AREA = #{area}
+AND  ST_STOCK.LOC <![CDATA[<>]]> #{loc}
+	      AND  ST_STOCK.SKU = #{sku}
+	      AND  ST_STOCK.STOCKGRADE = #{stockgrade}
+	      AND  ST_STOCK.STOCKID = #{stockid}
+	      AND  ST_STOCK.STOCKTYPE = 'GOOD'
+	    ORDER BY DECODE(CM_LOT.LOTTABLE01, 'STD', '10000101', CM_LOT.LOTTABLE01), ST_STOCK.LOC
+	</select>
+	
+    <!-- 엑셀업로드 정보을(를) 등록 -->
+    <insert id="insertTempExcel" parameterType="java.util.List" >
+        <!-- 
+        <selectKey resultType="int" keyProperty="seq" order="BEFORE">
+        SELECT '1' AS SEQ FROM DUAL
+        </selectKey>
+        -->    
+        INSERT /* [StLocMoveService.sqlx][insertTempExcel][엑셀데이터임시 Tabele 등록][sss][2025.05.23] */
+          INTO SY_PROCESSTEMP_ST (PROCESSTYPE,PROCESSCREATOR,SPID,ADDWHO,EDITWHO
+                                  /**/
+						         ,FROM_DCCODE
+						         ,FROM_STORERKEY
+						         ,FROM_ORGANIZE
+						         ,FROM_AREA
+						         ,FROM_SKU
+						         ,FROM_LOC
+						         ,FROM_LOT
+						         ,FROM_STOCKID
+						         ,FROM_STOCKGRADE
+						         ,FROM_STOCKTYPE
+						         /**/
+						         ,FROM_ORDERQTY
+						         ,FROM_UOM
+						         ,TO_DCCODE
+						         ,TO_STORERKEY
+						         ,TO_ORGANIZE
+						         ,TO_AREA
+						         ,TO_SKU
+						         ,TO_LOC
+						         ,TO_LOT
+						         ,TO_STOCKID
+						         /**/
+						         ,TO_STOCKGRADE
+						         ,TO_ORDERQTY
+						         ,TO_UOM
+						         ,ETCQTY1
+						         ,ETCQTY2
+                                )
+            <foreach collection="list" item="item" separator="UNION ALL">
+            	SELECT
+                    #{item.processtype},#{item.gUserId},#{item.gSpid},#{item.gUserId},#{item.gUserId}
+                    /**/
+					,#{item.fromDccode}        /* 1.출발센터코드   -grid*/
+					,#{item.fromStorerkey}     /* 2.출발화주코드   -grid*/
+					,#{item.fromOrganize}      /* 3.출발조직      -grid*/
+					,#{item.fromArea}          /* 4.출발구역      -grid*/
+					,#{item.fromSku}           /* 5.출발상품코드   -grid*/
+					,#{item.fromLoc}           /* 6.출발로케이션   -grid*/
+					,#{item.fromLot}           /* 7.출발로트      -grid*/
+					,#{item.fromStockid}       /* 8.출발재고ID    -grid*/
+					,#{item.fromStockgrade}    /* 9.출발재고등급   -grid*/
+					,#{item.fromStocktype}     /*10.출발재고유형   -grid*/
+					/**/
+					,#{item.fromOrderqty}      /*11.출발수량      -grid*/
+					,#{item.fromUom}           /*12.출발단위      -grid*/
+					,#{item.toDccode}          /*13.도착센터코드   -grid*/
+					,#{item.toStorerkey}       /*14.도착화주코드   -grid*/
+					,#{item.toOrganize}        /*15.도착조직      -grid*/
+					,#{item.toArea}            /*16.도착구역      -grid*/
+					,#{item.toSku}             /*17.도착상품코드   -grid*/
+					,#{item.toLoc}             /*18.도착로케이션   -grid*/
+					,#{item.toLot}             /*19.도착로트      -grid*/
+					,#{item.toStockid}         /*20.도착재고ID    -grid*/
+					/**/
+					,#{item.toStockgrade}      /*21.도착재고등급   -grid*/
+					,#{item.toOrderqty}        /*22.도착수량      -grid*/
+					,#{item.toUom}             /*23.도착단위      -grid*/
+					,#{item.etcqty1}           /*24.기타수량1(할당)-grid*/
+					,#{item.etcqty2}           /*25.기타수량2(피킹)-grid*/
+                FROM DUAL
+        </foreach>
+    </insert>
+</mapper>

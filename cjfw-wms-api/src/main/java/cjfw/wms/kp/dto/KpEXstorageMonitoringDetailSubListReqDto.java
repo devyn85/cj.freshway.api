@@ -1,0 +1,42 @@
+package cjfw.wms.kp.dto;
+
+
+import cjfw.wms.common.extend.CommonDto;
+import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+
+
+/**
+ * Copyright 2025. CJ Freshway Co. all rights reserved.
+ * @author : ParkJinWoo 
+ * @date : 2025.07.14 
+ * @description :외부창고재고모니터링 디테일 res DTO 기능을 구현한 Controller Class 
+ * @issues : 
+ * ----------------------------------------------------------- 
+ * DATE AUTHOR MAJOR_ISSUE 
+ * ----------------------------------------------------------- 
+ * 2025.07.14 ParkJinWoo 생성
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+@Schema(description = "외부창고재고모니터링 디테일 req DTO")
+public class KpEXstorageMonitoringDetailSubListReqDto extends CommonDto{
+
+    /** 구매요청번호 */
+    @Schema(description = "구매요청번호(MAPKEY_NO)")
+    private String mapkeyNo;
+
+    /** 구매번호(POKEY) */
+    @Schema(description = "구매번호(POKEY)")
+    private String pokey;
+
+    /** 시리얼정보 확정구분 (10/20/30/40/50) */
+    @Schema(description = "시리얼정보 확정구분(10:확정 Before, 20:확정 After, 30~50:미확정 유형)")
+    private String serialinfoCfmYn;
+}

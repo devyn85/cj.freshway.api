@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="inspectSorterService">
+
+    <resultMap id="returnCursorMap" type="cjfw.batch.job.inspectSorter.InspectSorterDto">
+        <result property="serialkey" column="SERIALKEY"/>
+    </resultMap>
+    <sql id="procedureParams" >
+          #{AVC_SYSTEM,         mode=IN, jdbcType=VARCHAR}
+        , #{AVC_EXECUTEMODE,    mode=IN, jdbcType=VARCHAR}
+        , #{AVC_COMMAND,        mode=IN, jdbcType=VARCHAR}
+        , #{AVC_DCCODE,         mode=IN, jdbcType=VARCHAR}
+        , #{AVC_STORERKEY,      mode=IN, jdbcType=VARCHAR}
+        , #{AVC_ORGANIZE,       mode=IN, jdbcType=VARCHAR}
+        , #{AVC_AREA,           mode=IN, jdbcType=VARCHAR}
+        , #{AVC_REQUESTCODE,    mode=IN, jdbcType=VARCHAR}
+        , #{AVC_REQUESTMSG,     mode=IN, jdbcType=VARCHAR}
+        , #{AVC_WORKER,         mode=IN, jdbcType=VARCHAR}
+        , #{AVC_SECURITYKEY,    mode=IN, jdbcType=VARCHAR}
+        , #{AI_SPID,            mode=IN, jdbcType=INTEGER}
+        , #{I_ERR,              mode=INOUT, jdbcType=INTEGER}
+        , #{VC_RESULTMSG,       mode=INOUT, jdbcType=VARCHAR}
+        , #{VC_RETURNCURSOR,    mode=OUT, jdbcType=CURSOR, resultMap=returnCursorMap}
+          --
+        , AVC_LOG_PARAMS => #{AVC_LOG_PARAMS, mode=IN , jdbcType=VARCHAR} /*(20251223) BATCH LOG관련 PARAMS.*/	
+    </sql>
+    <select id="callProcExecute" statementType="CALLABLE" parameterType="BatchParamsUtil" resultType="BatchParamsUtil" timeout="6000">
+        { CALL SPFC_PDA_DP_INSPECTION.EXECUTE ( /* [inspectSorterService.sqlx][callProcExecute][소터 오류건 재처리][김환수][20250801] */
+               <include refid="procedureParams"/>
+        )}
+    </select>
+
+
+    <insert id="insertInspectSorter" parameterType="BatchParamsUtil" >
+        INSERT INTO DP_INSPECT_SORTER /* [inspectSorterService.sqlx][inspectSorterService.insertInspectSorter][소터 오류건 재처리][김예원][20250808] */
+		(   /*SERIALKEY,*/
+			SORTERKEY,
+			EXECUTEDT,
+			OBJECTNAME,
+			SYSTEM,
+			COMMAND,
+			DCCODE,
+			STORERKEY,
+			ORGANIZE,
+			AREA,
+			REQUESTCODE,
+			REQUESTMSG,
+			WORKER,
+			RETURNMSG,
+			SPID,
+			SENDYN ,
+			ADDWHO,
+			ADDDATE ,
+			EDITWHO,
+			EDITDATE
+        )
+        SELECT
+            /*SEQ_DP_INSPECT_SORTER.NEXTVAL (*20250728) COLUMN DEFAULT 적용 */
+            MG_EXECUTELOG.SERIALKEY,
+            MG_EXECUTELOG.EXECUTEDT,
+            MG_EXECUTELOG.OBJECTNAME,
+            MG_EXECUTELOG.SYSTEM,
+            MG_EXECUTELOG.COMMAND,
+            MG_EXECUTELOG.DCCODE,
+            MG_EXECUTELOG.STORERKEY,
+            MG_EXECUTELOG.ORGANIZE,
+            MG_EXECUTELOG.AREA,
+            MG_EXECUTELOG.REQUESTCODE,
+            MG_EXECUTELOG.REQUESTMSG,
+            MG_EXECUTELOG.WORKER,
+            MG_EXECUTELOG.RETURNMSG,
+            MG_EXECUTELOG.SPID,
+            'N',
+            'BATCH',
+            SYSDATE,
+            'BATCH',
+            SYSDATE
+        FROM
+            MG_EXECUTELOG
+        WHERE 1=1
+          AND MG_EXECUTELOG.STORERKEY = 'FW00'
+          AND MG_EXECUTELOG.OBJECTNAME ='SPFC_PDA_DP_INSPECTION.EXECUTE'
+          AND MG_EXECUTELOG.COMMAND  = 'BARCODEREAD_DAILY_QUICK'
+          AND MG_EXECUTELOG.ERR <![CDATA[ <> ]]> '0'
+          AND MG_EXECUTELOG.EXECUTEDT = TO_CHAR(SYSDATE, 'YYYYMMDD')
+          AND MG_EXECUTELOG.ERRMSG = '검수 대상의 배송분류 바코드가 아닙니다.(-STD)'
+    </insert>
+
+    <select id="selectInspectSorter" resultType="cjfw.batch.job.inspectSorter.InspectSorterDto">
+        SELECT  /* [inspectSorterBatch.sqlx][inspectSorterBatch.selectInspectSorter][소터 오류건 재처리][김예원][20250808] */
+            DP_INSPECT_SORTER.SERIALKEY,
+            DP_INSPECT_SORTER.EXECUTEDT,
+            DP_INSPECT_SORTER.OBJECTNAME,
+            DP_INSPECT_SORTER.SYSTEM,
+            DP_INSPECT_SORTER.COMMAND,
+            DP_INSPECT_SORTER.DCCODE,
+            DP_INSPECT_SORTER.STORERKEY,
+            DP_INSPECT_SORTER.ORGANIZE,
+            DP_INSPECT_SORTER.AREA,
+            DP_INSPECT_SORTER.REQUESTCODE,
+            DP_INSPECT_SORTER.REQUESTMSG,
+            DP_INSPECT_SORTER.WORKER,
+            DP_INSPECT_SORTER.RETURNMSG,
+            DP_INSPECT_SORTER.SPID,
+            DP_INSPECT_SORTER.SENDYN
+        FROM
+            DP_INSPECT_SORTER
+        WHERE  1=1
+          AND DP_INSPECT_SORTER.EXECUTEDT = TO_CHAR(SYSDATE, 'YYYYMMDD')
+          AND DP_INSPECT_SORTER.SENDYN = 'N'
+    </select>
+
+
+    <update id="updateInspectSorter" parameterType="BatchParamsUtil" >
+        UPDATE DP_INSPECT_SORTER
+           SET SENDYN = 'Y'
+             , EDITWHO = 'BATCH'
+             , EDITDATE = SYSDATE
+         WHERE SERIALKEY = #{SERIALKEY}
+    </update>
+
+</mapper>

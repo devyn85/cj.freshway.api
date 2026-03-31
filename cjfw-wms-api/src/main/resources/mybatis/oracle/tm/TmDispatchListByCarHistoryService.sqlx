@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="tmDispatchListByCarHistoryService">
+
+    <select id="getDispatchListByCarHistory" resultType="TmDispatchListByCarHistoryResDto">
+
+            SELECT /* [tmDispatchListByCarHistoryService.sqlx][getDispatchListByCarHistory][차량 변경내역 조회][이현성][2025.09.19] */
+                  TM_LIST.STORERKEY
+                , TM_LIST.DCCODE
+                , FN_DESCR_DC(TM_LIST.DCCODE) AS DCNAME
+                , TM_LIST.DELIVERYDT
+                -- 변경전
+                , (SELECT MAX(CHUTENO) KEEP (DENSE_RANK LAST ORDER BY SERIALKEY)
+                   FROM MS_DISTRICT
+                   WHERE MS_DISTRICT.DISTRICTTYPE = TM_LIST.DISTRICTTYPE
+                     AND MS_DISTRICT.DISTRICTCODE = TM_LIST.DEFDELIVERYGROUP
+                     AND MS_DISTRICT.DCCODE       = TM_LIST.DCCODE
+                     AND MS_DISTRICT.CHUTENO      IS NOT NULL
+                  ) AS DOCKNO_F
+                , TM_LIST.DEFDELIVERYGROUP AS POPNO_OLD
+                , ( SELECT ROLLTAINER_NO
+                    FROM (
+                        SELECT MS_CUSTXPOP.ROLLTAINER_NO
+                        FROM MS_CUSTXPOP
+                        WHERE MS_CUSTXPOP.DCCODE    = TM_LIST.DCCODE
+                          AND MS_CUSTXPOP.STORERKEY = TM_LIST.STORERKEY
+                          AND MS_CUSTXPOP.CUSTTYPE  = TM_LIST.CUSTTYPE
+                          AND MS_CUSTXPOP.CUSTKEY   = TM_LIST.TRUTHCUSTKEY
+                          AND MS_CUSTXPOP.POPNO     = TM_LIST.DEFDELIVERYGROUP
+                          AND TM_LIST.DELIVERYDT BETWEEN MS_CUSTXPOP.FROMDATE AND MS_CUSTXPOP.TODATE
+                          AND MS_CUSTXPOP.DEL_YN = 'N'
+                        ORDER BY MS_CUSTXPOP.SERIALKEY, MS_CUSTXPOP.FROMDATE DESC, MS_CUSTXPOP.TODATE ASC
+                    )
+                    WHERE ROWNUM = 1
+                ) AS ROLLTAINER_NO_OLD
+                , TM_LIST.DEFCARNO AS CARNO_OLD
+                , TM_LIST.DEFPRIORITY AS PRIORITY_OLD
+                -- 거래처
+                , TM_LIST.TRUTHCUSTKEY
+                , FN_DESCR_CUST(TM_LIST.STORERKEY, TM_LIST.TRUTHCUSTKEY) AS TRUTHCUSTNAME
+                , TM_LIST.CUSTTYPE
+                , TM_LIST.CUSTKEY
+                , FN_DESCR_CUST(TM_LIST.STORERKEY, TM_LIST.CUSTKEY) AS CUSTNAME
+                , NULLIF(FN_CODEDESCR('STD', 'CRM_DLV_KEYTYPE', NVL(MS_CUSTDLVINFO.KEYTYPE2, '05')), MS_CUSTDLVINFO.KEYTYPE2) AS KEYTYPE2_NAME
+                -- 변경후
+                , (SELECT MAX(CHUTENO) KEEP (DENSE_RANK LAST ORDER BY SERIALKEY)
+                   FROM MS_DISTRICT
+                   WHERE MS_DISTRICT.DISTRICTTYPE = TM_LIST.DISTRICTTYPE
+                     AND MS_DISTRICT.DISTRICTCODE = TM_LIST.DELIVERYGROUP
+                     AND MS_DISTRICT.DCCODE       = TM_LIST.DCCODE
+                     AND MS_DISTRICT.CHUTENO      IS NOT NULL
+                  ) AS DOCKNO_B
+                , TM_LIST.DELIVERYGROUP AS POPNO
+                , ( SELECT ROLLTAINER_NO
+                    FROM (
+                        SELECT MS_CUSTXPOP.ROLLTAINER_NO
+                        FROM MS_CUSTXPOP
+                        WHERE MS_CUSTXPOP.DCCODE    = TM_LIST.DCCODE
+                          AND MS_CUSTXPOP.STORERKEY = TM_LIST.STORERKEY
+                          AND MS_CUSTXPOP.CUSTTYPE  = TM_LIST.CUSTTYPE
+                          AND MS_CUSTXPOP.CUSTKEY   = TM_LIST.TRUTHCUSTKEY
+                          AND MS_CUSTXPOP.POPNO     = TM_LIST.DELIVERYGROUP
+                          AND TM_LIST.DELIVERYDT BETWEEN MS_CUSTXPOP.FROMDATE AND MS_CUSTXPOP.TODATE
+                          AND MS_CUSTXPOP.DEL_YN = 'N'
+                        ORDER BY MS_CUSTXPOP.SERIALKEY, MS_CUSTXPOP.FROMDATE DESC, MS_CUSTXPOP.TODATE ASC
+                    )
+                    WHERE ROWNUM = 1
+                ) AS ROLLTAINER_NO
+                , TM_LIST.CARNO
+                , TM_LIST.PRIORITY
+            FROM (
+                SELECT STORERKEY, DCCODE, DELIVERYDT, SLIPDT, DOCTYPE, TM_DELIVERYTYPE, DISTRICTTYPE, DEFDELIVERYGROUP, DEFCARNO, DEFPRIORITY, CUSTTYPE, CUSTKEY, TRUTHCUSTKEY, DELIVERYGROUP, CARNO, PRIORITY, STATUS
+                FROM TM_INPLAN
+                WHERE DEL_YN = 'N'
+                  AND SPLIT_DELIVERY_YN = 'N'
+                UNION ALL
+                SELECT STORERKEY, DCCODE, DELIVERYDT, SLIPDT, DOCTYPE, TM_DELIVERYTYPE, DISTRICTTYPE, DEFDELIVERYGROUP, DEFCARNO, DEFPRIORITY, CUSTTYPE, CUSTKEY, TRUTHCUSTKEY, DELIVERYGROUP, CARNO, PRIORITY, STATUS
+                FROM TM_INPLAN_SPLIT
+                WHERE DEL_YN = 'N'
+            ) TM_LIST
+            LEFT JOIN MS_CUSTDLVINFO
+                ON  MS_CUSTDLVINFO.STORERKEY  = TM_LIST.STORERKEY
+                AND MS_CUSTDLVINFO.CUSTTYPE   = TM_LIST.CUSTTYPE
+                AND MS_CUSTDLVINFO.DLVCUSTKEY = TM_LIST.TRUTHCUSTKEY
+            WHERE TM_LIST.DCCODE = #{dccode}
+              AND TM_LIST.DOCTYPE IN ('WD', 'RT', 'DP')
+              AND TM_LIST.TM_DELIVERYTYPE IN ('1', '2', '3', '4', '6')
+              AND TM_LIST.DELIVERYDT BETWEEN #{deliverydtFrom} AND #{deliverydtTo}
+              AND TM_LIST.SLIPDT BETWEEN TO_CHAR(TRUNC(ADD_MONTHS(TO_DATE(#{deliverydtFrom}, 'YYYYMMDD'), -1), 'MM'), 'YYYYMMDD')
+                                     AND #{deliverydtTo}
+              AND TM_LIST.STATUS = '90'
+              AND TM_LIST.DEFDELIVERYGROUP != TM_LIST.DELIVERYGROUP
+              <if test="popnoMulti != null and popnoMulti.size() > 0">
+                  AND (
+                  TM_LIST.DEFDELIVERYGROUP IN
+                      <foreach collection="popnoMulti" item="popno" open="(" separator="," close=")">
+                          #{popno}
+                      </foreach>
+                  OR TM_LIST.DELIVERYGROUP IN
+                      <foreach collection="popnoMulti" item="popno" open="(" separator="," close=")">
+                          #{popno}
+                      </foreach>
+                  )
+              </if>
+              <if test="carnoList != null and carnoList.size() > 0">
+                  AND (
+                  TM_LIST.DEFCARNO IN
+                      <foreach collection="carnoList" item="carno" open="(" separator="," close=")">
+                        #{carno}
+                      </foreach>
+                  OR TM_LIST.CARNO IN
+                      <foreach collection="carnoList" item="carno" open="(" separator="," close=")">
+                        #{carno}
+                      </foreach>
+                  )
+              </if>
+              <if test="custkeyList != null and custkeyList.size() > 0">
+                AND TM_LIST.CUSTKEY IN
+              <foreach collection="custkeyList" item="custkey" open="(" separator="," close=")">
+                  #{custkey}
+              </foreach>
+              </if>
+            GROUP BY
+                  TM_LIST.STORERKEY
+                , TM_LIST.DCCODE
+                , TM_LIST.DELIVERYDT
+                , TM_LIST.DISTRICTTYPE
+                , TM_LIST.DEFDELIVERYGROUP
+                , TM_LIST.DEFCARNO
+                , TM_LIST.DEFPRIORITY
+                , TM_LIST.CUSTTYPE
+                , TM_LIST.CUSTKEY
+                , TM_LIST.TRUTHCUSTKEY
+                , MS_CUSTDLVINFO.KEYTYPE2
+                , TM_LIST.DELIVERYGROUP
+                , TM_LIST.CARNO
+                , TM_LIST.PRIORITY
+            ORDER BY
+                  TM_LIST.DELIVERYDT
+                , REGEXP_REPLACE(NVL(DOCKNO_F, DOCKNO_B), '[0-9]')
+                , REGEXP_REPLACE(NVL(DOCKNO_F, DOCKNO_B), '^[0-9]')
+                , NVL(DOCKNO_F, DOCKNO_B) NULLS LAST
+                , TM_LIST.DEFDELIVERYGROUP
+                , TM_LIST.DELIVERYGROUP
+    </select>
+</mapper>

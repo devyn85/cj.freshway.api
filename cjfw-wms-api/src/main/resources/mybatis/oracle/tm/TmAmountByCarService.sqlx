@@ -1,0 +1,772 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="tmAmountByCarService">
+
+    <select id="getMasterList" resultType="TmAmountByCarResDto" parameterType="TmAmountByCarReqDto">
+		SELECT    /* [tmAmountByCarService.sqlx][getMasterList][차량별 수당목록 조회][KwonJungyun][2025.08.01] */
+			   'R'                                AS ROW_STATUS
+            ,  TM_CAR_ALLOWANCE.SERIALKEY         AS SERIALKEY  
+			,  TM_CAR_ALLOWANCE.DCCODE            AS DCCODE
+			,  TM_CAR_ALLOWANCE.COURIER           AS COURIER
+			,  MS_CARRIER.DESCRIPTION             AS COURIERNAME
+			,  TM_CAR_ALLOWANCE.CARNO             AS CARNO
+			,  TM_CAR_ALLOWANCE.STTL_ITEM_CD      AS STTL_ITEM_CD 	
+			,  TM_CAR_ALLOWANCE.AMOUNT            AS AMOUNT
+			,  TM_CAR_ALLOWANCE.FROMDATE          AS FROMDATE
+			,  TM_CAR_ALLOWANCE.TODATE            AS TODATE
+			,  TM_CAR_ALLOWANCE.RMK               AS RMK
+			,  TM_CAR_ALLOWANCE.ADDDATE           AS ADDDATE
+			,  TM_CAR_ALLOWANCE.EDITDATE          AS EDITDATE
+			,  TM_CAR_ALLOWANCE.ADDWHO            AS ADDWHO
+			,  TM_CAR_ALLOWANCE.EDITWHO           AS EDITWHO
+			,  USER1.USER_NM                      AS ADDWHONAME			/* 최초등록자 */
+			,  USER2.USER_NM                      AS EDITWHONAME		/* 최종변경자 */
+			,  CM_CAR.CARCAPACITY                 AS CARCAPACITY
+			,  MS_CARRIERSUB.CARRIERKEY           AS CARAGENTKEY
+			,  MS_CARRIERSUB.DESCRIPTION          AS CARAGENTNAME
+			,  CM_CAR.CONTRACTTYPE                AS CONTRACTTYPE
+			,  CM_CAR.CAR_ORDERCLOSE_CD           AS OTHER03
+			/* ====== MASTERAMOUNT ====== */
+			, NVL((
+			     SELECT  CASE WHEN t.STTL_ITEM_CD = 'P01' AND CM_CAR.CONTRACTTYPE NOT IN('DELIVERY','MONTHLY')THEN 0 ELSE t.AMOUNT END AS AMOUNT
+			     FROM TM_TRSP_COST_ALLOWANCE t
+			     WHERE t.COURIER      = TM_CAR_ALLOWANCE.COURIER
+			       AND t.CONTRACTTYPE = CM_CAR.CONTRACTTYPE
+			       AND t.DCCODE       = #{fixdccode}
+			       AND t.STTL_ITEM_CD = TM_CAR_ALLOWANCE.STTL_ITEM_CD
+			       /* 후보 한정: 톤=일치 or NULL, 마감유형=일치 or 10 */
+			       AND (t.TON = CM_CAR.CARCAPACITY OR t.TON IS NULL)
+			       AND (t.CLOSETYPE = CM_CAR.CAR_ORDERCLOSE_CD OR t.CLOSETYPE = 10)
+			       AND TM_CAR_ALLOWANCE.TODATE BETWEEN T.FROMDATE AND T.TODATE
+			     ORDER BY
+			       CASE
+			         WHEN t.TON = CM_CAR.CARCAPACITY AND t.CLOSETYPE = CM_CAR.CAR_ORDERCLOSE_CD THEN 300
+			         WHEN t.TON = CM_CAR.CARCAPACITY AND t.CLOSETYPE = 10            THEN 210
+			         WHEN t.TON IS NULL              AND t.CLOSETYPE = CM_CAR.CAR_ORDERCLOSE_CD THEN 200
+			         WHEN t.TON IS NULL              AND t.CLOSETYPE = 10            THEN 100
+			         ELSE 0
+			       END DESC,
+			       t.AMOUNT,          
+			       t.ROWID           
+			     FETCH FIRST 1 ROW ONLY
+			   ), 0)                              AS MASTERAMOUNT
+			/* ====== CONFIRMAMOUNT = MASTERAMOUNT + 기본 AMOUNT ====== */
+			, NVL(
+			    NVL((
+			      SELECT  CASE WHEN t.STTL_ITEM_CD = 'P01' AND CM_CAR.CONTRACTTYPE NOT IN('DELIVERY','MONTHLY')THEN 0 ELSE t.AMOUNT END AS AMOUNT
+			      FROM TM_TRSP_COST_ALLOWANCE t
+			      WHERE t.COURIER      = TM_CAR_ALLOWANCE.COURIER
+			        AND t.CONTRACTTYPE = CM_CAR.CONTRACTTYPE
+			        AND t.DCCODE       = #{fixdccode}
+			        AND t.STTL_ITEM_CD = TM_CAR_ALLOWANCE.STTL_ITEM_CD
+			        AND (t.TON = CM_CAR.CARCAPACITY OR t.TON IS NULL)
+			        AND (t.CLOSETYPE = CM_CAR.CAR_ORDERCLOSE_CD OR t.CLOSETYPE = 10)
+			        AND TM_CAR_ALLOWANCE.TODATE BETWEEN T.FROMDATE AND T.TODATE 
+			      ORDER BY
+			        CASE
+			          WHEN t.TON = CM_CAR.CARCAPACITY AND t.CLOSETYPE = CM_CAR.CAR_ORDERCLOSE_CD THEN 300
+			          WHEN t.TON = CM_CAR.CARCAPACITY AND t.CLOSETYPE = 10            THEN 210
+			          WHEN t.TON IS NULL              AND t.CLOSETYPE = CM_CAR.CAR_ORDERCLOSE_CD THEN 200
+			          WHEN t.TON IS NULL              AND t.CLOSETYPE = 10            THEN 100
+			          ELSE 0
+			        END DESC,
+			        t.AMOUNT,
+			        t.ROWID
+			      FETCH FIRST 1 ROW ONLY
+			    ), 0) + TM_CAR_ALLOWANCE.AMOUNT, 0)    AS CONFIRMAMOUNT
+			, 'N' AS EXPIRED_YN
+			, NVL((SELECT COUNT(*)
+                    FROM TM_CAR_ALLOWANCE_DOC A
+                    WHERE 1=1
+                    AND A.DOC_NAME    = 'TRSP_BYCAR'
+                    AND A.SERIALKEY_H = TM_CAR_ALLOWANCE.SERIALKEY)
+                , 0)                                   AS ATTACHMENT
+		FROM TM_CAR_ALLOWANCE
+		JOIN CM_CAR ON TM_CAR_ALLOWANCE.CARNO = CM_CAR.CARNO
+		JOIN MS_CAR_ENTRY_INFO ON CM_CAR.CARNO = MS_CAR_ENTRY_INFO.CARNO
+		LEFT OUTER JOIN MS_CARRIER 
+		  ON MS_CARRIER.CARRIERKEY = TM_CAR_ALLOWANCE.COURIER 
+		 AND MS_CARRIER.DEL_YN = 'N'
+		 AND MS_CARRIER.CARRIERTYPE = 'LOCAL'
+		LEFT OUTER JOIN MS_CARRIER MS_CARRIERSUB
+		  ON MS_CARRIERSUB.CARRIERKEY = CM_CAR.CARAGENTKEY 
+		 AND MS_CARRIERSUB.DEL_YN = 'N'
+		 AND MS_CARRIERSUB.CARRIERTYPE = 'SUBC'
+		 
+		LEFT JOIN CM_CODE_STORER CD_CLOSETYPE
+		       ON CD_CLOSETYPE.CODELIST = 'CUSTORDERCLOSETYPE'
+		      AND TRIM(TO_CHAR(CM_CAR.CAR_ORDERCLOSE_CD)) = TRIM(CD_CLOSETYPE.BASECODE)
+	    LEFT JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = TM_CAR_ALLOWANCE.ADDWHO  /*등록자명*/
+		LEFT JOIN FRAMEONE_USER USER2 ON USER2.USER_ID = TM_CAR_ALLOWANCE.EDITWHO  /*수정자명*/
+		<where>
+			<if test="fromdt != null and fromdt != ''">
+			    AND TM_CAR_ALLOWANCE.TODATE <![CDATA[>=]]> #{fromdt}
+			</if>
+			<if test="todt != null and todt != ''">
+			    AND TM_CAR_ALLOWANCE.FROMDATE <![CDATA[<=]]> #{todt}
+			</if>
+			<if test="sttlitemcd != null and sttlitemcd != ''">
+			    AND TM_CAR_ALLOWANCE.STTL_ITEM_CD = #{sttlitemcd}
+			</if>
+			<if test="courier != null and courier != ''">
+			    AND TM_CAR_ALLOWANCE.COURIER IN (
+					SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL))
+					FROM (SELECT #{courier} AS VAL FROM DUAL)
+					CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) > 0
+				)
+			</if>
+			<if test="carno != null and carno != ''">
+			    AND TM_CAR_ALLOWANCE.CARNO IN (
+					SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) 
+					FROM (SELECT #{carno} AS VAL FROM DUAL)
+					CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) > 0
+				)
+			</if>
+			<if test="carcapacity != null and carcapacity != ''">
+			    AND CM_CAR.CARCAPACITY = #{carcapacity}
+			</if>
+			<if test="fixdccode != null and fixdccode != ''">
+			    AND TM_CAR_ALLOWANCE.DCCODE = #{fixdccode}
+			</if>
+			<if test="contractType != null and contractType != ''">
+			    AND  CM_CAR.CONTRACTTYPE = #{contractType}
+			</if>
+			<if test="caragentkey != null and caragentkey != ''">
+			    AND CM_CAR.CARAGENTKEY IN (
+					SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) 
+					FROM (SELECT #{caragentkey} AS VAL FROM DUAL)
+					CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) > 0
+				)
+			</if>
+	    </where>
+		ORDER BY
+			TM_CAR_ALLOWANCE.COURIER,
+			TM_CAR_ALLOWANCE.CARNO,
+			TM_CAR_ALLOWANCE.STTL_ITEM_CD,
+			TM_CAR_ALLOWANCE.FROMDATE
+    </select>
+    
+    <select id="getCarInfo" resultType="TmAmountByCarResDto">
+		SELECT   /* [tmAmountByCarService.sqlx][getCarInfo][차량별 수당목록 조회][KwonJungyun][2025.08.01] */
+			    A.COURIER                    AS COURIER
+			  , A.CARNO                      AS CARNO
+			  , A.CARCAPACITY                AS CARCAPACITY
+			  , A.CONTRACTTYPE               AS CONTRACTTYPE
+			  , B.DESCRIPTION                AS CARAGENTNAME
+			  , A.CARAGENTKEY                AS CARAGENTKEY
+			  , C.DESCRIPTION                AS COURIERNAME
+			  , A.CAR_ORDERCLOSE_CD          AS OTHER03   
+			  , NVL((
+			      SELECT CASE WHEN t.STTL_ITEM_CD = 'P01' AND A.CONTRACTTYPE NOT IN('DELIVERY','MONTHLY')THEN 0 ELSE t.AMOUNT END AS AMOUNT
+			      FROM TM_TRSP_COST_ALLOWANCE t
+			      WHERE 1=1
+			    <choose>
+			    <when test="courier != null and courier!= ''">
+			        AND	t.COURIER      = #{courier}	
+			     </when>
+			     <otherwise>
+			        AND  t.COURIER      = A.COURIER
+			     </otherwise>
+			     </choose>
+			        AND t.CONTRACTTYPE = A.CONTRACTTYPE
+			        AND t.DCCODE       = #{fixdccode}
+			        AND #{fromdt} BETWEEN T.FROMDATE AND T.TODATE
+			     <if test="sttlitemcd != null and sttlitemcd != ''">
+			        AND t.STTL_ITEM_CD = #{sttlitemcd}   -- 운송료 코드
+			     </if>
+			        /* 후보 조건: 동일 톤 또는 공통(NULL), 동일 유형 또는 공통(10) */
+			        AND (t.TON = A.CARCAPACITY OR t.TON IS NULL)
+			        AND (t.CLOSETYPE = A.CAR_ORDERCLOSE_CD OR t.CLOSETYPE = 10)
+			      ORDER BY
+			        
+			        CASE
+			          WHEN t.TON = A.CARCAPACITY AND t.CLOSETYPE = A.CAR_ORDERCLOSE_CD THEN 300
+			          WHEN t.TON = A.CARCAPACITY AND t.CLOSETYPE = 10        THEN 210
+			          WHEN t.TON IS NULL           AND t.CLOSETYPE = A.CAR_ORDERCLOSE_CD THEN 200
+			          WHEN t.TON IS NULL           AND t.CLOSETYPE = 10        THEN 100
+			          ELSE 0
+			        END DESC,
+			        
+			        t.AMOUNT,              -- 더 싼 금액 우선 (원치 않으면 제거)
+			        t.ROWID                -- 또는 PK/최신일자 등
+			      FETCH FIRST 1 ROW ONLY
+			    ), 0) AS AMOUNT
+		     , B.DESCRIPTION
+		FROM CM_CAR A
+		JOIN MS_CAR_ENTRY_INFO ON A.CARNO = MS_CAR_ENTRY_INFO.CARNO
+		LEFT JOIN MS_CARRIER B
+		  ON A.CARAGENTKEY = B.CARRIERKEY
+		 AND B.CARRIERTYPE = 'SUBC'
+		 AND B.DEL_YN = 'N'
+		LEFT JOIN MS_CARRIER C
+		  ON A.COURIER = C.CARRIERKEY
+		 AND C.CARRIERTYPE = 'LOCAL'
+		 AND C.DEL_YN = 'N'
+		LEFT JOIN CM_CODE_STORER CD_CLOSETYPE
+		  ON CD_CLOSETYPE.CODELIST = 'CUSTORDERCLOSETYPE'
+		 AND TRIM(TO_CHAR(A.CAR_ORDERCLOSE_CD)) = TRIM(CD_CLOSETYPE.BASECODE)
+		WHERE A.CARNO = #{carno}
+    </select>
+    
+    <select id="getCarAllowance" resultType="HashMap" parameterType="TmAmountByCarReqDto">
+           SELECT /* [tmAmountByCarService.sqlx][getCarAllowance][차량별 수당 한 건 조회][KwonJungyun][2025.08.01] */
+                  TM_CAR_ALLOWANCE.SERIALKEY         AS SERIALKEY 
+               ,  TM_CAR_ALLOWANCE.DCCODE            AS DCCODE
+               ,  TM_CAR_ALLOWANCE.COURIER           AS COURIER
+               ,  TM_CAR_ALLOWANCE.CARNO             AS CARNO
+               ,  TM_CAR_ALLOWANCE.FROMDATE          AS ALLOWANCE_DATE
+           FROM TM_CAR_ALLOWANCE
+           WHERE TM_CAR_ALLOWANCE.SERIALKEY = #{serialkeyH}
+    </select>
+      
+	<insert id="insertMaster" parameterType="TmAmountByCarResDto">
+	    MERGE INTO TM_CAR_ALLOWANCE A  /* [tmAmountByCarService.sqlx][insertMaster][차량별 수당관리 저장][KwonJungyun][2025.08.01] */
+		USING (
+		    SELECT
+		        #{serialkey}    AS SERIALKEY,
+		        #{dccode}       AS DCCODE,
+		        #{courier}      AS COURIER,
+		        #{carno}        AS CARNO,
+		        #{sttlItemCd}   AS STTL_ITEM_CD,
+		        #{amount}       AS AMOUNT,
+		        #{fromdate}     AS FROMDATE,
+		        #{todate}       AS TODATE,
+		        #{rmk}          AS RMK
+		    FROM DUAL
+		) B
+		ON (A.SERIALKEY = B.SERIALKEY)
+		WHEN MATCHED THEN
+		    UPDATE SET
+		        A.COURIER        = B.COURIER,
+		        A.CARNO          = B.CARNO,
+		        A.STTL_ITEM_CD   = B.STTL_ITEM_CD,
+		        A.AMOUNT         = B.AMOUNT,
+		        A.FROMDATE       = B.FROMDATE,
+		        A.TODATE         = B.TODATE,
+		        A.RMK            = B.RMK,
+		        A.EDITDATE       = SYSDATE,
+		        A.EDITWHO        = #{gUserId}
+		WHEN NOT MATCHED THEN
+		    INSERT (
+		        DCCODE,
+		        COURIER,
+		        CARNO,
+		        STTL_ITEM_CD,
+		        AMOUNT,
+		        FROMDATE,
+		        TODATE,
+		        RMK,
+		        ADDDATE,
+		        EDITDATE,
+		        ADDWHO,
+		        EDITWHO
+		    )
+		    VALUES (
+		        B.DCCODE,
+		        B.COURIER,
+		        B.CARNO,
+		        B.STTL_ITEM_CD,
+		        B.AMOUNT,
+		        B.FROMDATE,
+		        B.TODATE,
+		        B.RMK,
+		        SYSDATE,
+		        SYSDATE,
+		        #{gUserId},
+		        #{gUserId}
+		    )
+	</insert>
+	
+	<update id="updateMaster" parameterType="TmAmountByCarResDto">
+	    UPDATE    /* [tmAmountByCarService.sqlx][updateMaster][차량별 수당관리 수정][KwonJungyun][2025.08.01] */
+	    TM_CAR_ALLOWANCE
+	    SET
+	        COURIER      = #{courier},
+	        CARNO        = #{carno},
+	        STTL_ITEM_CD = #{sttlItemCd},
+	        AMOUNT       = #{amount},
+	        FROMDATE     = #{fromdate},
+	        TODATE       = #{todate},
+	        RMK          = #{rmk},
+	        EDITDATE     = SYSDATE,
+	        EDITWHO      = #{gUserId}
+	    WHERE
+	        SERIALKEY = #{serialkey}
+	</update>
+	
+	<delete id="deleteMaster" parameterType="TmAmountByCarResDto">
+	    DELETE    /* [tmAmountByCarService.sqlx][deleteMaster][차량별 수당관리 삭제][KwonJungyun][2025.08.01] */
+	    FROM TM_CAR_ALLOWANCE
+	    WHERE
+			SERIALKEY = #{serialkey}
+	</delete>
+
+	<select id="getDurationList" resultType="TmAmountByCarResDto" parameterType="TmAmountByCarReqDto">
+	    SELECT    /* [tmAmountByCarService.sqlx][getDurationList][차량별 수당관리 기간 조회][KwonJungyun][2025.08.07] */
+	    	   TM_CAR_ALLOWANCE.SERIALKEY 		AS SERIALKEY
+	    	,  TM_CAR_ALLOWANCE.DCCODE 			AS DCCODE
+	    	,  TM_CAR_ALLOWANCE.COURIER 		AS COURIER
+	    	,  TM_CAR_ALLOWANCE.CARNO			AS CARNO
+	    	,  TM_CAR_ALLOWANCE.STTL_ITEM_CD	AS STTL_ITEM_CD
+	    	,  TM_CAR_ALLOWANCE.FROMDATE   		AS FROMDATE
+	    	,  TM_CAR_ALLOWANCE.TODATE    		AS TODATE
+	    	,  'R'     							AS ROW_STATUS
+		FROM TM_CAR_ALLOWANCE
+		<where>
+			AND TM_CAR_ALLOWANCE.CARNO = #{carno}
+			AND TM_CAR_ALLOWANCE.COURIER = #{courier}
+			AND TM_CAR_ALLOWANCE.DCCODE = #{fixdccode}
+		<if test="fromdt != null and fromdt != ''">
+			AND TM_CAR_ALLOWANCE.TODATE <![CDATA[>=]]> #{fromdt}
+		</if>
+		<if test="todt != null and todt != ''">
+			AND TM_CAR_ALLOWANCE.FROMDATE <![CDATA[<=]]> #{todt}
+		</if>
+		<if test="excludeKeys != null and excludeKeys.size > 0">
+			AND SERIALKEY NOT IN
+			<foreach item="key" collection="excludeKeys" open="(" separator="," close=")">
+				#{key}
+			</foreach>
+		</if>
+		</where>
+	</select>
+	
+	<select id="getExcelValChk" parameterType="java.util.List" resultType="TmAmountByCarResDto">
+		WITH TEMP AS (    
+		<foreach collection="list" item="item" separator="UNION ALL">
+		    SELECT
+				       #{item.sttlItemCd}      AS STTLITEMCD         /* 정산항목코드 */
+				     , #{item.confirmAmount}   AS CONFIRMAMOUNT      /* 확정금액 */
+				     , #{item.amount}          AS AMOUNT             /* 금액 */
+				     , REGEXP_REPLACE(#{item.dccode}, '[^0-9]', '')                             AS DCCODE             /* 센터 */  
+				     , #{item.caragentname}    AS CARAGENTNAME       /* 차량소속(차주사) */
+				     , #{item.addwhoName}      AS ADDWHONAME         /* 등록자명 */
+				     , #{item.couriername}     AS COURIERNAME        /* 택배사명 */
+				     , NVL(REPLACE(#{item.fromdate}, '-', ''),TO_CHAR(SYSDATE,'YYYYMMDD') )     AS FROMDATE           /* 시작일자 */
+				     , #{item.rmk}             AS RMK                /* 비고 */
+				     , #{item.contracttype}    AS CONTRACTTYPE       /* 계약유형 */
+				     , NVL(REPLACE(#{item.todate}, '-', '') ,'29991231')                        AS TODATE             /* 종료일자 */
+				     , #{item.courier}         AS COURIER            /* 운송업체명 */
+				     , #{item.carno}           AS CARNO              /* 차량번호 */
+				     , #{item.other03}         AS OTHER03            /* 기타값 */
+				     , #{item.editwhoName}     AS EDITWHONAME        /* 수정자명 */
+				     , #{item.editdate}        AS EDITDATE           /* 수정일시 */
+				     , #{item.carcapacity}     AS CARCAPACITY        /* 차량톤수 */
+				     , #{item.masterAmount}    AS MASTERAMOUNT       /* 기준금액 */
+				     , #{item.adddate}         AS ADDDATE            /* 등록일시 */
+		    FROM DUAL
+		</foreach>
+        )
+		,NORM AS (
+		      SELECT 
+		           CD1.BASECODE                                      AS STTLITEMCD        /* 정산항목코드 */
+		         , T.DCCODE                                          AS DCCODE            /* 센터코드 */
+		         , T.DCCODE                                          AS CODE              /* 센터코드 */
+		         , CAR.COURIER                                       AS COURIER           /* 1차운송사 */
+		         , NVL(CAR.CAR_ORDERCLOSE_CD, CD2.BASECODE)          AS OTHER03           /* 마감유형 */
+		         , T.AMOUNT                                          AS AMOUNT            /* 금액(엑셀업로드) */
+		         , T.FROMDATE                                        AS FROM_DATE         /* 적용시작일자(YYYYMMDD) */
+		         , T.TODATE                                          AS TODATE            /* 적용종료일자(YYYYMMDD) */
+		         , T.RMK                                             AS RMK               /* 비고 */
+		         , NVL(MS_CARRIER.DESCRIPTION,CAR.COURIERNAME)       AS COURIERNAME       /* 1차운송사명 */
+		         , T.CARNO                                           AS CARNO             /* 차량번호 */
+		         , CAR.CARCAPACITY                                   AS CARCAPACITY       /* 차량톤수 */
+		         , CAR.CONTRACTTYPE                                  AS CONTRACTTYPE      /* 계약유형 */
+		         , CAR.CARAGENTNAME                                  AS CARAGENTNAME      /* 차량소속(차주사) */
+		         , CAR.CARAGENTKEY                                   AS CARAGENTKEY       /* 차량소속코드(차주사코드) */
+		         , NVL((
+		               SELECT  CASE WHEN TT.STTL_ITEM_CD = 'P01' AND CAR.CONTRACTTYPE NOT IN('DELIVERY','MONTHLY') THEN 0 ELSE TT.AMOUNT END AS AMOUNT 
+		                 FROM TM_TRSP_COST_ALLOWANCE TT
+		                WHERE TT.COURIER      = NVL(CAR.COURIER, MS_CARRIER.CARRIERKEY)               /* A.CUSTKEY */
+		                  AND TT.CONTRACTTYPE = CAR.CONTRACTTYPE      /* A.CONTRACTTYPE */
+		                  AND TT.DCCODE       = T.DCCODE           /* A.DEF_DCCODE */
+		                  AND TT.STTL_ITEM_CD = CD1.BASECODE          /* 정산항목코드 */
+		                  AND T.TODATE BETWEEN TT.FROMDATE AND TT.TODATE
+		                  /* 후보 조건: 동일 톤 또는 공통(NULL), 동일 유형 또는 공통(10) */
+		                  AND (TT.TON       = CAR.CARCAPACITY OR TT.TON IS NULL)
+		                  AND (TT.CLOSETYPE = CAR.CAR_ORDERCLOSE_CD OR TT.CLOSETYPE = 10)
+		                ORDER BY
+		                     CASE
+		                       WHEN TT.TON = CAR.CARCAPACITY AND TT.CLOSETYPE = CAR.CAR_ORDERCLOSE_CD THEN 300
+		                       WHEN TT.TON = CAR.CARCAPACITY AND TT.CLOSETYPE = 10          THEN 210
+		                       WHEN TT.TON IS NULL           AND TT.CLOSETYPE = CAR.CAR_ORDERCLOSE_CD THEN 200
+		                       WHEN TT.TON IS NULL           AND TT.CLOSETYPE = 10          THEN 100
+		                       ELSE 0
+		                     END DESC
+		                   , TT.AMOUNT
+		                   , TT.ROWID
+		               FETCH FIRST 1 ROW ONLY
+		           ), 0)                                              AS MASTERAMOUNT      /* 기준금액 */
+		         , CASE WHEN EXISTS (
+		                 SELECT 1
+		                   FROM TM_TRSP_COST_ALLOWANCE TMCOST
+		                  WHERE TMCOST.COURIER = CAR.COURIER
+		                    AND TMCOST.CONTRACTTYPE = CAR.CONTRACTTYPE
+		                    AND (TMCOST.TON = CAR.CARCAPACITY OR TMCOST.TON IS NULL)
+		                    AND (TMCOST.CLOSETYPE = NVL(CAR.CAR_ORDERCLOSE_CD, CD2.BASECODE)
+		                         OR TMCOST.CLOSETYPE = '10') 
+		                    AND TMCOST.STTL_ITEM_CD = CD1.BASECODE 
+		                    AND T.TODATE BETWEEN TMCOST.FROMDATE AND TMCOST.TODATE
+		                    AND (
+		                          TMCOST.STTL_ITEM_CD != 'P01'
+		                       OR (TMCOST.STTL_ITEM_CD = 'P01' 
+		                          AND TMCOST.CONTRACTTYPE NOT IN ('FIXTEMPORARY', 'TEMPORARY','FIX'))
+		                       OR TMCOST.STTL_ITEM_CD IN ('P12','P25')
+		                     )
+		                 )
+		               THEN 'Y'
+		               ELSE 'N'
+		               END AS EXIST_YN
+			    FROM TEMP T
+			    /* 기존 운송사 조인 */
+			    LEFT JOIN MS_CARRIER
+			      ON MS_CARRIER.DESCRIPTION = T.COURIERNAME 
+			     AND MS_CARRIER.CARRIERTYPE = 'LOCAL'
+			     AND MS_CARRIER.DEL_YN = 'N'
+				LEFT JOIN MS_CARRIER MS_CARRIERSUB
+				  ON MS_CARRIERSUB.DESCRIPTION = T.CARAGENTNAME 
+				 AND MS_CARRIERSUB.CARRIERTYPE = 'SUBC'
+				 AND MS_CARRIERSUB.DEL_YN = 'N'
+				/* 정산항목코드 매핑 */
+				LEFT OUTER JOIN CM_CODE_STORER CD1
+				  ON CD1.STORERKEY  = 'FW00' 
+				 AND CD1.CODELIST   = 'TM_CALC_ITEM'
+				 AND CD1.BASEDESCR  = T.STTLITEMCD
+				/* 마감유형 매핑 (차량유형 코드) */
+				LEFT OUTER JOIN CM_CODE_STORER CD2
+				  ON CD2.STORERKEY  = 'FW00' 
+				 AND CD2.CODELIST   = 'VIHICLE_TYPE_CD'
+				 AND CD2.BASEDESCR  = T.OTHER03
+				/* 차량정보 매핑 */
+				LEFT OUTER JOIN (
+				     SELECT
+				            B.CARRIERKEY                AS COURIER              /* 운송사코드 */
+				          , A.CARNO                     AS CARNO                /* 차량번호 */
+				          , A.CARCAPACITY               AS CARCAPACITY          /* 차량톤수 */
+				          , A.CONTRACTTYPE              AS CONTRACTTYPE         /* 계약유형 */
+				          , C.DESCRIPTION               AS CARAGENTNAME         /* 차량소속(차주사) */
+				          , C.CARRIERKEY                AS CARAGENTKEY          /* 차량소속코드(차주사코드) */
+				          , MS_CAR_ENTRY_INFO.DCCODE    AS DCCODE               /* 기본센터코드 */
+				          , A.CAR_ORDERCLOSE_CD         AS CAR_ORDERCLOSE_CD    /* 마감유형(공통=10) */
+				          , B.DESCRIPTION               AS COURIERNAME          /* 운송사명 */
+				     FROM CM_CAR A
+				     JOIN MS_CAR_ENTRY_INFO ON A.CARNO = MS_CAR_ENTRY_INFO.CARNO
+				     LEFT JOIN MS_CARRIER B
+				       ON A.COURIER = B.CARRIERKEY
+				      AND B.CARRIERTYPE = 'LOCAL' 
+				     LEFT JOIN MS_CARRIER C
+				       ON A.CARAGENTKEY = C.CARRIERKEY
+				      AND C.CARRIERTYPE = 'SUBC' 
+				     LEFT JOIN CM_CODE_STORER CD_CLOSETYPE
+				       ON CD_CLOSETYPE.CODELIST = 'CUSTORDERCLOSETYPE'
+				      AND TRIM(TO_CHAR(A.CAR_ORDERCLOSE_CD)) = TRIM(CD_CLOSETYPE.BASECODE)
+				    ) CAR
+				  ON CAR.CARNO = T.CARNO   /* 차량번호 기준으로 매핑 */
+			)
+		,VALCHK AS(      
+		     SELECT
+		           N.STTLITEMCD                                    AS STTLITEMCD        /* 정산항목코드 */
+		         , N.DCCODE                                        AS DCCODE            /* 센터코드 */
+		         , N.CODE                                          AS CODE              /* 센터코드 */
+		         , N.COURIER                                       AS COURIER           /* 운송사코드 */
+		         , N.OTHER03                                       AS OTHER03           /* 마감유형 */
+		         , N.AMOUNT                                        AS AMOUNT            /* 금액(엑셀업로드) */
+		         , N.FROM_DATE                                     AS FROM_DATE         /* 적용시작일자(YYYYMMDD) */
+		         , N.TODATE                                        AS TODATE            /* 적용종료일자(YYYYMMDD) */
+		         , N.RMK                                           AS RMK               /* 비고 */
+		         , N.COURIERNAME                                   AS COURIERNAME       /* 운송사명 */
+		         , N.CARNO                                         AS CARNO             /* 차량번호 */
+		         , N.CARCAPACITY                                   AS CARCAPACITY       /* 차량톤수 */
+		         , N.CONTRACTTYPE                                  AS CONTRACTTYPE      /* 계약유형 */
+		         , N.CARAGENTNAME                                  AS CARAGENTNAME      /* 차량소속(차주사) */
+		         , N.CARAGENTKEY                                   AS CARAGENTKEY       /* 차량소속코드(차주사코드) */
+		         , CASE WHEN N.EXIST_YN = 'N' THEN 0 ELSE N.MASTERAMOUNT      END                            AS MASTERAMOUNT      /* 기준금액 */
+		         , N.EXIST_YN                                      AS EXIST_YN          /* 요율 존재여부 */
+		         , CASE WHEN N.EXIST_YN = 'N' THEN 0 ELSE  N.MASTERAMOUNT + N.AMOUNT END                     AS SUMAMOUNT         /* 기준금액+금액 */
+		         , CASE
+		             WHEN N.COURIER    IS NULL THEN '운송사 미입력'
+		             WHEN N.DCCODE     IS NULL THEN '물류센터 미입력'
+		             WHEN N.CARNO      IS NULL THEN '차량번호 미입력'
+		             WHEN N.STTLITEMCD IS NULL THEN '관리항목 미입력'
+		             WHEN N.FROM_DATE  IS NULL THEN '시작일자 미입력'
+		             WHEN N.TODATE     IS NULL THEN '종료일자 미입력'
+		             WHEN FN_CHECK_TRSP_CLOSE(N.DCCODE, N.COURIER, N.FROM_DATE) = 'Y' THEN '해당운송사는 이미 마감처리 되었습니다.'
+		             WHEN N.TODATE <![CDATA[<]]>N.FROM_DATE THEN '시작일자가 종료일자보다 큽니다.'
+		             WHEN N.TODATE<![CDATA[<]]>TO_CHAR(TRUNC(SYSDATE), 'YYYYMMDD') THEN '종료일자가 오늘보다 작음'
+		             WHEN N.EXIST_YN = 'N' THEN '운송 단가가 등록 되지 않았습니다' 
+		             ELSE NULL
+		          END                                              AS ERRMSG            /* 오류메시지 */
+		         , CASE
+		               WHEN EXISTS (
+		                   SELECT 1
+		                   FROM TM_CAR_ALLOWANCE A
+		                   WHERE A.DCCODE     = N.DCCODE
+		                   AND A.COURIER      = N.COURIER
+		                   AND A.STTL_ITEM_CD = N.STTLITEMCD
+		                   AND A.CARNO        = N.CARNO
+		                   AND NOT ( A.TODATE <![CDATA[<]]> N.FROM_DATE
+		                          OR A.FROMDATE <![CDATA[>]]> N.TODATE )
+		                       )
+		               THEN 'Y'
+		               ELSE 'N'
+		           END                                             AS VALCHK            /* 중복여부 */
+			FROM NORM N
+		)
+        
+		SELECT 
+		     A.* 
+		    ,CASE WHEN A.ERRMSG IS NOT NULL THEN 'Y' ELSE 'N' END AS ERRYN
+		FROM VALCHK A
+    </select>
+    
+    <insert id="insertExcelMaster" >
+    	   INSERT INTO TM_CAR_ALLOWANCE(    /* [tmAmountByCarService.xml][insertExcelMaster][차량정산 단가 엑셀 저장][parkjinwoo][20260303] */
+    	        SERIALKEY,
+		        DCCODE,
+		        COURIER,
+		        CARNO,
+		        STTL_ITEM_CD,
+		        AMOUNT,
+		        FROMDATE,
+		        TODATE,
+		        RMK,
+		        ADDDATE,
+		        EDITDATE,
+		        ADDWHO,
+		        EDITWHO
+		    )
+		    VALUES (
+		        LOGISONESVC.SEQ_TM_CAR_ALLOWANCE_01.NEXTVAL,
+		        #{dccode},
+		        #{courier},
+		        #{carno},
+		        #{sttlItemCd},
+		        #{amount},
+		        #{fromdate},
+		        #{todate},
+		        #{rmk},
+		        SYSDATE,
+		        SYSDATE,
+		        #{gUserId},
+		        #{gUserId}
+		    )
+    </insert>
+    
+	<update id="updateExcelMaster">
+    	UPDATE TM_CAR_ALLOWANCE X      /* [tmAmountByCarService.xml][updateExcelMaster][차량정산 단가 엑셀 저장][parkjinwoo][20260303] */
+    	 SET X.TODATE   = TO_CHAR(TO_DATE(#{fromdate}, 'YYYYMMDD') - 1, 'YYYYMMDD')
+    	    ,X.EDITDATE = SYSDATE
+    	    ,X.EDITWHO  = #{gUserId}
+    	 WHERE <![CDATA[ X.DCCODE      		 = #{dccode}       ]]>
+		   AND <![CDATA[ X.COURIER      	 = #{courier}      ]]>
+		   AND <![CDATA[ X.STTL_ITEM_CD      = #{sttlItemCd}      ]]>
+		   AND <![CDATA[ X.CARNO             = #{carno}      ]]>
+		   AND NOT ( <![CDATA[ X.TODATE   < #{fromdate} ]]> 
+			        OR <![CDATA[ X.FROMDATE > #{todate} ]]> )
+	</update>
+   
+	<update id="updateTmAmountCar01">
+    	UPDATE TM_CAR_ALLOWANCE A
+		   SET A.AMOUNT       = #{amount}      /* 금액 */
+		     , A.RMK          = #{rmk}         /* 비고 */
+		     , A.EDITDATE     = SYSDATE        /* 최종변경시간 */
+		     , A.EDITWHO      = #{gUserId}     /* 최종변경자 */
+		      <!-- , A.ADDDATE     = SYSDATE        /* 최종변경시간 */
+		     , A.ADDWHO      = #{gUserId}     /* 최종변경자 */ -->
+		     , A.FROMDATE     = #{fromdate}
+		     , A.TODATE       = #{todate}
+		 WHERE A.DCCODE       = #{dccode}      /* 센터코드 */
+		   AND A.COURIER      = #{courier}     /* 운송사코드 */
+		   AND A.CARNO        = #{carno}       /* 차량번호 */
+		   AND A.STTL_ITEM_CD = #{sttlItemCd}  /* 정산항목코드 */
+		   AND A.FROMDATE     = #{fromdate}    /* 적용종료일자 */
+	</update>
+   
+	<update id="expireAndDeleteTmAmountCar01">
+	    UPDATE TM_CAR_ALLOWANCE A  /* [tmAmountByCarService.xml][expireAndDeleteTmAmountCar01][차량정산 단가 기간 마감(기준일로 종료일 갱신)][parkjinwoo][20260303] */
+	       SET A.TODATE       = #{todate}      /* 적용종료일자 */
+	         , A.RMK          = #{rmk}         /* 비고 */
+	         , A.EDITDATE     = SYSDATE        /* 최종변경시간 */
+	         , A.EDITWHO      = #{gUserId}     /* 최종변경자 */
+	     WHERE A.DCCODE       = #{dccode}      /* 센터코드 */
+	       AND A.COURIER      = #{courier}     /* 운송사코드 */
+	       AND A.CARNO        = #{carno}       /* 차량번호 */
+	       AND A.STTL_ITEM_CD = #{sttlItemCd}  /* 정산항목코드 */
+	       AND A.FROMDATE     = (
+	            SELECT MAX(B.FROMDATE)
+	              FROM TM_CAR_ALLOWANCE B
+	             WHERE B.DCCODE       = #{dccode}      /* 센터코드 */
+	               AND B.COURIER      = #{courier}     /* 운송사코드 */
+	               AND B.CARNO        = #{carno}       /* 차량번호 */
+	               AND B.STTL_ITEM_CD = #{sttlItemCd}  /* 정산항목코드 */
+	               AND B.FROMDATE     <![CDATA[<=]]> #{todate}  /* 기준일 이전 시작 */
+	        )
+	</update>
+     
+	<delete id="deleteTmAmountCar01">
+	    DELETE TM_CAR_ALLOWANCE A  /* [tmAmountByCarService.xml][deleteTmAmountCar01][차량정산 단가 종료 시점 이후 로우 전체 삭제][parkjinwoo][20260303] */
+	    WHERE  A.DCCODE       = #{dccode}      /* 센터코드 */
+	       AND A.COURIER      = #{courier}     /* 운송사코드 */
+	       AND A.CARNO        = #{carno}       /* 차량번호 */
+	       AND A.STTL_ITEM_CD = #{sttlItemCd}  /* 정산항목코드 */
+	       AND A.FROMDATE <![CDATA[>]]> (
+	            SELECT MAX(B.FROMDATE)
+	              FROM TM_CAR_ALLOWANCE B
+	             WHERE B.DCCODE       = #{dccode}      /* 센터코드 */
+	               AND B.COURIER      = #{courier}     /* 운송사코드 */
+	               AND B.CARNO        = #{carno}       /* 차량번호 */
+	               AND B.STTL_ITEM_CD = #{sttlItemCd}  /* 정산항목코드 */
+	               AND B.FROMDATE     <![CDATA[<=]]> #{todate}  /* 기준일 이전 시작(마감 대상) */
+	        )
+	</delete>
+
+	<select id="chkVal" resultType="TmAmountByCarResDto"> 
+	    SELECT  /* [tmAmountByCarService.sqlA][excelValChk][엑셀업로드 검증][ParkJinWoo][20250811] */
+	               (
+	                SELECT CASE WHEN COUNT(*) > 0 THEN 'Y' ELSE 'N' END
+	                  FROM TM_CAR_ALLOWANCE A
+	                 WHERE A.DCCODE        = #{dccode}
+	                   AND A.COURIER       = #{courier}
+	                   AND A.STTL_ITEM_CD  = #{sttlItemCd}
+	                   AND A.CARNO         = #{carno}
+	                   AND A.FROMDATE      = #{fromdate}
+	               ) AS CHK1              /* 체크.기존 자료가 존재하는 경우 가격 수정 */
+	             , (
+	                SELECT CASE WHEN MAX(A.FROMDATE) IS NOT NULL THEN MAX(A.FROMDATE) ELSE '' END
+	                  FROM TM_CAR_ALLOWANCE A
+	                 WHERE A.DCCODE        = #{dccode}
+	                   AND A.COURIER       = #{courier}
+	                   AND A.STTL_ITEM_CD  = #{sttlItemCd}
+	                   AND A.CARNO         = #{carno}
+	                   AND <![CDATA[ A.FROMDATE < #{fromdate} ]]>
+	               ) AS STA_DT            /* 체크.중복.시작일자가 겹치는 지 체크 */
+	             , (
+	                SELECT CASE WHEN MAX(A.SERIALKEY) IS NOT NULL THEN TO_CHAR(MAX(A.SERIALKEY)) ELSE '' END
+	                  FROM TM_CAR_ALLOWANCE A
+	                 WHERE A.DCCODE        = #{dccode}
+	                   AND A.COURIER       = #{courier}
+	                   AND A.STTL_ITEM_CD  = #{sttlItemCd}
+	                   AND A.CARNO         = #{carno}
+	                   AND <![CDATA[ A.FROMDATE < #{fromdate} ]]>
+	               ) AS SERIALKEY         /* 체크.중복.시작일자가 겹치는 지 체크 */
+	             , (
+	                SELECT CASE
+	                           WHEN MIN(A.FROMDATE) IS NOT NULL
+	                           THEN TO_CHAR(TO_DATE(MIN(A.FROMDATE), 'YYYYMMDD') - 1, 'YYYYMMDD')
+	                           ELSE ''
+	                       END
+	                  FROM TM_CAR_ALLOWANCE A
+	                 WHERE A.DCCODE        = #{dccode}
+	                   AND A.COURIER       = #{courier}
+	                   AND A.STTL_ITEM_CD  = #{sttlItemCd}
+	                   AND A.CARNO         = #{carno}
+	                   AND <![CDATA[ A.FROMDATE > #{fromdate} ]]>
+	               ) AS END_DT            /* 체크.중복.미래종료일자가 있는지.체크 */
+	    FROM DUAL
+	</select>
+  
+	<update id="updateTmAmountCar02">
+	    UPDATE /* [tmAmountByCarService.sqlx][updateTmAmountCar02][차량수당 이전기간 종료일 닫기][ParkJinWoo][20250811] */
+	           TM_CAR_ALLOWANCE A
+	      SET  A.TODATE    = TO_CHAR(TO_DATE(#{fromdate},'YYYYMMDD') - 1,'YYYYMMDD') /* 적용종료일자 */
+	         , A.EDITDATE  = SYSDATE                                                 /* 최종변경시간 */
+	         , A.EDITWHO   = #{gUserId}                                              /* 최종변경자 */
+	     WHERE (A.DCCODE, A.COURIER, A.STTL_ITEM_CD, A.CARNO, A.FROMDATE)
+	           =
+	           (
+	               SELECT X.DCCODE
+	                    , X.COURIER
+	                    , X.STTL_ITEM_CD
+	                    , X.CARNO
+	                    , MAX(X.FROMDATE)
+	                 FROM TM_CAR_ALLOWANCE X
+	                WHERE <![CDATA[ X.DCCODE       = #{dccode}    ]]>
+	                  AND <![CDATA[ X.COURIER      = #{courier}   ]]>
+	                  AND <![CDATA[ X.STTL_ITEM_CD = #{sttlItemCd} ]]>
+	                  AND <![CDATA[ X.CARNO        = #{carno}     ]]>
+	                  AND <![CDATA[ X.FROMDATE     < #{fromdate}  ]]>
+	                GROUP BY X.DCCODE, X.COURIER, X.STTL_ITEM_CD, X.CARNO
+	           )
+	</update>
+  
+	<select id="trspCloseChk" resultType="TmAmountByCarResDto">
+	    SELECT
+	 	      FN_CHECK_TRSP_CLOSE( #{dccode},#{courier},#{fromdate})  AS VALCHK
+	 	    , #{courier}                                              AS COURIER
+	 	    , MS_CARRIER.DESCRIPTION                                  AS COURIERNAME
+	 	    , TO_CHAR(TO_DATE(#{fromdate},'YYYY-MM-DD'),'YYYY-MM-DD') AS FROMDATE
+	     FROM DUAL
+	     JOIN MS_CARRIER 
+		   ON MS_CARRIER.CARRIERKEY = #{courier}
+		  AND MS_CARRIER.CARRIERTYPE = 'LOCAL'
+		  AND MS_CARRIER.DEL_YN = 'N'
+	</select>
+	   
+    <select id="getPopupUploadFileList" resultType="TmAmountByCarFilePopupResDto">
+        SELECT  /* [tmAmountByCarService.sqlx][getPopupUploadFileList][증빙첨부 Popup Upload File List 조회][sunho.kim][2026.03.04] */
+                SERIALKEY              AS SERIALKEY             /* 일련번호 */
+               ,SERIALKEY_H            AS SERIALKEY_H           /* 헤더ID */ 
+               ,DOC_NAME               AS DOC_NAME              /* 문서구분명 */
+               ,COURIER                AS COURIER               /* 운송사코드 */
+               ,CARNO                  AS CARNO                 /* 차량번호 */
+               ,FILE_NAME              AS FILE_NM               /* 파일명 */  
+               ,FILE_EXTENSION         AS ATTCH_FILE_EXT_NM     /* 파일확장자 */ 
+               ,FILE_LOCATION          AS FILE_LOCATION         /* 업로드 대상 파일 경로 */    
+               ,FILE_SIZE_BYTES        AS ATTCH_FILE_SZ         /* 파일크기(byte) */ 
+               ,UPLOAD_FILE_NAME       AS UPLOAD_FILE_NAME      /* 변환 후 업로드된 파일명 */
+               ,STATUS                 AS STATUS                /* 상태 */ 
+               ,ADDWHO                 AS ADDWHO                /* 최초등록자 */ 
+               ,ADDDATE                AS ADDDATE               /* 최초등록시간 */ 
+               ,EDITWHO                AS EDITWHO               /* 최종변경자 */ 
+               ,EDITDATE               AS EDITDATE              /* 최종변경시간 */
+        FROM    TM_CAR_ALLOWANCE_DOC
+        WHERE   SERIALKEY_H = #{serialkeyH}
+        <if test="serialkey != null and serialkey !=''">
+          AND   SERIALKEY   = #{serialkey}
+        </if>
+          AND   STATUS      = 'Y'
+    </select>
+    
+    <insert id="insertUploadFile">
+        INSERT  /* [tmAmountByCarService.sqlx][insertUploadFile][증빙첨부 저장][sunho.kim][2025.08.04] */ 
+        INTO TM_CAR_ALLOWANCE_DOC 
+               (   
+                 SERIALKEY_H  
+               , DOC_NAME  
+               , COURIER
+               , CARNO
+               , FILE_NAME  
+               , FILE_EXTENSION  
+               , FILE_LOCATION  
+               , FILE_SIZE_BYTES  
+               , UPLOAD_FILE_NAME  
+               , STATUS  
+               , ADDWHO
+               , ADDDATE
+               , EDITWHO
+               , EDITDATE
+               )
+        VALUES (    
+                 #{serialkeyH}
+               , #{docName}
+               , #{courier}
+               , #{carno} 
+               , #{fileNm} 
+               , #{attchFileExtNm}
+               , #{fileLocation}
+               , #{attchFileSz} 
+               , #{uploadFileName}
+               , 'Y'   
+               , #{gUserId}
+               , SYSDATE 
+               , #{gUserId} 
+               , SYSDATE 
+             )  
+    </insert> 
+        
+    <delete id="deleteUploadFile">
+        DELETE  /* [tmAmountByCarService.sqlx][deleteUploadFile][증빙첨부 삭제][sunho.kim][2025.08.04] */ 
+        TM_CAR_ALLOWANCE_DOC
+        WHERE  SERIALKEY        = #{serialkey}  
+    </delete>
+</mapper>

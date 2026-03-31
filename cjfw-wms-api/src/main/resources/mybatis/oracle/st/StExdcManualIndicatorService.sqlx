@@ -1,0 +1,764 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="stExdcManualIndicatorService">
+ 	<select id="getHeaderList"  resultType="StExdcManualIndicatorResDto">
+<!-- /* [stManualOutboundStatusMapper.xml][selectManualOutboundStatusSheet][수기출고현황 장표 조회][ParkJinWoo][20260203] */
+WITH
+PARAMS AS (
+    SELECT REGEXP_REPLACE(TO_CHAR(#{baseYyyymm}), '[^0-9]', '') AS M0_YM
+      FROM DUAL
+),
+RNG AS (
+    SELECT
+           M0_YM
+         , TO_CHAR(ADD_MONTHS(TO_DATE(M0_YM||'01','YYYYMMDD'), -1),  'YYYYMM') AS M1_YM          /* D-1 */
+         , TO_CHAR(ADD_MONTHS(TO_DATE(M0_YM||'01','YYYYMMDD'), -2),  'YYYYMM') AS M2_YM          /* D-2 */
+         , TO_CHAR(ADD_MONTHS(TO_DATE(M0_YM||'01','YYYYMMDD'), -12), 'YYYYMM') AS PY_M0_YM       /* 전년동월 */
+         , SUBSTR(M0_YM,1,4)                                                   AS BASE_YYYY
+         , TO_CHAR(ADD_MONTHS(TO_DATE(M0_YM||'01','YYYYMMDD'), -12), 'YYYY')   AS PREV_YYYY
+         , TO_CHAR(TRUNC(ADD_MONTHS(TO_DATE(M0_YM||'01','YYYYMMDD'), -12),'YYYY'),'YYYYMMDD') AS PREV_YEAR_FROM_YMD
+         , TO_CHAR(LAST_DAY(TO_DATE(M0_YM||'01','YYYYMMDD')),'YYYYMMDD')                      AS YTD_TO_YMD
+      FROM PARAMS
+),
+
+NORMAL_M AS (
+    SELECT
+           SUBSTR(TO_CHAR(D.DELIVERYDATE),1,6) AS YM
+         , COUNT(1)                            AS CNT
+      FROM WD_INPLAN W
+      JOIN DM_DOCUMENT_H H
+        ON H.DCCODE       = W.DCCODE
+       AND H.DELIVERYDATE = W.SLIPDT
+       AND H.DOCTYPE      = W.DOCTYPE
+       AND H.DOCNO        = W.DOCNO
+       AND H.DOCTYPE      = 'WD'
+       AND H.DEL_YN       = 'N'
+      JOIN DM_DOCUMENT_D D
+        ON D.DCCODE       = W.DCCODE
+       AND D.DOCTYPE      = W.DOCTYPE
+       AND D.DELIVERYDATE = W.SLIPDT
+       AND D.DOCNO        = W.DOCNO
+       AND D.DOCLINE      = W.DOCLINE
+       AND D.CHANNEL      IN ('1','2','3')
+       AND D.DEL_YN       = 'N'
+     CROSS JOIN RNG
+     WHERE <![CDATA[ W.DCCODE = #{dcCode} ]]>
+       AND <![CDATA[ W.STORERKEY = #{gStorerkey} ]]>
+       AND <![CDATA[ D.STATUS = '90' ]]>
+       AND <![CDATA[ TO_CHAR(D.DELIVERYDATE) BETWEEN RNG.PREV_YEAR_FROM_YMD AND RNG.YTD_TO_YMD ]]>
+              		<if test="organize != null and organize != ''">
+			AND W.ORGANIZE IN (
+				SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS ORGANIZE
+				FROM (SELECT #{organize} AS VAL FROM DUAL)
+				CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) > 0
+			)
+		</if>
+       AND EXISTS (
+           SELECT 1
+             FROM CM_USER_AUTHORITY A
+            WHERE <![CDATA[ A.USERID = #{gUserId} ]]>
+              AND <![CDATA[ A.DCCODE = W.DCCODE ]]>
+              AND <![CDATA[ A.STORERKEY = W.STORERKEY ]]>
+              AND <![CDATA[ A.ORGANIZE = W.ORGANIZE ]]>
+              AND <![CDATA[ A.AREA = W.AREA ]]>
+              AND <![CDATA[ A.DCCODE = #{dcCode} ]]>
+              AND <![CDATA[ A.STORERKEY = #{gStorerkey} ]]>
+       )
+     GROUP BY SUBSTR(TO_CHAR(D.DELIVERYDATE),1,6)
+),
+
+MANUAL_M AS (
+    SELECT
+           SUBSTR(TO_CHAR(NVL(W.SLIPDT, W.INSTRUCTDT)),1,6) AS YM
+         , W.REASONCODE                                      AS REASONCODE
+         , COUNT(1)                                          AS CNT
+      FROM WD_EXDCINSTRUCT W
+      JOIN DM_DOCUMENT_H H
+        ON H.DCCODE       = W.DCCODE
+       AND H.STORERKEY    = W.STORERKEY
+       AND H.DELIVERYDATE = W.SLIPDT
+       AND H.DOCNO        = W.DOCNO
+       AND H.DOCTYPE      = W.DOCTYPE
+      JOIN DM_DOCUMENT_D D
+        ON D.DCCODE       = W.DCCODE
+       AND D.STORERKEY    = W.STORERKEY
+       AND D.DELIVERYDATE = W.SLIPDT
+       AND D.DOCNO        = W.DOCNO
+       AND D.DOCLINE      = W.DOCLINE
+     CROSS JOIN RNG
+     WHERE <![CDATA[ W.DCCODE = #{dcCode} ]]>
+       AND <![CDATA[ W.STORERKEY = #{gStorerkey} ]]>
+       AND <![CDATA[ W.ORDERQTY > 0 ]]>
+       AND <![CDATA[ W.REASONCODE IN ('10','20','30','40','50','60') ]]>
+       AND <![CDATA[ D.STATUS = '90' ]]>
+       AND <![CDATA[ TO_CHAR(NVL(W.SLIPDT, W.INSTRUCTDT)) BETWEEN RNG.PREV_YEAR_FROM_YMD AND RNG.YTD_TO_YMD ]]>
+        		<if test="organize != null and organize != ''">
+			AND W.ORGANIZE IN (
+				SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS ORGANIZE
+				FROM (SELECT #{organize} AS VAL FROM DUAL)
+				CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) > 0
+			)
+		</if>
+       AND EXISTS (
+           SELECT 1
+             FROM CM_USER_AUTHORITY A
+            WHERE <![CDATA[ A.USERID = #{gUserId} ]]>
+              AND <![CDATA[ A.DCCODE = W.DCCODE ]]>
+              AND <![CDATA[ A.STORERKEY = W.STORERKEY ]]>
+              AND <![CDATA[ A.ORGANIZE = W.ORGANIZE ]]>
+              AND <![CDATA[ A.AREA = W.AREA ]]>
+              AND <![CDATA[ A.DCCODE = #{dcCode} ]]>
+              AND <![CDATA[ A.STORERKEY = #{gStorerkey} ]]>
+       )
+     GROUP BY SUBSTR(TO_CHAR(NVL(W.SLIPDT, W.INSTRUCTDT)),1,6), W.REASONCODE
+),
+
+M_CNT AS (
+    SELECT
+           'NORMAL' AS TYP
+         , YM
+         , CAST(NULL AS VARCHAR2(2)) AS REASONCODE
+         , CNT
+      FROM NORMAL_M
+    UNION ALL
+    SELECT
+           'MANUAL' AS TYP
+         , YM
+         , REASONCODE
+         , CNT
+      FROM MANUAL_M
+),
+
+CALC AS (
+    SELECT
+           TYP
+         , REASONCODE
+         , SUM(CASE WHEN YM = (SELECT M0_YM FROM RNG) THEN CNT ELSE 0 END) AS M0_CNT
+         , SUM(CASE WHEN YM = (SELECT M1_YM FROM RNG) THEN CNT ELSE 0 END) AS M1_CNT
+         , SUM(CASE WHEN YM = (SELECT M2_YM FROM RNG) THEN CNT ELSE 0 END) AS M2_CNT
+         , SUM(CASE WHEN YM = (SELECT PY_M0_YM FROM RNG) THEN CNT ELSE 0 END) AS PY_M0_CNT
+         , SUM(CASE WHEN SUBSTR(YM,1,4) = (SELECT BASE_YYYY FROM RNG)
+                     AND YM<![CDATA[ <= ]]>(SELECT M0_YM FROM RNG)
+                    THEN CNT ELSE 0 END) AS YTD_SUM
+         , ( SUM(CASE WHEN SUBSTR(YM,1,4) = (SELECT PREV_YYYY FROM RNG) THEN CNT ELSE 0 END) / 12 ) AS PREV_AVG
+      FROM M_CNT
+     GROUP BY TYP, REASONCODE
+),
+
+DIM_MANUAL_REASON AS (
+    SELECT CODE.BASECODE AS REASONCODE
+      FROM CM_CODE_STORER CODE
+     WHERE <![CDATA[ CODE.STORERKEY = #{gStorerkey} ]]>
+       AND <![CDATA[ CODE.CODELIST = 'WDEX_MANUAL_REASON' ]]>
+     ORDER BY CODE.SEQNO
+),
+
+MANUAL_REASON_ROWS AS (
+		    SELECT
+		           2 AS GRP
+		         , CASE R.REASONCODE
+		               WHEN '10' THEN 1 WHEN '20' THEN 2 WHEN '30' THEN 3
+		               WHEN '40' THEN 4 WHEN '50' THEN 5 WHEN '60' THEN 6
+		               ELSE 99
+		           END AS SEQ
+		         , '수기출고' AS CAT
+		         , R.REASONCODE AS REASONCODE
+		         , NVL(CD.BASEDESCR, R.REASONCODE) AS REASONNM
+		         , NVL(C.PREV_AVG, 0)   AS PREV_AVG
+		         , NVL(C.YTD_SUM, 0)    AS YTD_SUM
+		         , NVL(C.M2_CNT, 0)     AS M2_CNT
+		         , NVL(C.M1_CNT, 0)     AS M1_CNT
+		         , NVL(C.M0_CNT, 0)     AS M0_CNT
+		         , NVL(C.PY_M0_CNT, 0)  AS PY_M0_CNT
+		      FROM DIM_MANUAL_REASON R
+		      LEFT JOIN CM_CODE_STORER CD
+		        ON CD.STORERKEY = 'FW00'
+		       AND CD.CODELIST  = 'WDEX_MANUAL_REASON'
+		       AND CD.BASECODE  = R.REASONCODE
+		      LEFT JOIN CALC C
+		        ON C.TYP        = 'MANUAL'
+		       AND C.REASONCODE = R.REASONCODE
+		),
+		
+		NORMAL_ROW AS (
+		    SELECT
+		           1 AS GRP
+		         , 0 AS SEQ
+		         , '정상출고' AS CAT
+		         , CAST(NULL AS VARCHAR2(2)) AS REASONCODE
+		         , '정상출고확정' AS REASONNM
+		         , NVL(C.PREV_AVG, 0)   AS PREV_AVG
+		         , NVL(C.YTD_SUM, 0)    AS YTD_SUM
+		         , NVL(C.M2_CNT, 0)     AS M2_CNT
+		         , NVL(C.M1_CNT, 0)     AS M1_CNT
+		         , NVL(C.M0_CNT, 0)     AS M0_CNT
+		         , NVL(C.PY_M0_CNT, 0)  AS PY_M0_CNT
+		      FROM DUAL
+		      LEFT JOIN CALC C
+		        ON C.TYP = 'NORMAL'
+		       AND C.REASONCODE IS NULL
+		),
+		NORMAL_ROW_TOTAL AS (
+		    SELECT
+		           1 AS GRP
+		         , 0 AS SEQ
+		         , 'NORMAL' AS CAT
+		         , CAST(NULL AS VARCHAR2(2)) AS REASONCODE
+		         , '정상출고' AS REASONNM
+		         , NVL(C.PREV_AVG, 0)   AS PREV_AVG
+		         , NVL(C.YTD_SUM, 0)    AS YTD_SUM
+		         , NVL(C.M2_CNT, 0)     AS M2_CNT
+		         , NVL(C.M1_CNT, 0)     AS M1_CNT
+		         , NVL(C.M0_CNT, 0)     AS M0_CNT
+		         , NVL(C.PY_M0_CNT, 0)  AS PY_M0_CNT
+		      FROM DUAL
+		      LEFT JOIN CALC C
+		        ON C.TYP = 'NORMAL'
+		       AND C.REASONCODE IS NULL
+		),
+		MANUAL_TOTAL_ROW AS (
+		    SELECT
+		           1 AS GRP
+		         , 0 AS SEQ
+		         , 'MANUAL_TOTAL' AS CAT
+		         , CAST(NULL AS VARCHAR2(2))   AS REASONCODE
+		         , CAST('수기출고' AS VARCHAR2(200)) AS REASONNM
+		         , SUM(PREV_AVG)  AS PREV_AVG
+		         , SUM(YTD_SUM)   AS YTD_SUM
+		         , SUM(M2_CNT)    AS M2_CNT
+		         , SUM(M1_CNT)    AS M1_CNT
+		         , SUM(M0_CNT)    AS M0_CNT
+		         , SUM(PY_M0_CNT) AS PY_M0_CNT
+		      FROM MANUAL_REASON_ROWS
+		),
+		
+		TOTAL_ROW AS (
+		    SELECT
+		           1 AS GRP
+		         , -1 AS SEQ
+		         , 'TOTAL' AS CAT
+		         , CAST(NULL AS VARCHAR2(2))   AS REASONCODE
+		         , CAST('전체 計' AS VARCHAR2(200)) AS REASONNM
+		         , (N.PREV_AVG  + M.PREV_AVG)  AS PREV_AVG
+		         , (N.YTD_SUM   + M.YTD_SUM)   AS YTD_SUM
+		         , (N.M2_CNT    + M.M2_CNT)    AS M2_CNT
+		         , (N.M1_CNT    + M.M1_CNT)    AS M1_CNT
+		         , (N.M0_CNT    + M.M0_CNT)    AS M0_CNT
+		         , (N.PY_M0_CNT + M.PY_M0_CNT) AS PY_M0_CNT
+		      FROM NORMAL_ROW N
+		     CROSS JOIN MANUAL_TOTAL_ROW M
+		),
+		
+		OUT_ROWS AS (
+		    SELECT * FROM TOTAL_ROW
+		    UNION ALL
+		    SELECT * FROM NORMAL_ROW_TOTAL
+		    UNION ALL
+		    SELECT * FROM MANUAL_TOTAL_ROW
+		    UNION ALL
+		    SELECT * FROM NORMAL_ROW
+		    UNION ALL
+		    SELECT * FROM MANUAL_REASON_ROWS
+		)
+		
+		SELECT
+       CAT                                             AS CAT             /* 구분코드 */
+     , SEQ                                             AS SEQ             /* 순번 */
+     , REASONCODE                                      AS REASONCODE      /* 사유코드 */
+     , REASONNM                                        AS REASONNM        /* 사유명 */
+     , ROUND(PREV_AVG, 0)                              AS PREVYEARAVG     /* [A] 전년 월평균 */
+     , YTD_SUM                                         AS YTDSUM          /* 금년 누계건수 */
+     , M2_CNT                                          AS DMINUS2CNT      /* D-2 건수 */
+     , M1_CNT                                          AS DMINUS1CNT      /* D-1 건수 */
+     , M0_CNT                                          AS DCNT            /* [B] 당월(D) 건수 */
+
+     /* 1. 전년비 (%) : (당월 - 전년동월) / 전년동월 * 100 */
+     , CASE
+           WHEN NVL(PY_M0_CNT, 0) = 0 THEN '0%'
+           ELSE TO_CHAR(
+                    ROUND(
+                        (M0_CNT - PY_M0_CNT)
+                        / PY_M0_CNT
+                        * 100
+                    , 1)
+                ) || '%'
+       END                                             AS YOYRATE         /* 전년비(%) */
+
+     /* 2. 전년평균비 (%) : (당월 - 전년월평균) / 전년월평균 * 100 */
+     , CASE
+           WHEN NVL(PREV_AVG, 0) = 0 THEN '0%'
+           ELSE TO_CHAR(
+                    ROUND(
+                        (M0_CNT - PREV_AVG)
+                        / PREV_AVG
+                        * 100
+                    , 1)
+                ) || '%'
+       END                                             AS VSPREVAVGRATE   /* 전년평균비(%) */
+
+     /* 참고: 증감량(건수) */
+     , (M0_CNT - PY_M0_CNT)                            AS YOYDIFF         /* 전년비 증감량 */
+     , (M0_CNT - ROUND(PREV_AVG, 0))                   AS VSPREVAVGDIFF   /* 전년평균비 증감량 */
+  FROM OUT_ROWS
+ ORDER BY GRP, SEQ -->
+ /* [tmManualOutboundService.sqlx][getManualOutboundTopGrid][월별 수기출고(건수/비율) 상단그리드 조회][ParkJinWoo][20260210] */
+WITH
+PARAMS AS (
+    SELECT REGEXP_REPLACE(TO_CHAR(#{baseYyyymm}), '[^0-9]', '') AS M0_YM  /* 기준월(YYYYMM) */
+      FROM DUAL
+),
+RNG AS (
+    SELECT
+           M0_YM                                                                                          AS M0_YM                 /* 기준월(YYYYMM) */
+         , TO_CHAR(ADD_MONTHS(TO_DATE(M0_YM || '01','YYYYMMDD'), -1),  'YYYYMM')                           AS M1_YM                 /* M-1 */
+         , TO_CHAR(ADD_MONTHS(TO_DATE(M0_YM || '01','YYYYMMDD'), -2),  'YYYYMM')                           AS M2_YM                 /* M-2 */
+         , TO_CHAR(ADD_MONTHS(TO_DATE(M0_YM || '01','YYYYMMDD'), -12), 'YYYYMM')                           AS PY_M0_YM              /* 전년동월 */
+         , SUBSTR(M0_YM, 1, 4)                                                                              AS BASE_YYYY             /* 기준년도 */
+         , TO_CHAR(ADD_MONTHS(TO_DATE(M0_YM || '01','YYYYMMDD'), -12), 'YYYY')                              AS PREV_YYYY             /* 전년도 */
+         , TO_CHAR(TRUNC(ADD_MONTHS(TO_DATE(M0_YM || '01','YYYYMMDD'), -12), 'YYYY'),'YYYYMMDD')            AS PREV_YEAR_FROM_YMD    /* 전년도 시작일(YYYYMMDD) */
+         , TO_CHAR(LAST_DAY(TO_DATE(M0_YM || '01','YYYYMMDD')), 'YYYYMMDD')                                 AS YTD_TO_YMD             /* 기준월 말일(YYYYMMDD) */
+      FROM PARAMS
+),
+
+/* =========================================================
+   정상출고(모수) 월별 집계 : WD_INPLAN + DM_DOCUMENT_H/D
+   ========================================================= */
+NORMAL_M AS (
+    SELECT
+           SUBSTR(TO_CHAR(D.DELIVERYDATE), 1, 6)                                                            AS YM                    /* 년월(YYYYMM) */
+         , COUNT(1)                                                                                         AS CNT                   /* 건수 */
+      FROM WD_INPLAN W
+      JOIN DM_DOCUMENT_H H
+        ON H.DCCODE        = W.DCCODE
+       AND H.DELIVERYDATE  = W.SLIPDT
+       AND H.DOCTYPE       = W.DOCTYPE
+       AND H.DOCNO         = W.DOCNO
+       AND H.DOCTYPE       = 'WD'
+       AND H.DEL_YN        = 'N'
+      JOIN DM_DOCUMENT_D D
+        ON D.DCCODE        = W.DCCODE
+       AND D.DOCTYPE       = W.DOCTYPE
+       AND D.DELIVERYDATE  = W.SLIPDT
+       AND D.DOCNO         = W.DOCNO
+       AND D.DOCLINE       = W.DOCLINE
+       AND D.CHANNEL       IN ('1','2','3')
+       AND D.DEL_YN        = 'N'
+      CROSS JOIN RNG
+     WHERE 1 <![CDATA[=]]> 1
+       AND <![CDATA[ W.DCCODE    = #{dcCode}     ]]>
+       AND <![CDATA[ W.STORERKEY = #{gStorerkey} ]]>
+       <!-- AND <![CDATA[ W.ORGANIZE  = #{organize}   ]]> -->
+            		<if test="organize != null and organize != ''">
+			AND W.ORGANIZE IN (
+				SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS ORGANIZE
+				FROM (SELECT #{organize} AS VAL FROM DUAL)
+				CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) > 0
+			)
+		</if>
+       AND <![CDATA[ TO_CHAR(D.DELIVERYDATE) BETWEEN RNG.PREV_YEAR_FROM_YMD AND RNG.YTD_TO_YMD ]]>
+       AND EXISTS (
+            SELECT 1
+              FROM CM_USER_AUTHORITY A
+             WHERE 1 <![CDATA[=]]> 1
+               AND <![CDATA[ A.USERID    = #{gUserId}    ]]>
+               AND <![CDATA[ A.DCCODE    = W.DCCODE      ]]>
+               AND <![CDATA[ A.STORERKEY = W.STORERKEY   ]]>
+               AND <![CDATA[ A.ORGANIZE  = W.ORGANIZE    ]]>
+               AND <![CDATA[ A.AREA      = W.AREA        ]]>
+               AND <![CDATA[ A.DCCODE    = #{dcCode}     ]]>
+               AND <![CDATA[ A.STORERKEY = #{gStorerkey} ]]>
+       )
+     GROUP BY SUBSTR(TO_CHAR(D.DELIVERYDATE), 1, 6)
+),
+
+/* =========================================================
+   수기출고 월별 집계 : WD_EXDCINSTRUCT + DM_DOCUMENT_H/D
+   ========================================================= */
+MANUAL_M AS (
+    SELECT
+           SUBSTR(TO_CHAR(NVL(W.SLIPDT, W.INSTRUCTDT)), 1, 6)                                                AS YM                    /* 년월(YYYYMM) */
+         , COUNT(1)                                                                                           AS CNT                   /* 건수 */
+      FROM WD_EXDCINSTRUCT W
+      JOIN DM_DOCUMENT_H H
+        ON H.DCCODE        = W.DCCODE
+       AND H.STORERKEY     = W.STORERKEY
+       AND H.DELIVERYDATE  = W.SLIPDT
+       AND H.DOCNO         = W.DOCNO
+       AND H.DOCTYPE       = W.DOCTYPE
+      JOIN DM_DOCUMENT_D D
+        ON D.DCCODE        = W.DCCODE
+       AND D.STORERKEY     = W.STORERKEY
+       AND D.DELIVERYDATE  = W.SLIPDT
+       AND D.DOCNO         = W.DOCNO
+       AND D.DOCLINE       = W.DOCLINE
+      CROSS JOIN RNG
+     WHERE 1 <![CDATA[=]]> 1
+       AND <![CDATA[ W.DCCODE    = #{dcCode}     ]]>
+       AND <![CDATA[ W.STORERKEY = #{gStorerkey} ]]>
+       <!-- AND <![CDATA[ W.ORGANIZE  = #{organize}   ]]> -->
+                     		<if test="organize != null and organize != ''">
+			AND W.ORGANIZE IN (
+				SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS ORGANIZE
+				FROM (SELECT #{organize} AS VAL FROM DUAL)
+				CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) > 0
+			)
+		</if>
+       AND <![CDATA[ W.ORDERQTY  > 0             ]]>
+       AND <![CDATA[ W.REASONCODE IN ('10','20','30','40','50','60') ]]>
+       AND <![CDATA[ TO_CHAR(NVL(W.SLIPDT, W.INSTRUCTDT)) BETWEEN RNG.PREV_YEAR_FROM_YMD AND RNG.YTD_TO_YMD ]]>
+       AND EXISTS (
+            SELECT 1
+              FROM CM_USER_AUTHORITY A
+             WHERE 1 <![CDATA[=]]> 1
+               AND <![CDATA[ A.USERID    = #{gUserId}    ]]>
+               AND <![CDATA[ A.DCCODE    = W.DCCODE      ]]>
+               AND <![CDATA[ A.STORERKEY = W.STORERKEY   ]]>
+               AND <![CDATA[ A.ORGANIZE  = W.ORGANIZE    ]]>
+               AND <![CDATA[ A.AREA      = W.AREA        ]]>
+               AND <![CDATA[ A.DCCODE    = #{dcCode}     ]]>
+               AND <![CDATA[ A.STORERKEY = #{gStorerkey} ]]>
+       )
+     GROUP BY SUBSTR(TO_CHAR(NVL(W.SLIPDT, W.INSTRUCTDT)), 1, 6)
+),
+
+/* =========================================================
+   (M, M-1, M-2, 전년동월, YTD, 전년월평균) 변환
+   ========================================================= */
+NORMAL_CALC AS (
+    SELECT
+           SUM(CASE WHEN YM = (SELECT M0_YM    FROM RNG) THEN CNT ELSE 0 END)                                  AS M0_CNT                /* 당월(D) 건수 */
+         , SUM(CASE WHEN YM = (SELECT M1_YM    FROM RNG) THEN CNT ELSE 0 END)                                  AS M1_CNT                /* D-1 건수 */
+         , SUM(CASE WHEN YM = (SELECT M2_YM    FROM RNG) THEN CNT ELSE 0 END)                                  AS M2_CNT                /* D-2 건수 */
+         , SUM(CASE WHEN YM = (SELECT PY_M0_YM FROM RNG) THEN CNT ELSE 0 END)                                  AS PY_M0_CNT             /* 전년동월 건수 */
+         , SUM(CASE WHEN SUBSTR(YM,1,4) = (SELECT BASE_YYYY FROM RNG)
+                     AND YM <![CDATA[<=]]> (SELECT M0_YM FROM RNG)
+                    THEN CNT ELSE 0 END)                                                                       AS YTD_SUM               /* 금년 누계건수 */
+         , ( SUM(CASE WHEN SUBSTR(YM,1,4) = (SELECT PREV_YYYY FROM RNG) THEN CNT ELSE 0 END) / 12 )             AS PREV_AVG              /* 전년 월평균 */
+      FROM NORMAL_M
+),
+MANUAL_CALC AS (
+    SELECT
+           SUM(CASE WHEN YM = (SELECT M0_YM    FROM RNG) THEN CNT ELSE 0 END)                                  AS M0_CNT                /* 당월(D) 건수 */
+         , SUM(CASE WHEN YM = (SELECT M1_YM    FROM RNG) THEN CNT ELSE 0 END)                                  AS M1_CNT                /* D-1 건수 */
+         , SUM(CASE WHEN YM = (SELECT M2_YM    FROM RNG) THEN CNT ELSE 0 END)                                  AS M2_CNT                /* D-2 건수 */
+         , SUM(CASE WHEN YM = (SELECT PY_M0_YM FROM RNG) THEN CNT ELSE 0 END)                                  AS PY_M0_CNT             /* 전년동월 건수 */
+         , SUM(CASE WHEN SUBSTR(YM,1,4) = (SELECT BASE_YYYY FROM RNG)
+                     AND YM <![CDATA[<=]]> (SELECT M0_YM FROM RNG)
+                    THEN CNT ELSE 0 END)                                                                       AS YTD_SUM               /* 금년 누계건수 */
+         , ( SUM(CASE WHEN SUBSTR(YM,1,4) = (SELECT PREV_YYYY FROM RNG) THEN CNT ELSE 0 END) / 12 )             AS PREV_AVG              /* 전년 월평균 */
+      FROM MANUAL_M
+),
+TOTAL_CALC AS (
+    SELECT
+           (N.M0_CNT     + M.M0_CNT)                                                                           AS M0_CNT                /* 당월(D) 전체건수 */
+         , (N.M1_CNT     + M.M1_CNT)                                                                           AS M1_CNT                /* D-1 전체건수 */
+         , (N.M2_CNT     + M.M2_CNT)                                                                           AS M2_CNT                /* D-2 전체건수 */
+         , (N.PY_M0_CNT  + M.PY_M0_CNT)                                                                        AS PY_M0_CNT             /* 전년동월 전체건수 */
+         , (N.YTD_SUM    + M.YTD_SUM)                                                                          AS YTD_SUM               /* 금년 누계 전체건수 */
+         , (N.PREV_AVG   + M.PREV_AVG)                                                                         AS PREV_AVG              /* 전년 월평균 전체 */
+      FROM NORMAL_CALC N
+     CROSS JOIN MANUAL_CALC M
+),
+
+/* =========================================================
+   수기출고 비율(%) + 비율의 전년比/전년평균比
+   ========================================================= */
+MANUAL_RATE_ROW AS (
+    SELECT
+           CASE WHEN NVL(T.PREV_AVG, 0) = 0 THEN 0 ELSE ROUND(M.PREV_AVG / T.PREV_AVG * 100, 1) END            AS PREV_AVG_RATE         /* 전년월평균 대비 수기비율(%) */
+         , CASE WHEN NVL(T.YTD_SUM, 0)  = 0 THEN 0 ELSE ROUND(M.YTD_SUM  / T.YTD_SUM  * 100, 1) END            AS YTD_RATE              /* 금년누계 대비 수기비율(%) */
+         , CASE WHEN NVL(T.M2_CNT, 0)   = 0 THEN 0 ELSE ROUND(M.M2_CNT   / T.M2_CNT   * 100, 1) END            AS M2_RATE               /* D-2 수기비율(%) */
+         , CASE WHEN NVL(T.M1_CNT, 0)   = 0 THEN 0 ELSE ROUND(M.M1_CNT   / T.M1_CNT   * 100, 1) END            AS M1_RATE               /* D-1 수기비율(%) */
+         , CASE WHEN NVL(T.M0_CNT, 0)   = 0 THEN 0 ELSE ROUND(M.M0_CNT   / T.M0_CNT   * 100, 1) END            AS M0_RATE               /* 당월(D) 수기비율(%) */
+         , CASE WHEN NVL(T.PY_M0_CNT, 0)= 0 THEN 0 ELSE ROUND(M.PY_M0_CNT / T.PY_M0_CNT * 100, 1) END           AS PY_M0_RATE            /* 전년동월 수기비율(%) */
+         , CASE
+             WHEN NVL(T.PY_M0_CNT, 0) = 0 THEN 0
+             WHEN ROUND(M.PY_M0_CNT / T.PY_M0_CNT * 100, 1) = 0 THEN 0
+             ELSE ROUND(
+                    (
+                        ROUND(M.M0_CNT / T.M0_CNT * 100, 1)
+                      - ROUND(M.PY_M0_CNT / T.PY_M0_CNT * 100, 1)
+                    )
+                    / ROUND(M.PY_M0_CNT / T.PY_M0_CNT * 100, 1)
+                    * 100
+                  , 1)
+           END                                                                                                   AS RATE_YOY              /* 수기비율 전년比(%) */
+         , CASE
+             WHEN NVL(T.PREV_AVG, 0) = 0 THEN 0
+             WHEN ROUND(M.PREV_AVG / T.PREV_AVG * 100, 1) = 0 THEN 0
+             ELSE ROUND(
+                    (
+                        ROUND(M.M0_CNT / T.M0_CNT * 100, 1)
+                      - ROUND(M.PREV_AVG / T.PREV_AVG * 100, 1)
+                    )
+                    / ROUND(M.PREV_AVG / T.PREV_AVG * 100, 1)
+                    * 100
+                  , 1)
+           END                                                                                                   AS RATE_VS_PREVAVG       /* 수기비율 전년평균比(%) */
+      FROM MANUAL_CALC M
+     CROSS JOIN TOTAL_CALC  T
+)
+SELECT
+       '수기출고'                                                                                               AS REASONNM              /* 구분 */
+     , TO_CHAR(ROUND(M.PREV_AVG, 0))                                                                            AS PREVYEARAVG           /* [A] 전년 월평균 */
+     , TO_CHAR(M.YTD_SUM)                                                                                       AS YTDSUM                /* 금년 누계건수 */
+     , TO_CHAR(M.M2_CNT)                                                                                        AS DMINUS2CNT            /* D-2 건수 */
+     , TO_CHAR(M.M1_CNT)                                                                                        AS DMINUS1CNT            /* D-1 건수 */
+     , TO_CHAR(M.M0_CNT)                                                                                        AS DCNT                  /* [B] 당월(D) 건수 */
+     , CASE
+            WHEN NVL(M.PY_M0_CNT, 0) = 0 THEN '0%'
+            ELSE TO_CHAR(ROUND((M.M0_CNT - M.PY_M0_CNT) / M.PY_M0_CNT * 100, 1)) || '%'
+       END                                                                                                      AS YOYRATE               /* 전년비(%) */
+     , CASE
+            WHEN NVL(M.PREV_AVG, 0) = 0 THEN '0%'
+            ELSE TO_CHAR(ROUND((M.M0_CNT - M.PREV_AVG) / M.PREV_AVG * 100, 1)) || '%'
+       END                                                                                                      AS VSPREVAVGRATE         /* 전년평균비(%) */
+  FROM MANUAL_CALC M
+
+UNION ALL
+
+SELECT
+       '수기출고 %'                                                                                              AS REASONNM              /* 구분 */
+     , TO_CHAR(R.PREV_AVG_RATE) || '%'                                                                           AS PREVYEARAVG           /* [A] 전년 월평균(비율%) */
+     , TO_CHAR(R.YTD_RATE)      || '%'                                                                           AS YTDSUM                /* 금년 누계건수(비율%) */
+     , TO_CHAR(R.M2_RATE)       || '%'                                                                           AS DMINUS2CNT            /* D-2 건수(비율%) */
+     , TO_CHAR(R.M1_RATE)       || '%'                                                                           AS DMINUS1CNT            /* D-1 건수(비율%) */
+     , TO_CHAR(R.M0_RATE)       || '%'                                                                           AS DCNT                  /* [B] 당월(D) 건수(비율%) */
+     , TO_CHAR(R.RATE_YOY)      || '%'                                                                           AS YOYRATE               /* 수기비율 전년比(%) */
+     , TO_CHAR(R.RATE_VS_PREVAVG) || '%'                                                                         AS VSPREVAVGRATE         /* 수기비율 전년평균比(%) */
+  FROM MANUAL_RATE_ROW R
+</select>
+<!-- Mapper: stManualOutboundStatusMapper.xml -->
+
+		<select id="selectManualOutboundMonthlyTrend" resultType="StExdcManualIndicatorResDto">
+		/* [stManualOutboundStatusMapper.xml][selectManualOutboundMonthlyTrend][월별 수기출고 건수 추이 조회][ParkJinWoo][20260210] */
+		WITH
+		PARAMS AS (
+		    SELECT REGEXP_REPLACE(TO_CHAR(#{baseYyyymm}), '[^0-9]', '')                                                   AS M0_YM           /* 기준월(YYYYMM) */
+		      FROM DUAL
+		),
+		RNG AS (
+		    SELECT
+		           M0_YM                                                                                                   AS M0_YM           /* 기준월(YYYYMM) */
+		         , SUBSTR(M0_YM, 1, 4)                                                                                      AS BASE_YYYY       /* 기준년도(YYYY) */
+		         , TO_CHAR(TRUNC(TO_DATE(M0_YM || '01', 'YYYYMMDD'), 'YYYY'), 'YYYYMMDD')                                   AS BASE_FROM_YMD   /* 기준년도 시작일(YYYYMMDD) */
+		         , TO_CHAR(TO_DATE(SUBSTR(M0_YM, 1, 4) || '1231', 'YYYYMMDD'), 'YYYYMMDD')                                  AS BASE_TO_YMD     /* 기준년도 종료일(YYYYMMDD) */
+		      FROM PARAMS
+		),
+		/* 1~12월 고정 생성 (없으면 0 채움) */
+		MONTHS AS (
+		    SELECT
+		           (SELECT BASE_YYYY FROM RNG)                                                                              AS YYYY            /* 년도(YYYY) */
+		         , LPAD(LEVEL, 2, '0')                                                                                      AS MM              /* 월(MM) */
+		         , (SELECT BASE_YYYY FROM RNG) || LPAD(LEVEL, 2, '0')                                                       AS YM              /* 년월(YYYYMM) */
+		         , LEVEL                                                                                                     AS SEQ             /* 정렬순번 */
+		      FROM DUAL
+		   CONNECT BY LEVEL <![CDATA[<=]]> 12
+		),
+		/* 수기출고 월별 집계 */
+		MANUAL_M AS (
+		    SELECT
+		           SUBSTR(TO_CHAR(NVL(W.SLIPDT, W.INSTRUCTDT)), 1, 6)                                                       AS YM              /* 년월(YYYYMM) */
+		         , COUNT(1)                                                                                                 AS CNT             /* 수기출고 건수 */
+		      FROM WD_EXDCINSTRUCT W
+		      JOIN DM_DOCUMENT_H H
+		        ON H.DCCODE        = W.DCCODE
+		       AND H.STORERKEY     = W.STORERKEY
+		       AND H.DELIVERYDATE  = W.SLIPDT
+		       AND H.DOCNO         = W.DOCNO
+		       AND H.DOCTYPE       = W.DOCTYPE
+		      JOIN DM_DOCUMENT_D D
+		        ON D.DCCODE        = W.DCCODE
+		       AND D.STORERKEY     = W.STORERKEY
+		       AND D.DELIVERYDATE  = W.SLIPDT
+		       AND D.DOCNO         = W.DOCNO
+		       AND D.DOCLINE       = W.DOCLINE
+		      CROSS JOIN RNG
+		     WHERE 1 <![CDATA[=]]> 1
+		       AND <![CDATA[ W.DCCODE = #{dcCode} ]]>
+		       AND <![CDATA[ W.STORERKEY = #{gStorerkey} ]]>
+		       AND <![CDATA[ W.ORDERQTY > 0 ]]>
+		       AND <![CDATA[ W.REASONCODE IN ('10','20','30','40','50','60') ]]>
+		       
+		       AND <![CDATA[ TO_CHAR(NVL(W.SLIPDT, W.INSTRUCTDT)) BETWEEN RNG.BASE_FROM_YMD AND RNG.BASE_TO_YMD ]]>
+		       <if test="organize != null and organize != ''">
+		       AND W.ORGANIZE IN (
+		            SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL))
+		              FROM (SELECT #{organize} AS VAL FROM DUAL)
+		             CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) > 0
+		       )
+		       </if>
+		       AND EXISTS (
+		            SELECT 1
+		              FROM CM_USER_AUTHORITY A
+		             WHERE 1 <![CDATA[=]]> 1
+		               AND <![CDATA[ A.USERID = #{gUserId} ]]>
+		               AND <![CDATA[ A.DCCODE = W.DCCODE ]]>
+		               AND <![CDATA[ A.STORERKEY = W.STORERKEY ]]>
+		               AND <![CDATA[ A.ORGANIZE = W.ORGANIZE ]]>
+		               AND <![CDATA[ A.AREA = W.AREA ]]>
+		               AND <![CDATA[ A.DCCODE = #{dcCode} ]]>
+		               AND <![CDATA[ A.STORERKEY = #{gStorerkey} ]]>
+		       )
+		     GROUP BY SUBSTR(TO_CHAR(NVL(W.SLIPDT, W.INSTRUCTDT)), 1, 6)
+		)
+		SELECT
+		       M.YM                                                                                                         AS YM              /* 년월(YYYYMM) */
+		     , M.SEQ                                                                                                        AS SEQ             /* 정렬순번 */
+		     , NVL(X.CNT, 0)                                                                                                AS CNT             /* 수기출고 건수 */
+		  FROM MONTHS M
+		  LEFT JOIN MANUAL_M X
+		    ON X.YM = M.YM
+		 ORDER BY M.SEQ
+		</select>
+		
+
+		<select id="selectManualOutboundReasonByMonth" resultType="StExdcManualIndicatorResDto">
+		/* [stManualOutboundStatusMapper.xml][selectManualOutboundReasonByMonth][당월 수기출고 발생 사유(건수/비중) 조회][ParkJinWoo][20260210] */
+		WITH
+		PARAMS AS (
+		    SELECT REGEXP_REPLACE(TO_CHAR(#{baseYyyymm}), '[^0-9]', '')                                                     AS M0_YM           /* 기준월(YYYYMM) */
+		      FROM DUAL
+		),
+		RNG AS (
+		    SELECT
+		           M0_YM                                                                                                     AS M0_YM           /* 기준월(YYYYMM) */
+		         , TO_CHAR(TRUNC(TO_DATE(M0_YM || '01', 'YYYYMMDD'), 'MM'), 'YYYYMMDD')                                      AS M0_FROM_YMD     /* 당월 시작일(YYYYMMDD) */
+		         , TO_CHAR(LAST_DAY(TO_DATE(M0_YM || '01', 'YYYYMMDD')), 'YYYYMMDD')                                         AS M0_TO_YMD       /* 당월 종료일(YYYYMMDD) */
+		      FROM PARAMS
+		),
+		/* 사유 코드 마스터 (0건도 출력하려면 DIM으로 고정) */
+		DIM_REASON AS (
+		    SELECT
+		           CODE.BASECODE                                                                                              AS REASONCODE      /* 사유코드 */
+		         , NVL(CODE.BASEDESCR, CODE.BASECODE)                                                                        AS REASONNM        /* 사유명 */
+		         , CODE.SEQNO                                                                                                 AS SEQNO           /* 정렬순번 */
+		      FROM CM_CODE_STORER CODE
+		     WHERE 1 <![CDATA[=]]> 1
+		       AND <![CDATA[ CODE.STORERKEY = #{gStorerkey} ]]>
+		       AND <![CDATA[ CODE.CODELIST  = 'WDEX_MANUAL_REASON' ]]>
+		),
+		/* 당월 수기출고 집계(사유별) */
+		REASON_CNT AS (
+		    SELECT
+		           W.REASONCODE                                                                                               AS REASONCODE      /* 사유코드 */
+		         , COUNT(1)                                                                                                   AS CNT             /* 건수 */
+		      FROM WD_EXDCINSTRUCT W
+		      JOIN DM_DOCUMENT_H H
+		        ON H.DCCODE        = W.DCCODE
+		       AND H.STORERKEY     = W.STORERKEY
+		       AND H.DELIVERYDATE  = W.SLIPDT
+		       AND H.DOCNO         = W.DOCNO
+		       AND H.DOCTYPE       = W.DOCTYPE
+		      JOIN DM_DOCUMENT_D D
+		        ON D.DCCODE        = W.DCCODE
+		       AND D.STORERKEY     = W.STORERKEY
+		       AND D.DELIVERYDATE  = W.SLIPDT
+		       AND D.DOCNO         = W.DOCNO
+		       AND D.DOCLINE       = W.DOCLINE
+		      CROSS JOIN RNG
+		     WHERE 1 <![CDATA[=]]> 1
+		       AND <![CDATA[ W.DCCODE = #{dcCode} ]]>
+		       AND <![CDATA[ W.STORERKEY = #{gStorerkey} ]]>
+		       AND <![CDATA[ W.ORDERQTY > 0 ]]>
+		       AND <![CDATA[ W.REASONCODE IN ('10','20','30','40','50','60') ]]>
+		       
+		       AND <![CDATA[ TO_CHAR(NVL(W.SLIPDT, W.INSTRUCTDT)) BETWEEN RNG.M0_FROM_YMD AND RNG.M0_TO_YMD ]]>
+		       <if test="organize != null and organize != ''">
+		       AND W.ORGANIZE IN (
+		            SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL))
+		              FROM (SELECT #{organize} AS VAL FROM DUAL)
+		             CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) > 0
+		       )
+		       </if>
+		       AND EXISTS (
+		            SELECT 1
+		              FROM CM_USER_AUTHORITY A
+		             WHERE 1 <![CDATA[=]]> 1
+		               AND <![CDATA[ A.USERID = #{gUserId} ]]>
+		               AND <![CDATA[ A.DCCODE = W.DCCODE ]]>
+		               AND <![CDATA[ A.STORERKEY = W.STORERKEY ]]>
+		               AND <![CDATA[ A.ORGANIZE = W.ORGANIZE ]]>
+		               AND <![CDATA[ A.AREA = W.AREA ]]>
+		               AND <![CDATA[ A.DCCODE = #{dcCode} ]]>
+		               AND <![CDATA[ A.STORERKEY = #{gStorerkey} ]]>
+		       )
+		     GROUP BY W.REASONCODE
+		),
+		TOTAL AS (
+		    SELECT SUM(NVL(CNT, 0))                                                                                           AS TOTCNT          /* 전체건수 */
+		      FROM REASON_CNT
+		)
+		SELECT
+       D.REASONCODE                                                                                                   AS REASONCODE      /* 사유코드 */
+     , D.REASONNM                                                                                                     AS REASONNM        /* 사유명 */
+     , NVL(R.CNT, 0)                                                                                                  AS CNT             /* 건수 */
+         , CASE
+           WHEN NVL(T.TOTCNT, 0) = 0 THEN '0%'
+           ELSE TO_CHAR(ROUND(NVL(R.CNT, 0) / T.TOTCNT * 100, 1)) || '%'
+       END                                                                                                                  AS RATE            /* 비중(%) */
+  FROM DIM_REASON D
+  LEFT JOIN REASON_CNT R
+    ON R.REASONCODE = D.REASONCODE
+ CROSS JOIN TOTAL T
+ ORDER BY D.SEQNO
+		</select>
+
+	<select id="selectManualOutboundReasonByDepthr" resultType="StExdcManualIndicatorResDto">
+			SELECT 
+		          NVL(A.INSTRUCTNO,A.DOCNO) AS DOCNO
+		         , A.SKU                    AS SKU
+		         , SKU.DESCRIPTION          AS SKUNAME
+		         , SKU.SOMDNAME             AS MDNAME
+		         , C.DEPTHR_NM	            AS DEPTHRNM
+		         , NVL( CODE.BASEDESCR,A.REASONCODE)  AS REASONNM
+		     FROM WD_EXDCINSTRUCT A
+                                                JOIN DM_DOCUMENT_H H
+                                                ON H.DCCODE        = A.DCCODE
+                                                AND H.STORERKEY     = A.STORERKEY
+                                                AND H.DELIVERYDATE  = A.SLIPDT
+                                                AND H.DOCNO         = A.DOCNO
+                                                AND H.DOCTYPE       = A.DOCTYPE
+                                                JOIN DM_DOCUMENT_D D
+                                                ON D.DCCODE        = A.DCCODE
+                                                AND D.STORERKEY     = A.STORERKEY
+                                                AND D.DELIVERYDATE  = A.SLIPDT
+                                                AND D.DOCNO         = A.DOCNO
+                                                AND D.DOCLINE       = A.DOCLINE
+
+		LEFT JOIN CM_CODE_STORER CODE
+		       ON CODE.CODELIST = 'WDEX_MANUAL_REASON'
+		      AND CODE.STORERKEY = A.STORERKEY
+		      AND CODE.BASECODE = A.REASONCODE
+		     JOIN MS_SKU SKU
+		       ON A.SKU = SKU.SKU
+		      AND A.STORERKEY = SKU.STORERKEY
+		     JOIN CM_CODE B
+		       ON SKU.SOMDCODE = B.BASECODE
+		      AND B.CODELIST ='PURCHASEGROUP'
+		     JOIN FRAMEONE_EMP C
+		       ON B.DATA4= C.EMP_NO      
+		    WHERE 1=1
+		     AND (
+		        (A.INSTRUCTNO LIKE 'A%'
+		        OR 
+		        A.DOCNO LIKE 'A%') OR A.REASONCODE IN ('10','20','30','40','50','60')
+		      )
+		      AND NVL(A.SLIPDT, A.INSTRUCTDT) BETWEEN 
+		          TO_DATE(#{baseYyyymm} || '01', 'YYYYMMDD')
+		      AND LAST_DAY(TO_DATE(#{baseYyyymm} || '01', 'YYYYMMDD'))
+		      AND A.STORERKEY =  #{gStorerkey}
+		      AND A.DCCODE = #{dcCode}
+		    <if test="organize != null and organize != ''">
+		      AND A.ORGANIZE IN (
+		        SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS ORGANIZE
+		        FROM (SELECT #{organize} AS VAL FROM DUAL)
+		        CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) > 0
+		      )
+		    </if>
+		      AND A.REASONCODE IS NOT NULL
+		      AND  <![CDATA[ A.ORDERQTY > 0]]>
+		     ORDER by C.DEPTHR_NM, REASONNM
+	</select>
+
+</mapper>

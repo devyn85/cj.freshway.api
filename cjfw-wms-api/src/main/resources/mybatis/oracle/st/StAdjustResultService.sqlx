@@ -1,0 +1,328 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="stAdjustResultService">
+
+	<select id="getMasterList" resultType="cjfw.wms.st.dto.StAdjustResultResDto">				
+        SELECT /*+ LEADING(CM_USER_AUTHORITY AJ_INPLAN) */ 
+              /* [StAdjustResultService.sqlx][getMasterList][재고감모현황 목록 조회][공두경][2025.05.22] */
+			  DM_DOCUMENT_H.DCCODE 								AS DCCODE						/*물류센터*/
+            , DM_DOCUMENT_D.STORERKEY 							AS STORERKEY					/*고객사*/
+            , DM_DOCUMENT_H.DOCDT 								AS DOCDT						/*주문일자*/
+            , DM_DOCUMENT_H.ORGANIZE 							AS ORGANIZE						/*창고*/
+            , AJ_INPLAN.SLIPDT 									AS TRANDT						/*조정일자*/
+            , DM_DOCUMENT_H.DOCNO 								AS DOCNO						/*주문번호*/
+            , DM_DOCUMENT_D.SKU 								AS SKU							/*상품코드*/
+            , MAX(MS_SKU.DESCRIPTION) 							AS SKUNAME						/*상품명*/
+            , MAX(MS_SKU.SERIALYN) 								AS SERIALYN						/*식별번호유무*/
+            , SUM(DM_DOCUMENT_D.CONFIRMQTY) 					AS CONFIRMQTY					/*조정수량*/
+            , MAX(DM_DOCUMENT_D.UOM) 							AS UOM							/*단위*/
+            , CASE WHEN MAX(NVL(MS_SKU.LINE01,'N')) = 'Y' 
+            	    AND TO_NUMBER(MAX(NVL(MS_SKU.LINE02,0))) <![CDATA[<>]]> 0 
+            	   THEN TO_NUMBER(MAX(NVL(MS_SKU.LINE02,0))) 
+            	   ELSE 0 END 									AS AVGWEIGHT					/*평균중량*/
+            , ROUND(CASE WHEN MAX(NVL(MS_SKU.LINE01,'N')) = 'Y' 
+            			  AND TO_NUMBER(MAX(NVL(MS_SKU.LINE02,0))) <![CDATA[<>]]> 0 
+            			  AND MAX(DM_DOCUMENT_D.STORERUOM) = 'KG'
+                         THEN NVL((MAX(AJ_INPLAN.CONFIRMQTY) * MAX(AJ_INPLAN.BUNJA) / MAX(AJ_INPLAN.BUNMO)),0) / TO_NUMBER(MAX(NVL(MS_SKU.LINE02,0)))
+                              ELSE 0
+                          END
+                  ,2) 											AS CALBOX						/*환산박스*/
+            , CASE WHEN MAX(NVL(MS_SKU.LINE01,'N')) = 'Y' 
+            	   THEN ROUND(SUM(AJ_INPLAN.ETCQTY1),2) 
+            	   ELSE 0 END 									AS REALORDERBOX					/*실박스예정*/
+            , CASE WHEN MAX(NVL(MS_SKU.LINE01,'N')) = 'Y' 
+            	   THEN ROUND(SUM(AJ_INPLAN.ETCQTY2),2) 
+            	   ELSE 0 END 									AS REALCFMBOX					/*실박스확정*/
+            , NVL(CD1.BASEDESCR,CD1.BASECODE)					AS REASONCODE					/*발생사유*/
+            , NVL(CD2.BASEDESCR,CD2.BASECODE)					AS OTHER01						/*귀책*/
+            , NVL(CD3.BASEDESCR,CD3.BASECODE)					AS OTHER05						/*물류귀책배부*/
+            , MAX(DM_DOCUMENT_D.ADDWHO) 						AS ADDWHO						/*비고(사유)*/
+            , MAX(TO_CHAR(DM_DOCUMENT_D.ADDDATE,'YYYY-MM-DD')) 	AS ADDDATE						/*등록일자*/
+            , MAX(TO_CHAR(DM_DOCUMENT_D.ADDDATE,'HH24:MI:SS')) 	AS ADDTIME						/*생성시간*/
+            , NVL(CD4.BASEDESCR,CD4.BASECODE)					AS IOTYPE						/*증감여부*/
+            , NVL(CD5.BASEDESCR,CD5.BASECODE)					AS STOCKTYPE					/*재고위치*/
+            , MAX(DM_DOCUMENT_D.MEMO2) 							AS MEMO2						/*메모*/
+        FROM
+            DM_DOCUMENT_H
+        JOIN
+            DM_DOCUMENT_D
+            ON  DM_DOCUMENT_D.DCCODE        = DM_DOCUMENT_H.DCCODE
+            AND DM_DOCUMENT_D.STORERKEY     = DM_DOCUMENT_H.STORERKEY
+            AND DM_DOCUMENT_D.ORGANIZE      = DM_DOCUMENT_H.ORGANIZE
+            AND DM_DOCUMENT_D.DOCDT         = DM_DOCUMENT_H.DOCDT
+            AND DM_DOCUMENT_D.DOCTYPE       = DM_DOCUMENT_H.DOCTYPE
+            AND DM_DOCUMENT_H.DELIVERYDATE  = DM_DOCUMENT_D.DELIVERYDATE
+            AND DM_DOCUMENT_D.DOCNO         = DM_DOCUMENT_H.DOCNO
+            AND    DM_DOCUMENT_H.DELIVERYDATE   = DM_DOCUMENT_D.DELIVERYDATE 
+            <if test="reasoncode != null and reasoncode != ''">	AND DM_DOCUMENT_D.REASONCODE = #{reasoncode}	</if>
+            <if test="other01 != null and other01 != ''">		AND DM_DOCUMENT_D.OTHER01 	 = #{other01} 		</if>
+            <if test="other05 != null and other05 != ''">		AND DM_DOCUMENT_D.OTHER05 	 = #{other05} 		</if>
+            <if test="iotype != null and iotype != ''">			AND DM_DOCUMENT_D.IOTYPE 	 = #{iotype} 		</if>
+        JOIN
+            MS_SKU
+            ON  MS_SKU.STORERKEY        = DM_DOCUMENT_D.STORERKEY
+            AND MS_SKU.SKU              = DM_DOCUMENT_D.SKU
+        
+        <!-- START.상품.다중OR검색 -->
+        <if test="skuMulti != null and skuMulti != '' ">
+			<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+				<foreach collection="skuMulti" item="item">
+					OR DM_DOCUMENT_D.SKU IN
+					<foreach collection="item" item="code" open="(" close=")" separator=",">
+						#{code} 	 
+		      		</foreach>
+		    	</foreach>
+		  	</trim>			                                    
+        </if>
+        <!-- END.상품.다중OR검색 -->      
+              
+        JOIN
+            AJ_INPLAN
+            ON  AJ_INPLAN.DCCODE        = DM_DOCUMENT_D.DCCODE
+            AND AJ_INPLAN.STORERKEY     = DM_DOCUMENT_D.STORERKEY
+            AND AJ_INPLAN.ORGANIZE      = DM_DOCUMENT_D.ORGANIZE
+            <!-- AND AJ_INPLAN.DOCDT         = DM_DOCUMENT_D.DOCDT -->
+            AND    AJ_INPLAN.SLIPDT    			=  DM_DOCUMENT_D.DELIVERYDATE 
+            AND AJ_INPLAN.DOCNO         = DM_DOCUMENT_D.DOCNO
+            AND AJ_INPLAN.DOCLINE       = DM_DOCUMENT_D.DOCLINE
+            AND AJ_INPLAN.DOCTYPE       = DM_DOCUMENT_D.DOCTYPE
+            AND AJ_INPLAN.STATUS        = '90'
+            <if test="fromTrandt != null and fromTrandt != ''">	AND AJ_INPLAN.SLIPDT <![CDATA[>=]]> #{fromTrandt}	</if>
+            <if test="toTrandt != null and toTrandt != ''">		AND AJ_INPLAN.SLIPDT <![CDATA[<=]]> #{toTrandt}		</if>
+        JOIN
+            MS_LOCATION
+            ON  MS_LOCATION.DCCODE      = AJ_INPLAN.DCCODE
+            AND MS_LOCATION.LOC         = AJ_INPLAN.LOC
+            <if test="stocktype != null and stocktype != ''">	AND MS_LOCATION.STOCKTYPE = #{stocktype}  	</if>
+        <choose>
+            <when test="searchserial != null and searchserial != ''">
+            JOIN
+                ST_SNINFO ST_SERIALINFO
+                ON  AJ_INPLAN.STORERKEY = ST_SERIALINFO.STORERKEY
+                AND AJ_INPLAN.SKU       = ST_SERIALINFO.SKU
+                AND AJ_INPLAN.STOCKID   = ST_SERIALINFO.STOCKID
+            </when>
+            <otherwise>
+            LEFT OUTER JOIN
+                ST_SNINFO ST_SERIALINFO
+                ON  AJ_INPLAN.STORERKEY = ST_SERIALINFO.STORERKEY
+                AND AJ_INPLAN.SKU       = ST_SERIALINFO.SKU
+                AND AJ_INPLAN.STOCKID   = ST_SERIALINFO.STOCKID
+            </otherwise>
+        </choose>
+        LEFT JOIN CM_CODE_STORER CD1 ON CD1.STORERKEY = DM_DOCUMENT_D.STORERKEY	AND CD1.CODELIST = 'REASONCODE_AJ' 	AND CD1.BASECODE  = DM_DOCUMENT_D.REASONCODE
+        LEFT JOIN CM_CODE_STORER CD2 ON CD2.STORERKEY = DM_DOCUMENT_D.STORERKEY	AND CD2.CODELIST = 'OTHER01_DMD' 	AND CD2.BASECODE  = DM_DOCUMENT_D.OTHER01
+        LEFT JOIN CM_CODE_STORER CD3 ON CD3.STORERKEY = DM_DOCUMENT_D.STORERKEY	AND CD3.CODELIST = 'YN' 			AND CD3.BASECODE  = DM_DOCUMENT_D.OTHER05
+        LEFT JOIN CM_CODE_STORER CD4 ON CD4.STORERKEY = DM_DOCUMENT_D.STORERKEY	AND CD4.CODELIST = 'IOTYPE' 		AND CD4.BASECODE  = DM_DOCUMENT_D.IOTYPE
+        LEFT JOIN CM_CODE_STORER CD5 ON CD5.STORERKEY = DM_DOCUMENT_D.STORERKEY	AND CD5.CODELIST = 'STOCKTYPE' 		AND CD5.BASECODE  = MS_LOCATION.STOCKTYPE
+      WHERE 1=1
+        AND DM_DOCUMENT_D.DCCODE    = #{fixdccode}  /*센터*/
+        AND DM_DOCUMENT_D.STORERKEY = #{gStorerkey} /*고객사*/
+	    <!-- START.권한센터 -->
+	    AND EXISTS (SELECT 1
+                      FROM CM_USER_AUTHORITY 
+                     WHERE CM_USER_AUTHORITY.DCCODE    = DM_DOCUMENT_D.DCCODE       
+                       AND CM_USER_AUTHORITY.STORERKEY = DM_DOCUMENT_D.STORERKEY    
+                       AND CM_USER_AUTHORITY.ORGANIZE  = DM_DOCUMENT_D.ORGANIZE     
+                       AND CM_USER_AUTHORITY.AREA      = DM_DOCUMENT_D.AREA         
+                       AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey}
+                       AND CM_USER_AUTHORITY.USERID    = #{gUserId}
+                       AND CM_USER_AUTHORITY.DCCODE    = #{fixdccode}
+                       AND CM_USER_AUTHORITY.AREA      = #{gArea}   
+			           <!-- 창고.다중검색 -->
+			           <if test='gOrganizeMulti != null and gOrganizeMulti.length > 0'>
+				           AND CM_USER_AUTHORITY.ORGANIZE IN
+				           <foreach collection="gOrganizeMulti" item="code" open="(" close=")" separator=",">
+				             #{code}
+				           </foreach>
+			           </if>                       
+                   )
+	    <!-- END.권한센터	-->         
+            <if test="serialno != null and serialno != ''">	AND ST_SERIALINFO.SERIALNO 		= 	#{serialno}		</if>
+            <if test="blno != null and blno != ''">			AND ST_SERIALINFO.CONVSERIALNO  = 	#{blno}			</if>
+
+        <!-- START.거래처.다중OR검색 -->
+        <if test="contractcompanyMulti != null and contractcompanyMulti != '' ">
+			<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+				<foreach collection="contractcompanyMulti" item="item">
+					OR ST_SERIALINFO.CONTRACTCUSTKEY IN
+					<foreach collection="item" item="code" open="(" close=")" separator=",">
+						#{code} 	 
+		      		</foreach>
+		    	</foreach>
+		  	</trim>			                                    
+        </if>
+        <!-- END.거래처.다중OR검색 -->				
+	               
+        GROUP BY
+              DM_DOCUMENT_H.DCCODE
+            , DM_DOCUMENT_D.STORERKEY
+            , DM_DOCUMENT_H.DOCDT
+            , DM_DOCUMENT_H.ORGANIZE
+            , AJ_INPLAN.SLIPDT
+            , DM_DOCUMENT_H.DOCNO
+            , DM_DOCUMENT_D.SKU  
+            , NVL(CD1.BASEDESCR,CD1.BASECODE)					    
+            , NVL(CD2.BASEDESCR,CD2.BASECODE)					          
+            , NVL(CD3.BASEDESCR,CD3.BASECODE)					          
+            , NVL(CD4.BASEDESCR,CD4.BASECODE)					          
+            , NVL(CD5.BASEDESCR,CD5.BASECODE)					          
+        ORDER BY
+              DM_DOCUMENT_H.DCCODE
+            , DM_DOCUMENT_H.ORGANIZE
+            , AJ_INPLAN.SLIPDT
+            , DM_DOCUMENT_D.SKU
+    </select>
+    
+    <select id="getDetailList" resultType="cjfw.wms.st.dto.StAdjustResultDetailResDto">				
+        SELECT /* [StAdjustResultService.sqlx][getDetailList][재고감모현황 상세 조회][공두경][2025.05.23] */
+        	  DM_DOCUMENT_D.SKU                                     AS SKU						/*상품코드*/
+            , MS_SKU.DESCRIPTION                             		AS SKUNAME					/*상품명칭*/
+            , AJ_INPLAN.LOC                                     	AS LOC						/*로케이션*/
+            , ST_SERIALINFO.LOTTABLE01                              AS LOTTABLE01				/*기준일(유통,제조)*/
+              /*START.제조일자/소비일자*/
+              /*
+              * 기준일(제조) ~까지 : DURATIONTYPE =1 일때 , LOTTABLE01 - DURATION 
+              *             DURATIONTYPE =2 일때 LOTTABLE01 
+              * 기준일(소비) ~부터 : DURATIONTYPE =1 일때 LOTTABLE01
+              *             DURATIONTYPE =2일때 LOTTABLE01 + DURATION  -1
+              */
+              --
+              ,LOGISONESVC.FN_LOTTABLE_INFO('1',DM_DOCUMENT_D.STORERKEY,ST_SERIALINFO.LOTTABLE01,MS_SKU.DURATIONTYPE,MS_SKU.DURATION,'')             AS MANUFACTUREDT   /*제조일자*/
+              ,LOGISONESVC.FN_LOTTABLE_INFO('2',DM_DOCUMENT_D.STORERKEY,ST_SERIALINFO.LOTTABLE01,MS_SKU.DURATIONTYPE,MS_SKU.DURATION,'')             AS EXPIREDT        /*소비일자*/
+              --
+	         , CASE WHEN MS_SKU.DURATIONTYPE = 'N' THEN /*요건.소비기한 관리 안하면 빈값으로 처리*/
+	               ''
+	           ELSE 
+	               FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, ST_SERIALINFO.LOTTABLE01, 'N0')  || '/' || MS_SKU.DURATION 
+	           END AS DURATION_TERM /** 유통기한/기간 */            
+            
+            /*END.제조일자/소비일자*/
+            , ST_SERIALINFO.SERIALNO                                AS SERIALNO					/*이력번호*/
+            , ST_SERIALINFO.STOCKID                                 AS BARCODE					/*바코드*/
+            , ST_SERIALINFO.CONVSERIALNO                            AS CONVSERIALNO				/*B/L번호*/
+            , ST_SERIALINFO.BUTCHERYDT                              AS BUTCHERYDT				/*도축일자*/
+            , ST_SERIALINFO.FACTORYNAME                             AS FACTORYNAME				/*도축장*/
+            , ST_SERIALINFO.FROMVALIDDT                             AS FROMVALIDDT				/*유효일자(FROM)*/
+            , ST_SERIALINFO.TOVALIDDT                               AS TOVALIDDT				/*유효일자(TO)*/
+            , NVL(CD2.BASEDESCR,CD2.BASECODE)						AS CONTRACTTYPE				/*계약유형*/            
+            , ST_SERIALINFO.CONTRACTCUSTKEY                         AS CONTRACTCOMPANY			/*계약업체*/
+            , (SELECT DESCRIPTION FROM MS_CUST
+               WHERE MS_CUST.STORERKEY = ST_SERIALINFO.STORERKEY
+               AND MS_CUST.CUSTKEY     = ST_SERIALINFO.CONTRACTCUSTKEY
+               AND ROWNUM = 1 )                          			AS CONTRACTCOMPANYNAME		/*계약업체명*/
+            , DM_DOCUMENT_D.CONFIRMQTY                              AS CONFIRMQTY				/*조정수량*/
+            , AJ_INPLAN.OTHER04                                 	AS COSTCD					/*귀속부서코드*/
+            , (SELECT T.DESCRIPTION
+                 FROM MS_COST T
+                WHERE T.COSTCODE = AJ_INPLAN.OTHER04
+                  AND AJ_INPLAN.SLIPDT BETWEEN T.FROMDATE AND T.TODATE
+                  AND T.DEL_YN = 'N'
+                  AND ROWNUM = 1)                        			AS COSTNAME					/*귀속부서명*/
+            , DM_DOCUMENT_D.UOM                                     AS UOM						/*단위*/
+            , NVL(CD1.BASEDESCR,CD1.BASECODE)						AS IOTYPE					/*입출고타입*/            
+            , ST_SERIALINFO.SERIALLEVEL                             AS SERIALLEVEL				/*등급*/
+            , ST_SERIALINFO.SERIALTYPE                              AS SERIALTYPE				/*규격*/
+            , MS_SKU.COLORDESCR                              		AS COLORDESCR				/*부위명*/
+            , ST_SERIALINFO.PLACEOFORIGIN                           AS PLACEOFORIGIN			/*원산지*/
+            , CASE WHEN NVL(MS_SKU.LINE01,'N') = 'Y' 
+            		AND TO_NUMBER(NVL(MS_SKU.LINE02,0)) <![CDATA[<>]]> 0 
+            	   THEN TO_NUMBER(NVL(MS_SKU.LINE02,0)) 
+            	   ELSE 0 END 										AS AVGWEIGHT				/*평균중량*/
+            , ROUND(
+                CASE WHEN NVL(MS_SKU.LINE01,'N') = 'Y' 
+                	  AND TO_NUMBER(NVL(MS_SKU.LINE02,0)) <![CDATA[<>]]> 0 
+                	  AND DM_DOCUMENT_D.STORERUOM = 'KG'
+                     THEN NVL((AJ_INPLAN.CONFIRMQTY * AJ_INPLAN.BUNJA / AJ_INPLAN.BUNMO),0)  / TO_NUMBER(NVL(MS_SKU.LINE02,0))
+                     ELSE 0
+                END, 2)                                  			AS CALBOX					/*환산박스*/
+            , ROUND(AJ_INPLAN.ETCQTY1, 2)                       	AS REALORDERBOX				/*실박스예정*/
+            , ROUND(AJ_INPLAN.ETCQTY2, 2)                       	AS REALCFMBOX				/*실박스확정*/
+            , MS_SKU.DURATION                                		AS DURATION					/*유통기간*/
+            , MS_SKU.DURATIONTYPE                            		AS DURATIONTYPE				/*유통기한관리방법*/
+        FROM
+              DM_DOCUMENT_D
+        JOIN
+              MS_SKU MS_SKU
+           ON MS_SKU.STORERKEY      = DM_DOCUMENT_D.STORERKEY
+          AND MS_SKU.SKU            = DM_DOCUMENT_D.SKU
+        JOIN
+              AJ_INPLAN AJ_INPLAN
+           ON AJ_INPLAN.DCCODE         = DM_DOCUMENT_D.DCCODE
+          AND AJ_INPLAN.STORERKEY      = DM_DOCUMENT_D.STORERKEY
+          AND AJ_INPLAN.ORGANIZE       = DM_DOCUMENT_D.ORGANIZE
+          AND AJ_INPLAN.DOCDT          = DM_DOCUMENT_D.DOCDT
+          AND AJ_INPLAN.DOCNO          = DM_DOCUMENT_D.DOCNO
+          AND AJ_INPLAN.DOCLINE        = DM_DOCUMENT_D.DOCLINE
+          AND AJ_INPLAN.DOCTYPE        = DM_DOCUMENT_D.DOCTYPE
+          AND AJ_INPLAN.STATUS         = '90'
+          <choose>
+            <when test="searchserial != null and searchserial != ''">
+	        	JOIN ST_SNINFO ST_SERIALINFO
+		          ON AJ_INPLAN.STORERKEY      = ST_SERIALINFO.STORERKEY
+		         AND AJ_INPLAN.SKU            = ST_SERIALINFO.SKU
+		         AND AJ_INPLAN.STOCKID        = ST_SERIALINFO.STOCKID
+            </when>
+            <otherwise>
+                LEFT JOIN ST_SNINFO ST_SERIALINFO
+	              ON AJ_INPLAN.STORERKEY      = ST_SERIALINFO.STORERKEY
+	             AND AJ_INPLAN.SKU            = ST_SERIALINFO.SKU
+	             AND AJ_INPLAN.STOCKID        = ST_SERIALINFO.STOCKID
+            </otherwise>
+        </choose>
+        JOIN
+            MS_LOCATION T6
+           ON T6.DCCODE         = AJ_INPLAN.DCCODE
+          AND T6.LOC            = AJ_INPLAN.LOC
+        <if test="stocktype != null and stocktype != ''">	AND T6.STOCKTYPE = #{stocktype} 	</if>
+        LEFT JOIN CM_CODE_STORER CD1 ON CD1.STORERKEY = DM_DOCUMENT_D.STORERKEY	AND CD1.CODELIST = 'IOTYPE' 			AND CD1.BASECODE  = DM_DOCUMENT_D.IOTYPE
+        LEFT JOIN CM_CODE_STORER CD2 ON CD2.STORERKEY = DM_DOCUMENT_D.STORERKEY	AND CD2.CODELIST = 'CONTRACTTYPE_SN' 	AND CD2.BASECODE  = ST_SERIALINFO.CONTRACTTYPE
+        WHERE DM_DOCUMENT_D.DCCODE         = #{fixdccode}
+          AND DM_DOCUMENT_D.STORERKEY      = #{storerkey}
+          AND DM_DOCUMENT_D.DOCDT          = #{docdt}
+          AND DM_DOCUMENT_D.DOCNO          = #{docno}
+          AND DM_DOCUMENT_D.SKU            = #{sku}
+	    <!-- START.권한센터 -->
+	    AND EXISTS (SELECT 1
+                      FROM CM_USER_AUTHORITY 
+                     WHERE CM_USER_AUTHORITY.DCCODE    = DM_DOCUMENT_D.DCCODE       
+                       AND CM_USER_AUTHORITY.STORERKEY = DM_DOCUMENT_D.STORERKEY    
+                       AND CM_USER_AUTHORITY.ORGANIZE  = DM_DOCUMENT_D.ORGANIZE     
+                       AND CM_USER_AUTHORITY.AREA      = DM_DOCUMENT_D.AREA         
+                       AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey}
+                       AND CM_USER_AUTHORITY.USERID    = #{gUserId}
+                       AND CM_USER_AUTHORITY.DCCODE    = #{fixdccode}
+                       AND CM_USER_AUTHORITY.AREA      = #{gArea}   
+			           <!-- 창고.다중검색 -->
+			           <if test='gOrganizeMulti != null and gOrganizeMulti.length > 0'>
+				           AND CM_USER_AUTHORITY.ORGANIZE IN
+				           <foreach collection="gOrganizeMulti" item="code" open="(" close=")" separator=",">
+				             #{code}
+				           </foreach>
+			           </if>                       
+                   )
+	    <!-- END.권한센터	-->   
+        <if test="reasoncode != null and reasoncode != ''">	AND DM_DOCUMENT_D.REASONCODE 	= 	#{reasoncode} 	</if>
+        <if test="other01 != null and other01 != ''">		AND DM_DOCUMENT_D.OTHER01 		= 	#{other01} 		</if>
+        <if test="other05 != null and other05 != ''">		AND DM_DOCUMENT_D.OTHER05 		= 	#{other05} 		</if>
+        <if test="iotype != null and iotype != ''">			AND DM_DOCUMENT_D.IOTYPE 		= 	#{iotype} 		</if>
+        <if test="serialno != null and serialno != ''">		AND ST_SERIALINFO.SERIALNO 		= 	#{serialno} 	</if>
+        <if test="blno != null and blno != ''">				AND ST_SERIALINFO.CONVSERIALNO  = 	#{blno}			</if>
+	    
+        <!-- START.거래처.다중OR검색 -->
+        <if test="contractcompanyMulti != null and contractcompanyMulti != '' ">
+			<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+				<foreach collection="contractcompanyMulti" item="item">
+					OR FROM_SERIALINFO.CONTRACTCUSTKEY IN
+					<foreach collection="item" item="code" open="(" close=")" separator=",">
+						#{code} 	 
+		      		</foreach>
+		    	</foreach>
+		  	</trim>			                                    
+        </if>
+        <!-- END.거래처.다중OR검색 -->			
+	    
+        ORDER BY DM_DOCUMENT_D.SKU
+    </select>
+    
+</mapper>

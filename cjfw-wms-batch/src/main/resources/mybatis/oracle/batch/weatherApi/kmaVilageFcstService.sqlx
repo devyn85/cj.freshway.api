@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="kmaVilageFcstService">
+    <insert id="insertKmShortForecast" parameterType="cjfw.batch.weatherApi.dto.KmaVilageFcstEntity">
+        INSERT INTO KM_SHORT_FORECAST
+        /* [kmaVilageFcstService.sqlx][kmaVilageFcstService.insertKmShortForecast][날씨예보정보적재][yewon.kim][20250905] */
+        ( STD_DT
+        , BASE_DATE
+        , BASE_TIME
+        , FCST_DATE
+        , FCST_TIME
+        , CATEGORY
+        , FCST_VALUE
+        , NX
+        , NY
+        ) VALUES (
+            #{stdDt}
+          , #{baseDate}
+          , #{baseTime}
+          , #{fcstDate}
+          , #{fcstTime}
+          , #{category}
+          , #{fcstValue}
+          , #{nx}
+          , #{ny}
+        )
+    </insert>
+
+    <select id="selectAreaGrid" resultType="cjfw.batch.weatherApi.dto.CmAdminAreaGridEntity">
+        SELECT CTP_KOR_NM, NX, NY
+        FROM (
+            /* 1) SIG_KOR_NM, HJDONG_NM 둘 다 NOT NULL인 경우: (CTP, SIG)별 최소 (NX, NY) 1건 */
+            SELECT CTP_KOR_NM, SIG_KOR_NM, NX, NY
+            FROM (
+                   SELECT CM_ADMIN_AREA_GRID.CTP_KOR_NM, CM_ADMIN_AREA_GRID.SIG_KOR_NM, CM_ADMIN_AREA_GRID.NX, CM_ADMIN_AREA_GRID.NY,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY CM_ADMIN_AREA_GRID.CTP_KOR_NM, CM_ADMIN_AREA_GRID.SIG_KOR_NM
+                               ORDER BY CM_ADMIN_AREA_GRID.NX ASC, CM_ADMIN_AREA_GRID.NY ASC
+                           ) AS RNUM
+                      FROM CM_ADMIN_AREA_GRID
+                     WHERE CM_ADMIN_AREA_GRID.SIG_KOR_NM IS NOT NULL
+                       AND CM_ADMIN_AREA_GRID.HJDONG_NM IS NOT NULL
+                  ) T
+            WHERE RNUM = 1
+            <if test="searchGubun == 'S'.toString()">
+              AND NOT EXISTS ( SELECT  1 FROM V_KM_SHORT_FORECAST X WHERE T.CTP_KOR_NM = X.CTP_KOR_NM AND T.NX=X.NX AND T.NY =X.NY)
+            </if>
+
+            UNION ALL
+
+            /* 2) SIG_KOR_NM이 NULL인 경우: (CTP, SIG, HJDONG)별 최소 (NX, NY) 1건 */
+            SELECT CTP_KOR_NM, SIG_KOR_NM, NX, NY
+            FROM (
+                SELECT CM_ADMIN_AREA_GRID.CTP_KOR_NM, CM_ADMIN_AREA_GRID.SIG_KOR_NM, CM_ADMIN_AREA_GRID.NX, CM_ADMIN_AREA_GRID.NY,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY CM_ADMIN_AREA_GRID.CTP_KOR_NM, CM_ADMIN_AREA_GRID.SIG_KOR_NM, CM_ADMIN_AREA_GRID.HJDONG_NM
+                           ORDER BY CM_ADMIN_AREA_GRID.NX ASC, CM_ADMIN_AREA_GRID.NY ASC
+                       ) AS RNUM
+                FROM CM_ADMIN_AREA_GRID
+                WHERE CM_ADMIN_AREA_GRID.SIG_KOR_NM IS NULL
+            ) T
+            WHERE RNUM = 1
+            <if test="searchGubun == 'S'.toString()">
+              AND NOT EXISTS ( SELECT  1 FROM V_KM_SHORT_FORECAST X WHERE T.CTP_KOR_NM = X.CTP_KOR_NM AND T.NX=X.NX AND T.NY =X.NY)
+            </if>
+        )
+        WHERE 1=1
+        GROUP BY CTP_KOR_NM, NX, NY
+        ORDER BY CTP_KOR_NM, NX, NY
+    </select>
+
+
+    <select id="selectAreaCtpGroupList" resultType="cjfw.batch.weatherApi.dto.CmAdminAreaGridEntity">
+        SELECT CTP_KOR_NM   AS ctpKorNm
+             , COUNT(CTP_KOR_NM_CNT)     AS ctpKorNmCnt
+          FROM (
+                SELECT CTP_KOR_NM, COUNT(1) AS CTP_KOR_NM_CNT
+                  FROM (
+                        SELECT CTP_KOR_NM, SIG_KOR_NM, MIN(NX) AS NX, MIN(NY) AS NY
+                          FROM CM_ADMIN_AREA_GRID
+                          WHERE SIG_KOR_NM IS NOT NULL
+                          AND HJDONG_NM IS NOT NULL
+                          GROUP BY CTP_KOR_NM, SIG_KOR_NM
+
+                          UNION ALL
+
+                        SELECT CTP_KOR_NM, SIG_KOR_NM, MIN(NX) AS NX, MIN(NY) AS NY
+                          FROM CM_ADMIN_AREA_GRID
+                         WHERE (SIG_KOR_NM IS NULL OR HJDONG_NM IS NULL)
+                         GROUP BY CTP_KOR_NM, SIG_KOR_NM, HJDONG_NM
+                       )
+                   GROUP BY CTP_KOR_NM, NX, NY
+               )
+         GROUP BY CTP_KOR_NM
+         ORDER BY CTP_KOR_NM
+    </select>
+
+    <select id="selectUseCategory" resultType="cjfw.batch.weatherApi.dto.KmaVilageFcstEntity">
+        SELECT BASECODE AS CATEGORY
+        FROM CM_CODE
+        WHERE CODELIST = 'FCST_CATEGORY_CD'
+          AND DEL_YN = 'N'
+          AND DATA1 = 'Y'
+    </select>
+
+    <select id="selectReturnReasonMessage" resultType="String" parameterType="Map">
+        SELECT BASEDESCR
+          FROM CM_CODE
+         WHERE CODELIST = 'FCST_API_ERR_CD'
+           AND BASECODE = #{returnReasonCode}
+    </select>
+
+    <select id="selectKmShortForecastCnt" resultType="int" parameterType="Map">
+        SELECT COUNT(1) AS totalCnt FROM KM_SHORT_FORECAST WHERE STD_DT = #{stdDt}
+    </select>
+
+    <delete id="deleteKmShortForecast" parameterType="Map">
+        DELETE KM_SHORT_FORECAST WHERE STD_DT != #{stdDt}
+    </delete>
+</mapper>

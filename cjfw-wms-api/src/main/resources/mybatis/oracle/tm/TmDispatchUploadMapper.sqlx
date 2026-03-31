@@ -1,0 +1,712 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+    "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="tmDispatchUploadMapper">
+
+    <!-- ============================================
+         배차 업로드: 차량 정보 조회
+         ============================================ -->
+    <select id="selectVehicleInfoByCarnoList" resultType="cjfw.wms.tm.dto.VehicleInfoDto">
+        SELECT
+            c.CARNO AS carno,
+            c.CONTRACTTYPE AS contractType,
+            c.CARAGENTKEY AS carrierCode,
+            d.DRIVERNAME AS driverName,
+            mc.DESCRIPTION AS carrierName,
+            cei.OUT_GROUP_CD AS outGroupCd,
+            dc.LATITUDE AS startLatitude,
+            dc.LONGITUDE AS startLongitude
+        FROM CM_CAR c
+        LEFT JOIN CM_DRIVER d ON c.DRIVER1 = d.DRIVERID
+        LEFT JOIN MS_CARRIER mc ON c.CARAGENTKEY = mc.CARRIERKEY
+        LEFT JOIN MS_CAR_ENTRY_INFO cei ON c.CARNO = cei.CARNO AND cei.DCCODE = #{dccode}
+        LEFT JOIN CM_DC dc ON dc.DCCODE = #{dccode}
+        WHERE c.CARNO IN
+        <foreach collection="carnoList" item="carno" open="(" separator="," close=")">
+            #{carno}
+        </foreach>
+          AND c.DEL_YN = 'N'
+    </select>
+
+
+
+
+    <!-- ============================================
+         배차 업로드: 차량 정보 조회
+         ============================================ -->
+    <select id="selectHolidayInfo" resultType="cjfw.wms.tm.dto.VehicleInfoDto">
+        SELECT
+            TDA.CARNO AS carno  
+        from TM_DRIVER_ATTEND TDA
+        WHERE TDA.dccode = #{dccode}
+        AND TDA.ATTEND_CD = '10'
+        AND TDA.CARNO IN
+        <foreach collection="carnoList" item="carno" open="(" separator="," close=")">
+            #{carno}
+        </foreach>
+          
+    </select>
+
+
+
+
+
+    <!-- ============================================
+         배차 업로드: 실착지 좌표 조회 (직선거리 계산용)
+         ============================================ -->
+    <select id="selectCustCoordsByTruthCustKeyList" resultType="cjfw.wms.tm.dto.TmCustomerLocationResDto">
+        SELECT /* [TmDispatchUploadMapper.sqlx][selectCustCoordsByTruthCustKeyList][실착지 좌표 조회] */
+               DISTINCT
+               I.TRUTHCUSTKEY  AS truthcustkey,
+               C.LATITUDE      AS latitude,
+               C.LONGITUDE     AS longitude
+        FROM TM_INPLAN I
+        LEFT JOIN MS_CUSTDLVINFO C
+               ON  C.STORERKEY  = I.STORERKEY
+               AND C.CUSTTYPE   = I.CUSTTYPE
+               AND C.DLVCUSTKEY = I.TRUTHCUSTKEY
+        WHERE I.DCCODE     = #{dccode}
+          AND I.DELIVERYDT = #{deliveryDate}
+          AND I.DEL_YN     = 'N'
+          AND I.TRUTHCUSTKEY IN
+          <foreach collection="truthCustKeyList" item="key" open="(" separator="," close=")">
+              #{key}
+          </foreach>
+    </select>
+
+
+    <!-- ============================================
+         배차 업로드: TM_INPLAN 존재 여부 검증
+         ============================================ -->
+    <select id="selectTmInplanByTruthCustKeyList" resultType="java.util.HashMap">
+        SELECT
+            I.TRUTHCUSTKEY AS truthCustKey,
+            I.DCCODE,
+            I.DELIVERYDT,
+            I.STORERKEY
+        FROM TM_INPLAN I
+        WHERE I.TRUTHCUSTKEY IN
+        <foreach collection="truthCustKeyList" item="key" open="(" separator="," close=")">
+            #{key}
+        </foreach>
+          AND I.DCCODE = #{dccode}
+          AND I.DELIVERYDT = #{deliveryDate}
+          AND I.STORERKEY = #{storerkey}
+          AND I.DEL_YN = 'N'
+    </select>
+
+
+    <!-- ============================================
+         배차 업로드: TM_INPLAN 배치 업데이트 (리스트) - 성능 개선용
+         ============================================ -->
+    <update id="batchUpdateTmInplanNewList">
+        MERGE /* [TmDispatchUploadMapper.sqlx][batchUpdateTmInplanNewList][배차계획 배치 저장][2026.03.09] */
+            INTO TM_INPLAN T
+        USING (
+            WITH TM_SAVE AS (
+                <foreach collection="list" item="req" separator=" UNION ALL ">
+                SELECT
+                      #{req.dccode} AS DCCODE
+                    , #{req.deliveryDate} AS DELIVERYDT
+                    , #{req.outGroupCd} AS OUT_GROUP_CD
+                    , #{req.carno} AS CARNO
+                    , '1' AS DLV_DELIVERYPRIORITY
+                    , CASE WHEN #{req.roundSeq} = 0 THEN 1 ELSE #{req.roundSeq} END AS PRIORITY
+                    , #{req.truthCustkey} AS TRUTHCUSTKEY
+                    , TO_DATE('20251231122121', 'YYYY-MM-DD HH24:MI:SS') AS DELIVERYPLANDT
+                    , '90' AS STATUS
+                    , 'N' AS SPLIT_DELIVERY_YN
+                    , #{req.deliveryPriority} AS DELIVERIPRIORITY
+                    , #{req.slipno} AS SLIPNO
+                FROM DUAL
+                </foreach>
+            )
+            SELECT
+                  TM_INPLAN.DCCODE
+                , TM_INPLAN.SLIPDT
+                , TM_INPLAN.SLIPNO
+                , TM_INPLAN.DOCTYPE
+                , MIN(CASE WHEN TM_INPLAN.PRECARNO IS NOT NULL THEN TM_INPLAN.PREDISTRICTGROUP    ELSE MS_DLV_DISTRICT.DLVGROUP_ID END) AS PREDISTRICTGROUP
+                , MIN(CASE WHEN TM_INPLAN.PRECARNO IS NOT NULL THEN TM_INPLAN.PREDISTRICTCODE     ELSE MS_DISTRICT.WORKPOPNO END) AS PREDISTRICTCODE
+                , MIN(CASE WHEN TM_INPLAN.PRECARNO IS NOT NULL THEN TM_INPLAN.PREDELIVERYGROUP    ELSE (
+                      COALESCE(MS_CUSTXPOP.POPNO, MS_DISTRICTGROUP_POP.POPNO, 'INPLAN')
+                  ) END) AS PREDELIVERYGROUP
+                , MIN(CASE WHEN TM_INPLAN.PRECARNO IS NOT NULL THEN TM_INPLAN.PRECARNO            ELSE TM_SAVE.CARNO END) AS PRECARNO
+                , MIN(CASE WHEN TM_INPLAN.PRECARNO IS NOT NULL THEN TM_INPLAN.PREPRIORITY         ELSE TO_CHAR(TM_SAVE.PRIORITY) END) AS PREPRIORITY
+                , MIN(CASE WHEN TM_INPLAN.PRECARNO IS NOT NULL THEN TM_INPLAN.PRE_TM_CONTRACTTYPE ELSE TO_CHAR(CM_CAR.CONTRACTTYPE) END) AS PRE_TM_CONTRACTTYPE
+                , MIN(MS_DLV_DISTRICT.DLVGROUP_ID) AS DISTRICTGROUP
+                , MIN(MS_DLV_DISTRICT.DLVDISTRICT_ID) AS DISTRICTCODE
+                , MIN(COALESCE(CASE WHEN TM_INPLAN.DELIVERYGROUP = 'INPLAN' THEN NULL ELSE TM_INPLAN.PREDELIVERYGROUP END
+                         , MS_CUSTXPOP.POPNO
+                         , MS_DISTRICTGROUP_POP.POPNO
+                         , 'INPLAN'
+                  )) AS DELIVERYGROUP
+                , MIN(TM_SAVE.CARNO) AS CARNO
+                , MIN(TM_SAVE.PRIORITY) AS PRIORITY
+                , MIN(TM_SAVE.OUT_GROUP_CD) AS OUT_GROUP_CD
+                , MIN(TM_SAVE.DLV_DELIVERYPRIORITY) AS DELIVERYPRIORITY
+                , MIN(TM_SAVE.DELIVERYPLANDT) AS DELIVERYPLANDT
+                , MIN(CM_CAR.CONTRACTTYPE) AS CONTRACTTYPE
+                , MIN(CM_CAR.COURIER) AS COURIER
+                , MIN(CM_CAR.CARAGENTKEY) AS CARAGENTKEY
+                , MIN(MS_DISTRICTGROUP_POP.POPNO) AS POPNO
+                , MIN(TM_SAVE.STATUS) AS STATUS
+                , MIN(TM_SAVE.SPLIT_DELIVERY_YN) AS SPLIT_DELIVERY_YN
+            FROM TM_INPLAN
+            INNER JOIN TM_SAVE
+                ON  TM_SAVE.DCCODE       = TM_INPLAN.DCCODE
+                AND TM_SAVE.DELIVERYDT   = TM_INPLAN.DELIVERYDT
+                AND TM_SAVE.TRUTHCUSTKEY = TM_INPLAN.TRUTHCUSTKEY
+                AND TM_SAVE.SLIPNO       = TM_INPLAN.SLIPNO
+                AND TM_INPLAN.SLIPDT BETWEEN TO_CHAR(TRUNC(ADD_MONTHS(TO_DATE(TM_SAVE.DELIVERYDT, 'YYYYMMDD'), -1), 'MM'), 'YYYYMMDD')
+                                     AND TM_SAVE.DELIVERYDT
+            LEFT OUTER JOIN (
+                    SELECT MS_CUSTXPOP.DCCODE, MS_CUSTXPOP.STORERKEY, MS_CUSTXPOP.CUSTTYPE, MS_CUSTXPOP.CUSTKEY, MS_CUSTXPOP.POPNO, MS_CUSTXPOP.POPNAME, MS_CUSTXPOP.ROLLTAINER_NO, MS_CUSTXPOP.SERIALKEY
+                    FROM MS_CUSTXPOP
+                    JOIN MS_CUST
+                        ON  MS_CUSTXPOP.STORERKEY = MS_CUST.STORERKEY
+                        AND MS_CUSTXPOP.CUSTKEY   = MS_CUST.CUSTKEY
+                        AND MS_CUSTXPOP.CUSTTYPE  = MS_CUST.CUSTTYPE
+                        AND MS_CUST.DEL_YN        = 'N'
+                        AND MS_CUSTXPOP.DEL_YN    = 'N'
+                    ) MS_CUSTXPOP
+                ON MS_CUSTXPOP.DCCODE    = TM_INPLAN.DCCODE
+                AND MS_CUSTXPOP.CUSTKEY   = TM_INPLAN.CUSTKEY
+                AND MS_CUSTXPOP.CUSTTYPE  = TM_INPLAN.CUSTTYPE
+                AND MS_CUSTXPOP.STORERKEY = TM_INPLAN.STORERKEY
+            LEFT OUTER JOIN MS_DISTRICT
+                ON  MS_DISTRICT.DCCODE       = TM_INPLAN.DCCODE
+                AND MS_DISTRICT.DISTRICTCODE = MS_CUSTXPOP.POPNO
+                AND MS_DISTRICT.CARNO        = MS_CUSTXPOP.POPNAME
+                AND MS_DISTRICT.DEL_YN       = 'N'
+            LEFT OUTER JOIN MS_DLV_DISTRICT
+                ON  MS_DLV_DISTRICT.DCCODE         = TM_INPLAN.DCCODE
+                AND MS_DLV_DISTRICT.DLVDISTRICT_ID = MS_DISTRICT.WORKPOPNO
+                AND TM_INPLAN.DELIVERYDT BETWEEN MS_DLV_DISTRICT.FROMDATE AND MS_DLV_DISTRICT.TODATE
+                AND MS_DLV_DISTRICT.DEL_YN         = 'N'
+            LEFT OUTER JOIN MS_DISTRICTGROUP_POP
+                ON  MS_DISTRICTGROUP_POP.DCCODE = TM_INPLAN.DCCODE
+                AND TM_INPLAN.DELIVERYDT BETWEEN MS_DISTRICTGROUP_POP.FROMDATE AND MS_DISTRICTGROUP_POP.TODATE
+                AND MS_DISTRICTGROUP_POP.BASE_YN = 'Y'
+            LEFT OUTER JOIN CM_CAR
+                ON  CM_CAR.CARNO  = TM_SAVE.CARNO
+                AND CM_CAR.DEL_YN = 'N'
+            WHERE TM_INPLAN.TM_DELIVERYTYPE IN ('1', '2')
+            GROUP BY TM_INPLAN.DCCODE
+                   , TM_INPLAN.SLIPDT
+                   , TM_INPLAN.SLIPNO
+                   , TM_INPLAN.DOCTYPE
+        ) S ON (
+                S.DCCODE  = T.DCCODE
+            AND S.SLIPDT  = T.SLIPDT
+            AND S.SLIPNO  = T.SLIPNO
+            AND S.DOCTYPE = T.DOCTYPE
+        )
+        WHEN MATCHED THEN
+            UPDATE SET
+                  T.PREDISTRICTGROUP     = S.PREDISTRICTGROUP
+                , T.PREDISTRICTCODE      = S.PREDISTRICTCODE
+                , T.PREDELIVERYGROUP     = S.PREDELIVERYGROUP
+                , T.PRECARNO             = S.PRECARNO
+                , T.PREPRIORITY          = S.PREPRIORITY
+                , T.PRE_TM_CONTRACTTYPE  = S.PRE_TM_CONTRACTTYPE
+                , T.DISTRICTGROUP        = S.DISTRICTGROUP
+                , T.DISTRICTCODE         = S.DISTRICTCODE
+                , T.DELIVERYGROUP        = S.DELIVERYGROUP
+                , T.CARNO                = S.CARNO
+                , T.PRIORITY             = S.PRIORITY
+                , T.OUT_GROUP_CD         = S.OUT_GROUP_CD
+                , T.DELIVERYPRIORITY     = S.DELIVERYPRIORITY
+                , T.DELIVERYPLANDT       = S.DELIVERYPLANDT
+                , T.CONTRACTTYPE         = S.CONTRACTTYPE
+                , T.COURIER              = S.COURIER
+                , T.CARAGENTKEY          = S.CARAGENTKEY
+                , T.STATUS               = S.STATUS
+                , T.EDITDATE             = SYSDATE
+    </update>
+
+    <!-- ============================================
+         배차 업로드: TM_INPLAN_SPLIT(반품) 배치 업데이트 (리스트) - 성능 개선용
+         ============================================ -->
+    <update id="batchUpdateTmInplanNewRtList">
+        MERGE /* [TmDispatchUploadMapper.sqlx][batchUpdateTmInplanNewRtList][배송이 있는 반품 배차 배치 저장][2026.03.09] */
+            INTO TM_INPLAN_SPLIT T
+            USING (
+                WITH TM_SAVE AS (
+                <foreach collection="list" item="req" separator=" UNION ALL ">
+                    SELECT
+                           #{req.dccode} AS DCCODE
+                         , #{req.deliveryDate} AS DELIVERYDT
+                         , #{req.outGroupCd} AS OUT_GROUP_CD
+                         , #{req.carno} AS CARNO
+                         , '1' AS DLV_DELIVERYPRIORITY
+                         , CASE WHEN #{req.roundSeq} = 0 THEN 1 ELSE #{req.roundSeq} END AS PRIORITY
+                         , #{req.truthCustkey} AS TRUTHCUSTKEY
+                         , TO_DATE('20251231122121', 'YYYY-MM-DD HH24:MI:SS') AS DELIVERYPLANDT
+                         , '90' AS STATUS
+                    FROM DUAL
+                </foreach>
+                )
+                SELECT
+                      TM_INPLAN.DCCODE
+                    , TM_INPLAN.SLIPDT
+                    , TM_INPLAN.SLIPNO
+                    , TM_INPLAN.DOCTYPE
+                    , TM_INPLAN.SEQ
+                    , MIN(TM_SAVE.DELIVERYDT) AS DELIVERYDT
+                    , MIN(CASE WHEN TM_INPLAN.PRECARNO IS NOT NULL THEN TM_INPLAN.PREDISTRICTCODE     ELSE MS_DISTRICT.WORKPOPNO END) AS PREDISTRICTCODE
+                    , MIN(CASE WHEN TM_INPLAN.PRECARNO IS NOT NULL THEN TM_INPLAN.PREDISTRICTGROUP    ELSE MS_DLV_DISTRICT.DLVGROUP_ID END) AS PREDISTRICTGROUP
+                    , MIN(CASE WHEN TM_INPLAN.PRECARNO IS NOT NULL THEN TM_INPLAN.PREDELIVERYGROUP    ELSE (
+                      COALESCE(NULLIF(TM_INPLAN.DELIVERYGROUP, 'INPLAN'), TM_INPLAN.DEFDELIVERYGROUP, MS_DISTRICTGROUP_POP.POPNO, 'INPLAN')
+                      ) END) AS PREDELIVERYGROUP
+                    , MIN(CASE WHEN TM_INPLAN.PRECARNO IS NOT NULL THEN TM_INPLAN.PRECARNO            ELSE TM_SAVE.CARNO END) AS PRECARNO
+                    , MIN(CASE WHEN TM_INPLAN.PRECARNO IS NOT NULL THEN TM_INPLAN.PREPRIORITY         ELSE TO_CHAR(TM_SAVE.PRIORITY) END) AS PREPRIORITY
+                    , MIN(CASE WHEN TM_INPLAN.PRECARNO IS NOT NULL THEN TM_INPLAN.PRE_TM_CONTRACTTYPE ELSE TO_CHAR(CM_CAR.CONTRACTTYPE) END) AS PRE_TM_CONTRACTTYPE
+                    , MIN(MS_DLV_DISTRICT.DLVGROUP_ID) AS DISTRICTGROUP
+                    , MIN(MS_DLV_DISTRICT.DLVDISTRICT_ID) AS DISTRICTCODE
+                    , MIN(COALESCE(NULLIF(TM_INPLAN.DELIVERYGROUP, 'INPLAN'), TM_INPLAN.DEFDELIVERYGROUP, MS_DISTRICTGROUP_POP.POPNO, 'INPLAN')) AS DELIVERYGROUP
+                    , MIN(TM_SAVE.CARNO) AS CARNO
+                    , MIN(TM_SAVE.PRIORITY) AS PRIORITY
+                    , MIN(TM_SAVE.OUT_GROUP_CD) AS OUT_GROUP_CD
+                    , MIN(TM_SAVE.DLV_DELIVERYPRIORITY) AS DELIVERYPRIORITY
+                    , MIN(TM_SAVE.DLV_DELIVERYPRIORITY) AS DLV_DELIVERYPRIORITY
+                    , MIN(TM_SAVE.DELIVERYPLANDT) AS DELIVERYPLANDT
+                    , MIN(NVL(CM_CAR.CONTRACTTYPE, 'TEMPORARY')) AS CONTRACTTYPE
+                    , MIN(CM_CAR.COURIER) AS COURIER
+                    , MIN(CM_CAR.CARAGENTKEY) AS CARAGENTKEY
+                    , MIN(MS_DISTRICTGROUP_POP.POPNO) AS POPNO
+                    , MIN(TM_SAVE.STATUS) AS STATUS
+                FROM TM_INPLAN_SPLIT TM_INPLAN
+                INNER JOIN TM_SAVE
+                    ON  TM_SAVE.DCCODE       = TM_INPLAN.DCCODE
+                    AND TM_INPLAN.SLIPDT     BETWEEN TO_CHAR(TRUNC(ADD_MONTHS(TO_DATE(TM_SAVE.DELIVERYDT, 'YYYYMMDD'), -1), 'MM'), 'YYYYMMDD') AND TM_SAVE.DELIVERYDT
+                    AND TM_SAVE.DELIVERYDT   = TM_INPLAN.DELIVERYDT
+                    AND TM_SAVE.TRUTHCUSTKEY = TM_INPLAN.TRUTHCUSTKEY
+                    AND TM_INPLAN.DOCTYPE    = 'RT'
+                    AND TM_INPLAN.TM_DELIVERYTYPE = '2'
+                LEFT OUTER JOIN MS_DISTRICT
+                    ON  MS_DISTRICT.DCCODE       = TM_INPLAN.DCCODE
+                    AND MS_DISTRICT.DISTRICTCODE = DECODE(TM_INPLAN.DELIVERYGROUP, 'INPLAN', TM_INPLAN.DEFDELIVERYGROUP, TM_INPLAN.DELIVERYGROUP)
+                    AND MS_DISTRICT.DEL_YN       = 'N'
+                LEFT OUTER JOIN MS_DLV_DISTRICT
+                    ON  MS_DLV_DISTRICT.DCCODE         = TM_INPLAN.DCCODE
+                    AND MS_DLV_DISTRICT.DLVDISTRICT_ID = MS_DISTRICT.WORKPOPNO
+                    AND TM_INPLAN.DELIVERYDT BETWEEN MS_DLV_DISTRICT.FROMDATE AND MS_DLV_DISTRICT.TODATE
+                LEFT OUTER JOIN MS_DISTRICTGROUP_POP
+                    ON  MS_DISTRICTGROUP_POP.DCCODE = TM_INPLAN.DCCODE
+                    AND TM_INPLAN.DELIVERYDT BETWEEN MS_DISTRICTGROUP_POP.FROMDATE AND MS_DISTRICTGROUP_POP.TODATE
+                    AND MS_DISTRICTGROUP_POP.BASE_YN = 'Y'
+                LEFT OUTER JOIN CM_CAR
+                    ON  CM_CAR.CARNO  = TM_SAVE.CARNO
+                    AND CM_CAR.DEL_YN = 'N'
+                GROUP BY TM_INPLAN.DCCODE
+                       , TM_INPLAN.SLIPDT
+                       , TM_INPLAN.SLIPNO
+                       , TM_INPLAN.DOCTYPE
+                       , TM_INPLAN.SEQ
+            ) S ON ( S.DCCODE       = T.DCCODE
+                AND  S.SLIPDT       = T.SLIPDT
+                AND  S.SLIPNO       = T.SLIPNO
+                AND  S.DOCTYPE      = T.DOCTYPE
+                AND  S.SEQ          = T.SEQ
+            )
+            WHEN MATCHED THEN
+                UPDATE SET
+                           T.DELIVERYDT           = S.DELIVERYDT
+                         , T.PREDISTRICTGROUP     = S.PREDISTRICTGROUP
+                         , T.PREDISTRICTCODE      = S.PREDISTRICTCODE
+                         , T.PREDELIVERYGROUP     = S.PREDELIVERYGROUP
+                         , T.PRECARNO             = S.PRECARNO
+                         , T.PREPRIORITY          = S.PREPRIORITY
+                         , T.PRE_TM_CONTRACTTYPE  = S.PRE_TM_CONTRACTTYPE
+                         , T.DISTRICTGROUP        = S.DISTRICTGROUP
+                         , T.DISTRICTCODE         = S.DISTRICTCODE
+                         , T.DELIVERYGROUP        = S.DELIVERYGROUP
+                         , T.CARNO                = S.CARNO
+                         , T.PRIORITY             = S.PRIORITY
+                         , T.OUT_GROUP_CD         = S.OUT_GROUP_CD
+                         , T.DELIVERYPRIORITY     = S.DELIVERYPRIORITY
+                         , T.DELIVERYPLANDT       = S.DELIVERYPLANDT
+                         , T.CONTRACTTYPE         = S.CONTRACTTYPE
+                         , T.COURIER              = S.COURIER
+                         , T.CARAGENTKEY          = S.CARAGENTKEY
+                         , T.STATUS               = S.STATUS
+                         , T.EDITDATE             = SYSDATE
+                         , T.DEL_YN               = 'N'
+    </update>
+
+    <!-- ============================================
+         배차 업로드: TM_INPLAN_SPLIT 분할배송 배치 저장 (리스트) - 성능 개선용
+         ============================================ -->
+    <update id="saveExcelTmInplanSplitList">
+        BEGIN
+        <foreach collection="list" item="req">
+        UPDATE TM_INPLAN
+           SET SPLIT_DELIVERY_YN = 'Y'
+         WHERE TM_INPLAN.DCCODE    = #{req.dccode}
+           AND TM_INPLAN.SLIPDT    = #{req.slipdt}
+           AND TM_INPLAN.SLIPNO    = #{req.slipno}
+           AND TM_INPLAN.DOCTYPE   = 'WD';
+
+        MERGE /* [TmDispatchUploadMapper.sqlx][saveExcelTmInplanSplitList][분할배송 배치 저장][2026.03.09] */
+            INTO TM_INPLAN_SPLIT T
+        USING (
+            SELECT
+                 TM_INPLAN.DCCODE
+                ,TM_INPLAN.DELIVERYDT
+                ,TM_INPLAN.WAVEKEY
+                ,TM_INPLAN.DELIVERYNO
+                ,TM_INPLAN.DEFDISTRICTTYPE
+                ,TM_INPLAN.DEFDISTRICTGROUP
+                ,TM_INPLAN.DEFDISTRICTCODE
+                ,TM_INPLAN.DEFCARNO
+                ,TM_INPLAN.DEFDELIVERYGROUP
+                ,TM_INPLAN.DEFPRIORITY
+                ,NVL(TM_INPLAN.PRECARNO, #{req.carno})   AS PRECARNO
+                ,TM_INPLAN.PREDELIVERYGROUP
+                ,TM_INPLAN.PREPRIORITY
+                ,TM_INPLAN.DISTRICTTYPE
+                ,TM_INPLAN.DISTRICTGROUP
+                ,TM_INPLAN.DISTRICTCODE
+                ,#{req.carno}                  AS CARNO
+                ,TM_INPLAN.DELIVERYGROUP
+                ,TM_INPLAN.PRIORITY
+                ,TM_INPLAN.DELIVERYPRIORITY
+                ,TM_INPLAN.LOADPRIORITY
+                ,TM_INPLAN.UNLOADPRIORITY
+                ,TM_INPLAN.CARAGENTKEY
+                ,TM_INPLAN.COURIER
+                ,TM_INPLAN.SLIPDT
+                ,TM_INPLAN.SLIPNO
+                ,TM_INPLAN.SLIPTYPE
+                ,TM_INPLAN.ROUTE
+                ,TM_INPLAN.ROUTECARNO
+                ,TM_INPLAN.TRAINNO
+                ,TM_INPLAN.SHIPNO
+                ,TM_INPLAN.PLANENO
+                ,TM_INPLAN.STORERKEY
+                ,TM_INPLAN.CUSTTYPE
+                ,TM_INPLAN.CUSTKEY
+                ,TM_INPLAN.ZIPCODE
+                ,TM_INPLAN.DOCDT
+                ,TM_INPLAN.DOCNO
+                ,TM_INPLAN.DOCTYPE
+                ,TM_INPLAN.ORDERTYPE
+                ,TM_INPLAN.ORDERQTY   AS ORDERQTY
+                ,TM_INPLAN.CUBE       AS CUBE
+                ,TM_INPLAN.WEIGHT     AS WEIGHT
+                ,NULL                 AS SLIPLINE
+                ,#{req.splitDeliverySeq}  AS SEQ
+                ,TM_INPLAN.DELIVERYREQDT
+                ,TM_INPLAN.DELIVERYPLANDT
+                ,TM_INPLAN.DCDEPARTUREDT
+                ,TM_INPLAN.CUSTARRIVALDT
+                ,TM_INPLAN.CUSTDEPARTUREDT
+                ,TM_INPLAN.DCARRIVALDT
+                ,TM_INPLAN.RECEIVEDT
+                ,TM_INPLAN.RECEIVER
+                ,TM_INPLAN.REASONCODE
+                ,TM_INPLAN.REASONMSG
+                ,TM_INPLAN.PROCPOSS_YN
+                ,TM_INPLAN.PROCPOSS_MSG
+                ,TM_INPLAN.UNLOADSTATUS
+                ,TM_INPLAN.LOADSTATUS
+                ,TM_INPLAN.DELIVERYSTATUS
+                ,TM_INPLAN.OTDSTATUS
+                ,#{req.status}                 AS STATUS
+                ,TM_INPLAN.DEL_YN
+                ,TM_INPLAN.TRAFFICCOP
+                ,TM_INPLAN.ARCHIVECOP
+                ,TM_INPLAN.ERRCODE
+                ,TM_INPLAN.ERRMSG
+                ,TM_INPLAN.TRUTHCUSTKEY
+                ,TM_INPLAN.TMMEMO
+                ,TM_INPLAN.B2C_YN
+                ,TM_INPLAN.OPEN_TIME
+                ,TM_INPLAN.TPL_TYPE
+                ,TM_INPLAN.TPL_DTL_TYPE
+                ,TM_INPLAN.TPL_BCNR_ID
+                ,TM_INPLAN.OUT_GROUP_CD
+                ,#{req.contractType}           AS CONTRACTTYPE
+                ,TM_INPLAN.TM_DELIVERYTYPE
+                ,TM_INPLAN.EXP_DRIVEDISTANCE
+                ,TM_INPLAN.PREDISTRICTCODE
+                ,TM_INPLAN.PREDISTRICTGROUP
+                ,TM_INPLAN.PREDELIVERYPRIORITY
+                ,TM_INPLAN.POPNO
+                ,TM_INPLAN.DISTANT_YN
+                ,TM_INPLAN.DLV_WAIT_YN
+                ,TM_INPLAN.KIDS_CL_YN
+                ,TM_INPLAN.LNG_DISTANT_YN
+                ,TM_INPLAN.UNLOAD_LVL_CD
+                ,TM_INPLAN.FACEINSPECT_YN
+                ,TM_INPLAN.DLV_DELIVERYPRIORITY    AS DLV_DELIVERYPRIORITY
+                ,TM_INPLAN.HJDONG_CD
+            FROM TM_INPLAN
+            WHERE TM_INPLAN.DCCODE    = #{req.dccode}
+              AND TM_INPLAN.SLIPDT    = #{req.slipdt}
+              AND TM_INPLAN.SLIPNO    = #{req.slipno}
+              AND TM_INPLAN.DOCTYPE   = 'WD'
+        ) S
+        ON (
+            T.DCCODE     = S.DCCODE
+            AND T.SLIPDT     = S.SLIPDT
+            AND T.SLIPNO     = S.SLIPNO
+            AND T.DOCTYPE    = S.DOCTYPE
+            AND T.SEQ        = S.SEQ
+        )
+        WHEN MATCHED THEN
+            UPDATE SET
+                 T.PRECARNO            = S.PRECARNO
+                ,T.CARNO               = S.CARNO
+                ,T.ORDERQTY            = S.ORDERQTY
+                ,T.CUBE                = S.CUBE
+                ,T.WEIGHT              = S.WEIGHT
+                ,T.STATUS              = S.STATUS
+                ,T.CONTRACTTYPE        = S.CONTRACTTYPE
+                ,T.DLV_DELIVERYPRIORITY = S.DLV_DELIVERYPRIORITY
+                ,T.PRIORITY            = S.PRIORITY
+                ,T.DELIVERYPRIORITY    = S.DELIVERYPRIORITY
+                ,T.DELIVERYPLANDT      = S.DELIVERYPLANDT
+                ,T.DISTRICTGROUP       = S.DISTRICTGROUP
+                ,T.DISTRICTCODE        = S.DISTRICTCODE
+                ,T.DELIVERYGROUP       = S.DELIVERYGROUP
+                ,T.OUT_GROUP_CD        = S.OUT_GROUP_CD
+                ,T.COURIER             = S.COURIER
+                ,T.CARAGENTKEY         = S.CARAGENTKEY
+                ,T.PREDELIVERYGROUP    = S.PREDELIVERYGROUP
+                ,T.PREPRIORITY         = S.PREPRIORITY
+                ,T.PREDISTRICTGROUP    = S.PREDISTRICTGROUP
+                ,T.PREDISTRICTCODE     = S.PREDISTRICTCODE
+                ,T.EDITDATE            = SYSDATE
+                ,T.EDITWHO             = NVL(#{req.regId}, #{req.gUserId})
+                ,T.DEL_YN              = 'N'
+        WHEN NOT MATCHED THEN
+            INSERT (
+                 DCCODE, DELIVERYDT, WAVEKEY, DELIVERYNO, DEFDISTRICTTYPE, DEFDISTRICTGROUP
+                ,DEFDISTRICTCODE, DEFCARNO, DEFDELIVERYGROUP, DEFPRIORITY, PRECARNO, PREDELIVERYGROUP
+                ,PREPRIORITY, DISTRICTTYPE, DISTRICTGROUP, DISTRICTCODE, CARNO, DELIVERYGROUP
+                ,PRIORITY, DELIVERYPRIORITY, LOADPRIORITY, UNLOADPRIORITY, CARAGENTKEY, COURIER
+                ,SLIPDT, SLIPNO, SLIPTYPE, ROUTE, ROUTECARNO, TRAINNO, SHIPNO, PLANENO
+                ,STORERKEY, CUSTTYPE, CUSTKEY, ZIPCODE, DOCDT, DOCNO, DOCTYPE, ORDERTYPE
+                ,ORDERQTY, CUBE, WEIGHT, SLIPLINE, SEQ, DELIVERYREQDT, DELIVERYPLANDT
+                ,DCDEPARTUREDT, CUSTARRIVALDT, CUSTDEPARTUREDT, DCARRIVALDT, RECEIVEDT
+                ,RECEIVER, REASONCODE, REASONMSG, PROCPOSS_YN, PROCPOSS_MSG, UNLOADSTATUS
+                ,LOADSTATUS, DELIVERYSTATUS, OTDSTATUS, STATUS, DEL_YN, TRAFFICCOP, ARCHIVECOP
+                ,ERRCODE, ERRMSG, TRUTHCUSTKEY, TMMEMO, B2C_YN, OPEN_TIME, TPL_TYPE
+                ,TPL_DTL_TYPE, TPL_BCNR_ID, ADDDATE, EDITDATE, ADDWHO, EDITWHO
+                ,OUT_GROUP_CD, CONTRACTTYPE, TM_DELIVERYTYPE, EXP_DRIVEDISTANCE
+                ,PREDISTRICTCODE, PREDISTRICTGROUP, PREDELIVERYPRIORITY, POPNO
+                ,DISTANT_YN, DLV_WAIT_YN, KIDS_CL_YN, LNG_DISTANT_YN, UNLOAD_LVL_CD
+                ,FACEINSPECT_YN, DLV_DELIVERYPRIORITY, HJDONG_CD
+            ) VALUES (
+                 S.DCCODE, S.DELIVERYDT, S.WAVEKEY, S.DELIVERYNO, S.DEFDISTRICTTYPE, S.DEFDISTRICTGROUP
+                ,S.DEFDISTRICTCODE, S.DEFCARNO, S.DEFDELIVERYGROUP, S.DEFPRIORITY, S.PRECARNO, S.PREDELIVERYGROUP
+                ,S.PREPRIORITY, S.DISTRICTTYPE, S.DISTRICTGROUP, S.DISTRICTCODE, S.CARNO, S.DELIVERYGROUP
+                ,S.PRIORITY, S.DELIVERYPRIORITY, S.LOADPRIORITY, S.UNLOADPRIORITY, S.CARAGENTKEY, S.COURIER
+                ,S.SLIPDT, S.SLIPNO, S.SLIPTYPE, S.ROUTE, S.ROUTECARNO, S.TRAINNO, S.SHIPNO, S.PLANENO
+                ,S.STORERKEY, S.CUSTTYPE, S.CUSTKEY, S.ZIPCODE, S.DOCDT, S.DOCNO, S.DOCTYPE, S.ORDERTYPE
+                ,S.ORDERQTY, S.CUBE, S.WEIGHT, S.SLIPLINE, S.SEQ, S.DELIVERYREQDT, S.DELIVERYPLANDT
+                ,S.DCDEPARTUREDT, S.CUSTARRIVALDT, S.CUSTDEPARTUREDT, S.DCARRIVALDT, S.RECEIVEDT
+                ,S.RECEIVER, S.REASONCODE, S.REASONMSG, S.PROCPOSS_YN, S.PROCPOSS_MSG, S.UNLOADSTATUS
+                ,S.LOADSTATUS, S.DELIVERYSTATUS, S.OTDSTATUS, S.STATUS, 'N', S.TRAFFICCOP, S.ARCHIVECOP
+                ,S.ERRCODE, S.ERRMSG, S.TRUTHCUSTKEY, S.TMMEMO, S.B2C_YN, S.OPEN_TIME, S.TPL_TYPE
+                ,S.TPL_DTL_TYPE, S.TPL_BCNR_ID, SYSDATE, SYSDATE
+                ,NVL(#{req.regId}, #{req.gUserId}), NVL(#{req.regId}, #{req.gUserId})
+                ,S.OUT_GROUP_CD, S.CONTRACTTYPE, S.TM_DELIVERYTYPE, S.EXP_DRIVEDISTANCE
+                ,S.PREDISTRICTCODE, S.PREDISTRICTGROUP, S.PREDELIVERYPRIORITY, S.POPNO
+                ,S.DISTANT_YN, S.DLV_WAIT_YN, S.KIDS_CL_YN, S.LNG_DISTANT_YN, S.UNLOAD_LVL_CD
+                ,S.FACEINSPECT_YN, S.DLV_DELIVERYPRIORITY, S.HJDONG_CD
+            );
+        </foreach>
+        END;
+    </update>
+
+    <!-- ============================================
+     배차 업로드: TM_PLAN_ROUTE end 경로 삭제 (차량번호 기준)
+     ============================================ -->
+    <delete id="deletePlanRouteEnd">
+        DELETE FROM TM_PLAN_ROUTE
+        WHERE DCCODE = #{dccode}
+          AND DELIVERYDT = #{deliveryDate}
+          AND TO_CUSTKEY = 'end'
+          AND CARNO IN
+          <foreach collection="carnoList" item="carno" open="(" separator="," close=")">
+              #{carno}
+          </foreach>
+    </delete>
+
+    <!-- ============================================
+         배차 업로드: TM_PLAN_ROUTE 기존 경로 삭제
+         ============================================ -->
+    <delete id="deletePlanRoute">
+        DELETE FROM TM_PLAN_ROUTE
+        WHERE DCCODE = #{dccode}
+          AND DELIVERYDT = #{deliveryDate}
+          AND TO_CUSTKEY IN
+          <foreach collection="toCustkeyList" item="toCustkey" open="(" separator="," close=")">
+              #{toCustkey}
+          </foreach>
+    </delete>
+
+    <!-- ============================================
+         배차 업로드: TM_PLAN_ROUTE 새로운 경로 INSERT
+         ============================================ -->
+    <insert id="batchInsertPlanRoute">
+        BEGIN
+        <foreach collection="routeDataList" item="route">
+            INSERT INTO TM_PLAN_ROUTE (
+                DCCODE,
+                DELIVERYDT,
+                CARNO,
+                TM_DELIVERYTYPE,
+                FROM_CUSTTYPE,
+                FROM_CUSTKEY,
+                PRIORITY,
+                TO_CUSTTYPE,
+                TO_CUSTKEY,
+                DRIVEDISTANCE,
+                DRIVETIM,
+                ROUTE_POLYLINE,
+                TO_EXPCT_DATE,
+                ADDDATE,
+                EDITDATE
+            ) VALUES (
+                #{route.DCCODE},
+                #{route.DELIVERYDT},
+                #{route.CARNO},
+                #{route.TM_DELIVERYTYPE},
+                #{route.FROM_CUSTTYPE},
+                #{route.FROM_CUSTKEY},
+                #{route.PRIORITY},
+                #{route.TO_CUSTTYPE},
+                #{route.TO_CUSTKEY},
+                #{route.DRIVEDISTANCE},
+                #{route.DRIVETIM},
+                SDO_GEOMETRY(#{route.ROUTE_POLYLINE, jdbcType=CLOB}, 4326),
+                TO_DATE(#{route.TO_EXPCT_DATE}, 'YYYYMMDDHH24MISS'),
+                SYSDATE,
+                SYSDATE
+            );
+        </foreach>
+        END;
+    </insert>
+    
+    
+    
+   <!-- ============================================
+         배차 업로드: TM_PLAN_ROUTE 순서만 저장 (계산 필드 없이)
+         1) deletePlanRoute로 기존 경로 삭제 후 호출
+         2) ETA/거리/시간/경로 등 계산 필드는 추후 재계산 API로 채움
+         ============================================ -->
+    <insert id="batchInsertEmptyPlanRoute">
+        BEGIN
+        <foreach collection="routeDataList" item="route">
+            INSERT INTO TM_PLAN_ROUTE (
+                DCCODE,
+                DELIVERYDT,
+                TM_DELIVERYTYPE,
+                CARNO,
+                PRIORITY,
+                OUT_GROUP_CD,
+                TO_CUSTKEY,
+                TO_CUSTTYPE,
+                FROM_CUSTTYPE,
+                FROM_CUSTKEY,
+                TO_EXPCT_DATE,
+                DRIVEDISTANCE,
+                DRIVETIM,
+                ROUTE_POLYLINE,
+                ADDDATE,
+                EDITDATE
+            ) VALUES (
+                #{route.DCCODE},
+                #{route.DELIVERYDT},
+                #{route.TM_DELIVERYTYPE},
+                #{route.CARNO},
+                #{route.PRIORITY},
+                '10',
+                #{route.TO_CUSTKEY},
+                #{route.TO_CUSTTYPE},
+                #{route.FROM_CUSTTYPE},
+                #{route.FROM_CUSTKEY},
+                SYSDATE + (#{route.STOP_CNT} * (30/1440)),
+                0,
+                0,
+                SDO_GEOMETRY(2001, 4326, SDO_POINT_TYPE(0, 0, NULL), NULL, NULL),
+                SYSDATE,
+                SYSDATE
+            );
+        </foreach>
+        END; 
+    </insert>
+
+    <!-- ============================================
+             배차 업로드: TM_PLAN_ROUTE Start, End 추가
+             ============================================ -->
+    <insert id="batchInsertStartPlanRoute">
+        BEGIN
+        <foreach collection="list" item="startRoute">
+            MERGE INTO TM_PLAN_ROUTE T
+            USING (
+                SELECT #{startRoute.dccode}       AS DCCODE,
+                       #{startRoute.deliveryDate} AS DELIVERYDT,
+                       #{startRoute.deliveryType} AS TM_DELIVERYTYPE,
+                       #{startRoute.carno}        AS CARNO,
+                       #{startRoute.roundSeq}     AS PRIORITY,
+                       #{startRoute.truthCustkey} AS TO_CUSTKEY
+                FROM DUAL
+            ) S
+            ON (
+                    T.DCCODE          = S.DCCODE
+                AND T.DELIVERYDT      = S.DELIVERYDT
+                AND T.TM_DELIVERYTYPE = S.TM_DELIVERYTYPE
+                AND T.CARNO           = S.CARNO
+                AND T.PRIORITY        = S.PRIORITY
+                AND T.TO_CUSTKEY      = S.TO_CUSTKEY
+            )
+            WHEN NOT MATCHED THEN
+                INSERT (
+                    DCCODE,
+                    DELIVERYDT,
+                    TM_DELIVERYTYPE,
+                    CARNO,
+                    PRIORITY,
+                    OUT_GROUP_CD,
+                    TO_CUSTTYPE,
+                    TO_CUSTKEY,
+                    FROM_CUSTTYPE,
+                    FROM_CUSTKEY,
+                    TO_EXPCT_DATE,
+                    DRIVEDISTANCE,
+                    DRIVETIM,
+                    ROUTE_POLYLINE,
+                    ADDDATE,
+                    EDITDATE
+                ) VALUES (
+                    S.DCCODE,
+                    S.DELIVERYDT,
+                    S.TM_DELIVERYTYPE,
+                    S.CARNO,
+                    S.PRIORITY,
+                    '10',
+                    ' ',
+                    S.TO_CUSTKEY,
+                    ' ',
+                    #{startRoute.tcDcCode},
+                    SYSDATE,
+                    0,
+                    0,
+                    SDO_GEOMETRY(2001, 4326, SDO_POINT_TYPE(0, 0, NULL), NULL, NULL),
+                    SYSDATE,
+                    SYSDATE
+                );
+        </foreach>
+        END;
+    </insert>
+
+
+
+
+</mapper>

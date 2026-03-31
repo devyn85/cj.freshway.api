@@ -1,0 +1,616 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="tmCarPositionHistoryService">
+
+    <select id="getMasterList" resultType="TmCarPositionHistoryResDto">
+        SELECT /* [TmCarPositionHistoryService.sqlx][tmCarPositionHistoryService.getMasterList][운행일지 - 운행일지 목록 조회][JiHoPark][2025.11.18] */
+               RSLT.STORERKEY                                                                 AS STORERKEY         /*고객사코드*/
+             , RSLT.DCCODE                                                                    AS DCCODE            /*센터코드*/
+             , RSLT.DELIVERYDT                                                                AS DELIVERYDT        /*배송일자*/
+             , RSLT.CARNO                                                                     AS CARNO             /*차량번호*/
+             , NVL(( SELECT CM_DRIVER.DRIVERNAME
+                       FROM CM_DRIVER
+                      WHERE CM_DRIVER.DRIVERID = CM_CAR.DRIVER1), CM_CAR.DRIVER1 )            AS DRIVERNAME
+             , CM_CAR.CONTRACTTYPE                                                            AS CONTRACTTYPE
+             , FN_CODEDESCR(RSLT.STORERKEY, 'CONTRACTTYPE', CM_CAR.CONTRACTTYPE)              AS CONTRACTTYPENAME
+             , RSLT.PRIORITY                                                                  AS PRIORITY          /*차수*/
+             , NVL(RSLT.DAILY_EXP_DRIVEDISTANCE, 0)                                           AS DAILY_EXP_DRIVEDISTANCE /*당일 계획 주행거리*/
+             , ( SELECT NVL(SUM(TM_CAR_LOCATION_LOG.DAILY_MILEAGE), 0)
+                  FROM TM_CAR_LOCATION_LOG
+                 WHERE RSLT.CARNO      = TM_CAR_LOCATION_LOG.CARNO
+                   AND RSLT.DELIVERYDT = TO_CHAR(TM_CAR_LOCATION_LOG.LOAD_DATE, 'YYYYMMDD') ) AS DAILY_MILEAGE /* 당일 실 주행거리 */
+             , ( SELECT NVL(SUM(DIS_RSLT.EXP_DRIVEDISTANCE), 0)
+                   FROM ( SELECT DIS_INPLAN.STORERKEY                 AS STORERKEY         /*고객사코드*/
+                               , DIS_INPLAN.DCCODE                    AS DCCODE            /*센터코드*/
+                               , DIS_INPLAN.DELIVERYDT                AS DELIVERYDT        /*배송일자*/
+                               , DIS_INPLAN.CARNO                     AS CARNO             /*차량번호*/
+                               , DIS_INPLAN.PRIORITY                  AS PRIORITY          /*차수*/
+                               , DIS_INPLAN.CUSTKEY                   AS CUSTKEY           /*거래처코드*/
+                               , NVL(DIS_INPLAN.EXP_DRIVEDISTANCE, 0) AS EXP_DRIVEDISTANCE /*예상주행거리*/
+                               , ROW_NUMBER() OVER(PARTITION BY DIS_INPLAN.STORERKEY, DIS_INPLAN.DCCODE, DIS_INPLAN.DELIVERYDT, DIS_INPLAN.PRIORITY, DIS_INPLAN.CUSTKEY ORDER BY DIS_INPLAN.DELIVERYDT) AS RN
+                            FROM TM_INPLAN DIS_INPLAN
+                           WHERE DIS_INPLAN.STORERKEY = RSLT.STORERKEY
+                             AND DIS_INPLAN.DCCODE    = RSLT.DCCODE
+                             AND DIS_INPLAN.DELIVERYDT BETWEEN TRUNC(TO_DATE(RSLT.DELIVERYDT, 'YYYYMMDD'), 'MM') AND LAST_DAY(TO_DATE(RSLT.DELIVERYDT, 'YYYYMMDD'))
+                             AND DIS_INPLAN.CARNO     = RSLT.CARNO
+                             AND DIS_INPLAN.PRIORITY  = RSLT.PRIORITY
+                          ) DIS_RSLT
+                      WHERE DIS_RSLT.RN = 1 )                                                 AS DAILY_EXP_DRIVEDISTANCESUM /*당월 계획 주행거리*/
+             , ( SELECT NVL(SUM(TM_CAR_LOCATION_LOG.DAILY_MILEAGE), 0)
+                   FROM TM_CAR_LOCATION_LOG
+                  WHERE RSLT.CARNO = TM_CAR_LOCATION_LOG.CARNO
+                    AND SUBSTR(RSLT.DELIVERYDT, 0, 8) = TO_CHAR(TM_CAR_LOCATION_LOG.LOAD_DATE, 'YYYYMMDD')
+                  GROUP BY TO_CHAR(TM_CAR_LOCATION_LOG.LOAD_DATE, 'YYYYMMDD') )               AS DAILY_MILEAGESUM /* 당월 실 주행거리 */
+             , RSLT.DELIVERYDT                                                                AS SLIPDT   <!-- 인쇄용 -->
+             , '1'                                                                            AS SLIPNO   <!-- 인쇄용 -->
+             , 'WD'                                                                           AS SLIPTYPE <!-- 인쇄용 -->
+             , 'C'                                                                            AS CUSTTYPE <!-- 인쇄용 -->
+             , '1'                                                                            AS CUSTKEY  <!-- 인쇄용 -->
+         FROM ( SELECT DAY_INPLAN.STORERKEY                 AS STORERKEY               /*고객사코드*/
+                     , DAY_INPLAN.DCCODE                    AS DCCODE                  /*센터코드*/
+                     , DAY_INPLAN.DELIVERYDT                AS DELIVERYDT              /*배송일자*/
+                     , DAY_INPLAN.CARNO                     AS CARNO                   /*차량번호*/
+                     , DAY_INPLAN.PRIORITY                  AS PRIORITY                /*차수*/
+                     , SUM(DAY_INPLAN.EXP_DRIVEDISTANCE)    AS DAILY_EXP_DRIVEDISTANCE /*예상주행거리*/
+                  FROM ( SELECT DISTINCT
+                                TM_INPLAN.STORERKEY                 AS STORERKEY         /*고객사코드*/
+                              , TM_INPLAN.DCCODE                    AS DCCODE            /*센터코드*/
+                              , TM_INPLAN.DELIVERYDT                AS DELIVERYDT        /*배송일자*/
+                              , TM_INPLAN.CARNO                     AS CARNO             /*차량번호*/
+                              , TM_INPLAN.PRIORITY                  AS PRIORITY          /*차수*/
+                              , TM_INPLAN.CUSTKEY                   AS CUSTKEY           /*거래처코드*/
+                              , NVL(TM_INPLAN.EXP_DRIVEDISTANCE, 0) AS EXP_DRIVEDISTANCE /*예상주행거리*/
+                           FROM TM_INPLAN
+                           JOIN CM_USER_AUTHORITY_DCXSTORER ON 1=1
+                                                       <if test="dccode != null and dccode != ''">
+                                                           AND CM_USER_AUTHORITY_DCXSTORER.DCCODE    = #{dccode}
+                                                       </if>
+                                                       <if test="gStorerkey != null and gStorerkey != ''">
+                                                           AND CM_USER_AUTHORITY_DCXSTORER.STORERKEY = #{gStorerkey}
+                                                       </if>
+                                                           AND CM_USER_AUTHORITY_DCXSTORER.USERID    = #{gUserId}
+                                                           AND CM_USER_AUTHORITY_DCXSTORER.DCCODE    = TM_INPLAN.DCCODE
+                                                           AND CM_USER_AUTHORITY_DCXSTORER.STORERKEY = TM_INPLAN.STORERKEY
+                          WHERE 1 = 1
+                        <if test="dccode != null and dccode != ''">
+                            AND TM_INPLAN.DCCODE = #{dccode}
+                        </if>
+                        <if test="carno != null and carno != ''">
+                            AND TM_INPLAN.CARNO = #{carno}
+                        </if>
+                            AND TM_INPLAN.DELIVERYDT BETWEEN #{fromDocdt} AND #{toDocdt}
+                        <if test="toCustkey != null and toCustkey != ''">
+                            AND EXISTS ( SELECT 1
+                                                FROM TM_INPLAN SUB_INPLAN
+                                               WHERE SUB_INPLAN.DCCODE     = TM_INPLAN.DCCODE
+                                                 AND SUB_INPLAN.STORERKEY  = TM_INPLAN.STORERKEY
+                                                 AND SUB_INPLAN.DELIVERYDT = TM_INPLAN.DELIVERYDT
+                                                 AND SUB_INPLAN.CARNO      = TM_INPLAN.CARNO
+                                                 AND SUB_INPLAN.PRIORITY   = TM_INPLAN.PRIORITY
+                                                 AND SUB_INPLAN.CUSTKEY IN (SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS VAL
+                                                                                      FROM (SELECT #{toCustkey} AS VAL FROM DUAL) A
+					   	                   			                         CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0) )
+                        </if>
+                     ) DAY_INPLAN
+                 GROUP BY DAY_INPLAN.STORERKEY
+                        , DAY_INPLAN.DCCODE
+                        , DAY_INPLAN.DELIVERYDT
+                        , DAY_INPLAN.CARNO
+                        , DAY_INPLAN.PRIORITY
+            ) RSLT
+         JOIN CM_CAR ON CM_CAR.CARNO = RSLT.CARNO
+        WHERE 1=1
+      <if test="contracttype != null and contracttype != ''">
+          AND CM_CAR.CONTRACTTYPE = #{contracttype}
+      </if>
+        ORDER BY RSLT.DELIVERYDT
+               , RSLT.CARNO
+               , RSLT.PRIORITY
+    </select>
+
+    <select id="getMasterList2" resultType="TmCarPositionHistoryResDto">
+        SELECT /* [TmCarPositionHistoryService.sqlx][tmCarPositionHistoryService.getMasterList2][운행일지 - 운행일지 상세 목록 조회][JiHoPark][2025.11.15] */
+               RSLT.DCCODE                                      AS DCCODE           /*센터코드*/
+             , RSLT.DELIVERYDT                                  AS DELIVERYDT       /*배송일자*/
+             , RSLT.CARNO                                       AS CARNO            /*차량번호*/
+             , RSLT.PRIORITY                                    AS PRIORITY         /*차수*/
+             , RSLT.DELIVERYPRIORITY                            AS DELIVERYPRIORITY /*배송우선순위*/
+             , ROW_NUMBER() OVER (PARTITION BY RSLT.STORERKEY
+                                             , RSLT.DELIVERYDT
+                                             , RSLT.CARNO
+                                             , RSLT.PRIORITY
+                                      ORDER BY RSLT.CUSTARRIVALDT
+                                             , RSLT.DELIVERYPRIORITY
+                                             , RSLT.CUSTKEY)    AS REAL_DELIVERYPRIORITY
+             , RSLT.TRUTHCUSTKEY                                AS TRUTHCUSTKEY     /*실착지코드*/
+             , FN_DESCR_CUST(RSLT.STORERKEY, RSLT.TRUTHCUSTKEY) AS TRUTHCUSTNAME    /*실착지명*/
+             , RSLT.CUSTKEY                                     AS CUSTKEY          /*거래처코드*/
+             , MS_CUST.DESCRIPTION                              AS CUSTNAME         /*거래처명*/
+             , RSLT.ARRIVEDTIME                                 AS ARRIVEDTIME      /*거래처도착시간*/
+             , RSLT.DEPARTURETIME                               AS DEPARTURETIME    /*거래처출발시간*/
+          FROM ( SELECT TM_INPLAN.STORERKEY                         AS STORERKEY
+                      , TM_INPLAN.DCCODE                            AS DCCODE           /*센터코드*/
+                      , TM_INPLAN.DELIVERYDT                        AS DELIVERYDT       /*배송일자*/
+                      , TM_INPLAN.CARNO                             AS CARNO            /*차량번호*/
+                      , TM_INPLAN.PRIORITY                          AS PRIORITY         /*차수*/
+                      , 1                                           AS DELIVERYPRIORITY /*배송우선순위*/
+                      , TM_INPLAN.DCCODE                            AS CUSTKEY          /*거래처코드*/
+                      , ''                                          AS TRUTHCUSTKEY     /*실착지 거래처코드*/
+                      , NULL                                        AS ARRIVEDTIME
+                      , TO_CHAR(TM_INPLAN.DCDEPARTUREDT, 'HH24:MI') AS DEPARTURETIME    /*거래처출발시간*/
+                      , 0                                           AS CUSTARRIVALDT
+                   FROM TM_INPLAN
+                  WHERE TM_INPLAN.DCCODE     = #{dccode}
+                    AND TM_INPLAN.DELIVERYDT = #{deliverydt}
+                    AND TM_INPLAN.CARNO      = #{carno}
+                    AND TM_INPLAN.PRIORITY   = #{priority}
+                    AND TM_INPLAN.STORERKEY  = #{storerkey}
+                    AND ROWNUM = 1
+                  UNION ALL
+                 SELECT DISTINCT TM_INPLAN.STORERKEY                                             AS STORERKEY
+                      , TM_INPLAN.DCCODE                                                         AS DCCODE           /*센터코드*/
+                      , TM_INPLAN.DELIVERYDT                                                     AS DELIVERYDT       /*배송일자*/
+                      , TM_INPLAN.CARNO                                                          AS CARNO            /*차량번호*/
+                      , TM_INPLAN.PRIORITY                                                       AS PRIORITY         /*차수*/
+                      , TO_NUMBER(TM_INPLAN.DELIVERYPRIORITY) + 1                                AS DELIVERYPRIORITY /*배송우선순위*/
+                      , TM_INPLAN.CUSTKEY                                                        AS CUSTKEY          /*거래처코드*/
+                      , TM_INPLAN.TRUTHCUSTKEY                                                   AS TRUTHCUSTKEY     /*실착지 거래처코드*/
+                      , TO_CHAR(TM_INPLAN.CUSTARRIVALDT, 'HH24:MI')                              AS ARRIVEDTIME
+                      , TO_CHAR(TM_INPLAN.CUSTDEPARTUREDT, 'HH24:MI')                            AS DEPARTURETIME    /*거래처출발시간*/
+                      , TO_NUMBER(NVL(TO_CHAR(TM_INPLAN.CUSTARRIVALDT,'YYYYMMDDHH24MISS'), 0))   AS CUSTARRIVALDT
+                   FROM TM_INPLAN
+                  WHERE TM_INPLAN.DCCODE     = #{dccode}
+                    AND TM_INPLAN.DELIVERYDT = #{deliverydt}
+                    AND TM_INPLAN.CARNO      = #{carno}
+                    AND TM_INPLAN.PRIORITY   = #{priority}
+                    AND TM_INPLAN.STORERKEY  = #{storerkey}
+               ) RSLT
+            LEFT OUTER JOIN MS_CUST ON MS_CUST.STORERKEY = RSLT.STORERKEY
+                                   AND MS_CUST.CUSTKEY   = RSLT.CUSTKEY
+                                   AND MS_CUST.CUSTTYPE  = 'C'
+           ORDER BY REAL_DELIVERYPRIORITY
+    </select>
+
+    <select id="getPrintHeaderList" resultType="TmCarPositionHistoryReportDto">
+        SELECT /* [TmCarPositionHistoryService.sqlx][tmCarPositionHistoryService.getPrintHeaderList][운행일지 - 운행일지 출력용 헤더][JiHoPark][2025.11.14] */
+               RSLT.STORERKEY                                                                 AS STORERKEY
+             , TO_CHAR(TO_DATE(RSLT.DELIVERYDT,'YYYYMMDD'),'YYYY-MM-DD')                      AS DELIVERYDT
+             , RSLT.CARNO                                                                     AS CARNO
+             , RSLT.PRIORITY                                                                  AS PRIORITY
+             , NVL((SELECT CM_DRIVER.DRIVERNAME
+                      FROM CM_DRIVER
+                     WHERE CM_DRIVER.DRIVERID = CM_CAR.DRIVER1), CM_CAR.DRIVER1)              AS DRIVERNAME
+             , RSLT.GASREFUEL                                                                 AS GASREFUEL
+             , RSLT.GASREFUELSUM                                                              AS GASREFUELSUM
+             , RSLT.DELIVERYDT||'_'||RSLT.CARNO||'_'||RSLT.PRIORITY AS DISP_PAGE_DIV
+             , ( SELECT MAX(TM_CAR_LOCATION_LOG.DAILY_MILEAGE)
+                  FROM TM_CAR_LOCATION_LOG
+                 WHERE RSLT.CARNO      = TM_CAR_LOCATION_LOG.CARNO
+                   AND RSLT.DELIVERYDT = TO_CHAR(TM_CAR_LOCATION_LOG.LOAD_DATE, 'YYYYMMDD') ) AS DAILY_MILEAGE /* 당일 실 주행거리 */
+             , ( SELECT SUM(MAX(TM_CAR_LOCATION_LOG.DAILY_MILEAGE))
+                   FROM TM_CAR_LOCATION_LOG
+                  WHERE RSLT.CARNO = TM_CAR_LOCATION_LOG.CARNO
+                    AND SUBSTR(RSLT.DELIVERYDT, 0, 6) = TO_CHAR(TM_CAR_LOCATION_LOG.LOAD_DATE, 'YYYYMM')
+                  GROUP BY TO_CHAR(TM_CAR_LOCATION_LOG.LOAD_DATE, 'YYYYMMDD') )               AS DAILY_MILEAGESUM /* 당월 실 주행거리 */
+          FROM ( SELECT DISTINCT
+                        TM_INPLAN.STORERKEY   AS STORERKEY
+                      , TM_INPLAN.DELIVERYDT AS DELIVERYDT
+                      , TM_INPLAN.CARNO      AS CARNO
+                      , TM_INPLAN.PRIORITY   AS PRIORITY
+                      , 0                    AS GASREFUEL
+                      , 0                    AS GASREFUELSUM
+                   FROM TM_INPLAN
+                   JOIN SY_PROCESSTEMP_TM ON SY_PROCESSTEMP_TM.STORERKEY      = TM_INPLAN.STORERKEY
+                                         AND SY_PROCESSTEMP_TM.DELIVERYDT     = TM_INPLAN.DELIVERYDT
+                                         AND SY_PROCESSTEMP_TM.CARNO          = TM_INPLAN.CARNO
+                                         AND SY_PROCESSTEMP_TM.PRIORITY       = TM_INPLAN.PRIORITY
+                                         AND SY_PROCESSTEMP_TM.PROCESSTYPE    = 'TM_DRIVEHISTORY'
+                                         AND SY_PROCESSTEMP_TM.PROCESSCREATOR = #{gUserId}
+                                         AND SY_PROCESSTEMP_TM.SPID           = #{gSpid}
+             ) RSLT
+          JOIN CM_CAR ON CM_CAR.CARNO = RSLT.CARNO
+         ORDER BY RSLT.DELIVERYDT
+                , RSLT.CARNO
+                , RSLT.PRIORITY
+    </select>
+
+    <select id="getPrintDetailList" resultType="TmCarPositionHistoryReportDto">
+        SELECT /* [TmCarPositionHistoryService.sqlx][tmCarPositionHistoryService.getPrintHeaderList][운행일지 - 운행일지 출력용 헤더][JiHoPark][2025.11.14] */
+               RSLT.STORERKEY                                            AS STORERKEY
+             , TO_CHAR(TO_DATE(RSLT.DELIVERYDT,'YYYYMMDD'),'YYYY-MM-DD') AS DELIVERYDT
+             , RSLT.CARNO                                                AS CARNO
+             , RSLT.PRIORITY                                             AS PRIORITY
+             , TO_NUMBER(RSLT.DELIVERYPRIORITY)                          AS DELIVERYPRIORITY
+             , ROW_NUMBER() OVER (PARTITION BY RSLT.STORERKEY
+                                             , RSLT.DELIVERYDT
+                                             , RSLT.CARNO
+                                             , RSLT.PRIORITY
+                                      ORDER BY RSLT.CUSTARRIVALDT
+                                             , RSLT.DELIVERYPRIORITY
+                                             , RSLT.CUSTKEY)             AS REAL_DELIVERYPRIORITY
+             , RSLT.CUSTKEY                                              AS CUSTKEY
+             , MS_CUST.DESCRIPTION                                       AS CUSTNAME
+             , RSLT.ARRIVEDTIME                                          AS ARRIVEDTIME
+             , RSLT.DEPARTURETIME                                        AS DEPARTURETIME
+             , RSLT.DELIVERYDT||'_'||RSLT.CARNO||'_'||RSLT.PRIORITY      AS DISP_PAGE_DIV
+          FROM ( SELECT DISTINCT TM_INPLAN.STORERKEY                AS STORERKEY
+                      , TM_INPLAN.DCCODE                            AS DCCODE           /*센터코드*/
+                      , TM_INPLAN.DELIVERYDT                        AS DELIVERYDT       /*배송일자*/
+                      , TM_INPLAN.CARNO                             AS CARNO            /*차량번호*/
+                      , TM_INPLAN.PRIORITY                          AS PRIORITY         /*차수*/
+                      , 1                                           AS DELIVERYPRIORITY /*배송우선순위*/
+                      , TM_INPLAN.DCCODE                            AS CUSTKEY          /*거래처코드*/
+                      , NULL                                        AS ARRIVEDTIME
+                      , TO_CHAR(TM_INPLAN.DCDEPARTUREDT, 'HH24:MI') AS DEPARTURETIME    /*거래처출발시간*/
+                      , 0                                           AS CUSTARRIVALDT
+                   FROM TM_INPLAN
+                   JOIN SY_PROCESSTEMP_TM ON SY_PROCESSTEMP_TM.STORERKEY      = TM_INPLAN.STORERKEY
+                                         AND SY_PROCESSTEMP_TM.DCCODE         = TM_INPLAN.DCCODE
+                                         AND SY_PROCESSTEMP_TM.DELIVERYDT     = TM_INPLAN.DELIVERYDT
+                                         AND SY_PROCESSTEMP_TM.CARNO          = TM_INPLAN.CARNO
+                                         AND SY_PROCESSTEMP_TM.PRIORITY       = TM_INPLAN.PRIORITY
+                                         AND SY_PROCESSTEMP_TM.PROCESSTYPE    = 'TM_DRIVEHISTORY'
+                                         AND SY_PROCESSTEMP_TM.PROCESSCREATOR = #{gUserId}
+                                         AND SY_PROCESSTEMP_TM.SPID           = #{gSpid}
+                                         AND ROWNUM = 1
+                  UNION ALL
+                 SELECT DISTINCT TM_INPLAN.STORERKEY                                           AS STORERKEY
+                      , TM_INPLAN.DCCODE                                                       AS DCCODE           /*센터코드*/
+                      , TM_INPLAN.DELIVERYDT                                                   AS DELIVERYDT       /*배송일자*/
+                      , TM_INPLAN.CARNO                                                        AS CARNO            /*차량번호*/
+                      , TM_INPLAN.PRIORITY                                                     AS PRIORITY         /*차수*/
+                      , TO_NUMBER(TM_INPLAN.DELIVERYPRIORITY) + 1                              AS DELIVERYPRIORITY /*배송우선순위*/
+                      , TM_INPLAN.CUSTKEY                                                      AS CUSTKEY          /*거래처코드*/
+                      , TO_CHAR(TM_INPLAN.CUSTARRIVALDT, 'HH24:MI')                            AS ARRIVEDTIME
+                      , TO_CHAR(TM_INPLAN.CUSTDEPARTUREDT, 'HH24:MI')                          AS DEPARTURETIME    /*거래처출발시간*/
+                      , TO_NUMBER(NVL(TO_CHAR(TM_INPLAN.CUSTARRIVALDT,'YYYYMMDDHH24MISS'), 0)) AS CUSTARRIVALDT
+                   FROM TM_INPLAN
+                   JOIN SY_PROCESSTEMP_TM ON SY_PROCESSTEMP_TM.STORERKEY      = TM_INPLAN.STORERKEY
+                                         AND SY_PROCESSTEMP_TM.DCCODE         = TM_INPLAN.DCCODE
+                                         AND SY_PROCESSTEMP_TM.DELIVERYDT     = TM_INPLAN.DELIVERYDT
+                                         AND SY_PROCESSTEMP_TM.CARNO          = TM_INPLAN.CARNO
+                                         AND SY_PROCESSTEMP_TM.PRIORITY       = TM_INPLAN.PRIORITY
+                                         AND SY_PROCESSTEMP_TM.PROCESSTYPE    = 'TM_DRIVEHISTORY'
+                                         AND SY_PROCESSTEMP_TM.PROCESSCREATOR = #{gUserId}
+                                         AND SY_PROCESSTEMP_TM.SPID           = #{gSpid}
+             ) RSLT
+          LEFT OUTER JOIN MS_CUST ON MS_CUST.STORERKEY = RSLT.STORERKEY
+                                 AND MS_CUST.CUSTKEY   = RSLT.CUSTKEY
+                                 AND MS_CUST.CUSTTYPE  = 'C'
+         ORDER BY RSLT.DELIVERYDT
+                , RSLT.CARNO
+                , RSLT.PRIORITY
+                , REAL_DELIVERYPRIORITY
+    </select>
+
+    <select id="getMasterList_back" resultType="TmCarPositionHistoryResDto">
+        SELECT /* [TmCarPositionHistoryService.sqlx][tmCarPositionHistoryService.getMasterList][운행일지 - 운행일지 목록 조회][JiHoPark][2025.11.15] */
+               TM_DRIVEHISTORYMST.SERIALKEY
+             , TM_DRIVEHISTORYMST.STORERKEY
+             , TM_DRIVEHISTORYMST.DELIVERYDT
+             , TM_DRIVEHISTORYMST.CARNO
+             , TM_DRIVEHISTORYMST.PRIORITY
+             , NVL(( SELECT CM_DRIVER.DRIVERNAME
+                       FROM CM_DRIVER
+                      WHERE CM_DRIVER.DRIVERID = CM_CAR.DRIVER1), CM_CAR.DRIVER1 )                                         AS DRIVERNAME
+             , CM_CAR.CONTRACTTYPE                                                                                         AS CONTRACTTYPE
+             , FN_CODEDESCR(TM_DRIVEHISTORYMST.STORERKEY, 'CONTRACTTYPE', CM_CAR.CONTRACTTYPE)                             AS CONTRACTTYPENAME
+             , TM_DRIVEHISTORYMST.STARTMILEAGE
+             , TM_DRIVEHISTORYMST.ENDMILEAGE
+             , CASE WHEN TM_DRIVEHISTORYMST.ENDMILEAGE <![CDATA[>]]> 0 AND TM_DRIVEHISTORYMST.STARTMILEAGE <![CDATA[>]]> 0
+                    THEN TM_DRIVEHISTORYMST.ENDMILEAGE - TM_DRIVEHISTORYMST.STARTMILEAGE
+                    ELSE 0
+                END                                                                                                        AS DRIVEDISTANCE_MST
+             , TM_DRIVEHISTORYMST.GASREFUEL
+             , ( SELECT SUM(MST_SUM.GASREFUEL)
+                   FROM TM_DRIVEHISTORYMST MST_SUM
+                  WHERE MST_SUM.STORERKEY = TM_DRIVEHISTORYMST.STORERKEY
+                    AND MST_SUM.CARNO     = TM_DRIVEHISTORYMST.CARNO
+                    AND MST_SUM.DELIVERYDT <![CDATA[>=]]> SUBSTR(TM_DRIVEHISTORYMST.DELIVERYDT, 0, 6) || '01'
+                    AND MST_SUM.DELIVERYDT <![CDATA[<=]]> TM_DRIVEHISTORYMST.DELIVERYDT)                                   AS GASREFUELSUM
+             , ( SELECT SUM(MST_SUM.GASREFUEL)
+                   FROM TM_DRIVEHISTORYMST MST_SUM
+                  WHERE MST_SUM.STORERKEY = TM_DRIVEHISTORYMST.STORERKEY
+                    AND MST_SUM.CARNO     = TM_DRIVEHISTORYMST.CARNO
+                    AND MST_SUM.DELIVERYDT <![CDATA[>=]]> SUBSTR(TM_DRIVEHISTORYMST.DELIVERYDT, 0, 4) || '0101'
+                    AND MST_SUM.DELIVERYDT<![CDATA[<=]]> TM_DRIVEHISTORYMST.DELIVERYDT )                                   AS GASREFUELSUM_YEAR
+             , TM_DRIVEHISTORYMST.DISINFECTIONTIME
+             , TM_DRIVEHISTORYMST.CARCHECKYN
+             , TM_DRIVEHISTORYMST.TOLL
+             , TM_DRIVEHISTORYMST.PARKINGFEE
+             , ( SELECT SUM(TM_DRIVEHISTORYDTL.DRIVEDISTANCE)
+                   FROM TM_DRIVEHISTORYDTL
+                  WHERE TM_DRIVEHISTORYDTL.STORERKEY  = TM_DRIVEHISTORYMST.STORERKEY
+                    AND TM_DRIVEHISTORYDTL.DELIVERYDT = TM_DRIVEHISTORYMST.DELIVERYDT
+                    AND TM_DRIVEHISTORYDTL.CARNO      = TM_DRIVEHISTORYMST.CARNO)                                          AS DRIVEDISTANCE
+             ,( SELECT SUM(TM_DRIVEHISTORYDTL.DRIVEDISTANCE)
+                  FROM TM_DRIVEHISTORYDTL
+                 WHERE TM_DRIVEHISTORYDTL.STORERKEY = TM_DRIVEHISTORYMST.STORERKEY
+                   AND TM_DRIVEHISTORYDTL.CARNO     = TM_DRIVEHISTORYMST.CARNO
+                   AND TM_DRIVEHISTORYDTL.DELIVERYDT <![CDATA[>=]]> SUBSTR(TM_DRIVEHISTORYMST.DELIVERYDT, 0, 6) || '01'
+                   AND TM_DRIVEHISTORYDTL.DELIVERYDT <![CDATA[<=]]> TM_DRIVEHISTORYMST.DELIVERYDT )                        AS DRIVEDISTANCESUM
+             ,( SELECT SUM(TM_DRIVEHISTORYDTL.DRIVEDISTANCE)
+                  FROM TM_DRIVEHISTORYDTL
+                 WHERE TM_DRIVEHISTORYDTL.STORERKEY  = TM_DRIVEHISTORYMST.STORERKEY
+                   AND TM_DRIVEHISTORYDTL.CARNO      = TM_DRIVEHISTORYMST.CARNO
+                   AND TM_DRIVEHISTORYDTL.DELIVERYDT <![CDATA[>=]]> SUBSTR(TM_DRIVEHISTORYMST.DELIVERYDT, 0, 4) || '0101'
+                   AND TM_DRIVEHISTORYDTL.DELIVERYDT <![CDATA[<=]]> TM_DRIVEHISTORYMST.DELIVERYDT )                        AS DRIVEDISTANCESUM_YEAR
+             , TM_DRIVEHISTORYMST.DELIVERYDT                                                                               AS SLIPDT   <!-- 인쇄용 -->
+             , '1'                                                                                                         AS SLIPNO   <!-- 인쇄용 -->
+             , 'WD'                                                                                                        AS SLIPTYPE <!-- 인쇄용 -->
+             , 'C'                                                                                                         AS CUSTTYPE <!-- 인쇄용 -->
+             , '1'                                                                                                         AS CUSTKEY  <!-- 인쇄용 -->
+          FROM TM_DRIVEHISTORYMST
+          JOIN CM_CAR ON CM_CAR.CARNO = TM_DRIVEHISTORYMST.CARNO
+          JOIN CM_USER_AUTHORITY_DCXSTORER ON 1=1
+                                      <if test="dccode != null and dccode != ''">
+                                          AND CM_USER_AUTHORITY_DCXSTORER.DCCODE   = #{dccode}
+                                      </if>
+                                      <if test="gStorerkey != null and gStorerkey != ''">
+                                          AND CM_USER_AUTHORITY_DCXSTORER.STORERKEY = #{gStorerkey}
+                                      </if>
+                                          AND CM_USER_AUTHORITY_DCXSTORER.USERID    = #{gUserId}
+                                          AND CM_USER_AUTHORITY_DCXSTORER.STORERKEY = TM_DRIVEHISTORYMST.STORERKEY
+         WHERE 1=1
+       <if test="fromDocdt != null and fromDocdt != ''">
+           AND TM_DRIVEHISTORYMST.DELIVERYDT <![CDATA[>=]]> #{fromDocdt}
+       </if>
+       <if test="toDocdt != null and toDocdt != ''">
+           AND TM_DRIVEHISTORYMST.DELIVERYDT <![CDATA[<=]]> #{toDocdt}
+       </if>
+       <if test="dccode != null and dccode != ''">
+           AND EXISTS ( SELECT 1
+                          FROM TM_INPLAN
+                         WHERE TM_INPLAN.DCCODE     = #{dccode}
+                           AND TM_INPLAN.STORERKEY  = TM_DRIVEHISTORYMST.STORERKEY
+                           AND TM_INPLAN.DELIVERYDT = TM_DRIVEHISTORYMST.DELIVERYDT
+                           AND TM_INPLAN.CARNO      = TM_DRIVEHISTORYMST.CARNO
+                           AND TM_INPLAN.PRIORITY   = TM_DRIVEHISTORYMST.PRIORITY )
+       </if>
+       <if test="toCustkey != null and toCustkey != ''">
+           AND EXISTS ( SELECT 1
+                          FROM TM_DRIVEHISTORYDTL
+                         WHERE TM_DRIVEHISTORYDTL.STORERKEY  = TM_DRIVEHISTORYMST.STORERKEY
+                           AND TM_DRIVEHISTORYDTL.DELIVERYDT = TM_DRIVEHISTORYMST.DELIVERYDT
+                           AND TM_DRIVEHISTORYDTL.CARNO      = TM_DRIVEHISTORYMST.CARNO
+                           AND TM_DRIVEHISTORYDTL.PRIORITY   = TM_DRIVEHISTORYMST.PRIORITY
+                       <if test="toCustkey != null and toCustkey != ''">
+                           AND TM_DRIVEHISTORYDTL.CUSTKEY IN (SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS VAL
+                                                                FROM (SELECT #{toCustkey} AS VAL FROM DUAL) A
+									                         CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+                       </if>
+                      )
+       </if>
+       <if test="carno != null and carno != ''">
+           AND TM_DRIVEHISTORYMST.CARNO IN (SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS VAL
+                                              FROM (SELECT #{carno} AS VAL FROM DUAL) A
+									       CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+       </if>
+         ORDER BY TM_DRIVEHISTORYMST.DELIVERYDT
+                , TM_DRIVEHISTORYMST.CARNO
+                , TM_DRIVEHISTORYMST.PRIORITY
+    </select>
+
+    <select id="getMasterList2_back" resultType="TmCarPositionHistoryResDto">
+        SELECT /* [TmCarPositionHistoryService.sqlx][tmCarPositionHistoryService.getMasterList2][운행일지 - 운행일지 상세 목록 조회][JiHoPark][2025.11.15] */
+               TM_DRIVEHISTORYDTL.SERIALKEY
+             , TM_DRIVEHISTORYDTL.STORERKEY
+             , TM_DRIVEHISTORYDTL.DELIVERYDT
+             , TM_DRIVEHISTORYDTL.CARNO
+             , TM_DRIVEHISTORYDTL.PRIORITY
+             , TM_DRIVEHISTORYDTL.CUSTKEY
+             , TO_NUMBER(TM_DRIVEHISTORYDTL.DELIVERYPRIORITY)                                                                                                AS DELIVERYPRIORITY
+             , ROW_NUMBER() OVER (PARTITION BY TM_DRIVEHISTORYDTL.STORERKEY
+                                             , TM_DRIVEHISTORYDTL.DELIVERYDT
+                                             , TM_DRIVEHISTORYDTL.CARNO
+                                             , TM_DRIVEHISTORYDTL.PRIORITY
+                                      ORDER BY TO_NUMBER(NVL(TM_DRIVEHISTORYDTL.ARRIVEDTIME, 0))
+                                             , TO_NUMBER(NVL(TM_DRIVEHISTORYDTL.DELIVERYPRIORITY, 0))
+                                             , TM_DRIVEHISTORYDTL.CUSTKEY)                                                                                   AS REAL_DELIVERYPRIORITY
+             , MS_CUST.DESCRIPTION                                                                                                                           AS CUSTNAME
+             , CASE WHEN LENGTH(TM_DRIVEHISTORYDTL.ARRIVEDTIME) = 14
+                    THEN SUBSTR(TM_DRIVEHISTORYDTL.ARRIVEDTIME, 9, 2)||':'||SUBSTR(TM_DRIVEHISTORYDTL.ARRIVEDTIME, 11, 2)
+                    ELSE NULL
+                END                                                                                                                                          AS ARRIVEDTIME
+             , CASE WHEN LENGTH(TM_DRIVEHISTORYDTL.DEPARTURETIME) = 14
+                    THEN SUBSTR(TM_DRIVEHISTORYDTL.DEPARTURETIME, 9, 2)||':'||SUBSTR(TM_DRIVEHISTORYDTL.DEPARTURETIME, 11, 2)
+                    ELSE NULL
+                END                                                                                                                                          AS DEPARTURETIME
+             , TM_DRIVEHISTORYDTL.DRIVEDISTANCE
+             , CASE WHEN NVL(TM_DRIVEHISTORYDTL.MOVINGTIME, 0) <![CDATA[>=]]> 0
+                    THEN LPAD(TRUNC(NVL(TM_DRIVEHISTORYDTL.MOVINGTIME, 0) / 60), 2, '0')||':'||LPAD(MOD(NVL(TM_DRIVEHISTORYDTL.MOVINGTIME, 0), 60), 2, '0')
+                    ELSE NULL
+                END                                                                                                                                           AS MOVINGTIME
+             , CASE WHEN NVL(TM_DRIVEHISTORYDTL.WORKINGTIME,0) <![CDATA[>=]]> 0
+                    THEN LPAD(TRUNC(NVL(TM_DRIVEHISTORYDTL.WORKINGTIME, 0) / 60), 2, '0')||':'||LPAD(MOD(NVL(TM_DRIVEHISTORYDTL.WORKINGTIME, 0), 60), 2, '0')
+                    ELSE NULL
+                END                                                                                                                                           AS WORKINGTIME
+             , TM_DRIVEHISTORYDTL.OTHER01
+          FROM TM_DRIVEHISTORYDTL
+          LEFT OUTER JOIN MS_CUST ON MS_CUST.STORERKEY = TM_DRIVEHISTORYDTL.STORERKEY
+                                 AND MS_CUST.CUSTKEY   = TM_DRIVEHISTORYDTL.CUSTKEY
+                                 AND MS_CUST.CUSTTYPE  = 'C'
+         WHERE TM_DRIVEHISTORYDTL.STORERKEY  = #{storerkey}
+           AND TM_DRIVEHISTORYDTL.DELIVERYDT = #{deliverydt}
+           AND TM_DRIVEHISTORYDTL.CARNO      = #{carno}
+           AND TM_DRIVEHISTORYDTL.PRIORITY   = #{priority}
+         ORDER BY REAL_DELIVERYPRIORITY
+    </select>
+
+    <select id="getPrintHeaderList_back" resultType="TmCarPositionHistoryReportDto">
+        SELECT /* [TmCarPositionHistoryService.sqlx][tmCarPositionHistoryService.getPrintHeaderList][운행일지 - 운행일지 출력용 헤더][JiHoPark][2025.11.14] */
+               TM_DRIVEHISTORYMST.STORERKEY
+             , TO_CHAR(TO_DATE(TM_DRIVEHISTORYMST.DELIVERYDT,'YYYYMMDD'),'YYYY-MM-DD')                      AS DELIVERYDT
+             , TM_DRIVEHISTORYMST.CARNO
+             , TM_DRIVEHISTORYMST.PRIORITY
+             , NVL((SELECT CM_DRIVER.DRIVERNAME
+                      FROM CM_DRIVER
+                     WHERE CM_DRIVER.DRIVERID = CM_CAR.DRIVER1), CM_CAR.DRIVER1)                            AS DRIVERNAME
+             , TM_DRIVEHISTORYMST.STARTMILEAGE
+             , TM_DRIVEHISTORYMST.ENDMILEAGE
+             , TM_DRIVEHISTORYMST.GASREFUEL
+             , (SELECT SUM(MST_SUM.GASREFUEL)
+                  FROM TM_DRIVEHISTORYMST MST_SUM
+                 WHERE MST_SUM.STORERKEY = TM_DRIVEHISTORYMST.STORERKEY
+                   AND MST_SUM.CARNO = TM_DRIVEHISTORYMST.CARNO
+                   AND MST_SUM.DELIVERYDT <![CDATA[>=]]> SUBSTR(TM_DRIVEHISTORYMST.DELIVERYDT, 0, 6) || '01'
+                   AND MST_SUM.DELIVERYDT <![CDATA[<=]]> TM_DRIVEHISTORYMST.DELIVERYDT)                      AS GASREFUELSUM
+             , (SELECT SUM(MST_SUM.GASREFUEL)
+                  FROM TM_DRIVEHISTORYMST MST_SUM
+                 WHERE MST_SUM.STORERKEY = TM_DRIVEHISTORYMST.STORERKEY
+                   AND MST_SUM.CARNO = TM_DRIVEHISTORYMST.CARNO
+                   AND MST_SUM.DELIVERYDT <![CDATA[>=]]> SUBSTR(TM_DRIVEHISTORYMST.DELIVERYDT, 0, 4) || '0101'
+                   AND MST_SUM.DELIVERYDT <![CDATA[<=]]> TM_DRIVEHISTORYMST.DELIVERYDT)                      AS GASREFUELSUM_YEAR
+             , TM_DRIVEHISTORYMST.DISINFECTIONTIME
+             , TM_DRIVEHISTORYMST.CARCHECKYN
+             , TM_DRIVEHISTORYMST.TOLL
+             , (SELECT SUM(MST_SUM.TOLL)
+                  FROM TM_DRIVEHISTORYMST MST_SUM
+                 WHERE MST_SUM.STORERKEY = TM_DRIVEHISTORYMST.STORERKEY
+                   AND MST_SUM.CARNO = TM_DRIVEHISTORYMST.CARNO
+                   AND MST_SUM.DELIVERYDT LIKE SUBSTR(TM_DRIVEHISTORYMST.DELIVERYDT, 0, 6) || '%')           AS TOLLSUM
+             , TM_DRIVEHISTORYMST.PARKINGFEE
+             , (SELECT SUM(MST_SUM.PARKINGFEE)
+                  FROM TM_DRIVEHISTORYMST MST_SUM
+                 WHERE MST_SUM.STORERKEY = TM_DRIVEHISTORYMST.STORERKEY
+                   AND MST_SUM.CARNO = TM_DRIVEHISTORYMST.CARNO
+                   AND MST_SUM.DELIVERYDT LIKE SUBSTR(TM_DRIVEHISTORYMST.DELIVERYDT, 0, 6) || '%')            AS PARKINGFEESUM
+             , CASE WHEN TM_DRIVEHISTORYMST.ENDMILEAGE <![CDATA[>]]> 0 AND TM_DRIVEHISTORYMST.STARTMILEAGE <![CDATA[>]]> 0
+                    THEN TM_DRIVEHISTORYMST.ENDMILEAGE - TM_DRIVEHISTORYMST.STARTMILEAGE
+                    ELSE 0
+                END                                                                                           AS DRIVEDISTANCE_MST
+             , (SELECT SUM(DTL_SUM.DRIVEDISTANCE)
+                  FROM TM_DRIVEHISTORYDTL DTL_SUM
+                 WHERE DTL_SUM.STORERKEY = TM_DRIVEHISTORYMST.STORERKEY
+                   AND DTL_SUM.CARNO = TM_DRIVEHISTORYMST.CARNO
+                   AND DTL_SUM.DELIVERYDT <![CDATA[>=]]> SUBSTR(TM_DRIVEHISTORYMST.DELIVERYDT, 0, 6) || '01'
+                   AND DTL_SUM.DELIVERYDT <![CDATA[<=]]> TM_DRIVEHISTORYMST.DELIVERYDT )                      AS DRIVEDISTANCESUM
+             , (SELECT SUM(DTL_SUM.DRIVEDISTANCE)
+                  FROM TM_DRIVEHISTORYDTL DTL_SUM
+                 WHERE DTL_SUM.STORERKEY = TM_DRIVEHISTORYMST.STORERKEY
+                   AND DTL_SUM.CARNO = TM_DRIVEHISTORYMST.CARNO
+                   AND DTL_SUM.DELIVERYDT <![CDATA[>=]]> SUBSTR(TM_DRIVEHISTORYMST.DELIVERYDT, 0, 4) || '0101'
+                   AND DTL_SUM.DELIVERYDT <![CDATA[<=]]> TM_DRIVEHISTORYMST.DELIVERYDT )                      AS DRIVEDISTANCESUM_YEAR
+             , TM_DRIVEHISTORYMST.DELIVERYDT||'_'||TM_DRIVEHISTORYMST.CARNO||'_'||TM_DRIVEHISTORYMST.PRIORITY AS DISP_PAGE_DIV
+          FROM TM_DRIVEHISTORYMST
+          JOIN CM_CAR ON CM_CAR.CARNO = TM_DRIVEHISTORYMST.CARNO
+          JOIN SY_PROCESSTEMP_TM ON SY_PROCESSTEMP_TM.STORERKEY      = TM_DRIVEHISTORYMST.STORERKEY
+                                AND SY_PROCESSTEMP_TM.DELIVERYDT     = TM_DRIVEHISTORYMST.DELIVERYDT
+                                AND SY_PROCESSTEMP_TM.CARNO          = TM_DRIVEHISTORYMST.CARNO
+                                AND SY_PROCESSTEMP_TM.PRIORITY       = TM_DRIVEHISTORYMST.PRIORITY
+                                AND SY_PROCESSTEMP_TM.PROCESSTYPE    = 'TM_DRIVEHISTORY'
+                                AND SY_PROCESSTEMP_TM.PROCESSCREATOR = #{gUserId}
+                                AND SY_PROCESSTEMP_TM.SPID           = #{gSpid}
+         ORDER BY TM_DRIVEHISTORYMST.DELIVERYDT
+                , TM_DRIVEHISTORYMST.CARNO
+                , TM_DRIVEHISTORYMST.PRIORITY
+    </select>
+
+    <select id="getPrintDetailList_back" resultType="TmCarPositionHistoryReportDto">
+        SELECT /* [TmCarPositionHistoryService.sqlx][tmCarPositionHistoryService.getPrintDetailList][운행일지 - 운행일지 출력용 상세][JiHoPark][2025.11.14] */
+               TM_DRIVEHISTORYDTL.STORERKEY
+             , TO_CHAR(TO_DATE(TM_DRIVEHISTORYDTL.DELIVERYDT,'YYYYMMDD'),'YYYY-MM-DD')                       AS DELIVERYDT
+             , TM_DRIVEHISTORYDTL.CARNO
+             , TM_DRIVEHISTORYDTL.PRIORITY
+             , TO_NUMBER(TM_DRIVEHISTORYDTL.DELIVERYPRIORITY)                                                AS DELIVERYPRIORITY
+             , ROW_NUMBER() OVER (PARTITION BY TM_DRIVEHISTORYDTL.STORERKEY
+                                             , TM_DRIVEHISTORYDTL.DELIVERYDT
+                                             , TM_DRIVEHISTORYDTL.CARNO
+                                             , TM_DRIVEHISTORYDTL.PRIORITY
+                                      ORDER BY TO_NUMBER(NVL(TM_DRIVEHISTORYDTL.ARRIVEDTIME, 0))
+                                             , TO_NUMBER(NVL(TM_DRIVEHISTORYDTL.DELIVERYPRIORITY, 0))
+                                             , TM_DRIVEHISTORYDTL.CUSTKEY)                                   AS REAL_DELIVERYPRIORITY
+             , TM_DRIVEHISTORYDTL.CUSTKEY
+             , MS_CUST.DESCRIPTION                                                                           AS CUSTNAME
+             , CASE WHEN LENGTH(TM_DRIVEHISTORYDTL.ARRIVEDTIME) = 14
+                    THEN SUBSTR(TM_DRIVEHISTORYDTL.ARRIVEDTIME, 9, 2)||':'||SUBSTR(TM_DRIVEHISTORYDTL.ARRIVEDTIME, 11, 2)
+                    ELSE NULL
+                END                                                                                          AS ARRIVEDTIME
+             , CASE WHEN LENGTH(TM_DRIVEHISTORYDTL.DEPARTURETIME) = 14
+                    THEN SUBSTR(TM_DRIVEHISTORYDTL.DEPARTURETIME, 9, 2)||':'||SUBSTR(TM_DRIVEHISTORYDTL.DEPARTURETIME, 11, 2)
+                    ELSE NULL
+                END                                                                                           AS DEPARTURETIME
+             , TM_DRIVEHISTORYDTL.DRIVEDISTANCE
+             , CASE WHEN NVL(TM_DRIVEHISTORYDTL.MOVINGTIME,0) <![CDATA[>=]]> 0
+                    THEN LPAD(TRUNC(NVL(TM_DRIVEHISTORYDTL.MOVINGTIME, 0)/60), 2, '0')||':'||LPAD(MOD(NVL(TM_DRIVEHISTORYDTL.MOVINGTIME, 0), 60), 2, '0')
+                    ELSE NULL
+                END                                                                                           AS MOVINGTIME
+             , CASE WHEN NVL(TM_DRIVEHISTORYDTL.WORKINGTIME,0) <![CDATA[>=]]> 0
+                    THEN LPAD(TRUNC(NVL(TM_DRIVEHISTORYDTL.WORKINGTIME, 0)/60), 2, '0')||':'||LPAD(MOD(NVL(TM_DRIVEHISTORYDTL.WORKINGTIME, 0), 60), 2, '0')
+                    ELSE NULL
+                END                                                                                           AS WORKINGTIME
+             , TM_DRIVEHISTORYDTL.DELIVERYDT||'_'||TM_DRIVEHISTORYDTL.CARNO||'_'||TM_DRIVEHISTORYDTL.PRIORITY AS DISP_PAGE_DIV
+          FROM TM_DRIVEHISTORYDTL
+          LEFT OUTER JOIN MS_CUST ON MS_CUST.STORERKEY = TM_DRIVEHISTORYDTL.STORERKEY
+                                 AND MS_CUST.CUSTKEY   = TM_DRIVEHISTORYDTL.CUSTKEY
+                                 AND MS_CUST.CUSTTYPE  = 'C'
+          JOIN SY_PROCESSTEMP_TM ON SY_PROCESSTEMP_TM.STORERKEY      = TM_DRIVEHISTORYDTL.STORERKEY
+                                AND SY_PROCESSTEMP_TM.DELIVERYDT     = TM_DRIVEHISTORYDTL.DELIVERYDT
+                                AND SY_PROCESSTEMP_TM.CARNO          = TM_DRIVEHISTORYDTL.CARNO
+                                AND SY_PROCESSTEMP_TM.PRIORITY       = TM_DRIVEHISTORYDTL.PRIORITY
+                                AND SY_PROCESSTEMP_TM.PROCESSTYPE    = 'TM_DRIVEHISTORY'
+                                AND SY_PROCESSTEMP_TM.PROCESSCREATOR = #{gUserId}
+                                AND SY_PROCESSTEMP_TM.SPID           = #{gSpid}
+         ORDER BY TM_DRIVEHISTORYDTL.DELIVERYDT
+                , TM_DRIVEHISTORYDTL.CARNO
+                , TM_DRIVEHISTORYDTL.PRIORITY
+                , REAL_DELIVERYPRIORITY
+    </select>
+
+    <insert id="insertSyProcessTempTm">
+        INSERT /* [TmCarPositionHistoryService.sqlx][tmCarPositionHistoryService.insertSyProcessTempTm][임시저장 정보 TM 등록][JiHoPark][2025.11.14] */
+          INTO SY_PROCESSTEMP_TM
+             ( PROCESSTYPE
+             , PROCESSCREATOR
+             , SPID
+             , PROCESSFLAG
+             , DCCODE
+             , DELIVERYDT
+             , CARNO
+             , PRIORITY
+             , SLIPDT
+             , SLIPNO
+             , SLIPTYPE
+             , STORERKEY
+             , CUSTTYPE
+             , CUSTKEY
+             , STATUS
+             , DEL_YN
+             , ADDDATE
+             , EDITDATE
+             , ADDWHO
+             , EDITWHO )
+           <foreach collection="list" item="item" separator="UNION ALL">
+               SELECT #{item.processtype}           AS PROCESSTYPE
+                    , #{item.processcreator}        AS PROCESSCREATOR
+                    , #{item.spid}                  AS SPID
+                    , NVL(#{item.processflag}, 'N') AS PROCESSFLAG
+                    , #{item.dccode}                AS DCCODE
+                    , #{item.deliverydt}            AS DELIVERYDT
+                    , #{item.carno}                 AS CARNO
+                    , #{item.priority}              AS PRIORITY
+                    , #{item.slipdt}                AS SLIPDT
+                    , #{item.slipno}                AS SLIPNO
+                    , #{item.sliptype}              AS SLIPTYPE
+                    , #{item.storerkey}             AS STORERKEY
+                    , #{item.custtype}              AS CUSTTYPE
+                    , #{item.custkey}               AS CUSTKEY
+                    , NVL(#{item.status}, '00')     AS STATUS
+                    , NVL(#{item.delYn}, 'N')       AS DEL_YN
+                    , SYSDATE                       AS ADDDATE
+                    , SYSDATE                       AS EDITDATE
+                    , #{item.addwho}                AS ADDWHO
+                    , #{item.editwho}               AS EDITWHO
+                 FROM DUAL
+           </foreach>
+    </insert>
+
+    <delete id="deleteSyProcessTempTm">
+        DELETE /* [TmCarPositionHistoryService.sqlx][tmCarPositionHistoryService.deleteSyProcessTempTm][임시저장 정보 TM 삭제][JiHoPark][2025.11.14] */
+          FROM SY_PROCESSTEMP_TM
+         WHERE PROCESSCREATOR = #{gUserId}
+           AND PROCESSTYPE    = #{processtype}
+           AND SPID           = #{gSpid}
+    </delete>
+
+</mapper>

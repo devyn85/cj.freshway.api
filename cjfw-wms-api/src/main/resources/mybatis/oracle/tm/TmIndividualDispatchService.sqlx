@@ -1,0 +1,556 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="tmIndividualDispatchService">
+
+    <select id="getIndividualDispatchList" resultType="TmIndividualDispatchResDto">
+        SELECT /* [TmIndividualDispatchService.sqlx][getIndividualDispatchList][개별배차 목록 조회][devyn][2026.03.04] */
+              NVL(ORDER_LIST.ROUTE, ORDER_LIST.FROM_CUSTKEY) AS DCCODE
+            , FN_DESCR_DC(NVL(ORDER_LIST.ROUTE, ORDER_LIST.FROM_CUSTKEY)) AS DCNAME
+            , ORDER_LIST.DELIVERYDATE
+            , ORDER_LIST.TM_DELIVERYTYPE
+            , FN_CODEDESCR('FW00', 'TM_DELIVERYTYPE', ORDER_LIST.TM_DELIVERYTYPE) AS TM_DELIVERYTYPE_NM
+            , ORDER_LIST.ORDERTYPE
+            , CASE WHEN ORDER_LIST.DOCTYPE = 'RT' THEN FN_CODEDESCR('FW00', 'ORDERTYPE_RT', ORDER_LIST.ORDERTYPE)
+                   WHEN ORDER_LIST.DOCTYPE = 'DP' THEN FN_CODEDESCR('FW00', 'ORDERTYPE_DP', ORDER_LIST.ORDERTYPE)
+                   ELSE FN_CODEDESCR('FW00', 'ORDERTYPE_WD', ORDER_LIST.ORDERTYPE) END AS ORDERTYPE_NM
+            , MS_DLV_DISTRICTGROUP.DLVGROUP_ID AS DISTRICTGROUP
+            , MS_DLV_DISTRICTGROUP.DLVGROUP_NM AS DISTRICTGROUP_NM
+            , MS_DLV_DISTRICT.DLVDISTRICT_ID AS DISTRICTCODE
+            , MS_DLV_DISTRICT.DLVDISTRICT_NM AS DISTRICTCODE_NM
+            , ORDER_LIST.STORERKEY
+            , ORDER_LIST.DOCNO
+            , DECODE(ORDER_LIST.POPNO, 'INPLAN', NULL, ORDER_LIST.POPNO) AS POP
+            , ORDER_LIST.CARNO
+            , NVL(ORDER_LIST.STATUS, '00') AS DISPATCH_STATUS
+            , FN_CODEVALUE('STD', 'STATUS_TM', NVL(ORDER_LIST.STATUS, '00'), 'BASEDESCR') AS DISPATCH_STATUS_NM
+            , MS_CUST.HJDONG_CD
+            , ORDER_LIST.TO_CUSTKEY AS CUSTKEY
+            , FN_DESCR_CUST(ORDER_LIST.STORERKEY, ORDER_LIST.TO_CUSTKEY) AS CUSTNAME
+            , CASE WHEN MS_CUSTDLVINFO.ADDRESS1 IS NULL
+                   THEN TRIM(MS_CUSTDLVINFO.ADDRESS3 || ' ' || MS_CUSTDLVINFO.ADDRESS4)
+                   ELSE TRIM(MS_CUSTDLVINFO.ADDRESS1 || ' ' || MS_CUSTDLVINFO.ADDRESS2) END AS CUST_ADDRESS
+            , MS_CUSTDLVINFO.TRUTHCUSTKEY AS TRUTHCUSTKEY
+            , FN_DESCR_CUST(ORDER_LIST.STORERKEY, TRUTHCUSTDLVINFO.DLVCUSTKEY) AS TRUTHCUSTNAME
+            , TRIM(TRUTHCUSTDLVINFO.TRUTHADDRESS1 || ' ' || TRUTHCUSTDLVINFO.TRUTHADDRESS2) AS TRUTHCUSTADDRESS
+            , ORDER_LIST.ORDER_QTY AS ORDER_QTY
+            , ORDER_LIST.ORDER_WEIGHT AS WEIGHT
+            , ORDER_LIST.ORDER_CUBE AS CUBE
+        FROM (
+            <choose>
+                <when test='deliveryType == "1"'>
+                    SELECT
+                          DM_DOCUMENT_H.DCCODE
+                        , DM_DOCUMENT_H.DOCTYPE
+                        , DM_DOCUMENT_H.DELIVERYDATE
+                        , DM_DOCUMENT_H.DOCNO
+                        , DM_DOCUMENT_H.STORERKEY
+                        , DM_DOCUMENT_H.FROM_CUSTKEY
+                        , DM_DOCUMENT_H.ORDERTYPE
+                        , DM_DOCUMENT_H.TO_CUSTTYPE
+                        , DM_DOCUMENT_H.TO_CUSTKEY
+                        , DM_DOCUMENT_H.ROUTE
+                        , '1' AS TM_DELIVERYTYPE
+                        , SUM(WD_INPLAN.ORDERQTY) AS ORDER_QTY
+                        , SUM(FN_CONV_UOM(
+                              WD_INPLAN.STORERKEY
+                            , WD_INPLAN.SKU
+                            , WD_INPLAN.UOM
+                            , DECODE(WD_INPLAN.UOM, 'KG', 'BASE', 'KG')
+                            , DECODE(DM_DOCUMENT_D.DEL_YN,'N',WD_INPLAN.ORDERQTY,0)
+                          )) AS ORDER_WEIGHT
+                        , TRUNC(NVL(SUM((WD_INPLAN.ORDERQTY * (MS_UOM.BUNJA / MS_UOM.BUNMO)) * MS_UOM.CUBE), 0) / POWER(10, 9), 5) AS ORDER_CUBE
+                        , MAX(TM_INPLAN.DELIVERYGROUP) AS POPNO
+                        , MAX(TM_INPLAN.CARNO) AS CARNO
+                        , MAX(TM_INPLAN.STATUS) AS STATUS
+                    FROM DM_DOCUMENT_H
+                    JOIN DM_DOCUMENT_D
+                        ON  DM_DOCUMENT_D.STORERKEY    = DM_DOCUMENT_H.STORERKEY
+                        AND DM_DOCUMENT_D.DCCODE       = DM_DOCUMENT_H.DCCODE
+                        AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+                        AND DM_DOCUMENT_D.DOCTYPE      = DM_DOCUMENT_H.DOCTYPE
+                        AND DM_DOCUMENT_D.DOCNO        = DM_DOCUMENT_H.DOCNO
+                        AND DM_DOCUMENT_D.DEL_YN       = 'N'
+                    JOIN WD_INPLAN
+                      ON  WD_INPLAN.DCCODE    = DM_DOCUMENT_D.DCCODE
+                      AND WD_INPLAN.STORERKEY = DM_DOCUMENT_D.STORERKEY
+                      AND WD_INPLAN.DOCTYPE   = DM_DOCUMENT_D.DOCTYPE
+                      AND WD_INPLAN.SLIPDT    = DM_DOCUMENT_D.DELIVERYDATE
+                      AND WD_INPLAN.DOCNO     = DM_DOCUMENT_D.DOCNO
+                      AND WD_INPLAN.DOCLINE   = DM_DOCUMENT_D.DOCLINE
+                    LEFT JOIN MS_UOM
+                      ON  MS_UOM.STORERKEY = WD_INPLAN.STORERKEY
+                      AND MS_UOM.SKU       = WD_INPLAN.SKU
+                      AND MS_UOM.UOM       = DECODE(WD_INPLAN.UOM, 'KG', 'BASE', 'KG')
+                    LEFT JOIN TM_INPLAN
+                        ON  TM_INPLAN.DCCODE    = WD_INPLAN.DCCODE
+                        AND TM_INPLAN.STORERKEY = WD_INPLAN.STORERKEY
+                        AND TM_INPLAN.DOCTYPE   = WD_INPLAN.DOCTYPE
+                        AND TM_INPLAN.SLIPDT    = WD_INPLAN.SLIPDT
+                        AND TM_INPLAN.SLIPNO    = WD_INPLAN.SLIPNO
+                        AND TM_INPLAN.DEL_YN    = 'N'
+                    WHERE DM_DOCUMENT_H.DCCODE = #{dccode}
+                      AND DM_DOCUMENT_H.DOCTYPE = 'WD'
+                      AND DM_DOCUMENT_H.DELIVERYDATE BETWEEN #{deliverydtFrom} AND #{deliverydtTo}
+                      AND DM_DOCUMENT_H.WORKPROCESSCODE IN ('SO', 'JASO')
+                      <if test="custCode != null and custCode.length > 0">
+                      AND DM_DOCUMENT_H.TO_CUSTKEY IN
+                          <foreach collection="custCode.split(',')" item="item" separator="," open="(" close=")">
+                            #{item}
+                        </foreach>
+                      </if>
+                      <if test="carNo != null and carNo.length > 0">
+                      AND TM_INPLAN.CARNO IN
+                          <foreach collection="carNo.split(',')" item="item" separator="," open="(" close=")">
+                            #{item}
+                        </foreach>
+                      </if>
+                      <if test="docNo != null and docNo.length > 0">
+                      AND DM_DOCUMENT_H.DOCNO IN
+                          <foreach collection="docNo.split(',')" item="item" separator="," open="(" close=")">
+                            #{item}
+                        </foreach>
+                      </if>
+                    GROUP BY
+                          DM_DOCUMENT_H.DCCODE
+                        , DM_DOCUMENT_H.DOCTYPE
+                        , DM_DOCUMENT_H.DELIVERYDATE
+                        , DM_DOCUMENT_H.DOCNO
+                        , DM_DOCUMENT_H.STORERKEY
+                        , DM_DOCUMENT_H.FROM_CUSTKEY
+                        , DM_DOCUMENT_H.ORDERTYPE
+                        , DM_DOCUMENT_H.TO_CUSTTYPE
+                        , DM_DOCUMENT_H.TO_CUSTKEY
+                        , DM_DOCUMENT_H.ROUTE
+                </when>
+                <when test='deliveryType == "3"'>
+                    SELECT
+                          DM_DOCUMENT_H.DCCODE
+                        , DM_DOCUMENT_H.DOCTYPE
+                        , DM_DOCUMENT_H.DELIVERYDATE
+                        , DM_DOCUMENT_H.DOCNO
+                        , DM_DOCUMENT_H.STORERKEY
+                        , DM_DOCUMENT_H.TO_CUSTKEY FROM_CUSTKEY
+                        , DM_DOCUMENT_H.ORDERTYPE
+                        , DM_DOCUMENT_H.FROM_CUSTTYPE TO_CUSTTYPE
+                        , DM_DOCUMENT_H.FROM_CUSTKEY TO_CUSTKEY
+                        , DM_DOCUMENT_H.ROUTE
+                        , '3' AS TM_DELIVERYTYPE
+                        , SUM(DP_INPLAN.ORDERQTY) AS ORDER_QTY
+                        , SUM(FN_CONV_UOM(
+                              DP_INPLAN.STORERKEY
+                            , DP_INPLAN.SKU
+                            , DP_INPLAN.UOM
+                            , DECODE(DP_INPLAN.UOM, 'KG', 'BASE', 'KG')
+                            , DECODE(DM_DOCUMENT_D.DEL_YN,'N',DP_INPLAN.ORDERQTY,0)
+                        )) AS ORDER_WEIGHT
+                        , TRUNC(NVL(SUM((DP_INPLAN.ORDERQTY * (MS_UOM.BUNJA / MS_UOM.BUNMO)) * MS_UOM.CUBE), 0) / POWER(10, 9), 5) AS ORDER_CUBE
+                        , MAX(TM_INPLAN.DELIVERYGROUP) AS POPNO
+                        , MAX(TM_INPLAN.CARNO) AS CARNO
+                        , MAX(TM_INPLAN.STATUS) AS STATUS
+                    FROM DM_DOCUMENT_H
+                    JOIN DM_DOCUMENT_D
+                        ON  DM_DOCUMENT_D.STORERKEY    = DM_DOCUMENT_H.STORERKEY
+                        AND DM_DOCUMENT_D.DCCODE       = DM_DOCUMENT_H.DCCODE
+                        AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+                        AND DM_DOCUMENT_D.DOCTYPE      = DM_DOCUMENT_H.DOCTYPE
+                        AND DM_DOCUMENT_D.DOCNO        = DM_DOCUMENT_H.DOCNO
+                        AND DM_DOCUMENT_D.DEL_YN       = 'N'
+                    JOIN DP_INPLAN
+                      ON  DP_INPLAN.DCCODE    = DM_DOCUMENT_D.DCCODE
+                      AND DP_INPLAN.STORERKEY = DM_DOCUMENT_D.STORERKEY
+                      AND DP_INPLAN.DOCTYPE   = DM_DOCUMENT_D.DOCTYPE
+                      AND DP_INPLAN.SLIPDT    = DM_DOCUMENT_D.DELIVERYDATE
+                      AND DP_INPLAN.DOCNO     = DM_DOCUMENT_D.DOCNO
+                      AND DP_INPLAN.DOCLINE   = DM_DOCUMENT_D.DOCLINE
+                    LEFT JOIN MS_UOM
+                      ON  MS_UOM.STORERKEY = DP_INPLAN.STORERKEY
+                      AND MS_UOM.SKU       = DP_INPLAN.SKU
+                      AND MS_UOM.UOM       = DECODE(DP_INPLAN.UOM, 'KG', 'BASE', 'KG')
+                    LEFT JOIN TM_INPLAN
+                        ON  TM_INPLAN.DCCODE    = DP_INPLAN.DCCODE
+                        AND TM_INPLAN.STORERKEY = DP_INPLAN.STORERKEY
+                        AND TM_INPLAN.DOCTYPE   = DP_INPLAN.DOCTYPE
+                        AND TM_INPLAN.SLIPDT    = DP_INPLAN.SLIPDT
+                        AND TM_INPLAN.SLIPNO    = DP_INPLAN.SLIPNO
+                        AND TM_INPLAN.DEL_YN    = 'N'
+                    WHERE DM_DOCUMENT_H.DCCODE = #{dccode}
+                      AND DM_DOCUMENT_H.DOCTYPE = 'DP'
+                      AND DM_DOCUMENT_H.DELIVERYDATE BETWEEN #{deliverydtFrom} AND #{deliverydtTo}
+                      AND DM_DOCUMENT_H.WORKPROCESSCODE IN ('SO', 'JASO')
+                      AND DM_DOCUMENT_H.CHANNEL IN ('2', '3')
+                      <if test="custCode != null and custCode.length > 0">
+                      AND DM_DOCUMENT_H.FROM_CUSTKEY IN
+                          <foreach collection="custCode.split(',')" item="item" separator="," open="(" close=")">
+                            #{item}
+                        </foreach>
+                      </if>
+                      <if test="carNo != null and carNo.length > 0">
+                      AND TM_INPLAN.CARNO IN
+                          <foreach collection="carNo.split(',')" item="item" separator="," open="(" close=")">
+                            #{item}
+                        </foreach>
+                      </if>
+                      <if test="docNo != null and docNo.length > 0">
+                      AND DM_DOCUMENT_H.DOCNO IN
+                          <foreach collection="docNo.split(',')" item="item" separator="," open="(" close=")">
+                            #{item}
+                        </foreach>
+                      </if>
+                    GROUP BY
+                          DM_DOCUMENT_H.DCCODE
+                        , DM_DOCUMENT_H.DOCTYPE
+                        , DM_DOCUMENT_H.DELIVERYDATE
+                        , DM_DOCUMENT_H.DOCNO
+                        , DM_DOCUMENT_H.STORERKEY
+                        , DM_DOCUMENT_H.TO_CUSTKEY
+                        , DM_DOCUMENT_H.ORDERTYPE
+                        , DM_DOCUMENT_H.FROM_CUSTTYPE
+                        , DM_DOCUMENT_H.FROM_CUSTKEY
+                        , DM_DOCUMENT_H.ROUTE
+                </when>
+                <when test='deliveryType == "4"'>
+                    SELECT
+                          DM_DOCUMENT_H.DCCODE
+                        , DM_DOCUMENT_H.DOCTYPE
+                        , DM_DOCUMENT_H.DELIVERYDATE
+                        , DM_DOCUMENT_H.DOCNO
+                        , DM_DOCUMENT_H.STORERKEY
+                        , DM_DOCUMENT_H.TO_CUSTKEY FROM_CUSTKEY
+                        , DM_DOCUMENT_H.ORDERTYPE
+                        , DM_DOCUMENT_H.FROM_CUSTTYPE TO_CUSTTYPE
+                        , DM_DOCUMENT_H.FROM_CUSTKEY TO_CUSTKEY
+                        , DM_DOCUMENT_H.ROUTE
+                        , '4' AS TM_DELIVERYTYPE
+                        , SUM(DP_INPLAN.ORDERQTY) AS ORDER_QTY
+                        , SUM(FN_CONV_UOM(
+                              DP_INPLAN.STORERKEY
+                            , DP_INPLAN.SKU
+                            , DP_INPLAN.UOM
+                            , DECODE(DP_INPLAN.UOM, 'KG', 'BASE', 'KG')
+                            , DECODE(DM_DOCUMENT_D.DEL_YN,'N',DP_INPLAN.ORDERQTY,0)
+                        )) AS ORDER_WEIGHT
+                        , TRUNC(NVL(SUM((DP_INPLAN.ORDERQTY * (MS_UOM.BUNJA / MS_UOM.BUNMO)) * MS_UOM.CUBE), 0) / POWER(10, 9), 5) AS ORDER_CUBE
+                        , MAX(TM_INPLAN.DELIVERYGROUP) AS POPNO
+                        , MAX(TM_INPLAN.CARNO) AS CARNO
+                        , MAX(TM_INPLAN.STATUS) AS STATUS
+                    FROM DM_DOCUMENT_H
+                    JOIN DM_DOCUMENT_D
+                        ON  DM_DOCUMENT_D.STORERKEY    = DM_DOCUMENT_H.STORERKEY
+                        AND DM_DOCUMENT_D.DCCODE       = DM_DOCUMENT_H.DCCODE
+                        AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+                        AND DM_DOCUMENT_D.DOCTYPE      = DM_DOCUMENT_H.DOCTYPE
+                        AND DM_DOCUMENT_D.DOCNO        = DM_DOCUMENT_H.DOCNO
+                        AND DM_DOCUMENT_D.DEL_YN       = 'N'
+                    JOIN DP_INPLAN
+                      ON  DP_INPLAN.DCCODE    = DM_DOCUMENT_D.DCCODE
+                      AND DP_INPLAN.STORERKEY = DM_DOCUMENT_D.STORERKEY
+                      AND DP_INPLAN.DOCTYPE   = DM_DOCUMENT_D.DOCTYPE
+                      AND DP_INPLAN.SLIPDT    = DM_DOCUMENT_D.DELIVERYDATE
+                      AND DP_INPLAN.DOCNO     = DM_DOCUMENT_D.DOCNO
+                      AND DP_INPLAN.DOCLINE   = DM_DOCUMENT_D.DOCLINE
+                    LEFT JOIN MS_UOM
+                      ON  MS_UOM.STORERKEY = DP_INPLAN.STORERKEY
+                      AND MS_UOM.SKU       = DP_INPLAN.SKU
+                      AND MS_UOM.UOM       = DECODE(DP_INPLAN.UOM, 'KG', 'BASE', 'KG')
+                    LEFT JOIN TM_INPLAN
+                        ON  TM_INPLAN.DCCODE    = DP_INPLAN.DCCODE
+                        AND TM_INPLAN.STORERKEY = DP_INPLAN.STORERKEY
+                        AND TM_INPLAN.DOCTYPE   = DP_INPLAN.DOCTYPE
+                        AND TM_INPLAN.SLIPDT    = DP_INPLAN.SLIPDT
+                        AND TM_INPLAN.SLIPNO    = DP_INPLAN.SLIPNO
+                        AND TM_INPLAN.DEL_YN    = 'N'
+                    WHERE DM_DOCUMENT_H.DCCODE = #{dccode}
+                      AND DM_DOCUMENT_H.DOCTYPE = 'DP'
+                      AND DM_DOCUMENT_H.DELIVERYDATE BETWEEN #{deliverydtFrom} AND #{deliverydtTo}
+                      AND DM_DOCUMENT_H.WORKPROCESSCODE = 'PO'
+                      AND DM_DOCUMENT_H.CHANNEL = '1'
+                      <if test="custCode != null and custCode.length > 0">
+                      AND DM_DOCUMENT_H.FROM_CUSTKEY IN
+                          <foreach collection="custCode.split(',')" item="item" separator="," open="(" close=")">
+                              #{item}
+                          </foreach>
+                      </if>
+                      <if test="carNo != null and carNo.length > 0">
+                      AND TM_INPLAN.CARNO IN
+                          <foreach collection="carNo.split(',')" item="item" separator="," open="(" close=")">
+                            #{item}
+                        </foreach>
+                      </if>
+                      <if test="docNo != null and docNo.length > 0">
+                      AND DM_DOCUMENT_H.DOCNO IN
+                          <foreach collection="docNo.split(',')" item="item" separator="," open="(" close=")">
+                            #{item}
+                        </foreach>
+                      </if>
+                    GROUP BY
+                          DM_DOCUMENT_H.DCCODE
+                        , DM_DOCUMENT_H.DOCTYPE
+                        , DM_DOCUMENT_H.DELIVERYDATE
+                        , DM_DOCUMENT_H.DOCNO
+                        , DM_DOCUMENT_H.STORERKEY
+                        , DM_DOCUMENT_H.TO_CUSTKEY
+                        , DM_DOCUMENT_H.ORDERTYPE
+                        , DM_DOCUMENT_H.FROM_CUSTTYPE
+                        , DM_DOCUMENT_H.FROM_CUSTKEY
+                        , DM_DOCUMENT_H.ROUTE
+                </when>
+                <when test='deliveryType == "5"'>
+                    SELECT
+                          SY_PROCESSTEMP_PO.DCCODE
+                        , 'DP' AS DOCTYPE
+                        , SY_PROCESSTEMP_PO.DELIVERYDATE
+                        , NULL AS DOCNO
+                        , SY_PROCESSTEMP_PO.STORERKEY
+                        , SY_PROCESSTEMP_PO.DCCODE AS FROM_CUSTKEY
+                        , SY_PROCESSTEMP_PO.ORDERTYPE
+                        , SY_PROCESSTEMP_PO.CUSTTYPE AS TO_CUSTTYPE
+                        , SY_PROCESSTEMP_PO.CUSTKEY  AS TO_CUSTKEY
+                        , NULL AS ROUTE
+                        , '5' AS TM_DELIVERYTYPE
+                        , SUM(SY_PROCESSTEMP_PO.ORDERQTY) AS ORDER_QTY
+                        , SUM(FN_CONV_UOM(
+                              SY_PROCESSTEMP_PO.STORERKEY
+                            , SY_PROCESSTEMP_PO.SKU
+                            , SY_PROCESSTEMP_PO.UOM
+                            , DECODE(SY_PROCESSTEMP_PO.UOM, 'KG', 'BASE', 'KG')
+                            , DECODE(SY_PROCESSTEMP_PO.DEL_YN,'N',SY_PROCESSTEMP_PO.ORDERQTY,0)
+                        )) AS ORDER_WEIGHT
+                        , TRUNC(NVL(SUM((SY_PROCESSTEMP_PO.ORDERQTY * (MS_UOM.BUNJA / MS_UOM.BUNMO)) * MS_UOM.CUBE), 0) / POWER(10, 9), 5) AS ORDER_CUBE
+                        , NULL AS POPNO
+                        , NULL AS CARNO
+                        , NULL AS STATUS
+                    FROM SY_PROCESSTEMP_PO
+                    LEFT JOIN MS_UOM
+                      ON  MS_UOM.STORERKEY = SY_PROCESSTEMP_PO.STORERKEY
+                      AND MS_UOM.SKU       = SY_PROCESSTEMP_PO.SKU
+                      AND MS_UOM.UOM       = DECODE(SY_PROCESSTEMP_PO.UOM, 'KG', 'BASE', 'KG')
+                    WHERE SY_PROCESSTEMP_PO.DCCODE = #{dccode}
+                      AND SY_PROCESSTEMP_PO.DELIVERYDATE BETWEEN #{deliverydtFrom} AND #{deliverydtTo}
+                      AND SY_PROCESSTEMP_PO.POTYPE = 'PROC-PO'
+                      AND SY_PROCESSTEMP_PO.STATUS = '10'
+                      <if test="custCode != null and custCode.length > 0">
+                      AND SY_PROCESSTEMP_PO.CUSTKEY IN
+                          <foreach collection="custCode.split(',')" item="item" separator="," open="(" close=")">
+                            #{item}
+                        </foreach>
+                      </if>
+                    GROUP BY
+                          SY_PROCESSTEMP_PO.DCCODE
+                        , SY_PROCESSTEMP_PO.DELIVERYDATE
+                        , SY_PROCESSTEMP_PO.STORERKEY
+                        , SY_PROCESSTEMP_PO.CUSTTYPE
+                        , SY_PROCESSTEMP_PO.CUSTKEY
+                        , SY_PROCESSTEMP_PO.ORDERTYPE
+                </when>
+            </choose>
+        ) ORDER_LIST
+        LEFT OUTER JOIN MS_CUSTDLVINFO
+             ON MS_CUSTDLVINFO.STORERKEY  = ORDER_LIST.STORERKEY
+            AND MS_CUSTDLVINFO.CUSTTYPE   = ORDER_LIST.TO_CUSTTYPE
+            AND MS_CUSTDLVINFO.DLVCUSTKEY = ORDER_LIST.TO_CUSTKEY
+        LEFT OUTER JOIN MS_CUSTDLVINFO TRUTHCUSTDLVINFO
+             ON TRUTHCUSTDLVINFO.STORERKEY  = MS_CUSTDLVINFO.STORERKEY
+            AND TRUTHCUSTDLVINFO.CUSTTYPE   = MS_CUSTDLVINFO.CUSTTYPE
+            AND TRUTHCUSTDLVINFO.DLVCUSTKEY = MS_CUSTDLVINFO.TRUTHCUSTKEY
+        LEFT JOIN MS_CUST
+            ON  MS_CUST.STORERKEY = TRUTHCUSTDLVINFO.STORERKEY
+            AND MS_CUST.CUSTKEY   = TRUTHCUSTDLVINFO.DLVCUSTKEY
+            AND MS_CUST.CUSTTYPE  = TRUTHCUSTDLVINFO.CUSTTYPE
+        LEFT OUTER JOIN MS_CUSTXPOP
+             ON MS_CUSTXPOP.DCCODE    = ORDER_LIST.DCCODE
+            AND MS_CUSTXPOP.CUSTKEY   = TRUTHCUSTDLVINFO.DLVCUSTKEY
+            AND MS_CUSTXPOP.CUSTTYPE  = ORDER_LIST.TO_CUSTTYPE
+            AND MS_CUSTXPOP.STORERKEY = ORDER_LIST.STORERKEY
+            AND MS_CUSTXPOP.SERIALKEY = (
+                SELECT MIN(X.SERIALKEY) KEEP (DENSE_RANK FIRST ORDER BY X.FROMDATE DESC, X.TODATE ASC)
+                FROM MS_CUSTXPOP X
+                WHERE X.DCCODE    = MS_CUSTXPOP.DCCODE
+                  AND X.STORERKEY = MS_CUSTXPOP.STORERKEY
+                  AND X.CUSTTYPE  = MS_CUSTXPOP.CUSTTYPE
+                  AND X.CUSTKEY   = MS_CUSTXPOP.CUSTKEY
+                  AND X.DEL_YN    = 'N'
+                  AND ORDER_LIST.DELIVERYDATE BETWEEN X.FROMDATE AND X.TODATE
+            )
+        LEFT OUTER JOIN (
+            SELECT DCCODE, DISTRICTCODE, WORKPOPNO
+                 , ROW_NUMBER() OVER (
+                       PARTITION BY DCCODE, DISTRICTCODE
+                       ORDER BY EDITDATE DESC
+                   ) AS RN
+            FROM MS_DISTRICT
+            WHERE DEL_YN = 'N'
+        ) MS_DISTRICT
+             ON MS_DISTRICT.DCCODE       = ORDER_LIST.DCCODE
+            AND MS_DISTRICT.DISTRICTCODE = MS_CUSTXPOP.POPNO
+            AND MS_DISTRICT.RN           = 1
+        LEFT JOIN MS_DLV_DISTRICT
+            ON  MS_DLV_DISTRICT.DCCODE         = ORDER_LIST.DCCODE
+            AND MS_DLV_DISTRICT.DLVDISTRICT_ID = MS_DISTRICT.WORKPOPNO
+            AND ORDER_LIST.DELIVERYDATE        BETWEEN MS_DLV_DISTRICT.FROMDATE AND MS_DLV_DISTRICT.TODATE
+        LEFT JOIN MS_DLV_DISTRICTGROUP
+            ON  MS_DLV_DISTRICTGROUP.DCCODE      = ORDER_LIST.DCCODE
+            AND MS_DLV_DISTRICTGROUP.DLVGROUP_ID = MS_DLV_DISTRICT.DLVGROUP_ID
+            AND ORDER_LIST.DELIVERYDATE          BETWEEN MS_DLV_DISTRICT.FROMDATE AND MS_DLV_DISTRICT.TODATE
+        WHERE 1 = 1
+          <if test="dispatchStatus != null and dispatchStatus != ''">
+            AND NVL(ORDER_LIST.STATUS, '00') = #{dispatchStatus}
+          </if>
+        ORDER BY MS_CUSTDLVINFO.TRUTHCUSTKEY, ORDER_LIST.TM_DELIVERYTYPE
+    </select>
+
+    <update id="updateTmInplanCarnoByDocno" parameterType="TmSavePlanRouteReqDto">
+        /* 개별배차 > TM_INPLAN carno 업데이트 (DOCNO 기준) */
+        MERGE /* [TmIndividualDispatchService.sqlx][updateTmInplanCarnoByDocno][개별배차 DOCNO 기준 carno 벌크 업데이트][2026.03.07] */
+        INTO TM_INPLAN T
+        USING (
+            WITH TM_SAVE AS (
+                <foreach collection="list" item="item" separator=" UNION ALL ">
+                SELECT
+                      #{item.dccode} AS DCCODE
+                    , #{item.deliveryDate} AS DELIVERYDT
+                    , #{item.carno} AS CARNO
+                    , CASE WHEN #{item.roundSeq} = 0 THEN 1 ELSE #{item.roundSeq} END AS PRIORITY
+                    , #{item.dlvDeliveryPriority} AS DLV_DELIVERYPRIORITY
+                    , #{item.truthCustkey} AS TRUTHCUSTKEY
+                    , #{item.docno} AS DOCNO
+                    , #{item.status} AS STATUS
+                    , NVL(#{item.splitDeliveryYn}, 'N') AS SPLIT_DELIVERY_YN
+                    , #{item.regId} AS REGID
+                FROM DUAL
+                </foreach>
+            )
+            SELECT
+                  TM_INPLAN.DCCODE
+                , TM_INPLAN.SLIPDT
+                , TM_INPLAN.SLIPNO
+                , TM_INPLAN.DOCTYPE
+                -- 배차엔진 추천
+                , MIN(CASE WHEN TM_INPLAN.PRECARNO IS NOT NULL THEN TM_INPLAN.PREDISTRICTGROUP    ELSE MS_DLV_DISTRICT.DLVGROUP_ID END) AS PREDISTRICTGROUP
+                , MIN(CASE WHEN TM_INPLAN.PRECARNO IS NOT NULL THEN TM_INPLAN.PREDISTRICTCODE     ELSE MS_DISTRICT.WORKPOPNO END) AS PREDISTRICTCODE
+                , MIN(CASE WHEN TM_INPLAN.PRECARNO IS NOT NULL THEN TM_INPLAN.PREDELIVERYGROUP    ELSE DECODE(TM_INPLAN.DELIVERYGROUP, 'INPLAN', TM_INPLAN.DEFDELIVERYGROUP, TM_INPLAN.DELIVERYGROUP) END) AS PREDELIVERYGROUP
+                , MIN(CASE WHEN TM_INPLAN.PRECARNO IS NOT NULL THEN TM_INPLAN.PRECARNO            ELSE TM_SAVE.CARNO END) AS PRECARNO
+                , MIN(CASE WHEN TM_INPLAN.PRECARNO IS NOT NULL THEN TM_INPLAN.PREPRIORITY         ELSE TO_CHAR(TM_SAVE.PRIORITY) END) AS PREPRIORITY
+                , MIN(CASE WHEN TM_INPLAN.PRECARNO IS NOT NULL THEN TM_INPLAN.PRE_TM_CONTRACTTYPE ELSE TO_CHAR(NVL(CM_CAR.CONTRACTTYPE, 'TEMPORARY')) END) AS PRE_TM_CONTRACTTYPE
+                -- 최종 배차
+                , MIN(MS_DLV_DISTRICT.DLVGROUP_ID) AS DISTRICTGROUP
+                , MIN(MS_DLV_DISTRICT.DLVDISTRICT_ID) AS DISTRICTCODE
+                , MIN(DECODE(TM_INPLAN.DELIVERYGROUP, 'INPLAN', TM_INPLAN.DEFDELIVERYGROUP, TM_INPLAN.DELIVERYGROUP)) AS DELIVERYGROUP
+                , MIN(TM_SAVE.CARNO) AS CARNO
+                , MIN(TM_SAVE.PRIORITY) AS PRIORITY
+                -- 기타 정보
+                , MIN(TM_SAVE.DLV_DELIVERYPRIORITY) AS DELIVERYPRIORITY
+                , MIN(TM_SAVE.DLV_DELIVERYPRIORITY) AS DLV_DELIVERYPRIORITY
+                , MIN(NVL(CM_CAR.CONTRACTTYPE, 'TEMPORARY')) AS CONTRACTTYPE
+                , MIN(CM_CAR.COURIER) AS COURIER
+                , MIN(CM_CAR.CARAGENTKEY) AS CARAGENTKEY
+                , MIN(MS_OUT_GROUP.OUT_GROUP_CD) AS OUT_GROUP_CD
+                , MIN(TM_SAVE.STATUS) AS STATUS
+                , MAX(TM_SAVE.SPLIT_DELIVERY_YN) AS SPLIT_DELIVERY_YN
+                , MIN(TM_SAVE.REGID) AS REGID
+            FROM TM_INPLAN
+            INNER JOIN TM_SAVE
+                ON  TM_SAVE.DCCODE       = TM_INPLAN.DCCODE
+                AND TM_SAVE.DELIVERYDT   = TM_INPLAN.DELIVERYDT
+                AND TM_SAVE.TRUTHCUSTKEY = TM_INPLAN.TRUTHCUSTKEY
+                AND TM_SAVE.DOCNO        = TM_INPLAN.DOCNO
+                AND TM_INPLAN.SLIPDT BETWEEN TO_CHAR(TRUNC(ADD_MONTHS(TO_DATE(TM_SAVE.DELIVERYDT, 'YYYYMMDD'), -1), 'MM'), 'YYYYMMDD') AND TM_SAVE.DELIVERYDT
+            LEFT OUTER JOIN MS_DISTRICT
+                ON  MS_DISTRICT.DCCODE       = TM_INPLAN.DCCODE
+                AND MS_DISTRICT.DISTRICTCODE = DECODE(TM_INPLAN.DELIVERYGROUP, 'INPLAN', TM_INPLAN.DEFDELIVERYGROUP, TM_INPLAN.DELIVERYGROUP)
+                AND MS_DISTRICT.DEL_YN       = 'N'
+            LEFT OUTER JOIN MS_DLV_DISTRICT
+                ON  MS_DLV_DISTRICT.DCCODE         = TM_INPLAN.DCCODE
+                AND MS_DLV_DISTRICT.DLVDISTRICT_ID = MS_DISTRICT.WORKPOPNO
+                AND TM_INPLAN.DELIVERYDT BETWEEN MS_DLV_DISTRICT.FROMDATE AND MS_DLV_DISTRICT.TODATE
+            LEFT OUTER JOIN CM_CAR
+                ON  CM_CAR.CARNO   = TM_SAVE.CARNO
+                AND CM_CAR.DEL_YN = 'N'
+            LEFT OUTER JOIN MS_OUT_GROUP
+                ON  MS_OUT_GROUP.DCCODE = TM_INPLAN.DCCODE
+            WHERE TM_INPLAN.TM_DELIVERYTYPE = '1'
+            GROUP BY TM_INPLAN.DCCODE
+                   , TM_INPLAN.SLIPDT
+                   , TM_INPLAN.SLIPNO
+                   , TM_INPLAN.DOCTYPE
+        ) S ON (  S.DCCODE       = T.DCCODE
+            AND  S.SLIPDT       = T.SLIPDT
+            AND  S.SLIPNO       = T.SLIPNO
+            AND  S.DOCTYPE      = T.DOCTYPE
+        )
+        WHEN MATCHED THEN
+            UPDATE SET
+                  T.PREDISTRICTGROUP     = S.PREDISTRICTGROUP
+                , T.PREDISTRICTCODE      = S.PREDISTRICTCODE
+                , T.PREDELIVERYGROUP     = S.PREDELIVERYGROUP
+                , T.PRECARNO             = S.PRECARNO
+                , T.PREPRIORITY          = S.PREPRIORITY
+                , T.PRE_TM_CONTRACTTYPE  = S.PRE_TM_CONTRACTTYPE
+                , T.DISTRICTGROUP        = S.DISTRICTGROUP
+                , T.DISTRICTCODE         = S.DISTRICTCODE
+                , T.DELIVERYGROUP        = S.DELIVERYGROUP
+                , T.CARNO                = S.CARNO
+                , T.PRIORITY             = S.PRIORITY
+                , T.DELIVERYPRIORITY     = S.DELIVERYPRIORITY
+                , T.DLV_DELIVERYPRIORITY = S.DLV_DELIVERYPRIORITY
+                , T.CONTRACTTYPE         = S.CONTRACTTYPE
+                , T.COURIER              = S.COURIER
+                , T.CARAGENTKEY          = S.CARAGENTKEY
+                , T.OUT_GROUP_CD         = NVL(S.OUT_GROUP_CD, '10')
+                , T.STATUS               = S.STATUS
+                , T.SPLIT_DELIVERY_YN    = S.SPLIT_DELIVERY_YN
+                , T.EDITWHO              = S.REGID
+                , T.EDITDATE             = SYSDATE
+                , T.DEL_YN               = 'N'
+    </update>
+
+    <!-- 개별배차 팝업 목록 조회 -->
+    <select id="getIndividualDispatchPopList" resultType="TmIndividualDispatchPopResDto">
+        SELECT /* [TmIndividualDispatchService.sqlx][getIndividualDispatchPopList][개별배차 팝업 목록 조회][devyn][2026.03.04] */
+              CM_CAR.CARNO              AS code
+            , CM_DRIVER.DRIVERNAME      AS driverName
+            , CM_CAR.CONTRACTTYPE       AS contractType
+            , MS_DISTRICT.DISTRICTCODE  AS name
+            , CM_CAR.CUSTKEY            AS custKey
+            , COURIER.CARRIERKEY        AS COURIER
+            , COURIER.DESCRIPTION       AS COURIERNAME
+            , CARAGENT.CARRIERKEY       AS CARAGENTKEY
+            , CARAGENT.DESCRIPTION      AS CARAGENTNAME
+        FROM CM_CAR
+        LEFT OUTER JOIN CM_DRIVER
+            ON CM_DRIVER.DRIVERID   = NVL(CM_CAR.DRIVER1, CM_CAR.DRIVER2)
+        LEFT OUTER JOIN MS_DISTRICT
+            ON CM_CAR.CARID         = MS_DISTRICT.CARNO
+        LEFT JOIN MS_CARRIER COURIER
+            ON  COURIER.STORERKEY   = 'FW00'
+            AND COURIER.CARRIERKEY  = CM_CAR.COURIER
+            AND COURIER.CARRIERTYPE = 'LOCAL'
+        LEFT JOIN MS_CARRIER CARAGENT
+            ON  CARAGENT.STORERKEY   = 'FW00'
+            AND CARAGENT.CARRIERKEY  = CM_CAR.CARAGENTKEY
+            AND CARAGENT.CARRIERTYPE = 'SUBC'
+        WHERE 1 = 1
+          AND CM_CAR.DEL_YN = 'N'
+          AND CM_CAR.CONTRACTTYPE IN ('TEMPORARY', 'SELF')
+          AND NVL(CM_CAR.STTL_YN, 'Y') = 'N'
+        <if test="multiSelect != null and multiSelect != ''">
+            AND CM_CAR.CARNO IN (
+                SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS VAL
+                FROM (SELECT #{multiSelect} AS VAL FROM DUAL) A
+                CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0
+            )
+        </if>
+        <if test="contractType != null and contractType != ''">
+            AND CM_CAR.CONTRACTTYPE = #{contractType}
+        </if>
+        <if test="code != null and code != ''">
+            AND CM_CAR.CARNO = #{code}
+        </if>
+        <if test="name != null and name != ''">
+            AND (
+                    CM_CAR.CARNO             LIKE '%' || #{name} || '%'
+                OR  MS_DISTRICT.DISTRICTCODE LIKE '%' || #{name} || '%'
+            )
+        </if>
+    </select>
+
+</mapper>

@@ -1,0 +1,313 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="tmAllocationCheckService">
+
+    <select id="getMasterList" resultType="TmAllocationCheckMasterResDto">    	
+
+    <![CDATA[
+      SELECT /* [tmAllocationCheck.sqlx][getMasterList][배차마스터체크결과  ][박진우][20250630] */ 
+      		 'MS_DISTRICT.CARNO'       CHECKCODE
+            ,TO_CHAR(DCCODE) || '권역정보에 미등록된 차량이 배송차량(보조차량 포함)으로 지정되어 있습니다. [' || COUNT(1) || '건]'   CHECKMEMO
+            ,COUNT(1)                  CHECKCNT
+            ,#{dcCode}              CHECKKEY1
+            ,''                CHECKKEY2
+            ,''                CHECKKEY3
+      FROM  (
+              SELECT MS_DISTRICT.DCCODE
+                    ,MS_DISTRICT.DISTRICTGROUP
+                    ,MS_DISTRICT.DISTRICTCODE
+                    ,MS_DISTRICT.DISTRICTNAME
+                    ,MS_DISTRICT.CARNO
+                    ,MS_DISTRICT.SUBCARNO1
+                    ,MS_DISTRICT.SUBCARNO2
+                    ,MS_DISTRICT.SUBCARNO3
+                    ,   CASE WHEN MS_DISTRICT.CARNO     IS NOT NULL AND T_CARNO.CARID     IS NULL THEN MS_DISTRICT.CARNO     || '차량미등록 ' ELSE '' END
+                     || CASE WHEN MS_DISTRICT.SUBCARNO1 IS NOT NULL AND T_SUBCARNO1.CARID IS NULL THEN MS_DISTRICT.SUBCARNO1 || '차량미등록 ' ELSE '' END
+                     || CASE WHEN MS_DISTRICT.SUBCARNO2 IS NOT NULL AND T_SUBCARNO2.CARID IS NULL THEN MS_DISTRICT.SUBCARNO2 || '차량미등록 ' ELSE '' END
+                     || CASE WHEN MS_DISTRICT.SUBCARNO3 IS NOT NULL AND T_SUBCARNO3.CARID IS NULL THEN MS_DISTRICT.SUBCARNO3 || '차량미등록 ' ELSE '' END AS CHECKMESSAGE
+              FROM   MS_DISTRICT
+              LEFT JOIN CM_CAR T_CARNO
+                     ON T_CARNO.CARID = MS_DISTRICT.CARNO
+              LEFT JOIN CM_CAR T_SUBCARNO1
+                     ON T_SUBCARNO1.CARID = MS_DISTRICT.SUBCARNO1
+              LEFT JOIN CM_CAR T_SUBCARNO2
+                     ON T_SUBCARNO2.CARID = MS_DISTRICT.SUBCARNO2
+              LEFT JOIN CM_CAR T_SUBCARNO3
+                     ON T_SUBCARNO3.CARID = MS_DISTRICT.SUBCARNO3
+              WHERE  MS_DISTRICT.DCCODE = #{dcCode}
+              AND   (   CASE WHEN MS_DISTRICT.CARNO     IS NOT NULL AND T_CARNO.CARID     IS NULL THEN MS_DISTRICT.CARNO     || '차량미등록 ' ELSE '' END
+                     || CASE WHEN MS_DISTRICT.SUBCARNO1 IS NOT NULL AND T_SUBCARNO1.CARID IS NULL THEN MS_DISTRICT.SUBCARNO1 || '차량미등록 ' ELSE '' END
+                     || CASE WHEN MS_DISTRICT.SUBCARNO2 IS NOT NULL AND T_SUBCARNO2.CARID IS NULL THEN MS_DISTRICT.SUBCARNO2 || '차량미등록 ' ELSE '' END
+                     || CASE WHEN MS_DISTRICT.SUBCARNO3 IS NOT NULL AND T_SUBCARNO3.CARID IS NULL THEN MS_DISTRICT.SUBCARNO3 || '차량미등록 ' ELSE '' END
+                   ) IS NOT NULL
+            ) T_RESULT
+      GROUP BY DCCODE
+
+      UNION ALL
+
+      SELECT 'MS_CUSTXPOP.DISTRICTCODE' CHECKCODE
+            ,TO_CHAR(DCCODE) || '권역별차량관리에 미등록된 권역(POP)코드가 거래처별POP관리에서 사용되었습니다.[' || COUNT(1) || '건]'   CHECKMEMO
+            ,COUNT(1)                  CHECKCNT
+            ,#{dcCode}              CHECKKEY1
+            ,#{gStorerkey}           CHECKKEY2
+            ,''                CHECKKEY3
+      FROM  (
+              SELECT DCCODE
+              FROM   MS_CUSTXPOP
+              WHERE  NOT EXISTS (
+                       SELECT 'A'
+                       FROM   MS_DISTRICT
+                       WHERE  MS_DISTRICT.DCCODE        = MS_CUSTXPOP.DCCODE
+                       AND    MS_DISTRICT.DISTRICTTYPE  = MS_CUSTXPOP.POPTYPE
+                       AND    MS_DISTRICT.DISTRICTCODE  = MS_CUSTXPOP.POPNO )
+              AND    DCCODE     = #{dcCode}
+              AND    STORERKEY  = #{gStorerkey}
+            ) T_RESULT
+      GROUP BY DCCODE
+
+      UNION ALL
+
+      SELECT 'MS_CUSTXPOP.CUSTXPOP'     CHECKCODE
+            ,'거래처별 POP정보에 미등록된 출고예정 거래처가 있습니다. [' || COUNT(1) || '건]'   CHECKMEMO
+            ,COUNT(1)                  CHECKCNT
+            ,#{dcCode}              CHECKKEY1
+            ,#{gStorerkey}           CHECKKEY2
+            ,#{pvcDeliveryDt}          CHECKKEY3
+      FROM  (
+              SELECT DM_DOCUMENT_H.DCCODE                      AS DCCODE
+                    ,DM_DOCUMENT_H.STORERKEY                   AS STORERKEY
+                    ,DM_DOCUMENT_H.DOCTYPE                     AS DOCTYPE
+                    ,DM_DOCUMENT_H.DELIVERYDATE                AS DELIVERYDT
+                    ,DM_DOCUMENT_H.TO_CUSTKEY                  AS CUSTKEY
+                    ,FN_DESCR_CODE (DM_DOCUMENT_H.STORERKEY
+                                   ,'CUSTTYPE'
+                                   ,DM_DOCUMENT_H.TO_CUSTTYPE) AS CUSTTYPE
+                    ,DM_DOCUMENT_H.TO_CUSTNAME                 AS CUSTNAME
+                    ,COUNT(DISTINCT DM_DOCUMENT_D.SKU)         AS SKUCNT
+                    ,TRUNC(SUM(FN_CONV_UOM( DM_DOCUMENT_H.STORERKEY
+                                         ,DM_DOCUMENT_D.SKU
+                                         ,DM_DOCUMENT_D.STORERUOM
+                                         ,'KG'
+                                         ,DM_DOCUMENT_D.STOREROPENQTY  ))) AS WEIGHT
+              FROM   DM_DOCUMENT_H
+              JOIN   DM_DOCUMENT_D
+                              
+                   ON DM_DOCUMENT_D.DCCODE       = DM_DOCUMENT_H.DCCODE
+			      AND DM_DOCUMENT_D.DOCTYPE      = DM_DOCUMENT_H.DOCTYPE
+			      AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE 
+			      AND DM_DOCUMENT_D.DOCNO        = DM_DOCUMENT_H.DOCNO
+			      
+			      AND DM_DOCUMENT_D.DEL_YN       = 'N'      
+              WHERE  NOT EXISTS (
+                        SELECT 'A'
+                        FROM   MS_CUSTXPOP
+                        WHERE  MS_CUSTXPOP.DCCODE    = DM_DOCUMENT_H.DCCODE
+                        AND    MS_CUSTXPOP.STORERKEY = DM_DOCUMENT_H.STORERKEY
+                        AND    MS_CUSTXPOP.CUSTTYPE  = DM_DOCUMENT_H.TO_CUSTTYPE
+                        AND    MS_CUSTXPOP.CUSTKEY   = DM_DOCUMENT_H.TO_CUSTKEY )
+              AND    DM_DOCUMENT_H.STORERKEY    = #{gStorerkey}
+              AND    DM_DOCUMENT_H.DCCODE       = #{dcCode}
+              AND    DM_DOCUMENT_H.DOCTYPE      = 'WD'
+              AND    DM_DOCUMENT_H.DELIVERYDATE = #{pvcDeliveryDt}
+              AND    DM_DOCUMENT_H.TO_CUSTKEY   LIKE '%'
+              GROUP BY DM_DOCUMENT_H.DCCODE
+                      ,DM_DOCUMENT_H.STORERKEY
+                      ,DM_DOCUMENT_H.DOCTYPE
+                      ,DM_DOCUMENT_H.DELIVERYDATE
+                      ,DM_DOCUMENT_H.TO_CUSTKEY
+                      ,FN_DESCR_CODE (DM_DOCUMENT_H.STORERKEY
+                                     ,'CUSTTYPE'
+                                     ,DM_DOCUMENT_H.TO_CUSTTYPE)
+                      ,DM_DOCUMENT_H.TO_CUSTNAME
+            ) T_RESULT
+
+      UNION ALL
+
+      SELECT 'CM_CAR.DRIVERIDDC'        CHECKCODE
+            ,TO_CHAR(DEF_DCCODE) || '센터 배송차량에 미등록된 배송기사가 지정되어 있습니다.. [' || COUNT(1) || '건]'   CHECKMEMO
+            ,COUNT(1)                  CHECKCNT
+            ,DEF_DCCODE                CHECKKEY1
+            ,''                CHECKKEY2
+            ,''                CHECKKEY3
+      FROM   CM_CAR
+      WHERE  DRIVER1    NOT IN (SELECT DRIVERID FROM CM_DRIVER)
+      AND    DEF_DCCODE = #{dcCode}
+      GROUP BY DEF_DCCODE
+
+      UNION ALL
+
+      SELECT 'CM_CAR.DRIVERID'          CHECKCODE
+            ,'[전센터기준]배송차량에 미등록된 배송기사가 지정되어 있습니다.. [' || COUNT(1) || '건]'   CHECKMEMO
+            ,COUNT(1)                  CHECKCNT
+            ,''                CHECKKEY1
+            ,''                CHECKKEY2
+            ,''                CHECKKEY3
+      FROM   CM_CAR
+      WHERE  DRIVER1 NOT IN (SELECT DRIVERID FROM CM_DRIVER)
+
+      UNION ALL
+
+      SELECT 'CM_CAR.UNDEFINEDC'        CHECKCODE
+            ,'[전센터기준]센터가 지정되어 있지 않는 차량이 존재합니다. [' || COUNT(1) || '건]'   CHECKMEMO
+            ,COUNT(1)                  CHECKCNT
+            ,''                CHECKKEY1
+            ,''                CHECKKEY2
+            ,''                CHECKKEY3
+      FROM   CM_CAR
+      WHERE  DEF_DCCODE NOT IN (SELECT DCCODE FROM CM_DC)
+    ]]>
+    </select>
+    
+    <select id="getDetailList" resultType="TmAllocationCheckDetailResDto">    	
+    	
+	    <choose>
+	
+	      
+	      <when test="checkCode == 'MS_DISTRICT.CARNO'">
+	        <![CDATA[
+	          SELECT    MS_DISTRICT.DISTRICTCODE || '권역에 '
+	                 || CASE WHEN MS_DISTRICT.CARNO     IS NOT NULL AND T_CARNO.CARID     IS NULL THEN MS_DISTRICT.CARNO     || '차량미등록 ' ELSE '' END
+	                 || CASE WHEN MS_DISTRICT.SUBCARNO1 IS NOT NULL AND T_SUBCARNO1.CARID IS NULL THEN MS_DISTRICT.SUBCARNO1 || '차량미등록 ' ELSE '' END
+	                 || CASE WHEN MS_DISTRICT.SUBCARNO2 IS NOT NULL AND T_SUBCARNO2.CARID IS NULL THEN MS_DISTRICT.SUBCARNO2 || '차량미등록 ' ELSE '' END
+	                 || CASE WHEN MS_DISTRICT.SUBCARNO3 IS NOT NULL AND T_SUBCARNO3.CARID IS NULL THEN MS_DISTRICT.SUBCARNO3 || '차량미등록 ' ELSE '' END AS MESSAGE
+	                ,'' AS CHECKKEY1
+	                ,'' AS CHECKKEY2
+	                ,'' AS CHECKKEY3
+	          FROM   MS_DISTRICT
+	          LEFT JOIN CM_CAR T_CARNO      ON T_CARNO.CARID     = MS_DISTRICT.CARNO
+	          LEFT JOIN CM_CAR T_SUBCARNO1  ON T_SUBCARNO1.CARID = MS_DISTRICT.SUBCARNO1
+	          LEFT JOIN CM_CAR T_SUBCARNO2  ON T_SUBCARNO2.CARID = MS_DISTRICT.SUBCARNO2
+	          LEFT JOIN CM_CAR T_SUBCARNO3  ON T_SUBCARNO3.CARID = MS_DISTRICT.SUBCARNO3
+	          WHERE  MS_DISTRICT.DCCODE = #{checkKey1}
+	          AND   ( CASE WHEN MS_DISTRICT.CARNO     IS NOT NULL AND T_CARNO.CARID     IS NULL THEN MS_DISTRICT.CARNO     || '차량미등록 ' ELSE '' END
+	                 || CASE WHEN MS_DISTRICT.SUBCARNO1 IS NOT NULL AND T_SUBCARNO1.CARID IS NULL THEN MS_DISTRICT.SUBCARNO1 || '차량미등록 ' ELSE '' END
+	                 || CASE WHEN MS_DISTRICT.SUBCARNO2 IS NOT NULL AND T_SUBCARNO2.CARID IS NULL THEN MS_DISTRICT.SUBCARNO2 || '차량미등록 ' ELSE '' END
+	                 || CASE WHEN MS_DISTRICT.SUBCARNO3 IS NOT NULL AND T_SUBCARNO3.CARID IS NULL THEN MS_DISTRICT.SUBCARNO3 || '차량미등록 ' ELSE '' END ) IS NOT NULL
+	        ]]>
+	      </when>
+	
+	      <!-- ── MS_CUSTXPOP.DISTRICTCODE ────────────────────────────── -->
+	      <when test="checkCode == 'MS_CUSTXPOP.DISTRICTCODE'">
+	        <![CDATA[
+	          SELECT MS_CUSTXPOP.DCCODE || '센터 [POP:' 
+	                 || MS_CUSTXPOP.POPNO || '] ['
+	                 || MS_CUSTXPOP.STORERKEY || '-' || MS_CUSTXPOP.CUSTKEY || ' 거래처('
+	                 || MS_CUSTXPOP.CUSTTYPE || ')'
+	                 || MS_CUST.DESCRIPTION || ']' AS MESSAGE
+	                ,MS_CUSTXPOP.CUSTKEY  AS CHECKKEY1
+	                ,MS_CUSTXPOP.CUSTTYPE AS CHECKKEY2
+	                ,MS_CUSTXPOP.POPNO    AS CHECKKEY3
+	          FROM   MS_CUSTXPOP
+	          JOIN   MS_CUST
+	            ON   MS_CUST.STORERKEY = MS_CUSTXPOP.STORERKEY
+	           AND   MS_CUST.CUSTTYPE  = MS_CUSTXPOP.CUSTTYPE
+	           AND   MS_CUST.CUSTKEY   = MS_CUSTXPOP.CUSTKEY
+	          WHERE  NOT EXISTS (
+	                    SELECT 'A'
+	                    FROM   MS_DISTRICT
+	                    WHERE  MS_DISTRICT.DCCODE       = MS_CUSTXPOP.DCCODE
+	                    AND    MS_DISTRICT.DISTRICTTYPE = MS_CUSTXPOP.POPTYPE
+	                    AND    MS_DISTRICT.DISTRICTCODE = MS_CUSTXPOP.POPNO )
+	          AND    MS_CUSTXPOP.DCCODE    = #{checkKey1}
+	          AND    MS_CUSTXPOP.STORERKEY = #{checkKey2}
+	        ]]>
+	      </when>
+	
+	      
+	      <when test="checkCode == 'MS_CUSTXPOP.CUSTXPOP'">
+	        <![CDATA[
+	          SELECT DM_DOCUMENT_H.DCCODE || '센터 [' 
+	                 || DM_DOCUMENT_H.TO_CUSTKEY
+	                 || FN_DESCR_CODE (DM_DOCUMENT_H.STORERKEY,'CUSTTYPE',DM_DOCUMENT_H.TO_CUSTTYPE)
+	                 || ']' || DM_DOCUMENT_H.TO_CUSTNAME
+	                 || ' -->거래처별POP 정보에 미등록 됨' AS MESSAGE
+	                ,DM_DOCUMENT_H.DCCODE     AS CHECKKEY1
+	                ,DM_DOCUMENT_H.TO_CUSTKEY AS CHECKKEY2
+	                ,''               AS CHECKKEY3
+	          FROM   DM_DOCUMENT_H
+	          JOIN   DM_DOCUMENT_D
+                   ON DM_DOCUMENT_D.DCCODE       = DM_DOCUMENT_H.DCCODE
+			      AND DM_DOCUMENT_D.DOCTYPE      = DM_DOCUMENT_H.DOCTYPE
+			      AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE 
+			      AND DM_DOCUMENT_D.DOCNO        = DM_DOCUMENT_H.DOCNO
+			      AND DM_DOCUMENT_D.STATUS       = '90' /*상태(90:확정완료)*/
+			      AND DM_DOCUMENT_D.DEL_YN       = 'N'                  
+			   
+	          WHERE  NOT EXISTS (
+	                    SELECT 'A'
+	                    FROM   MS_CUSTXPOP 
+	                    WHERE  MS_CUSTXPOP.DCCODE    = DM_DOCUMENT_H.DCCODE   
+	                    AND    MS_CUSTXPOP.STORERKEY = DM_DOCUMENT_H.STORERKEY
+	                    AND    MS_CUSTXPOP.CUSTTYPE  = DM_DOCUMENT_H.TO_CUSTTYPE 
+	                    AND    MS_CUSTXPOP.CUSTKEY   = DM_DOCUMENT_H.TO_CUSTKEY )
+	          AND    DM_DOCUMENT_H.DCCODE       = #{checkKey1}
+	          AND    DM_DOCUMENT_H.STORERKEY    = #{checkKey2}
+	          AND    DM_DOCUMENT_H.DOCTYPE      = 'WD'
+	          AND    DM_DOCUMENT_H.DELIVERYDATE = #{checkKey3}
+	          GROUP BY DM_DOCUMENT_H.DCCODE                    
+	                 ,DM_DOCUMENT_H.STORERKEY                 
+	                 ,DM_DOCUMENT_H.DOCTYPE                   
+	                 ,DM_DOCUMENT_H.DELIVERYDATE              
+	                 ,DM_DOCUMENT_H.TO_CUSTKEY
+	                 ,FN_DESCR_CODE (DM_DOCUMENT_H.STORERKEY,'CUSTTYPE',DM_DOCUMENT_H.TO_CUSTTYPE)
+	                 ,DM_DOCUMENT_H.TO_CUSTNAME
+	        ]]>
+	      </when>
+	
+	      
+	      <when test="checkCode == 'CM_CAR.DRIVERIDDC'">
+	        <![CDATA[
+	          SELECT CM_CAR.CARID || '['||CM_CAR.CARNO||'] 차량에 운전자ID['
+	                 || CM_CAR.DRIVER1 || '] 는 배송기사 정보에 미등록 되어 있습니다.' AS MESSAGE
+	                ,CM_CAR.CARID   AS CHECKKEY1
+	                ,CM_CAR.CARNO   AS CHECKKEY2
+	                ,CM_CAR.DRIVER1 AS CHECKKEY3
+	          FROM   CM_CAR
+	          WHERE  DRIVER1    NOT IN (SELECT DRIVERID FROM CM_DRIVER)
+	          AND    DEF_DCCODE = #{checkKey1}
+	        ]]>
+	      </when>
+	
+	      
+	      <when test="checkCode == 'CM_CAR.DRIVERID'">
+	        <![CDATA[
+	          SELECT '['||CM_CAR.DEF_DCCODE||'센터] [CARID:'||CM_CAR.CARID
+	                 ||'('||CM_CAR.CARNO||') [운전자ID:'||CM_CAR.DRIVER1
+	                 ||'] --> 배송기사 정보에 미등록 되어 있습니다.' AS MESSAGE
+	                ,CM_CAR.CARID   AS CHECKKEY1
+	                ,CM_CAR.CARNO   AS CHECKKEY2
+	                ,CM_CAR.DRIVER1 AS CHECKKEY3
+	          FROM   CM_CAR
+	          WHERE  DRIVER1 NOT IN (SELECT DRIVERID FROM CM_DRIVER)
+	        ]]>
+	      </when>
+	
+	      
+	      <when test="checkCode == 'CM_CAR.UNDEFINEDC'">
+	        <![CDATA[
+	          SELECT '['||CM_CAR.DEF_DCCODE||'센터] [CARID:'||CM_CAR.CARID
+	                 ||'('||CM_CAR.CARNO||') 차량의 배송센터['||CM_CAR.DEF_DCCODE
+	                 ||'] --> 실물센터 정보에 없는 배송센터 입니다.' AS MESSAGE
+	                ,CM_CAR.CARID       AS CHECKKEY1
+	                ,CM_CAR.CARNO       AS CHECKKEY2
+	                ,CM_CAR.DEF_DCCODE  AS CHECKKEY3
+	          FROM   CM_CAR
+	          WHERE  DEF_DCCODE NOT IN (SELECT DCCODE FROM CM_DC)
+	        ]]>
+	      </when>
+	
+	      
+	      <otherwise>
+	        <![CDATA[
+	          SELECT '' AS MESSAGE
+	                ,'' AS CHECKKEY1
+	                ,'' AS CHECKKEY2
+	                ,'' AS CHECKKEY3
+	          FROM DUAL
+	        ]]>
+	      </otherwise>
+	
+	    </choose>
+    	
+    </select>
+</mapper>

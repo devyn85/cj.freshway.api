@@ -1,0 +1,1709 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cmElecService">
+
+    <update id="updateElecStatus">
+		UPDATE /* [cmElecService.sqlx][updateElecStatus][전자결재 상태값 업데이트][JangGwangSeok][2025.09.22] */ AJ_APPRREQUEST
+		SET
+			 APPROVALNO     = #{docId}
+			,APPROVALSTATUS = #{status}
+			,EDITDATE       = SYSDATE
+			,APPROVALID     = #{approveId}
+			,APPROVALNM     = #{approveNm}
+		WHERE APPROVALREQDT = #{approvalReauestDt}
+			AND APPROVALREQNO = #{approvalReauestNo}
+	</update>
+
+	<select id="selectDccode" resultType="map">
+		SELECT /* [cmElecService.sqlx][selectDccode][재고 감모 승인요청서(센터) 재고실사 센터타이틀 전자결재로 올려야 하는 문서조회][JangGwangSeok][2025.09.22] */
+			 AJ_APPRREQUEST.DCCODE
+			,CM_DC.DCNAME
+		FROM AJ_APPRREQUEST
+		JOIN CM_DC ON CM_DC.DCCODE = AJ_APPRREQUEST.DCCODE
+			AND CM_DC.DEL_YN = 'N'
+		WHERE 1 = 1
+			AND AJ_APPRREQUEST.DEL_YN = 'N'
+			AND AJ_APPRREQUEST.APPROVALREQDT = #{approvalReauestDt}
+			AND AJ_APPRREQUEST.APPROVALREQNO = #{approvalReauestNo}
+		GROUP BY AJ_APPRREQUEST.DCCODE, CM_DC.DCNAME
+	</select>
+
+	<select id="selectElecForm1Cont1" resultType="map">
+		SELECT /* [cmElecService.sqlx][selectElecForm1Cont1][재고 감모 승인요청서 (센터) 재고실사 전자결재로 올려야 하는 문서조회][JangGwangSeok][2025.09.22] */
+			*
+		FROM
+			(
+				SELECT
+					CASE WHEN SY_PROCESSTEMP_AJ.ORDERTYPE = 'DDRAJ' THEN
+					CASE WHEN SY_PROCESSTEMP_AJ.IOTYPE = 'WD' THEN UNISTR('감모') ELSE UNISTR('역감모') END
+					END IOTYPENAME
+					,SY_PROCESSTEMP_AJ.DCCODE
+					,SUM(NVL(SY_PROCESSTEMP_AJ.ETCQTY1,0)) AMT
+				FROM AJ_APPRREQUEST
+				JOIN SY_PROCESSTEMP_AJ ON AJ_APPRREQUEST.APPROVALREQDT = SY_PROCESSTEMP_AJ.LIST_NO
+					AND AJ_APPRREQUEST.APPROVALREQNO 	= SY_PROCESSTEMP_AJ.BATCH_NO
+					AND AJ_APPRREQUEST.DCCODE        	= SY_PROCESSTEMP_AJ.DCCODE
+					AND AJ_APPRREQUEST.ORGANIZE      	= SY_PROCESSTEMP_AJ.ORGANIZE
+					AND AJ_APPRREQUEST.DOCDT         	= SY_PROCESSTEMP_AJ.DOCDT
+					AND AJ_APPRREQUEST.DOCNO         	= SY_PROCESSTEMP_AJ.DOCNO
+					AND SY_PROCESSTEMP_AJ.PROCESSFLAG 	= 'Y'
+				WHERE 1 = 1
+					AND AJ_APPRREQUEST.APPROVALREQDT = #{approvalReauestDt}
+					AND AJ_APPRREQUEST.APPROVALREQNO = #{approvalReauestNo}
+				GROUP BY SY_PROCESSTEMP_AJ.ORDERTYPE, SY_PROCESSTEMP_AJ.IOTYPE, SY_PROCESSTEMP_AJ.DCCODE
+			)
+		PIVOT
+			(
+				SUM(AMT)
+				FOR DCCODE IN ( ${multiDccode} )
+			)
+		ORDER BY IOTYPENAME
+	</select>
+
+	<select id="selectElecForm1Cont2" resultType="map">
+		 SELECT /* [cmElecService.sqlx][selectElecForm1Cont2][재고 감모 승인요청서 (센터) 수불오차 전자결재로 올려야 하는 문서조회][JangGwangSeok][2025.09.22] */
+			 COUNT(DISTINCT SY_PROCESSTEMP_AJ.SKU) SKU_CNT
+			,SUM(DECODE(SY_PROCESSTEMP_AJ.IOTYPE,'WD', SY_PROCESSTEMP_AJ.ETCQTY1, 0)) WD_AMT
+			,SUM(DECODE(SY_PROCESSTEMP_AJ.IOTYPE,'DP', SY_PROCESSTEMP_AJ.ETCQTY1, 0)) DP_AMT
+		 FROM AJ_APPRREQUEST
+		 JOIN SY_PROCESSTEMP_AJ ON AJ_APPRREQUEST.APPROVALREQDT = SY_PROCESSTEMP_AJ.LIST_NO
+			 AND AJ_APPRREQUEST.APPROVALREQNO 	= SY_PROCESSTEMP_AJ.BATCH_NO
+		     AND AJ_APPRREQUEST.DCCODE        	= SY_PROCESSTEMP_AJ.DCCODE
+		     AND AJ_APPRREQUEST.ORGANIZE      	= SY_PROCESSTEMP_AJ.ORGANIZE
+		     AND AJ_APPRREQUEST.DOCDT         	= SY_PROCESSTEMP_AJ.DOCDT
+		     AND AJ_APPRREQUEST.DOCNO         	= SY_PROCESSTEMP_AJ.DOCNO
+			 AND SY_PROCESSTEMP_AJ.PROCESSFLAG 	= 'Y'
+		 WHERE 1 = 1
+			 AND AJ_APPRREQUEST.APPROVALREQDT 	= #{approvalReauestDt}
+			 AND AJ_APPRREQUEST.APPROVALREQNO 	= #{approvalReauestNo}
+	</select>
+
+	<select id="selectElecForm2Cont" resultType="map">
+ 		SELECT /* [cmElecService.sqlx][selectElecForm2Cont][재고 감모 승인요청서 (외부창고)  전자결재로 올려야 하는 문서조회][JangGwangSeok][2025.09.22] */
+			 DECODE(SY_PROCESSTEMP_AJ.IOTYPE,'WD',UNISTR('출고'),UNISTR('입고'))  		        AS IOTYPE
+			,SY_PROCESSTEMP_AJ.SKU                                                	        AS SKU
+			,MS_SKU.DESCRIPTION                                                   	        AS SKUNAME
+			,NVL(FN_GETPARAMETER('SELECT',SY_PROCESSTEMP_AJ.OTHER03,'CONVSERIALNO',''), '') AS BLNO
+			,SY_PROCESSTEMP_AJ.UOM                                                 	        AS UOM
+			,SY_PROCESSTEMP_AJ.ORDERQTY                                           	        AS TRANQTY
+			,SY_PROCESSTEMP_AJ.ETCQTY1                                             	        AS AMT
+			,ROUND(SY_PROCESSTEMP_AJ.INVOICEQTY,2)                                	        AS WEIGHT
+		FROM AJ_APPRREQUEST
+		JOIN SY_PROCESSTEMP_AJ ON AJ_APPRREQUEST.APPROVALREQDT = SY_PROCESSTEMP_AJ.LIST_NO
+			AND AJ_APPRREQUEST.APPROVALREQNO 	= SY_PROCESSTEMP_AJ.BATCH_NO
+			AND AJ_APPRREQUEST.DCCODE        	= SY_PROCESSTEMP_AJ.DCCODE
+			AND AJ_APPRREQUEST.ORGANIZE      	= SY_PROCESSTEMP_AJ.ORGANIZE
+			AND AJ_APPRREQUEST.DOCDT         	= SY_PROCESSTEMP_AJ.DOCDT
+			AND AJ_APPRREQUEST.DOCNO         	= SY_PROCESSTEMP_AJ.DOCNO
+			AND SY_PROCESSTEMP_AJ.PROCESSFLAG 	= 'Y'
+		JOIN MS_SKU ON MS_SKU.STORERKEY = SY_PROCESSTEMP_AJ.STORERKEY
+			AND MS_SKU.SKU       		= SY_PROCESSTEMP_AJ.SKU
+			AND MS_SKU.DEL_YN    		= 'N'
+		WHERE 1 = 1
+			AND AJ_APPRREQUEST.DEL_YN        = 'N'
+			AND AJ_APPRREQUEST.APPROVALREQDT = #{approvalReauestDt}
+			AND AJ_APPRREQUEST.APPROVALREQNO = #{approvalReauestNo}
+	</select>
+
+	<select id="selectElecForm3Cont" resultType="map">
+ 		SELECT /* [cmElecService.sqlx][selectElecForm3Cont][매각 출고 승인요청서 (외부창고)  전자결재로 올려야 하는 문서조회][JihoPark][2025.10.27] */
+               SY_PROCESSTEMP_AJ.SKU                                                          AS SKU
+             , MS_SKU.DESCRIPTION                                                             AS SKUNAME
+             , NVL(FN_GETPARAMETER('SELECT',SY_PROCESSTEMP_AJ.OTHER03,'CONVSERIALNO',''), '') AS BLNO
+             , SY_PROCESSTEMP_AJ.UOM                                                          AS UOM
+             , SY_PROCESSTEMP_AJ.ORDERQTY                                                     AS TRANQTY
+             , AJ_INPLAN.OTHER04 || ' / ' || MS_COST.DESCRIPTION                              AS COSTCDNAME
+             , SY_PROCESSTEMP_AJ.ETCQTY1                                                      AS AMT
+             , AJ_INPLAN.DEPOSIT_AMOUNT                                                       AS DEPOSIT_AMOUNT
+             , AJ_INPLAN.WRBTR                                                                AS WRBTR
+		FROM AJ_APPRREQUEST
+		JOIN SY_PROCESSTEMP_AJ ON AJ_APPRREQUEST.APPROVALREQDT  = SY_PROCESSTEMP_AJ.LIST_NO
+			                  AND AJ_APPRREQUEST.APPROVALREQNO  = SY_PROCESSTEMP_AJ.BATCH_NO
+			                  AND AJ_APPRREQUEST.DCCODE         = SY_PROCESSTEMP_AJ.DCCODE
+			                  AND AJ_APPRREQUEST.ORGANIZE       = SY_PROCESSTEMP_AJ.ORGANIZE
+			                  AND AJ_APPRREQUEST.DOCDT          = SY_PROCESSTEMP_AJ.DOCDT
+			                  AND AJ_APPRREQUEST.DOCNO          = SY_PROCESSTEMP_AJ.DOCNO
+			                  AND SY_PROCESSTEMP_AJ.PROCESSFLAG = 'Y'
+		JOIN AJ_INPLAN ON AJ_APPRREQUEST.DCCODE    = AJ_INPLAN.DCCODE
+                      AND AJ_APPRREQUEST.STORERKEY = AJ_INPLAN.STORERKEY
+                      AND AJ_APPRREQUEST.ORGANIZE  = AJ_INPLAN.ORGANIZE
+                      AND AJ_APPRREQUEST.DOCTYPE   = AJ_INPLAN.DOCTYPE
+                      AND AJ_APPRREQUEST.DOCDT     = AJ_INPLAN.DOCDT
+                      AND AJ_APPRREQUEST.DOCNO     = AJ_INPLAN.DOCNO
+                      AND AJ_APPRREQUEST.SLIPDT    = AJ_INPLAN.SLIPDT
+                      AND AJ_APPRREQUEST.SLIPNO    = AJ_INPLAN.SLIPNO
+                      AND AJ_INPLAN.ORDERTYPE      = 'SARAJ'
+		JOIN MS_SKU ON MS_SKU.STORERKEY = SY_PROCESSTEMP_AJ.STORERKEY
+			       AND MS_SKU.SKU       = SY_PROCESSTEMP_AJ.SKU
+			       AND MS_SKU.DEL_YN    = 'N'
+		LEFT OUTER JOIN MS_COST ON AJ_INPLAN.STORERKEY = MS_COST.STORERKEY
+                               AND AJ_INPLAN.OTHER04   = MS_COST.COSTCODE
+                               AND AJ_INPLAN.SLIPDT <![CDATA[>=]]> MS_COST.FROMDATE
+                               AND AJ_INPLAN.SLIPDT <![CDATA[<=]]> MS_COST.TODATE
+                               AND MS_COST.DEL_YN      = 'N'
+	   WHERE 1 = 1
+         AND AJ_APPRREQUEST.DEL_YN        = 'N'
+         AND AJ_APPRREQUEST.APPROVALREQDT = #{approvalReauestDt}
+         AND AJ_APPRREQUEST.APPROVALREQNO = #{approvalReauestNo}
+	</select>
+
+	<select id="selectCostCd" resultType="map">
+		SELECT /* [cmElecService.sqlx][selectCostCd][재고 폐기 승인요청서(센터) 귀속부서 전자결재로 올려야 하는 문서조회][JangGwangSeok][2025.09.22] */
+			 SY_PROCESSTEMP_AJ.OTHER04 AS COSTCD
+			,MS_COST.DESCRIPTION AS CODECDNAME
+		FROM AJ_APPRREQUEST
+		JOIN SY_PROCESSTEMP_AJ ON AJ_APPRREQUEST.APPROVALREQDT = SY_PROCESSTEMP_AJ.LIST_NO
+			AND AJ_APPRREQUEST.APPROVALREQNO 	= SY_PROCESSTEMP_AJ.BATCH_NO
+			AND AJ_APPRREQUEST.DCCODE        	= SY_PROCESSTEMP_AJ.DCCODE
+			AND AJ_APPRREQUEST.ORGANIZE      	= SY_PROCESSTEMP_AJ.ORGANIZE
+			AND AJ_APPRREQUEST.DOCDT         	= SY_PROCESSTEMP_AJ.DOCDT
+			AND AJ_APPRREQUEST.DOCNO         	= SY_PROCESSTEMP_AJ.DOCNO
+			AND SY_PROCESSTEMP_AJ.PROCESSFLAG 	= 'Y'
+		JOIN MS_COST ON MS_COST.STORERKEY = SY_PROCESSTEMP_AJ.STORERKEY
+			AND MS_COST.COSTCODE  = SY_PROCESSTEMP_AJ.OTHER04
+			AND MS_COST.FROMDATE  <![CDATA[<=]]> SY_PROCESSTEMP_AJ.DOCDT
+			AND MS_COST.TODATE    <![CDATA[>=]]> SY_PROCESSTEMP_AJ.DOCDT
+		WHERE 1 = 1
+			AND AJ_APPRREQUEST.DEL_YN        = 'N'
+			AND AJ_APPRREQUEST.APPROVALREQDT = #{approvalReauestDt}
+			AND AJ_APPRREQUEST.APPROVALREQNO = #{approvalReauestNo}
+		GROUP BY SY_PROCESSTEMP_AJ.OTHER04, MS_COST.DESCRIPTION
+		ORDER BY MS_COST.DESCRIPTION
+	</select>
+
+	<select id="selectElecForm3Cont1" resultType="map">
+		WITH T_FORM AS (
+			/* [cmElecService.sqlx][selectElecForm3Cont1][재고 폐기 승인요청서(센터) 전자결재로 올려야 하는 문서조회][JangGwangSeok][2025.09.22] */
+			SELECT GUBUN
+				  ,CHANNEL
+				  ,CHANNELNAME
+			      ,DISUSETYPE
+			      ,DISUSETYPENAME
+			      ,REASONCODE
+	              ,TO_CHAR(ROW_NUMBER() OVER (ORDER BY CHANNEL)) AS ROW_NUM1
+	              ,TO_CHAR(COUNT(CHANNEL) OVER (PARTITION BY CHANNEL) + 1) AS ROW_CNT1
+	              ,TO_CHAR(ROW_NUMBER() OVER (PARTITION BY CHANNEL, DISUSETYPE ORDER BY DISUSETYPE)) AS ROW_NUM2
+	              ,TO_CHAR(COUNT(DISTINCT REASONCODE) OVER (PARTITION BY CHANNEL, DISUSETYPE))  AS ROW_CNT2
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 0">
+	              ,NVL(COSTCD0, 0)  AS COSTCD0
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 1">
+	              ,NVL(COSTCD1, 0)  AS COSTCD1
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 2">
+	              ,NVL(COSTCD2, 0)  AS COSTCD2
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 3">
+	              ,NVL(COSTCD3, 0)  AS COSTCD3
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 4">
+	              ,NVL(COSTCD4, 0)  AS COSTCD4
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 5">
+	              ,NVL(COSTCD5, 0)  AS COSTCD5
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 6">
+	              ,NVL(COSTCD6, 0)  AS COSTCD6
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 7">
+	              ,NVL(COSTCD7, 0)  AS COSTCD7
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 8">
+	              ,NVL(COSTCD8, 0)  AS COSTCD8
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 9">
+	              ,NVL(COSTCD9, 0)  AS COSTCD9
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 10">
+	              ,NVL(COSTCD10, 0)  AS COSTCD10
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 11">
+	              ,NVL(COSTCD11, 0)  AS COSTCD11
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 12">
+	              ,NVL(COSTCD12, 0)  AS COSTCD12
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 13">
+	              ,NVL(COSTCD13, 0)  AS COSTCD13
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 14">
+	              ,NVL(COSTCD14, 0)  AS COSTCD14
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 15">
+	              ,NVL(COSTCD15, 0)  AS COSTCD15
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 16">
+	              ,NVL(COSTCD16, 0)  AS COSTCD16
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 17">
+	              ,NVL(COSTCD17, 0)  AS COSTCD17
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 18">
+	              ,NVL(COSTCD18, 0)  AS COSTCD18
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 19">
+	              ,NVL(COSTCD19, 0)  AS COSTCD19
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 20">
+	              ,NVL(COSTCD20, 0)  AS COSTCD20
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 21">
+	              ,NVL(COSTCD21, 0)  AS COSTCD21
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 22">
+	              ,NVL(COSTCD22, 0)  AS COSTCD22
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 23">
+	              ,NVL(COSTCD23, 0)  AS COSTCD23
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 24">
+	              ,NVL(COSTCD24, 0)  AS COSTCD24
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 25">
+	              ,NVL(COSTCD25, 0)  AS COSTCD25
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 26">
+	              ,NVL(COSTCD26, 0)  AS COSTCD26
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 27">
+	              ,NVL(COSTCD27, 0)  AS COSTCD27
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 28">
+	              ,NVL(COSTCD28, 0)  AS COSTCD28
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 29">
+	              ,NVL(COSTCD29, 0)  AS COSTCD29
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 30">
+	              ,NVL(COSTCD30, 0)  AS COSTCD30
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 31">
+	              ,NVL(COSTCD31, 0)  AS COSTCD31
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 32">
+	              ,NVL(COSTCD32, 0)  AS COSTCD32
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 33">
+	              ,NVL(COSTCD33, 0)  AS COSTCD33
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 34">
+	              ,NVL(COSTCD34, 0)  AS COSTCD34
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 35">
+	              ,NVL(COSTCD35, 0)  AS COSTCD35
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 36">
+	              ,NVL(COSTCD36, 0)  AS COSTCD36
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 37">
+	              ,NVL(COSTCD37, 0)  AS COSTCD37
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 38">
+	              ,NVL(COSTCD38, 0)  AS COSTCD38
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 39">
+	              ,NVL(COSTCD39, 0)  AS COSTCD39
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 40">
+	              ,NVL(COSTCD40, 0)  AS COSTCD40
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 41">
+	              ,NVL(COSTCD41, 0)  AS COSTCD41
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 42">
+	              ,NVL(COSTCD42, 0)  AS COSTCD42
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 43">
+	              ,NVL(COSTCD43, 0)  AS COSTCD43
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 44">
+	              ,NVL(COSTCD44, 0)  AS COSTCD44
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 45">
+	              ,NVL(COSTCD45, 0)  AS COSTCD45
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 46">
+	              ,NVL(COSTCD46, 0)  AS COSTCD46
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 47">
+	              ,NVL(COSTCD47, 0)  AS COSTCD47
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 48">
+	              ,NVL(COSTCD48, 0)  AS COSTCD48
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 49">
+	              ,NVL(COSTCD49, 0)  AS COSTCD49
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 50">
+	              ,NVL(COSTCD50, 0)  AS COSTCD50
+	              </if>
+			FROM (
+			SELECT
+			      '30'                             AS GUBUN
+			      ,CASE WHEN INSTR(SY_PROCESSTEMP_AJ.LOC, 'RTN-') > 0 THEN UNISTR('02') ELSE UNISTR('01') END AS CHANNEL
+			      ,FN_CODEDESCR(SY_PROCESSTEMP_AJ.STORERKEY, 'PUTAWAYTYPE',CASE WHEN INSTR(SY_PROCESSTEMP_AJ.LOC, 'RTN-') >0 THEN UNISTR('2') ELSE UNISTR('1') END) AS CHANNELNAME
+	              ,CASE WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD0} THEN 'COSTCD0'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD1} THEN 'COSTCD1'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD2} THEN 'COSTCD2'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD3} THEN 'COSTCD3'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD4} THEN 'COSTCD4'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD5} THEN 'COSTCD5'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD6} THEN 'COSTCD6'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD7} THEN 'COSTCD7'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD8} THEN 'COSTCD8'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD9} THEN 'COSTCD9'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD10} THEN 'COSTCD10'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD11} THEN 'COSTCD11'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD12} THEN 'COSTCD12'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD13} THEN 'COSTCD13'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD14} THEN 'COSTCD14'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD15} THEN 'COSTCD15'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD16} THEN 'COSTCD16'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD17} THEN 'COSTCD17'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD18} THEN 'COSTCD18'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD19} THEN 'COSTCD19'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD20} THEN 'COSTCD20'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD21} THEN 'COSTCD21'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD22} THEN 'COSTCD22'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD23} THEN 'COSTCD23'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD24} THEN 'COSTCD24'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD25} THEN 'COSTCD25'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD26} THEN 'COSTCD26'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD27} THEN 'COSTCD27'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD28} THEN 'COSTCD28'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD29} THEN 'COSTCD29'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD30} THEN 'COSTCD30'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD31} THEN 'COSTCD31'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD32} THEN 'COSTCD32'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD33} THEN 'COSTCD33'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD34} THEN 'COSTCD34'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD35} THEN 'COSTCD35'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD36} THEN 'COSTCD36'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD37} THEN 'COSTCD37'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD38} THEN 'COSTCD38'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD39} THEN 'COSTCD39'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD40} THEN 'COSTCD40'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD41} THEN 'COSTCD41'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD42} THEN 'COSTCD42'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD43} THEN 'COSTCD43'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD44} THEN 'COSTCD44'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD45} THEN 'COSTCD45'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD46} THEN 'COSTCD46'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD47} THEN 'COSTCD47'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD48} THEN 'COSTCD48'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD49} THEN 'COSTCD49'
+	                    WHEN SY_PROCESSTEMP_AJ.OTHER04 = #{COSTCD50} THEN 'COSTCD50'
+	               END AS OTHER01
+			      ,SY_PROCESSTEMP_AJ.OTHER02       AS DISUSETYPE
+			      ,FN_CODEDESCR(SY_PROCESSTEMP_AJ.STORERKEY, 'DISUSETYPE', SY_PROCESSTEMP_AJ.OTHER02)      AS DISUSETYPENAME
+			      ,FN_CODEDESCR(SY_PROCESSTEMP_AJ.STORERKEY, 'REASONCODE_AJ', SY_PROCESSTEMP_AJ.WAVEKEY )  AS REASONCODE
+			      ,SUM(SY_PROCESSTEMP_AJ.INVOICEQTY) AS WEIGHT
+			FROM AJ_APPRREQUEST
+			JOIN SY_PROCESSTEMP_AJ
+			ON   AJ_APPRREQUEST.APPROVALREQDT = SY_PROCESSTEMP_AJ.LIST_NO
+			AND  AJ_APPRREQUEST.APPROVALREQNO = SY_PROCESSTEMP_AJ.BATCH_NO
+			AND  AJ_APPRREQUEST.DCCODE        = SY_PROCESSTEMP_AJ.DCCODE
+			AND  AJ_APPRREQUEST.ORGANIZE      = SY_PROCESSTEMP_AJ.ORGANIZE
+			AND  AJ_APPRREQUEST.DOCDT         = SY_PROCESSTEMP_AJ.DOCDT
+			AND  AJ_APPRREQUEST.DOCNO         = SY_PROCESSTEMP_AJ.DOCNO
+			AND  SY_PROCESSTEMP_AJ.PROCESSFLAG = 'Y'
+			JOIN MS_COST
+			ON   MS_COST.STORERKEY = SY_PROCESSTEMP_AJ.STORERKEY
+			AND  MS_COST.COSTCODE  = SY_PROCESSTEMP_AJ.OTHER04
+			AND  MS_COST.FROMDATE  <![CDATA[<=]]> SY_PROCESSTEMP_AJ.DOCDT
+			AND  MS_COST.TODATE    <![CDATA[>=]]> SY_PROCESSTEMP_AJ.DOCDT
+			WHERE 1=1
+			AND   AJ_APPRREQUEST.DEL_YN        = 'N'
+			AND   AJ_APPRREQUEST.APPROVALREQDT = #{approvalReauestDt}
+			AND   AJ_APPRREQUEST.APPROVALREQNO = #{approvalReauestNo}
+			GROUP BY SY_PROCESSTEMP_AJ.OTHER04, SY_PROCESSTEMP_AJ.OTHER02, SY_PROCESSTEMP_AJ.STORERKEY,
+	                 SY_PROCESSTEMP_AJ.LOC, SY_PROCESSTEMP_AJ.WAVEKEY
+			)
+			PIVOT
+			        (
+			            SUM(WEIGHT)
+			            FOR OTHER01 IN (
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 0">
+	                                       'COSTCD0'  AS COSTCD0
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 1">
+	                                      ,'COSTCD1'  AS COSTCD1
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 2">
+	                                      ,'COSTCD2'  AS COSTCD2
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 3">
+	                                      ,'COSTCD3'  AS COSTCD3
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 4">
+	                                      ,'COSTCD4'  AS COSTCD4
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 5">
+	                                      ,'COSTCD5'  AS COSTCD5
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 6">
+	                                      ,'COSTCD6'  AS COSTCD6
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 7">
+	                                      ,'COSTCD7'  AS COSTCD7
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 8">
+	                                      ,'COSTCD8'  AS COSTCD8
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 9">
+	                                      ,'COSTCD9'  AS COSTCD9
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 10">
+	                                      ,'COSTCD10'  AS COSTCD10
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 11">
+	                                      ,'COSTCD11'  AS COSTCD11
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 12">
+	                                      ,'COSTCD12'  AS COSTCD12
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 13">
+	                                      ,'COSTCD13'  AS COSTCD13
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 14">
+	                                      ,'COSTCD14'  AS COSTCD14
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 15">
+	                                      ,'COSTCD15'  AS COSTCD15
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 16">
+	                                      ,'COSTCD16'  AS COSTCD16
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 17">
+	                                      ,'COSTCD17'  AS COSTCD17
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 18">
+	                                      ,'COSTCD18'  AS COSTCD18
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 19">
+	                                      ,'COSTCD19'  AS COSTCD19
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 20">
+	                                      ,'COSTCD20'  AS COSTCD20
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 21">
+	                                      ,'COSTCD21'  AS COSTCD21
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 22">
+	                                      ,'COSTCD22'  AS COSTCD22
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 23">
+	                                      ,'COSTCD23'  AS COSTCD23
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 24">
+	                                      ,'COSTCD24'  AS COSTCD24
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 25">
+	                                      ,'COSTCD25'  AS COSTCD25
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 26">
+	                                      ,'COSTCD26'  AS COSTCD26
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 27">
+	                                      ,'COSTCD27'  AS COSTCD27
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 28">
+	                                      ,'COSTCD28'  AS COSTCD28
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 29">
+	                                      ,'COSTCD29'  AS COSTCD29
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 30">
+	                                      ,'COSTCD30'  AS COSTCD30
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 31">
+	                                      ,'COSTCD31'  AS COSTCD31
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 32">
+	                                      ,'COSTCD32'  AS COSTCD32
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 33">
+	                                      ,'COSTCD33'  AS COSTCD33
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 34">
+	                                      ,'COSTCD34'  AS COSTCD34
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 35">
+	                                      ,'COSTCD35'  AS COSTCD35
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 36">
+	                                      ,'COSTCD36'  AS COSTCD36
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 37">
+	                                      ,'COSTCD37'  AS COSTCD37
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 38">
+	                                      ,'COSTCD38'  AS COSTCD38
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 39">
+	                                      ,'COSTCD39'  AS COSTCD39
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 40">
+	                                      ,'COSTCD40'  AS COSTCD40
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 41">
+	                                      ,'COSTCD41'  AS COSTCD41
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 42">
+	                                      ,'COSTCD42'  AS COSTCD42
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 43">
+	                                      ,'COSTCD43'  AS COSTCD43
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 44">
+	                                      ,'COSTCD44'  AS COSTCD44
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 45">
+	                                      ,'COSTCD45'  AS COSTCD45
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 46">
+	                                      ,'COSTCD46'  AS COSTCD46
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 47">
+	                                      ,'COSTCD47'  AS COSTCD47
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 48">
+	                                      ,'COSTCD48'  AS COSTCD48
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 49">
+	                                      ,'COSTCD49'  AS COSTCD49
+	                                      </if>
+	                                      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 50">
+	                                      ,'COSTCD50'  AS COSTCD50
+	                                      </if>
+	                                    )
+			        )
+			ORDER BY CHANNEL, DISUSETYPE )
+
+			SELECT GUBUN
+				  ,CHANNEL
+				  ,CHANNELNAME
+			      ,DISUSETYPE
+			      ,DISUSETYPENAME
+			      ,REASONCODE
+	              ,ROW_NUM1
+	              ,ROW_CNT1
+	              ,ROW_NUM2
+	              ,ROW_CNT2
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 0">
+	              ,COSTCD0
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 1">
+	              ,COSTCD1
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 2">
+	              ,COSTCD2
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 3">
+	              ,COSTCD3
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 4">
+	              ,COSTCD4
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 5">
+	              ,COSTCD5
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 6">
+	              ,COSTCD6
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 7">
+	              ,COSTCD7
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 8">
+	              ,COSTCD8
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 9">
+	              ,COSTCD9
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 10">
+	              ,COSTCD10
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 11">
+	              ,COSTCD11
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 12">
+	              ,COSTCD12
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 13">
+	              ,COSTCD13
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 14">
+	              ,COSTCD14
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 15">
+	              ,COSTCD15
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 16">
+	              ,COSTCD16
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 17">
+	              ,COSTCD17
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 18">
+	              ,COSTCD18
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 19">
+	              ,COSTCD19
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 20">
+	              ,COSTCD20
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 21">
+	              ,COSTCD21
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 22">
+	              ,COSTCD22
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 23">
+	              ,COSTCD23
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 24">
+	              ,COSTCD24
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 25">
+	              ,COSTCD25
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 26">
+	              ,COSTCD26
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 27">
+	              ,COSTCD27
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 28">
+	              ,COSTCD28
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 29">
+	              ,COSTCD29
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 30">
+	              ,COSTCD30
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 31">
+	              ,COSTCD31
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 32">
+	              ,COSTCD32
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 33">
+	              ,COSTCD33
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 34">
+	              ,COSTCD34
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 35">
+	              ,COSTCD35
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 36">
+	              ,COSTCD36
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 37">
+	              ,COSTCD37
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 38">
+	              ,COSTCD38
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 39">
+	              ,COSTCD39
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 40">
+	              ,COSTCD40
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 41">
+	              ,COSTCD41
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 42">
+	              ,COSTCD42
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 43">
+	              ,COSTCD43
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 44">
+	              ,COSTCD44
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 45">
+	              ,COSTCD45
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 46">
+	              ,COSTCD46
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 47">
+	              ,COSTCD47
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 48">
+	              ,COSTCD48
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 49">
+	              ,COSTCD49
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 50">
+	              ,COSTCD50
+	              </if>
+			FROM (
+			SELECT GUBUN
+			      ,CHANNEL
+			      ,CHANNELNAME
+			      ,DISUSETYPE
+			      ,DISUSETYPENAME
+			      ,REASONCODE
+	              ,ROW_NUM1
+	              ,ROW_CNT1
+	              ,ROW_NUM2
+	              ,ROW_CNT2
+			      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 0">
+	              ,NVL(COSTCD0, 0)  AS COSTCD0
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 1">
+	              ,NVL(COSTCD1, 0)  AS COSTCD1
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 2">
+	              ,NVL(COSTCD2, 0)  AS COSTCD2
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 3">
+	              ,NVL(COSTCD3, 0)  AS COSTCD3
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 4">
+	              ,NVL(COSTCD4, 0)  AS COSTCD4
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 5">
+	              ,NVL(COSTCD5, 0)  AS COSTCD5
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 6">
+	              ,NVL(COSTCD6, 0)  AS COSTCD6
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 7">
+	              ,NVL(COSTCD7, 0)  AS COSTCD7
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 8">
+	              ,NVL(COSTCD8, 0)  AS COSTCD8
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 9">
+	              ,NVL(COSTCD9, 0)  AS COSTCD9
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 10">
+	              ,NVL(COSTCD10, 0)  AS COSTCD10
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 11">
+	              ,NVL(COSTCD11, 0)  AS COSTCD11
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 12">
+	              ,NVL(COSTCD12, 0)  AS COSTCD12
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 13">
+	              ,NVL(COSTCD13, 0)  AS COSTCD13
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 14">
+	              ,NVL(COSTCD14, 0)  AS COSTCD14
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 15">
+	              ,NVL(COSTCD15, 0)  AS COSTCD15
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 16">
+	              ,NVL(COSTCD16, 0)  AS COSTCD16
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 17">
+	              ,NVL(COSTCD17, 0)  AS COSTCD17
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 18">
+	              ,NVL(COSTCD18, 0)  AS COSTCD18
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 19">
+	              ,NVL(COSTCD19, 0)  AS COSTCD19
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 20">
+	              ,NVL(COSTCD20, 0)  AS COSTCD20
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 21">
+	              ,NVL(COSTCD21, 0)  AS COSTCD21
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 22">
+	              ,NVL(COSTCD22, 0)  AS COSTCD22
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 23">
+	              ,NVL(COSTCD23, 0)  AS COSTCD23
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 24">
+	              ,NVL(COSTCD24, 0)  AS COSTCD24
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 25">
+	              ,NVL(COSTCD25, 0)  AS COSTCD25
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 26">
+	              ,NVL(COSTCD26, 0)  AS COSTCD26
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 27">
+	              ,NVL(COSTCD27, 0)  AS COSTCD27
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 28">
+	              ,NVL(COSTCD28, 0)  AS COSTCD28
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 29">
+	              ,NVL(COSTCD29, 0)  AS COSTCD29
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 30">
+	              ,NVL(COSTCD30, 0)  AS COSTCD30
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 31">
+	              ,NVL(COSTCD31, 0)  AS COSTCD31
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 32">
+	              ,NVL(COSTCD32, 0)  AS COSTCD32
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 33">
+	              ,NVL(COSTCD33, 0)  AS COSTCD33
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 34">
+	              ,NVL(COSTCD34, 0)  AS COSTCD34
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 35">
+	              ,NVL(COSTCD35, 0)  AS COSTCD35
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 36">
+	              ,NVL(COSTCD36, 0)  AS COSTCD36
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 37">
+	              ,NVL(COSTCD37, 0)  AS COSTCD37
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 38">
+	              ,NVL(COSTCD38, 0)  AS COSTCD38
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 39">
+	              ,NVL(COSTCD39, 0)  AS COSTCD39
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 40">
+	              ,NVL(COSTCD40, 0)  AS COSTCD40
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 41">
+	              ,NVL(COSTCD41, 0)  AS COSTCD41
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 42">
+	              ,NVL(COSTCD42, 0)  AS COSTCD42
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 43">
+	              ,NVL(COSTCD43, 0)  AS COSTCD43
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 44">
+	              ,NVL(COSTCD44, 0)  AS COSTCD44
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 45">
+	              ,NVL(COSTCD45, 0)  AS COSTCD45
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 46">
+	              ,NVL(COSTCD46, 0)  AS COSTCD46
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 47">
+	              ,NVL(COSTCD47, 0)  AS COSTCD47
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 48">
+	              ,NVL(COSTCD48, 0)  AS COSTCD48
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 49">
+	              ,NVL(COSTCD49, 0)  AS COSTCD49
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 50">
+	              ,NVL(COSTCD50, 0)  AS COSTCD50
+	              </if>
+			FROM  T_FORM
+			UNION ALL
+			SELECT
+			      '50'                 AS GUBUN
+			      ,CHANNEL
+			      ,CHANNELNAME
+			      ,UNISTR('')          AS DISUSETYPE
+			      ,UNISTR('')          AS DISUSETYPENAME
+			      ,UNISTR('')          AS REASONCODE
+	              ,UNISTR('')          AS ROW_NUM1
+	              ,UNISTR('')          AS ROW_CNT1
+	              ,UNISTR('')          AS ROW_NUM2
+	              ,UNISTR('')          AS ROW_CNT2
+			      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 0">
+	              ,SUM(NVL(COSTCD0, 0))  AS COSTCD0
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 1">
+	              ,SUM(NVL(COSTCD1, 0))  AS COSTCD1
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 2">
+	              ,SUM(NVL(COSTCD2, 0))  AS COSTCD2
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 3">
+	              ,SUM(NVL(COSTCD3, 0))  AS COSTCD3
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 4">
+	              ,SUM(NVL(COSTCD4, 0))  AS COSTCD4
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 5">
+	              ,SUM(NVL(COSTCD5, 0))  AS COSTCD5
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 6">
+	              ,SUM(NVL(COSTCD6, 0))  AS COSTCD6
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 7">
+	              ,SUM(NVL(COSTCD7, 0))  AS COSTCD7
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 8">
+	              ,SUM(NVL(COSTCD8, 0))  AS COSTCD8
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 9">
+	              ,SUM(NVL(COSTCD9, 0))  AS COSTCD9
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 10">
+	              ,SUM(NVL(COSTCD10, 0))  AS COSTCD10
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 11">
+	              ,SUM(NVL(COSTCD11, 0))  AS COSTCD11
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 12">
+	              ,SUM(NVL(COSTCD12, 0))  AS COSTCD12
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 13">
+	              ,SUM(NVL(COSTCD13, 0))  AS COSTCD13
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 14">
+	              ,SUM(NVL(COSTCD14, 0))  AS COSTCD14
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 15">
+	              ,SUM(NVL(COSTCD15, 0))  AS COSTCD15
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 16">
+	              ,SUM(NVL(COSTCD16, 0))  AS COSTCD16
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 17">
+	              ,SUM(NVL(COSTCD17, 0))  AS COSTCD17
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 18">
+	              ,SUM(NVL(COSTCD18, 0))  AS COSTCD18
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 19">
+	              ,SUM(NVL(COSTCD19, 0))  AS COSTCD19
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 20">
+	              ,SUM(NVL(COSTCD20, 0))  AS COSTCD20
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 21">
+	              ,SUM(NVL(COSTCD21, 0))  AS COSTCD21
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 22">
+	              ,SUM(NVL(COSTCD22, 0))  AS COSTCD22
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 23">
+	              ,SUM(NVL(COSTCD23, 0))  AS COSTCD23
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 24">
+	              ,SUM(NVL(COSTCD24, 0))  AS COSTCD24
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 25">
+	              ,SUM(NVL(COSTCD25, 0))  AS COSTCD25
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 26">
+	              ,SUM(NVL(COSTCD26, 0))  AS COSTCD26
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 27">
+	              ,SUM(NVL(COSTCD27, 0))  AS COSTCD27
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 28">
+	              ,SUM(NVL(COSTCD28, 0))  AS COSTCD28
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 29">
+	              ,SUM(NVL(COSTCD29, 0))  AS COSTCD29
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 30">
+	              ,SUM(NVL(COSTCD30, 0))  AS COSTCD30
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 31">
+	              ,SUM(NVL(COSTCD31, 0))  AS COSTCD31
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 32">
+	              ,SUM(NVL(COSTCD32, 0))  AS COSTCD32
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 33">
+	              ,SUM(NVL(COSTCD33, 0))  AS COSTCD33
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 34">
+	              ,SUM(NVL(COSTCD34, 0))  AS COSTCD34
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 35">
+	              ,SUM(NVL(COSTCD35, 0))  AS COSTCD35
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 36">
+	              ,SUM(NVL(COSTCD36, 0))  AS COSTCD36
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 37">
+	              ,SUM(NVL(COSTCD37, 0))  AS COSTCD37
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 38">
+	              ,SUM(NVL(COSTCD38, 0))  AS COSTCD38
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 39">
+	              ,SUM(NVL(COSTCD39, 0))  AS COSTCD39
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 40">
+	              ,SUM(NVL(COSTCD40, 0))  AS COSTCD40
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 41">
+	              ,SUM(NVL(COSTCD41, 0))  AS COSTCD41
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 42">
+	              ,SUM(NVL(COSTCD42, 0))  AS COSTCD42
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 43">
+	              ,SUM(NVL(COSTCD43, 0))  AS COSTCD43
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 44">
+	              ,SUM(NVL(COSTCD44, 0))  AS COSTCD44
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 45">
+	              ,SUM(NVL(COSTCD45, 0))  AS COSTCD45
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 46">
+	              ,SUM(NVL(COSTCD46, 0))  AS COSTCD46
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 47">
+	              ,SUM(NVL(COSTCD47, 0))  AS COSTCD47
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 48">
+	              ,SUM(NVL(COSTCD48, 0))  AS COSTCD48
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 49">
+	              ,SUM(NVL(COSTCD49, 0))  AS COSTCD49
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 50">
+	              ,SUM(NVL(COSTCD50, 0))  AS COSTCD50
+	              </if>
+			  FROM T_FORM
+			GROUP BY CHANNEL, CHANNELNAME
+			UNION ALL
+			SELECT
+			      '70'                 AS GUBUN
+			      ,CHANNEL
+			      ,CHANNELNAME
+			      ,UNISTR('')          AS DISUSETYPE
+			      ,UNISTR('')          AS DISUSETYPENAME
+			      ,UNISTR('')          AS REASONCODE
+	              ,UNISTR('')          AS ROW_NUM1
+	              ,UNISTR('')          AS ROW_CNT1
+	              ,UNISTR('')          AS ROW_NUM2
+	              ,UNISTR('')          AS ROW_CNT2
+			      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 0">
+	              ,SUM(NVL(COSTCD0, 0))  AS COSTCD0
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 1">
+	              ,SUM(NVL(COSTCD1, 0))  AS COSTCD1
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 2">
+	              ,SUM(NVL(COSTCD2, 0))  AS COSTCD2
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 3">
+	              ,SUM(NVL(COSTCD3, 0))  AS COSTCD3
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 4">
+	              ,SUM(NVL(COSTCD4, 0))  AS COSTCD4
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 5">
+	              ,SUM(NVL(COSTCD5, 0))  AS COSTCD5
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 6">
+	              ,SUM(NVL(COSTCD6, 0))  AS COSTCD6
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 7">
+	              ,SUM(NVL(COSTCD7, 0))  AS COSTCD7
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 8">
+	              ,SUM(NVL(COSTCD8, 0))  AS COSTCD8
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 9">
+	              ,SUM(NVL(COSTCD9, 0))  AS COSTCD9
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 10">
+	              ,SUM(NVL(COSTCD10, 0))  AS COSTCD10
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 11">
+	              ,SUM(NVL(COSTCD11, 0))  AS COSTCD11
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 12">
+	              ,SUM(NVL(COSTCD12, 0))  AS COSTCD12
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 13">
+	              ,SUM(NVL(COSTCD13, 0))  AS COSTCD13
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 14">
+	              ,SUM(NVL(COSTCD14, 0))  AS COSTCD14
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 15">
+	              ,SUM(NVL(COSTCD15, 0))  AS COSTCD15
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 16">
+	              ,SUM(NVL(COSTCD16, 0))  AS COSTCD16
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 17">
+	              ,SUM(NVL(COSTCD17, 0))  AS COSTCD17
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 18">
+	              ,SUM(NVL(COSTCD18, 0))  AS COSTCD18
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 19">
+	              ,SUM(NVL(COSTCD19, 0))  AS COSTCD19
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 20">
+	              ,SUM(NVL(COSTCD20, 0))  AS COSTCD20
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 21">
+	              ,SUM(NVL(COSTCD21, 0))  AS COSTCD21
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 22">
+	              ,SUM(NVL(COSTCD22, 0))  AS COSTCD22
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 23">
+	              ,SUM(NVL(COSTCD23, 0))  AS COSTCD23
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 24">
+	              ,SUM(NVL(COSTCD24, 0))  AS COSTCD24
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 25">
+	              ,SUM(NVL(COSTCD25, 0))  AS COSTCD25
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 26">
+	              ,SUM(NVL(COSTCD26, 0))  AS COSTCD26
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 27">
+	              ,SUM(NVL(COSTCD27, 0))  AS COSTCD27
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 28">
+	              ,SUM(NVL(COSTCD28, 0))  AS COSTCD28
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 29">
+	              ,SUM(NVL(COSTCD29, 0))  AS COSTCD29
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 30">
+	              ,SUM(NVL(COSTCD30, 0))  AS COSTCD30
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 31">
+	              ,SUM(NVL(COSTCD31, 0))  AS COSTCD31
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 32">
+	              ,SUM(NVL(COSTCD32, 0))  AS COSTCD32
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 33">
+	              ,SUM(NVL(COSTCD33, 0))  AS COSTCD33
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 34">
+	              ,SUM(NVL(COSTCD34, 0))  AS COSTCD34
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 35">
+	              ,SUM(NVL(COSTCD35, 0))  AS COSTCD35
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 36">
+	              ,SUM(NVL(COSTCD36, 0))  AS COSTCD36
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 37">
+	              ,SUM(NVL(COSTCD37, 0))  AS COSTCD37
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 38">
+	              ,SUM(NVL(COSTCD38, 0))  AS COSTCD38
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 39">
+	              ,SUM(NVL(COSTCD39, 0))  AS COSTCD39
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 40">
+	              ,SUM(NVL(COSTCD40, 0))  AS COSTCD40
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 41">
+	              ,SUM(NVL(COSTCD41, 0))  AS COSTCD41
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 42">
+	              ,SUM(NVL(COSTCD42, 0))  AS COSTCD42
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 43">
+	              ,SUM(NVL(COSTCD43, 0))  AS COSTCD43
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 44">
+	              ,SUM(NVL(COSTCD44, 0))  AS COSTCD44
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 45">
+	              ,SUM(NVL(COSTCD45, 0))  AS COSTCD45
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 46">
+	              ,SUM(NVL(COSTCD46, 0))  AS COSTCD46
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 47">
+	              ,SUM(NVL(COSTCD47, 0))  AS COSTCD47
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 48">
+	              ,SUM(NVL(COSTCD48, 0))  AS COSTCD48
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 49">
+	              ,SUM(NVL(COSTCD49, 0))  AS COSTCD49
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 50">
+	              ,SUM(NVL(COSTCD50, 0))  AS COSTCD50
+	              </if>
+			  FROM T_FORM
+			GROUP BY CHANNEL ,CHANNELNAME
+			UNION ALL
+			SELECT
+			      '99'                 AS GUBUN
+			      ,UNISTR('')          AS CHANNEL
+			      ,UNISTR('')          AS CHANNELNAME
+			      ,UNISTR('')          AS DISUSETYPE
+			      ,UNISTR('')          AS DISUSETYPENAME
+			      ,UNISTR('')          AS REASONCODE
+	              ,UNISTR('')          AS ROW_NUM1
+	              ,UNISTR('')          AS ROW_CNT1
+	              ,UNISTR('')          AS ROW_NUM2
+	              ,UNISTR('')          AS ROW_CNT2
+			      <if test="CUSTCD_CNT != null and CUSTCD_CNT > 0">
+	              ,SUM(NVL(COSTCD0, 0))  AS COSTCD0
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 1">
+	              ,SUM(NVL(COSTCD1, 0))  AS COSTCD1
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 2">
+	              ,SUM(NVL(COSTCD2, 0))  AS COSTCD2
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 3">
+	              ,SUM(NVL(COSTCD3, 0))  AS COSTCD3
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 4">
+	              ,SUM(NVL(COSTCD4, 0))  AS COSTCD4
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 5">
+	              ,SUM(NVL(COSTCD5, 0))  AS COSTCD5
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 6">
+	              ,SUM(NVL(COSTCD6, 0))  AS COSTCD6
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 7">
+	              ,SUM(NVL(COSTCD7, 0))  AS COSTCD7
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 8">
+	              ,SUM(NVL(COSTCD8, 0))  AS COSTCD8
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 9">
+	              ,SUM(NVL(COSTCD9, 0))  AS COSTCD9
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 10">
+	              ,SUM(NVL(COSTCD10, 0))  AS COSTCD10
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 11">
+	              ,SUM(NVL(COSTCD11, 0))  AS COSTCD11
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 12">
+	              ,SUM(NVL(COSTCD12, 0))  AS COSTCD12
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 13">
+	              ,SUM(NVL(COSTCD13, 0))  AS COSTCD13
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 14">
+	              ,SUM(NVL(COSTCD14, 0))  AS COSTCD14
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 15">
+	              ,SUM(NVL(COSTCD15, 0))  AS COSTCD15
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 16">
+	              ,SUM(NVL(COSTCD16, 0))  AS COSTCD16
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 17">
+	              ,SUM(NVL(COSTCD17, 0))  AS COSTCD17
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 18">
+	              ,SUM(NVL(COSTCD18, 0))  AS COSTCD18
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 19">
+	              ,SUM(NVL(COSTCD19, 0))  AS COSTCD19
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 20">
+	              ,SUM(NVL(COSTCD20, 0))  AS COSTCD20
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 21">
+	              ,SUM(NVL(COSTCD21, 0))  AS COSTCD21
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 22">
+	              ,SUM(NVL(COSTCD22, 0))  AS COSTCD22
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 23">
+	              ,SUM(NVL(COSTCD23, 0))  AS COSTCD23
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 24">
+	              ,SUM(NVL(COSTCD24, 0))  AS COSTCD24
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 25">
+	              ,SUM(NVL(COSTCD25, 0))  AS COSTCD25
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 26">
+	              ,SUM(NVL(COSTCD26, 0))  AS COSTCD26
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 27">
+	              ,SUM(NVL(COSTCD27, 0))  AS COSTCD27
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 28">
+	              ,SUM(NVL(COSTCD28, 0))  AS COSTCD28
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 29">
+	              ,SUM(NVL(COSTCD29, 0))  AS COSTCD29
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 30">
+	              ,SUM(NVL(COSTCD30, 0))  AS COSTCD30
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 31">
+	              ,SUM(NVL(COSTCD31, 0))  AS COSTCD31
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 32">
+	              ,SUM(NVL(COSTCD32, 0))  AS COSTCD32
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 33">
+	              ,SUM(NVL(COSTCD33, 0))  AS COSTCD33
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 34">
+	              ,SUM(NVL(COSTCD34, 0))  AS COSTCD34
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 35">
+	              ,SUM(NVL(COSTCD35, 0))  AS COSTCD35
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 36">
+	              ,SUM(NVL(COSTCD36, 0))  AS COSTCD36
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 37">
+	              ,SUM(NVL(COSTCD37, 0))  AS COSTCD37
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 38">
+	              ,SUM(NVL(COSTCD38, 0))  AS COSTCD38
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 39">
+	              ,SUM(NVL(COSTCD39, 0))  AS COSTCD39
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 40">
+	              ,SUM(NVL(COSTCD40, 0))  AS COSTCD40
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 41">
+	              ,SUM(NVL(COSTCD41, 0))  AS COSTCD41
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 42">
+	              ,SUM(NVL(COSTCD42, 0))  AS COSTCD42
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 43">
+	              ,SUM(NVL(COSTCD43, 0))  AS COSTCD43
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 44">
+	              ,SUM(NVL(COSTCD44, 0))  AS COSTCD44
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 45">
+	              ,SUM(NVL(COSTCD45, 0))  AS COSTCD45
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 46">
+	              ,SUM(NVL(COSTCD46, 0))  AS COSTCD46
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 47">
+	              ,SUM(NVL(COSTCD47, 0))  AS COSTCD47
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 48">
+	              ,SUM(NVL(COSTCD48, 0))  AS COSTCD48
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 49">
+	              ,SUM(NVL(COSTCD49, 0))  AS COSTCD49
+	              </if>
+	              <if test="CUSTCD_CNT != null and CUSTCD_CNT > 50">
+	              ,SUM(NVL(COSTCD50, 0))  AS COSTCD50
+	              </if>
+			  FROM T_FORM
+			GROUP BY CHANNEL ,CHANNELNAME
+			)
+			ORDER BY CHANNEL, DISUSETYPE, REASONCODE, GUBUN
+	</select>
+
+	<select id="selectElecForm2Cont1" resultType="map">
+		WITH T_FORM AS (
+			/* [cmElecService.sqlx][selectElecForm2Cont1][재고 폐기 승인요청서(KX센터) 전자결재로 올려야 하는 문서조회][JangGwangSeok][2025.09.22] */
+		    SELECT GUBUN
+		           ,DISUSETYPE
+		           ,DISUSETYPENAME
+		           ,DETAILCODE
+		           ,DETAILNAME
+		           ,${COSTCD2}
+		     FROM (
+		    SELECT
+		              '30'                             AS GUBUN
+		              ,SY_PROCESSTEMP_AJ.OTHER04       AS OTHER01
+		              ,SY_PROCESSTEMP_AJ.OTHER02       AS DISUSETYPE
+		              ,FN_CODEDESCR(SY_PROCESSTEMP_AJ.STORERKEY, 'DISUSETYPE', SY_PROCESSTEMP_AJ.OTHER02)      AS DISUSETYPENAME
+		              ,'100'                            AS DETAILCODE
+		              ,'SKU'                            AS DETAILNAME
+		              ,count(distinct SY_PROCESSTEMP_AJ.SKU)           AS DETAIL
+		        FROM AJ_APPRREQUEST
+		        JOIN SY_PROCESSTEMP_AJ
+		        ON   AJ_APPRREQUEST.APPROVALREQDT = SY_PROCESSTEMP_AJ.LIST_NO
+		        AND  AJ_APPRREQUEST.APPROVALREQNO = SY_PROCESSTEMP_AJ.BATCH_NO
+		        AND  AJ_APPRREQUEST.DCCODE        = SY_PROCESSTEMP_AJ.DCCODE
+		        AND  AJ_APPRREQUEST.ORGANIZE      = SY_PROCESSTEMP_AJ.ORGANIZE
+		        AND  AJ_APPRREQUEST.DOCDT         = SY_PROCESSTEMP_AJ.DOCDT
+		        AND  AJ_APPRREQUEST.DOCNO         = SY_PROCESSTEMP_AJ.DOCNO
+		        AND  SY_PROCESSTEMP_AJ.PROCESSFLAG = 'Y'
+		        JOIN MS_COST
+		        ON   MS_COST.STORERKEY = SY_PROCESSTEMP_AJ.STORERKEY
+		        AND  MS_COST.COSTCODE  = SY_PROCESSTEMP_AJ.OTHER04
+				AND  MS_COST.FROMDATE  <![CDATA[<=]]> SY_PROCESSTEMP_AJ.DOCDT
+				AND  MS_COST.TODATE    <![CDATA[>=]]> SY_PROCESSTEMP_AJ.DOCDT
+		        WHERE 1=1
+		        AND   AJ_APPRREQUEST.DEL_YN        = 'N'
+		        AND   AJ_APPRREQUEST.APPROVALREQDT = #{approvalReauestDt}
+				AND   AJ_APPRREQUEST.APPROVALREQNO = #{approvalReauestNo}
+		        group by SY_PROCESSTEMP_AJ.OTHER04  ,SY_PROCESSTEMP_AJ.OTHER02  ,SY_PROCESSTEMP_AJ.STORERKEY
+		    UNION ALL
+		    SELECT
+		              '30'                             AS GUBUN
+		              ,SY_PROCESSTEMP_AJ.OTHER04       AS OTHER01
+		              ,SY_PROCESSTEMP_AJ.OTHER02       AS DISUSETYPE
+		              ,FN_CODEDESCR(SY_PROCESSTEMP_AJ.STORERKEY, 'DISUSETYPE', SY_PROCESSTEMP_AJ.OTHER02)      AS DISUSETYPENAME
+		              ,'200'                         AS DETAILCODE
+		              ,'물량'                        AS DETAILNAME
+		              ,sum(SY_PROCESSTEMP_AJ.INVOICEQTY)           AS DETAIL
+		        FROM AJ_APPRREQUEST
+		        JOIN SY_PROCESSTEMP_AJ
+		        ON   AJ_APPRREQUEST.APPROVALREQDT = SY_PROCESSTEMP_AJ.LIST_NO
+		        AND  AJ_APPRREQUEST.APPROVALREQNO = SY_PROCESSTEMP_AJ.BATCH_NO
+		        AND  AJ_APPRREQUEST.DCCODE        = SY_PROCESSTEMP_AJ.DCCODE
+		        AND  AJ_APPRREQUEST.ORGANIZE      = SY_PROCESSTEMP_AJ.ORGANIZE
+		        AND  AJ_APPRREQUEST.DOCDT         = SY_PROCESSTEMP_AJ.DOCDT
+		        AND  AJ_APPRREQUEST.DOCNO         = SY_PROCESSTEMP_AJ.DOCNO
+		        AND  SY_PROCESSTEMP_AJ.PROCESSFLAG = 'Y'
+		        JOIN MS_COST
+		        ON   MS_COST.STORERKEY = SY_PROCESSTEMP_AJ.STORERKEY
+		        AND  MS_COST.COSTCODE  = SY_PROCESSTEMP_AJ.OTHER04
+				AND  MS_COST.FROMDATE  <![CDATA[<=]]> SY_PROCESSTEMP_AJ.DOCDT
+				AND  MS_COST.TODATE    <![CDATA[>=]]> SY_PROCESSTEMP_AJ.DOCDT
+		        WHERE 1=1
+		        AND   AJ_APPRREQUEST.DEL_YN        = 'N'
+		        AND   AJ_APPRREQUEST.APPROVALREQDT = #{approvalReauestDt}
+				AND   AJ_APPRREQUEST.APPROVALREQNO = #{approvalReauestNo}
+		        group by SY_PROCESSTEMP_AJ.OTHER04  ,SY_PROCESSTEMP_AJ.OTHER02  ,SY_PROCESSTEMP_AJ.STORERKEY
+		    UNION ALL
+		    SELECT
+		              '30'                             AS GUBUN
+		              ,SY_PROCESSTEMP_AJ.OTHER04       AS OTHER01
+		              ,SY_PROCESSTEMP_AJ.OTHER02       AS DISUSETYPE
+		              ,FN_CODEDESCR(SY_PROCESSTEMP_AJ.STORERKEY, 'DISUSETYPE', SY_PROCESSTEMP_AJ.OTHER02)      AS DISUSETYPENAME
+		              ,'300'                         AS DETAILCODE
+		              ,'폐기금액'                    AS DETAILNAME
+		              ,sum(SY_PROCESSTEMP_AJ.ETCQTY1) + (sum(SY_PROCESSTEMP_AJ.INVOICEQTY) * 220)           AS DETAIL
+		        FROM AJ_APPRREQUEST
+		        JOIN SY_PROCESSTEMP_AJ
+		        ON   AJ_APPRREQUEST.APPROVALREQDT = SY_PROCESSTEMP_AJ.LIST_NO
+		        AND  AJ_APPRREQUEST.APPROVALREQNO = SY_PROCESSTEMP_AJ.BATCH_NO
+		        AND  AJ_APPRREQUEST.DCCODE        = SY_PROCESSTEMP_AJ.DCCODE
+		        AND  AJ_APPRREQUEST.ORGANIZE      = SY_PROCESSTEMP_AJ.ORGANIZE
+		        AND  AJ_APPRREQUEST.DOCDT         = SY_PROCESSTEMP_AJ.DOCDT
+		        AND  AJ_APPRREQUEST.DOCNO         = SY_PROCESSTEMP_AJ.DOCNO
+		        AND  SY_PROCESSTEMP_AJ.PROCESSFLAG = 'Y'
+		        JOIN MS_COST
+		        ON   MS_COST.STORERKEY = SY_PROCESSTEMP_AJ.STORERKEY
+		        AND  MS_COST.COSTCODE  = SY_PROCESSTEMP_AJ.OTHER04
+				AND  MS_COST.FROMDATE  <![CDATA[<=]]> SY_PROCESSTEMP_AJ.DOCDT
+				AND  MS_COST.TODATE    <![CDATA[>=]]> SY_PROCESSTEMP_AJ.DOCDT
+		        WHERE 1=1
+		        AND   AJ_APPRREQUEST.DEL_YN        = 'N'
+		        AND   AJ_APPRREQUEST.APPROVALREQDT = #{approvalReauestDt}
+				AND   AJ_APPRREQUEST.APPROVALREQNO = #{approvalReauestNo}
+		        group by SY_PROCESSTEMP_AJ.OTHER04  ,SY_PROCESSTEMP_AJ.OTHER02  ,SY_PROCESSTEMP_AJ.STORERKEY
+		    UNION ALL
+		    SELECT
+		              '30'                             AS GUBUN
+		              ,SY_PROCESSTEMP_AJ.OTHER04       AS OTHER01
+		              ,SY_PROCESSTEMP_AJ.OTHER02       AS DISUSETYPE
+		              ,FN_CODEDESCR(SY_PROCESSTEMP_AJ.STORERKEY, 'DISUSETYPE', SY_PROCESSTEMP_AJ.OTHER02)      AS DISUSETYPENAME
+		              ,'400'                         AS DETAILCODE
+		              ,'재고금액'                    AS DETAILNAME
+		              ,sum(SY_PROCESSTEMP_AJ.ETCQTY1)           AS DETAIL
+		        FROM AJ_APPRREQUEST
+		        JOIN SY_PROCESSTEMP_AJ
+		        ON   AJ_APPRREQUEST.APPROVALREQDT = SY_PROCESSTEMP_AJ.LIST_NO
+		        AND  AJ_APPRREQUEST.APPROVALREQNO = SY_PROCESSTEMP_AJ.BATCH_NO
+		        AND  AJ_APPRREQUEST.DCCODE        = SY_PROCESSTEMP_AJ.DCCODE
+		        AND  AJ_APPRREQUEST.ORGANIZE      = SY_PROCESSTEMP_AJ.ORGANIZE
+		        AND  AJ_APPRREQUEST.DOCDT         = SY_PROCESSTEMP_AJ.DOCDT
+		        AND  AJ_APPRREQUEST.DOCNO         = SY_PROCESSTEMP_AJ.DOCNO
+		        AND  SY_PROCESSTEMP_AJ.PROCESSFLAG = 'Y'
+		        JOIN MS_COST
+		        ON   MS_COST.STORERKEY = SY_PROCESSTEMP_AJ.STORERKEY
+		        AND  MS_COST.COSTCODE  = SY_PROCESSTEMP_AJ.OTHER04
+				AND  MS_COST.FROMDATE  <![CDATA[<=]]> SY_PROCESSTEMP_AJ.DOCDT
+				AND  MS_COST.TODATE    <![CDATA[>=]]> SY_PROCESSTEMP_AJ.DOCDT
+		        WHERE 1=1
+		        AND   AJ_APPRREQUEST.DEL_YN        = 'N'
+		        AND   AJ_APPRREQUEST.APPROVALREQDT = #{approvalReauestDt}
+				AND   AJ_APPRREQUEST.APPROVALREQNO = #{approvalReauestNo}
+		        group by SY_PROCESSTEMP_AJ.OTHER04  ,SY_PROCESSTEMP_AJ.OTHER02  ,SY_PROCESSTEMP_AJ.STORERKEY
+		    UNION ALL
+		    SELECT
+		              '30'                             AS GUBUN
+		              ,SY_PROCESSTEMP_AJ.OTHER04       AS OTHER01
+		              ,SY_PROCESSTEMP_AJ.OTHER02       AS DISUSETYPE
+		              ,FN_CODEDESCR(SY_PROCESSTEMP_AJ.STORERKEY, 'DISUSETYPE', SY_PROCESSTEMP_AJ.OTHER02)      AS DISUSETYPENAME
+		              ,'500'                         AS DETAILCODE
+		              ,'폐기비용'                    AS DETAILNAME
+		              ,sum(SY_PROCESSTEMP_AJ.OTHER04) * 220           AS DETAIL
+		        FROM AJ_APPRREQUEST
+		        JOIN SY_PROCESSTEMP_AJ
+		        ON   AJ_APPRREQUEST.APPROVALREQDT = SY_PROCESSTEMP_AJ.LIST_NO
+		        AND  AJ_APPRREQUEST.APPROVALREQNO = SY_PROCESSTEMP_AJ.BATCH_NO
+		        AND  AJ_APPRREQUEST.DCCODE        = SY_PROCESSTEMP_AJ.DCCODE
+		        AND  AJ_APPRREQUEST.ORGANIZE      = SY_PROCESSTEMP_AJ.ORGANIZE
+		        AND  AJ_APPRREQUEST.DOCDT         = SY_PROCESSTEMP_AJ.DOCDT
+		        AND  AJ_APPRREQUEST.DOCNO         = SY_PROCESSTEMP_AJ.DOCNO
+		        AND  SY_PROCESSTEMP_AJ.PROCESSFLAG = 'Y'
+		        JOIN MS_COST
+		        ON   MS_COST.STORERKEY = SY_PROCESSTEMP_AJ.STORERKEY
+		        AND  MS_COST.COSTCODE  = SY_PROCESSTEMP_AJ.OTHER04
+				AND  MS_COST.FROMDATE  <![CDATA[<=]]> SY_PROCESSTEMP_AJ.DOCDT
+				AND  MS_COST.TODATE    <![CDATA[>=]]> SY_PROCESSTEMP_AJ.DOCDT
+		        WHERE 1=1
+		        AND   AJ_APPRREQUEST.DEL_YN        = 'N'
+		        AND   AJ_APPRREQUEST.APPROVALREQDT = #{approvalReauestDt}
+				AND   AJ_APPRREQUEST.APPROVALREQNO = #{approvalReauestNo}
+		        group by SY_PROCESSTEMP_AJ.OTHER04  ,SY_PROCESSTEMP_AJ.OTHER02  ,SY_PROCESSTEMP_AJ.STORERKEY
+		    )
+		        PIVOT (
+		                  SUM(DETAIL)
+		                  FOR OTHER01 IN ( ${COSTCD1} )
+		     )
+		    ORDER BY DISUSETYPE, DETAILCODE, DETAILNAME
+		)
+
+		SELECT  GUBUN
+		       ,DISUSETYPE
+		       ,DISUSETYPENAME
+		       ,DETAILCODE
+		       ,DETAILNAME
+		       ,${COSTCD4}
+		FROM   (
+		    SELECT  GUBUN
+		           ,DISUSETYPE
+		           ,DISUSETYPENAME
+		           ,DETAILCODE
+		           ,DETAILNAME
+		           ,${COSTCD2}
+		    FROM   T_FORM
+		    UNION ALL
+		    SELECT  '50' AS GUBUN
+		           ,UNISTR('') AS DISUSETYPE
+		           ,UNISTR('') AS DISUSETYPENAME
+		           ,DETAILCODE
+		           ,DETAILNAME
+		           ,${COSTCD3}
+		    FROM   T_FORM
+		    GROUP BY DETAILCODE, DETAILNAME
+		)
+		ORDER BY GUBUN,DISUSETYPE, DETAILCODE
+	</select>
+
+	<select id="selectElecForm5Cont1" resultType="map">
+		SELECT  /* [CmElecService.sqlx][selectElecForm5Cont1][키트처리 전자결재 목록 조회][20260120] */
+			'Y' AS KIT_YN
+			,AJ_APPRREQUEST.DCCODE AS DCCODE
+			,AJ_APPRREQUEST.DOCNO AS SKU
+			,MS_SKU.DESCRIPTION AS SKU_NAME
+			,MS_SKU.BASEUOM AS UOM
+			,nvl(ST_KIT_PLAN.CONFIRMQTY, 0) AS QTY
+		FROM AJ_APPRREQUEST
+		JOIN ST_KIT_PLAN
+			ON AJ_APPRREQUEST.DOCNO = ST_KIT_PLAN.SKU
+			AND AJ_APPRREQUEST.DCCODE = ST_KIT_PLAN.DCCODE
+			AND AJ_APPRREQUEST.STORERKEY = ST_KIT_PLAN.STORERKEY
+			AND AJ_APPRREQUEST.SLIPDT = ST_KIT_PLAN.PLAN_DT
+		JOIN MS_SKU
+			ON MS_SKU.STORERKEY          = AJ_APPRREQUEST.STORERKEY
+		   AND MS_SKU.SKU                = AJ_APPRREQUEST.DOCNO
+		   AND MS_SKU.DEL_YN             = 'N'
+		WHERE
+			AJ_APPRREQUEST.APPROVALREQDT = #{approvalReauestDt}
+			AND AJ_APPRREQUEST.APPROVALREQNO = #{approvalReauestNo}
+		UNION ALL
+		SELECT
+			'N' AS KIT_YN
+			,ST_KIT_PLANDETAIL.DCCODE AS DCCODE
+			,ST_KIT_PLANDETAIL.BOM_SKU AS SKU
+			,MS_SKU.DESCRIPTION AS SKU_NAME
+			,MS_SKU.BASEUOM AS UOM
+			,nvl(ST_KIT_PLANDETAIL.CONFIRMQTY * MS_KITSKU.QTY, 0) AS QTY
+		FROM AJ_APPRREQUEST
+		JOIN ST_KIT_PLANDETAIL
+			ON AJ_APPRREQUEST.DOCNO = ST_KIT_PLANDETAIL.SKU
+			AND AJ_APPRREQUEST.DCCODE = ST_KIT_PLANDETAIL.DCCODE
+			AND AJ_APPRREQUEST.STORERKEY = ST_KIT_PLANDETAIL.STORERKEY
+			AND AJ_APPRREQUEST.SLIPDT = ST_KIT_PLANDETAIL.PLAN_DT
+		JOIN MS_KITSKU
+			ON MS_KITSKU.KIT_SKU = AJ_APPRREQUEST.DOCNO
+			AND MS_KITSKU.DCCODE = ST_KIT_PLANDETAIL.DCCODE
+			AND MS_KITSKU.STORERKEY = ST_KIT_PLANDETAIL.STORERKEY
+			AND MS_KITSKU.SKU = ST_KIT_PLANDETAIL.BOM_SKU
+		    AND MS_KITSKU.DEL_YN = 'N'
+            AND MS_KITSKU.FROMDATE <![CDATA[<=]]> TO_CHAR(SYSDATE, 'YYYYMMDD')
+		    AND MS_KITSKU.TODATE <![CDATA[>=]]> TO_CHAR(SYSDATE, 'YYYYMMDD')
+		JOIN MS_SKU
+			ON MS_SKU.STORERKEY          = ST_KIT_PLANDETAIL.STORERKEY
+		   AND MS_SKU.SKU                = ST_KIT_PLANDETAIL.BOM_SKU
+		   AND MS_SKU.DEL_YN             = 'N'
+		WHERE
+			AJ_APPRREQUEST.APPROVALREQDT = #{approvalReauestDt}
+			AND AJ_APPRREQUEST.APPROVALREQNO = #{approvalReauestNo}
+	</select>
+
+	<select id="selectElecForm6Cont1" resultType="map">
+        SELECT    /* [cmElecService.sqlx][selectElecForm6Cont1][비용기표 조회][sunho.kim][2025.10.28] */
+                TO_CHAR(ISSUE_DATE, 'YYYY-MM-DD')                                        AS ISSUE_DATE                                              /* 전기일 */
+              , EX.ADJUSTMENT_SUPPLIER_NAME                                              AS ADJUSTMENT_SUPPLIER_NAME                                /* 협력사명 */
+              , TO_CHAR(NVL(EX.SUPPLY_PRICE, 0), '999,999,999')                          AS SUPPLY_PRICE                                            /* 공급가액 */
+              , TO_CHAR(NVL(EX.TAX_AMOUNT, 0), '999,999,999')                            AS TAX_AMOUNT                                              /* 부가세 */
+              , TO_CHAR(NVL(EX.AMOUNT, 0), '999,999,999')                                AS AMOUNT                                                  /* 총액 */
+              , X.ACCOUNT_DETAIL_NAME                                                    AS ACCOUNT_DETAIL                                          /* 비용구분 */
+              , CD1.BASEDESCR                                                            AS TAX_TAG                                                 /* 증빙구분 */
+              , TO_CHAR(EX.TAX_YMD, 'YYYY-MM-DD')                                        AS TAX_YMD                                                 /* 증빙일 */
+        FROM    IB_EXPENSE EX
+
+        LEFT JOIN   (  
+             SELECT 
+                  X.EXPENSE_SN
+                 ,CASE WHEN MAX(ACCOUNT_DETAIL_CODE) IN ('K10', 'K11', 'W01', 'W02', 'W03')
+                       THEN '보관료'
+                       WHEN MAX(ACCOUNT_DETAIL_CODE) IN ('K09')
+                       THEN '보관료(PLT)'
+                       ELSE MAX(ACCOUNT_DETAIL_NAME)
+                  END                                AS ACCOUNT_DETAIL_NAME
+             FROM   IB_EXPENSE_DISTRIBUTION X
+             LEFT OUTER JOIN CM_CODE CD
+               ON CD.CODELIST  = 'JOURNALCODE'
+              AND CD.BASECODE  = X.ACCOUNT_DETAIL_CODE  
+             GROUP BY X.EXPENSE_SN        
+            ) X 
+            ON X.EXPENSE_SN = EX.SERIALKEY
+
+        LEFT OUTER JOIN CM_CODE_STORER CD1
+                    ON CD1.STORERKEY = EX.STORERKEY
+                   AND CD1.CODELIST  = 'TAX_TAG'
+                   AND CD1.BASECODE  = EX.TAX_TAG
+
+        WHERE  EX.SERIALKEY IN (
+                   SELECT SLIPNO
+                     FROM AJ_APPRREQUEST
+                    WHERE AJ_APPRREQUEST.DOCTYPE       = 'IBEXPENSE'
+                      AND AJ_APPRREQUEST.DEL_YN        = 'N'
+                      AND AJ_APPRREQUEST.APPROVALREQDT = #{approvalReauestDt}
+                      AND AJ_APPRREQUEST.APPROVALREQNO = #{approvalReauestNo} )
+
+       ORDER BY EX.KEY_NO
+    </select>
+
+	<select id="selectElecApprDoctype" resultType="map">
+        SELECT
+              AJ_APPRREQUEST.DOCTYPE
+             ,AJ_APPRREQUEST.APPROVALSTATUS
+             ,AJ_APPRREQUEST.DCCODE
+        FROM AJ_APPRREQUEST
+        WHERE 1 = 1
+            AND AJ_APPRREQUEST.DEL_YN = 'N'
+            AND AJ_APPRREQUEST.APPROVALREQDT = #{approvalReauestDt}
+            AND AJ_APPRREQUEST.APPROVALREQNO = #{approvalReauestNo}
+    </select>
+
+</mapper>

@@ -1,0 +1,365 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="tmTrxCalculationReportService">
+
+    <select id="getMasterList" resultType="TmTrxCalculationReportResDto">    	
+        WITH A AS (
+          SELECT  /* [TmTrxCalculationReportService.sqlx][getMasterList][운송비정산서 조회][sunho.kim][2025.10.20] */
+               A.DCCODE                                     AS DCCODE /* 센터코드 */
+             , A.STTL_TYPE                                  AS STTL_TYPE /* 정산유형" */
+             , A.CAR_NO                                     AS CAR_NO /* 차량번호 */
+             , MAX(A.CONTRACTTYPE)                          AS CONTRACTTYPE /* 계약유형 */
+             , A.COURIER                                    AS COURIER /* 운송사 */
+             , A.SLAVE_COURIER                              AS SLAVE_COURIER /* 2차운송사 */
+             , MAX(A.WORK_DAY)                              AS WORK_DAY /* 근무일수 */
+             , SUM(A.TOT_DEST_CNT)                          AS TOT_DEST_CNT /* 총착지수 */
+             , SUM(A.CTRNG_DEST_CNT)                        AS CTRNG_DEST_CNT /* 급식착지수 */
+             , SUM(A.DINOUT_DEST_CNT)                       AS DINOUT_DEST_CNT /* 외식착지수 */
+             , SUM(A.ALT_AMOUNT)                            AS ALT_AMOUNT /* 결행대체금액 */
+          FROM TM_TRSP_COST_STTL_H A          
+          
+          LEFT OUTER JOIN ( 
+               SELECT STORERKEY, CARRIERKEY, CARRIERTYPE, DESCRIPTION
+               FROM  MS_CARRIER
+               WHERE STORERKEY   = #{gStorerkey}
+                AND CARRIERTYPE  = 'LOCAL'                
+            ) B
+             ON B.STORERKEY   = #{gStorerkey}
+            AND B.CARRIERKEY  = A.COURIER
+          LEFT OUTER JOIN (
+               SELECT CM_CAR.*, MS_CAR_ENTRY_INFO.DCCODE
+               FROM CM_CAR 
+               INNER JOIN (
+                SELECT CARNO, DCCODE
+                FROM MS_CAR_ENTRY_INFO 
+                WHERE DCCODE = #{fixdccode}
+                GROUP BY CARNO, DCCODE) MS_CAR_ENTRY_INFO
+                  ON MS_CAR_ENTRY_INFO.CARNO = CM_CAR.CARNO ) C
+             ON C.DCCODE      = A.DCCODE
+            AND C.COURIER     = A.COURIER
+            AND C.CARNO       = A.CAR_NO
+          LEFT OUTER JOIN CM_DRIVER E 
+             ON E.DRIVERID    = C.DRIVER1
+          WHERE 1=1
+            AND A.DCCODE             = #{fixdccode}
+            AND A.STTL_DATE <![CDATA[>=]]> #{fromdate}
+            AND A.STTL_DATE <![CDATA[<=]]> #{todate}
+          <if test="deliveryType != null and deliveryType != ''">
+            AND A.STTL_TYPE          = #{deliveryType}         
+          </if> 
+          <if test="closeType != null and closeType != ''">
+            AND C.CAR_ORDERCLOSE_CD = #{closeType}         
+          </if>
+          <if test="contractType != null and contractType != ''">
+            AND A.CONTRACTTYPE      = #{contractType}         
+          </if>
+          <if test="courierMulti != null and courierMulti != ''">
+            AND A.COURIER            IN
+            <foreach collection="courierMulti" item="item" open="(" separator="," close=")">
+              #{item}
+            </foreach>         
+          </if>
+          <if test="carnoMulti != null and carnoMulti != ''">
+            AND A.CAR_NO             IN 
+            <foreach collection="carnoMulti" item="item" open="(" separator="," close=")">
+              #{item}
+            </foreach>        
+          </if>
+          <if test="carcapacity != null and carcapacity != ''">
+            AND C.CARCAPACITY        = #{carcapacity}         
+          </if>
+            AND EXISTS (SELECT USERID 
+                       FROM CM_USER_AUTHORITY
+                       WHERE STORERKEY = #{gStorerkey}
+                         AND DCCODE    = #{fixdccode}
+                         AND USERID    = #{gUserId})     
+          GROUP BY A.DCCODE, A.COURIER, A.SLAVE_COURIER, A.CAR_NO, A.STTL_TYPE  
+        )  
+                
+        SELECT 
+               A.DCCODE                                     AS DCCODE /* 센터코드 */
+             , A.STTL_TYPE                                  AS STTL_TYPE /* 정산유형 */
+             , CD1.BASEDESCR                                AS STTL_TYPE_NAME /* 정산유형명 */ 
+             , A.CAR_NO                                     AS CARNO /* 차량번호 */
+             , A.CONTRACTTYPE                               AS CONTRACTTYPE /* 계약유형 */
+             , CD2.BASEDESCR                                AS CONTRACTTYPE_NAME /* 계약유형명 */
+             , A.COURIER                                    AS COURIER /* 운송사 */
+             , B.DESCRIPTION                                AS COURIER_NAME /* 운송사명 */
+             , A.SLAVE_COURIER                              AS SLAVE_COURIER /* 2차운송사 */
+             , B2.DESCRIPTION                               AS SLAVE_COURIER_NAME /* 2차운송사명 */
+             , E.DRIVERNAME                                 AS DRIVER_NAME /* 기사명 */
+             , CD3.BASEDESCR                                AS TON_NAME /* 차량톤수 */
+             , CD4.BASEDESCR                                AS CLOSETYPE_NAME /* 마감유형명 */
+             , A.WORK_DAY                                   AS WORK_DAY /* 근무일수 */
+             , A.TOT_DEST_CNT                               AS TOT_DEST_CNT /* 총착지수 */
+             , A.CTRNG_DEST_CNT                             AS CTRNG_DEST_CNT /* 급식착지수 */
+             , A.DINOUT_DEST_CNT                            AS DINOUT_DEST_CNT /* 외식착지수 */ 
+             , CASE WHEN ROUND(NVL(F.WEIGHT, 0), 3) > 0 
+                    THEN TO_CHAR(ROUND(NVL(F.WEIGHT, 0), 3), 'FM999999999.000') 
+                    ELSE '0'
+                END                                         AS WEIGHT_KG /* 배송물량 */
+             , F.EMAIL                                      AS EMAIL /* 운송사 이메일 */
+             , NVL(D.STTL_AMOUNT, 0)                        AS STTL_AMOUNT /* 정산금액 */
+             , NVL(D.BASE_AMOUNT, 0)                        AS BASE_AMOUNT /* 기본급 */
+             , NVL(D.FEE_AMOUNT, 0)                         AS FEE_AMOUNT /* 수수료 */
+             , NVL(D.PENALTY_AMOUNT, 0)                     AS PENALTY_AMOUNT /* 패널티 공제 */
+             , NVL(D.UNPAID_AMOUNT, 0)                      AS UNPAID_AMOUNT /* 무급휴무 공제 */
+             , NVL(D.ALT_AMOUNT, 0)                         AS ALT_AMOUNT /* 대체차량 공제 */
+             , 0                                            AS INSPECT_ALLOWANCE /* 검사 수당 */
+             , 0                                            AS EDUCATION_ALLOWANCE /* 교육 수당 */
+             , NVL(D.HOLIDAY_ALLOWANCE, 0)                  AS HOLIDAY_ALLOWANCE /* 휴일 수당 */
+             , NVL(D.ROUND_ALLOWANCE, 0)                    AS ROUND_ALLOWANCE /* 회전수당 */
+             , NVL(D.SUBDRIVER_ALLOWANCE, 0)                AS SUBDRIVER_ALLOWANCE /* 보조원수당 */
+             , NVL(D.BOSS_ALLOWANCE, 0)                     AS BOSS_ALLOWANCE /* 조장수당 */
+             , NVL(D.DISTANCE_ALLOWANCE, 0)                 AS DISTANCE_ALLOWANCE /* 격오지/장거리수당 */
+             , NVL(D.DIFFCULT_ALLOWANCE, 0)                 AS DIFFCULT_ALLOWANCE /* 하차난이도수당 */
+             , NVL(D.FACE_ALLOWANCE, 0)                     AS FACE_ALLOWANCE /* 대면검수수당 */
+             , NVL(D.KIDS_ALLOWANCE, 0)                     AS KIDS_ALLOWANCE /* 키즈분류수당 */
+             , NVL(D.TOLL_CHARGE, 0)                        AS TOLL_CHARGE /* 통행료 */
+             , NVL(D.PARKING_CHARGE, 0)                     AS PARKING_CHARGE /* 주차비 */
+             , NVL(D.WASH_CHARGE, 0)                        AS WASH_CHARGE /* 세차비 */
+             , NVL(D.WEIGTH_INCENTIVE, 0)                   AS WEIGTH_INCENTIVE /* 물량 인센티브 */
+             , NVL(D.DEST_INCENTIVE, 0)                     AS DEST_INCENTIVE /* 착지 인센티브 */
+             , NVL(D.DISTANCE_INCENTIVE, 0)                 AS DISTANCE_INCENTIVE /* 거리 인센티브 */ 
+             , NVL(D.ZONE_INCENTIVE, 0)                     AS ZONE_INCENTIVE /* 권역이동 인센티브 */
+             , NVL(D.NEWCAR_INCENTIVE, 0)                   AS NEWCAR_INCENTIVE /* 신차지원금 인센티브 */
+             , NVL(D.COMMUNICATION_EXPENSE, 0)              AS COMMUNICATION_EXPENSE /* 통신비 */
+             , NVL(D.FUEL_EXPENSE, 0)                       AS FUEL_EXPENSE /* 유류비 */
+             , NVL(D.DISUSE_DEDUCTION, 0)                   AS DISUSE_DEDUCTION /* 폐기공제 */
+             , NVL(D.QUICK_DEDUCTION, 0)                    AS QUICK_DEDUCTION /* 퀵공제 */
+             , 0                                            AS RETROACTIVE_EXPENSE /* 정산누락 및 소급분 */
+             , NVL(D.ETC_ALLOWANCE, 0)                      AS ETC_ALLOWANCE /* 기타 */
+             , NVL(D.PROCURE_ALLOWANCE, 0)                  AS PROCURE_ALLOWANCE /* 조달 */
+             , NVL(G.DELIVERYDAYCNT, 0)                     AS DELIVERYDAYCNT /* 배송일수 */
+        
+        FROM A 
+                  
+          LEFT OUTER JOIN (
+              SELECT H.COURIER
+                   , H.CAR_NO
+                   , SUM(D.AMOUNT * CASE WHEN CD.DATA1 = 'P' THEN 1 WHEN CD.DATA1 = 'D' THEN -1 ELSE 0 END) AS STTL_AMOUNT
+                   , SUM(D.AMOUNT * CASE WHEN CD.DATA1 = 'P' THEN 1 WHEN CD.DATA1 = 'D' THEN -1 ELSE 0 END * CASE WHEN CD.BASECODE = 'P01' THEN 1 ELSE 0 END) AS BASE_AMOUNT
+                   , SUM(D.AMOUNT * CASE WHEN CD.DATA1 = 'P' THEN 1 WHEN CD.DATA1 = 'D' THEN -1 ELSE 0 END * CASE WHEN CD.BASECODE = 'P02' THEN 1 ELSE 0 END) AS FEE_AMOUNT
+                   , SUM(D.AMOUNT * CASE WHEN CD.DATA1 = 'P' THEN 1 WHEN CD.DATA1 = 'D' THEN -1 ELSE 0 END * CASE WHEN CD.BASECODE = 'P06' THEN 1 ELSE 0 END) AS PENALTY_AMOUNT
+                   , SUM(D.AMOUNT * CASE WHEN CD.DATA1 = 'P' THEN 1 WHEN CD.DATA1 = 'D' THEN -1 ELSE 0 END * CASE WHEN CD.BASECODE = 'P07' THEN 1 ELSE 0 END) AS UNPAID_AMOUNT
+                   , SUM(D.AMOUNT * CASE WHEN CD.DATA1 = 'P' THEN 1 WHEN CD.DATA1 = 'D' THEN -1 ELSE 0 END * CASE WHEN CD.BASECODE = 'P05' THEN 1 ELSE 0 END) AS HOLIDAY_ALLOWANCE
+                   , SUM(D.AMOUNT * CASE WHEN CD.DATA1 = 'P' THEN 1 WHEN CD.DATA1 = 'D' THEN -1 ELSE 0 END * CASE WHEN CD.BASECODE = 'P08' THEN 1 ELSE 0 END) AS ROUND_ALLOWANCE
+                   , SUM(D.AMOUNT * CASE WHEN CD.DATA1 = 'P' THEN 1 WHEN CD.DATA1 = 'D' THEN -1 ELSE 0 END * CASE WHEN CD.BASECODE = 'P09' THEN 1 ELSE 0 END) AS SUBDRIVER_ALLOWANCE
+                   , SUM(D.AMOUNT * CASE WHEN CD.DATA1 = 'P' THEN 1 WHEN CD.DATA1 = 'D' THEN -1 ELSE 0 END * CASE WHEN CD.BASECODE = 'P12' THEN 1 ELSE 0 END) AS BOSS_ALLOWANCE
+                   , SUM(D.AMOUNT * CASE WHEN CD.DATA1 = 'P' THEN 1 WHEN CD.DATA1 = 'D' THEN -1 ELSE 0 END * CASE WHEN CD.BASECODE IN ('P13','P14') THEN 1 ELSE 0 END) AS DISTANCE_ALLOWANCE
+                   , SUM(D.AMOUNT * CASE WHEN CD.DATA1 = 'P' THEN 1 WHEN CD.DATA1 = 'D' THEN -1 ELSE 0 END * CASE WHEN CD.BASECODE = 'P15' THEN 1 ELSE 0 END) AS DIFFCULT_ALLOWANCE
+                   , SUM(D.AMOUNT * CASE WHEN CD.DATA1 = 'P' THEN 1 WHEN CD.DATA1 = 'D' THEN -1 ELSE 0 END * CASE WHEN CD.BASECODE IN ('P19','P20') THEN 1 ELSE 0 END) AS FACE_ALLOWANCE
+                   , SUM(D.AMOUNT * CASE WHEN CD.DATA1 = 'P' THEN 1 WHEN CD.DATA1 = 'D' THEN -1 ELSE 0 END * CASE WHEN CD.BASECODE = 'P21' THEN 1 ELSE 0 END) AS KIDS_ALLOWANCE
+                   , SUM(D.AMOUNT * CASE WHEN CD.DATA1 = 'P' THEN 1 WHEN CD.DATA1 = 'D' THEN -1 ELSE 0 END * CASE WHEN CD.BASECODE = 'P27' THEN 1 ELSE 0 END) AS TOLL_CHARGE
+                   , SUM(D.AMOUNT * CASE WHEN CD.DATA1 = 'P' THEN 1 WHEN CD.DATA1 = 'D' THEN -1 ELSE 0 END * CASE WHEN CD.BASECODE = 'P28' THEN 1 ELSE 0 END) AS PARKING_CHARGE  
+                   , SUM(D.AMOUNT * CASE WHEN CD.DATA1 = 'P' THEN 1 WHEN CD.DATA1 = 'D' THEN -1 ELSE 0 END * CASE WHEN CD.BASECODE = 'P29' THEN 1 ELSE 0 END) AS WASH_CHARGE
+                   , SUM(D.AMOUNT * CASE WHEN CD.DATA1 = 'P' THEN 1 WHEN CD.DATA1 = 'D' THEN -1 ELSE 0 END * CASE WHEN CD.BASECODE = 'P22' THEN 1 ELSE 0 END) AS WEIGTH_INCENTIVE 
+                   , SUM(D.AMOUNT * CASE WHEN CD.DATA1 = 'P' THEN 1 WHEN CD.DATA1 = 'D' THEN -1 ELSE 0 END * CASE WHEN CD.BASECODE = 'P23' THEN 1 ELSE 0 END) AS DEST_INCENTIVE
+                   , SUM(D.AMOUNT * CASE WHEN CD.DATA1 = 'P' THEN 1 WHEN CD.DATA1 = 'D' THEN -1 ELSE 0 END * CASE WHEN CD.BASECODE = 'P24' THEN 1 ELSE 0 END) AS DISTANCE_INCENTIVE
+                   , SUM(D.AMOUNT * CASE WHEN CD.DATA1 = 'P' THEN 1 WHEN CD.DATA1 = 'D' THEN -1 ELSE 0 END * CASE WHEN CD.BASECODE = 'P25' THEN 1 ELSE 0 END) AS NEWCAR_INCENTIVE
+                   , SUM(D.AMOUNT * CASE WHEN CD.DATA1 = 'P' THEN 1 WHEN CD.DATA1 = 'D' THEN -1 ELSE 0 END * CASE WHEN CD.BASECODE = 'P26' THEN 1 ELSE 0 END) AS ZONE_INCENTIVE
+                   , SUM(D.AMOUNT * CASE WHEN CD.DATA1 = 'P' THEN 1 WHEN CD.DATA1 = 'D' THEN -1 ELSE 0 END * CASE WHEN CD.BASECODE = 'P04' THEN 1 ELSE 0 END) AS COMMUNICATION_EXPENSE
+                   , SUM(D.AMOUNT * CASE WHEN CD.DATA1 = 'P' THEN 1 WHEN CD.DATA1 = 'D' THEN -1 ELSE 0 END * CASE WHEN CD.BASECODE = 'P03' THEN 1 ELSE 0 END) AS FUEL_EXPENSE
+                   , SUM(D.AMOUNT * CASE WHEN CD.DATA1 = 'P' THEN 1 WHEN CD.DATA1 = 'D' THEN -1 ELSE 0 END * CASE WHEN CD.BASECODE = 'P30' THEN 1 ELSE 0 END) AS ETC_ALLOWANCE
+                   , SUM(D.AMOUNT * CASE WHEN CD.DATA1 = 'P' THEN 1 WHEN CD.DATA1 = 'D' THEN -1 ELSE 0 END * CASE WHEN CD.BASECODE = 'P31' THEN 1 ELSE 0 END) AS ALT_AMOUNT
+                   , SUM(D.AMOUNT * CASE WHEN CD.DATA1 = 'P' THEN 1 WHEN CD.DATA1 = 'D' THEN -1 ELSE 0 END * CASE WHEN CD.BASECODE = 'P32' THEN 1 ELSE 0 END) AS DISUSE_DEDUCTION
+                   , SUM(D.AMOUNT * CASE WHEN CD.DATA1 = 'P' THEN 1 WHEN CD.DATA1 = 'D' THEN -1 ELSE 0 END * CASE WHEN CD.BASECODE = 'P33' THEN 1 ELSE 0 END) AS QUICK_DEDUCTION
+                   , SUM(D.AMOUNT * CASE WHEN CD.DATA1 = 'P' THEN 1 WHEN CD.DATA1 = 'D' THEN -1 ELSE 0 END * CASE WHEN CD.BASECODE = 'P34' THEN 1 ELSE 0 END) AS PROCURE_ALLOWANCE
+              FROM TM_TRSP_COST_STTL_D        D
+              INNER JOIN TM_TRSP_COST_STTL_H  H
+                 ON D.SERIALKEY_H   = H.SERIALKEY
+              LEFT OUTER JOIN CM_CODE_STORER CD
+                 ON CD.STORERKEY    = #{gStorerkey}
+                AND CD.CODELIST     = 'TM_CALC_ITEM'   
+                AND CD.BASECODE     = D.ALLOWANCE_CD  
+              WHERE H.DCCODE        = #{fixdccode}
+                AND H.STTL_DATE <![CDATA[>=]]> #{fromdate}
+                AND H.STTL_DATE <![CDATA[<=]]> #{todate}
+              <if test="deliveryType != null and deliveryType != ''">
+                AND H.STTL_TYPE     = #{deliveryType}         
+              </if> 
+              <if test="contractType != null and contractType != ''">
+                AND H.CONTRACTTYPE = #{contractType}         
+              </if>
+              <if test="courierMulti != null and courierMulti != ''">
+                AND H.COURIER       IN 
+                <foreach collection="courierMulti" item="item" open="(" separator="," close=")">
+                  #{item}
+                </foreach>  
+              </if>
+              <if test="carnoMulti != null and carnoMulti != ''">
+                AND H.CAR_NO        IN
+                <foreach collection="carnoMulti" item="item" open="(" separator="," close=")">
+                  #{item}
+                </foreach>
+              </if>
+              GROUP BY H.DCCODE, H.COURIER, H.CAR_NO   
+                      ) D
+             ON D.COURIER = A.COURIER
+            AND D.CAR_NO  = A.CAR_NO          
+          LEFT OUTER JOIN (
+              SELECT 
+                  STORERKEY, DCCODE, COURIER, CARAGENTKEY, CARNO, SUM(WEIGHT) WEIGHT
+              FROM (
+                SELECT 
+                    STORERKEY, DCCODE, COURIER, CARAGENTKEY, CARNO, SUM(CASE WHEN TM_DELIVERYTYPE = '1' THEN WEIGHT ELSE 0 END) WEIGHT
+                FROM TM_INPLAN 
+                WHERE STORERKEY  = #{gStorerkey}
+                  AND DCCODE     = #{fixdccode}
+                  AND DELIVERYDT <![CDATA[>=]]> #{fromdate}
+                  AND DELIVERYDT <![CDATA[<=]]> #{todate}
+                  AND STATUS     = '90'
+                  AND DEL_YN     = 'N'
+                  AND SPLIT_DELIVERY_YN = 'N'
+                  AND TM_DELIVERYTYPE IN ('1', '2')
+                GROUP BY STORERKEY, DCCODE, COURIER, CARAGENTKEY, CARNO 
+                UNION ALL
+                SELECT 
+                    STORERKEY, DCCODE, COURIER, CARAGENTKEY, CARNO, SUM(CASE WHEN TM_DELIVERYTYPE = '1' THEN WEIGHT ELSE 0 END) WEIGHT
+                FROM TM_INPLAN_SPLIT 
+                WHERE STORERKEY  = #{gStorerkey}
+                  AND DCCODE     = #{fixdccode}
+                  AND DELIVERYDT <![CDATA[>=]]> #{fromdate}
+                  AND DELIVERYDT <![CDATA[<=]]> #{todate}
+                  AND STATUS     = '90'
+                  AND DEL_YN     = 'N'
+                  AND TM_DELIVERYTYPE IN ('1', '2')
+                GROUP BY STORERKEY, DCCODE, COURIER, CARAGENTKEY, CARNO
+               ) A 
+               GROUP BY STORERKEY, DCCODE, COURIER, CARAGENTKEY, CARNO
+             ) F   
+             ON F.DCCODE      = A.DCCODE
+            AND F.CARNO       = A.CAR_NO 
+            AND F.COURIER     = A.COURIER
+            AND F.CARAGENTKEY = A.SLAVE_COURIER
+            
+          LEFT OUTER JOIN (
+              SELECT STORERKEY, DCCODE, COUNT(DISTINCT (DELIVERYDT)) AS DELIVERYDAYCNT, CARNO, COURIER, CARAGENTKEY
+              FROM (    
+                  SELECT 
+                      T.STORERKEY, T.DCCODE, T.CARNO, T.COURIER, T.CARAGENTKEY, T.DELIVERYDT, CA.WORK_YN, DA.ATTEND_CD 
+                  FROM (
+                        SELECT STORERKEY, DCCODE, CARNO, COURIER, CARAGENTKEY, DELIVERYDT
+                        FROM TM_INPLAN 
+                        WHERE DCCODE            = #{fixdccode}
+                          AND DELIVERYDT <![CDATA[>=]]> #{fromdate}
+                          AND DELIVERYDT <![CDATA[<=]]> #{todate}
+                          AND SPLIT_DELIVERY_YN = 'N'
+                          AND STATUS            = '90'
+                          AND DEL_YN            = 'N'
+                          AND TM_DELIVERYTYPE   IN ('1', '2')
+                        GROUP BY STORERKEY, DCCODE, CARNO, COURIER, CARAGENTKEY, DELIVERYDT
+                        UNION ALL
+                        SELECT STORERKEY, DCCODE, CARNO, COURIER, CARAGENTKEY, DELIVERYDT
+                        FROM TM_INPLAN_SPLIT  
+                        WHERE DCCODE          = #{fixdccode}
+                          AND DELIVERYDT <![CDATA[>=]]> #{fromdate}
+                          AND DELIVERYDT <![CDATA[<=]]> #{todate}
+                          AND STATUS          = '90'
+                          AND DEL_YN          = 'N' 
+                          AND TM_DELIVERYTYPE IN ('1', '2')
+                        GROUP BY STORERKEY, DCCODE, CARNO, COURIER, CARAGENTKEY, DELIVERYDT
+                   ) T
+                  JOIN CM_CALENDAR  CA 
+                     ON CA.DCCODE = T.DCCODE  
+                    AND CA.YY     = SUBSTR(T.DELIVERYDT, 1, 4) 
+                    AND CA.MM     = SUBSTR(T.DELIVERYDT, 5, 2)
+                    AND CA.DD     = SUBSTR(T.DELIVERYDT, 7, 2)
+                  LEFT OUTER JOIN TM_DRIVER_ATTEND  DA  
+                     ON DA.DCCODE = T.DCCODE 
+                    AND DA.BASEDT = T.DELIVERYDT
+                    AND DA.CARNO  = T.CARNO
+                  WHERE CA.CALENDAR_ID = 'TRSP'
+                    AND CA.WORK_YN     = 'Y'
+              ) T 
+              WHERE T.WORK_YN = 'Y' 
+                AND (T.ATTEND_CD IS NULL OR T.ATTEND_CD IN ('','10','90','99'))
+              GROUP BY STORERKEY, DCCODE, CARNO, COURIER, CARAGENTKEY
+            ) G 
+              ON G.DCCODE      = A.DCCODE
+             AND G.CARNO       = A.CAR_NO
+             AND G.COURIER     = A.COURIER
+             AND G.CARAGENTKEY = A.SLAVE_COURIER  
+ 
+          LEFT OUTER JOIN ( 
+               SELECT STORERKEY, CARRIERKEY, CARRIERTYPE, DESCRIPTION
+               FROM  MS_CARRIER
+               WHERE STORERKEY   = #{gStorerkey}
+                AND CARRIERTYPE  = 'LOCAL' 
+            ) B
+             ON B.STORERKEY   = #{gStorerkey}
+            AND B.CARRIERKEY  = A.COURIER
+          LEFT OUTER JOIN ( 
+               SELECT STORERKEY, CARRIERKEY, CARRIERTYPE, DESCRIPTION
+               FROM  MS_CARRIER
+               WHERE STORERKEY   = #{gStorerkey}
+                AND CARRIERTYPE  = 'SUBC' 
+            ) B2
+             ON B2.STORERKEY   = #{gStorerkey}
+            AND B2.CARRIERKEY  = A.SLAVE_COURIER 
+          LEFT OUTER JOIN (
+               SELECT CM_CAR.*, MS_CAR_ENTRY_INFO.DCCODE
+               FROM CM_CAR 
+               INNER JOIN (
+                SELECT CARNO, DCCODE
+                FROM MS_CAR_ENTRY_INFO 
+                WHERE DCCODE = #{fixdccode}
+                GROUP BY CARNO, DCCODE) MS_CAR_ENTRY_INFO
+                  ON MS_CAR_ENTRY_INFO.CARNO = CM_CAR.CARNO ) C
+             ON C.DCCODE      = A.DCCODE
+            AND C.COURIER     = A.COURIER
+            AND C.CARNO       = A.CAR_NO
+          LEFT OUTER JOIN CM_DRIVER E 
+             ON E.DRIVERID    = C.DRIVER1  
+          LEFT OUTER JOIN MS_CUST  F 
+             ON F.CUSTKEY     = B.CARRIERKEY 
+            AND F.CUSTTYPE    = 'P'   
+          
+          LEFT OUTER JOIN CM_CODE_STORER CD1
+             ON CD1.STORERKEY = #{gStorerkey}
+            AND CD1.CODELIST  = 'TM_CALC_OP' 
+            AND CD1.BASECODE  = A.STTL_TYPE
+          LEFT OUTER JOIN CM_CODE_STORER CD2
+             ON CD2.STORERKEY = #{gStorerkey}
+            AND CD2.CODELIST  = 'CONTRACTTYPE'   
+            AND CD2.BASECODE  = A.CONTRACTTYPE
+          LEFT OUTER JOIN CM_CODE_STORER CD3
+             ON CD3.STORERKEY = #{gStorerkey}
+            AND CD3.CODELIST  = 'CARCAPACITY'   
+            AND CD3.BASECODE  = C.CARCAPACITY
+          LEFT OUTER JOIN CM_CODE_STORER CD4
+             ON CD4.STORERKEY = #{gStorerkey}
+            AND CD4.CODELIST  = 'VIHICLE_TYPE_CD'   
+            AND CD4.BASECODE  = C.CAR_ORDERCLOSE_CD  
+
+         ORDER BY A.DCCODE
+                 ,A.COURIER
+                 ,A.SLAVE_COURIER
+                 ,A.CAR_NO
+    </select>
+    
+    <select id="getWorkDay" resultType="TmTrxCalculationReportResDto">     
+        SELECT  /* [TmTrxCalculationReportService.sqlx][getWorkDays][월 기준 근무일수 조회][sunho.kim][2025.10.20] */
+            COUNT(CASE WHEN NVL(REST_YN, 'N') = 'N' THEN 1 END) AS WORK_DAY
+        FROM CM_CALENDAR
+        WHERE DCCODE      = #{fixdccode}
+          AND  #{fromdate} <![CDATA[<=]]> YY || MM || DD
+          AND  #{todate}   <![CDATA[>=]]> YY || MM || DD
+          AND CALENDAR_ID = 'TRSP'
+          AND CALENDAR_ID = 'TRSP'
+    </select>
+    
+    <select id="getCustEmail" resultType="TmTrxCalculationReportEmailResDto">
+        SELECT  /* [TmTrxCalculationReportService.sqlx][getCustEmail][운송사 이메일주소 조회][sunho.kim][2025.10.20] */
+            B.EMAIL
+        FROM MS_CARRIER  A 
+        INNER JOIN MS_CUST  B 
+            ON B.CUSTKEY  = A.CARRIERKEY 
+           AND B.CUSTTYPE = 'P'
+        WHERE A.STORERKEY  = #{gStorerkey}
+          AND A.CARRIERKEY = #{courier} 
+          AND B.EMAIL     IS NOT NULL
+        FETCH FIRST 1 ROWS ONLY  
+    </select>
+    
+</mapper>

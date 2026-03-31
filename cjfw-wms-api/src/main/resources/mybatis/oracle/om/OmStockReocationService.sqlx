@@ -1,0 +1,335 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="omStockReocationService">
+    
+    <!-- 재고재배치조회 plt 조회 (목록) -->
+	<select id="getPltList" resultType="OmStockReocationPltResDto">
+		SELECT	/* [omStockReocationService.sqlx][omStockReocationService.getPltList][재고재배치조회 plt 조회 (목록)][JeongHyeongCheol][20251222] */ 
+			    DCCODE
+			  , MAX(DCNAME) AS DCNAME
+			  
+			  , SUM(CASE WHEN STORAGETYPE = '10' THEN CNT ELSE 0 END) AS ROOM_TEMP
+			  , SUM(CASE WHEN STORAGETYPE = '20' THEN CNT ELSE 0 END) AS REFRIGERATION
+			  , SUM(CASE WHEN STORAGETYPE = '30' THEN CNT ELSE 0 END) AS FROZEN
+			  
+			  , SUM(SUM(CNT)) OVER() AS TOTAL_CAPA
+		FROM (
+			  /* 1. SERIALYN = 'N' 인 경우 */
+			  SELECT ST_STOCK.DCCODE,
+			         MAX(CM_DC.DCNAME) AS DCNAME,
+			         MS_SKU.STORAGETYPE,
+			         MAX(MS_SKU.REFERENCE15),
+			         SUM(CEIL(ST_STOCK.QTY / MS_SKU.QTYPERBOX / MS_SKUCHAIN.BOXPERPLT)) AS CNT
+				FROM MS_SKUCHAIN
+			    JOIN ST_STOCK 
+			      ON MS_SKUCHAIN.STORERKEY 	= ST_STOCK.STORERKEY 
+			     AND MS_SKUCHAIN.SKU 		= ST_STOCK.SKU
+			      
+			    JOIN MS_SKU 
+			      ON MS_SKU.STORERKEY 	= MS_SKUCHAIN.STORERKEY 
+			     AND MS_SKU.SKU 		= MS_SKUCHAIN.SKU
+			      
+			    JOIN MS_LOCATION 
+			      ON MS_LOCATION.DCCODE = ST_STOCK.DCCODE 
+			     AND MS_LOCATION.LOC 	= ST_STOCK.LOC
+			      
+			    JOIN CM_LOT 
+			      ON CM_LOT.STORERKEY 	= ST_STOCK.STORERKEY 
+			     AND CM_LOT.LOT 		= ST_STOCK.LOT
+
+			    LEFT JOIN CM_DC 
+			      ON CM_DC.DCCODE = ST_STOCK.DCCODE
+
+			   WHERE ST_STOCK.STORERKEY = 'FW00'
+			     AND MS_SKU.STORAGETYPE IN ('10','20','30')
+			     AND MS_SKU.REFERENCE15 IS NOT NULL
+			     AND MS_SKU.SERIALYN 		= 'N'
+			     AND MS_SKU.REFERENCE15 	= 'Y'
+
+			     AND ST_STOCK.QTY <![CDATA[>]]> 0
+
+			     AND MS_LOCATION.LOCTYPE IN ('STAGE', 'PICK', 'KEEP', 'CROSS', 'FIRSTOUT', 'LONGSTAY', 'CANCEL')
+			     AND ((MS_LOCATION.LOCCATEGORY IN ('RACK', 'YARD') AND ST_STOCK.DCCODE != '2690') OR
+			          (MS_LOCATION.LOCCATEGORY IN ('RACK', 'YARD', 'AUTO') AND ST_STOCK.DCCODE = '2690'))
+			     AND MS_LOCATION.LOCFLAG = 'GOOD'
+			     AND MS_LOCATION.CAPA_YN = 'Y'
+			     AND (CASE 
+			     		WHEN MS_LOCATION.DCCODE = '2690' AND MS_LOCATION.LOCTYPE = 'STAGE' 
+			     		THEN 'Y'
+			            WHEN MS_LOCATION.DCCODE = '2600' AND MS_LOCATION.LOCTYPE = 'STAGE' 
+			            THEN 'Y'
+			          ELSE MS_LOCATION.OUT_YN END) = 'Y'
+			     AND MS_LOCATION.DEL_YN = 'N'
+			     AND MS_LOCATION.STOCKTYPE = 'GOOD'
+			     AND 'TRUE' = (CASE 
+			     				 WHEN CM_LOT.LOTTABLE01 = 'STD' OR MS_SKU.DURATIONTYPE = 'N' 
+			     				 THEN 'TRUE'
+			                     WHEN MS_SKU.DURATIONTYPE = '1' AND FN_ISDATE(CM_LOT.LOTTABLE01) = 1 AND TO_DATE(CM_LOT.LOTTABLE01, 'YYYYMMDD') <![CDATA[<]]> TRUNC(SYSDATE) 
+			                     THEN 'FALSE'
+			                     WHEN MS_SKU.DURATIONTYPE IN ('2', '3') AND FN_ISDATE(CM_LOT.LOTTABLE01) = 1 AND TO_DATE(CM_LOT.LOTTABLE01, 'YYYYMMDD') + MS_SKU.DURATION - 1 <![CDATA[<]]> TRUNC(SYSDATE) 
+			                     THEN 'FALSE'
+			                   ELSE 'TRUE' END)
+			     AND (MS_LOCATION.PLT_FLG <![CDATA[<>]]> 'S' OR MS_LOCATION.PLT_FLG IS NULL)
+			     AND MS_LOCATION.LOC NOT IN ('CROSS', 'DAILYCROSS', 'STAGE')
+			     GROUP BY ST_STOCK.DCCODE, MS_SKU.STORAGETYPE
+			
+			    UNION ALL
+			
+			    /* 2. SERIALYN = 'Y' 인 경우 */
+			    SELECT ST_STOCK.DCCODE,
+			           MAX(CM_DC.DCNAME) AS DCNAME,
+			           MS_SKU.STORAGETYPE,
+			           MAX(MS_SKU.REFERENCE15),
+			           CEIL(SUM(ST_STOCK.QTY) / MAX(MS_SKU.QTYPERBOX) / MAX(MS_SKUCHAIN.BOXPERPLT)) AS CNT
+			      FROM MS_SKUCHAIN
+			      JOIN ST_STOCK 
+			        ON MS_SKUCHAIN.STORERKEY 	= ST_STOCK.STORERKEY 
+			       AND MS_SKUCHAIN.SKU 			= ST_STOCK.SKU
+			      
+			      JOIN MS_SKU 
+			        ON MS_SKU.STORERKEY = MS_SKUCHAIN.STORERKEY 
+			       AND MS_SKU.SKU 		= MS_SKUCHAIN.SKU
+			      
+			      JOIN MS_LOCATION 
+			        ON MS_LOCATION.DCCODE 	= ST_STOCK.DCCODE 
+			       AND MS_LOCATION.LOC 		= ST_STOCK.LOC
+			       
+			      JOIN CM_LOT 
+			        ON CM_LOT.STORERKEY = ST_STOCK.STORERKEY 
+			       AND CM_LOT.LOT 		= ST_STOCK.LOT
+			      
+			      LEFT JOIN CM_DC 
+			        ON CM_DC.DCCODE = ST_STOCK.DCCODE
+			     
+			     WHERE ST_STOCK.STORERKEY = 'FW00'
+			       AND MS_SKU.REFERENCE15 IS NOT NULL
+			       AND MS_SKU.STORAGETYPE IN ('10','20','30')
+			       AND MS_SKU.SERIALYN 		= 'Y'
+			       AND MS_SKU.REFERENCE15 	= 'Y'
+			       
+			       AND ST_STOCK.QTY > 0
+
+			       AND MS_LOCATION.LOCTYPE IN ('STAGE', 'PICK', 'KEEP', 'CROSS', 'FIRSTOUT', 'LONGSTAY', 'CANCEL')
+			       AND ((MS_LOCATION.LOCCATEGORY IN ('RACK', 'YARD') AND ST_STOCK.DCCODE != '2690') OR
+			            (MS_LOCATION.LOCCATEGORY IN ('RACK', 'YARD', 'AUTO') AND ST_STOCK.DCCODE = '2690'))
+			       AND MS_LOCATION.LOCFLAG = 'GOOD'
+			       AND MS_LOCATION.CAPA_YN = 'Y'
+			       AND (CASE 
+			       			WHEN MS_LOCATION.DCCODE = '2690' AND MS_LOCATION.LOCTYPE = 'STAGE' 
+			       			THEN 'Y'
+			                WHEN MS_LOCATION.DCCODE = '2600' AND MS_LOCATION.LOCTYPE = 'STAGE' 
+			                THEN 'Y'
+			            ELSE MS_LOCATION.OUT_YN END) = 'Y'
+			       AND MS_LOCATION.DEL_YN = 'N'
+			       AND MS_LOCATION.STOCKTYPE = 'GOOD'
+			       AND 'TRUE' = (CASE 
+			       					WHEN CM_LOT.LOTTABLE01 = 'STD' OR MS_SKU.DURATIONTYPE = 'N' 
+			       					THEN 'TRUE'
+			                        WHEN MS_SKU.DURATIONTYPE = '1' AND FN_ISDATE(CM_LOT.LOTTABLE01) = 1 AND TO_DATE(CM_LOT.LOTTABLE01, 'YYYYMMDD') <![CDATA[<]]> TRUNC(SYSDATE) 
+			                        THEN 'FALSE'
+			                        WHEN MS_SKU.DURATIONTYPE IN ('2', '3') AND FN_ISDATE(CM_LOT.LOTTABLE01) = 1 AND TO_DATE(CM_LOT.LOTTABLE01, 'YYYYMMDD') + MS_SKU.DURATION - 1 <![CDATA[<]]> TRUNC(SYSDATE) 
+			                        THEN 'FALSE'
+			                     ELSE 'TRUE' END)
+			       AND (MS_LOCATION.PLT_FLG <![CDATA[<>]]> 'S' OR MS_LOCATION.PLT_FLG IS NULL)
+			       AND MS_LOCATION.LOC NOT IN ('CROSS', 'DAILYCROSS', 'STAGE')
+			     GROUP BY ST_STOCK.DCCODE, MS_SKUCHAIN.SKU, MS_SKU.STORAGETYPE
+			) 
+			GROUP BY DCCODE
+			ORDER BY DCCODE
+    </select>
+    
+    <!-- 재고재배치조회 capa 조회 (목록) -->
+	<select id="getCapaList" resultType="OmStockReocationCapaResDto">
+		SELECT	/* [omStockReocationService.sqlx][omStockReocationService.getCapaList][재고재배치 capa 조회 (목록)][JeongHyeongCheol][20251222] */ 
+	          NVL(MS_CAPA.DCCODE, 'TOTAL')                   AS DCCODE
+		    , MAX(CM_DC.DCNAME)                              AS DCNAME
+		    
+		    , SUM(CASE WHEN MS_CAPA.STORAGETYPE = '10' THEN MS_CAPA.CAPAVALUE ELSE '0' END) AS ROOM_TEMP
+		    , SUM(CASE WHEN MS_CAPA.STORAGETYPE = '20' THEN MS_CAPA.CAPAVALUE ELSE '0' END) AS REFRIGERATION
+		    , SUM(CASE WHEN MS_CAPA.STORAGETYPE = '30' THEN MS_CAPA.CAPAVALUE ELSE '0' END) AS FROZEN
+		    
+		    , SUM(SUM(MS_CAPA.CAPAVALUE))OVER()                         AS TOTAL_CAPA
+		FROM MS_CAPA
+		LEFT JOIN CM_DC
+		       ON CM_DC.DCCODE = MS_CAPA.DCCODE 
+		WHERE MS_CAPA.CAPATYPE = '1' 
+		  AND MS_CAPA.DEL_YN   = 'N'
+		  AND MS_CAPA.STORAGETYPE IN ('10','20','30')
+		GROUP BY 
+		      MS_CAPA.DCCODE
+		ORDER BY 
+		      CASE WHEN MS_CAPA.DCCODE IS NULL THEN 1 ELSE 0 END, MS_CAPA.DCCODE
+    </select>
+    
+    <!-- 재고재배치조회 이체량 조회 (목록) -->
+	<select id="getWeightList" resultType="OmStockReocationWeightResDto">
+		SELECT	/* [omStockReocationService.sqlx][omStockReocationService.getWeightList][재고재배치조회 이체량 조회 (목록)][JeongHyeongCheol][20251222] */ 
+			  FROMSTO.DCCODE                                    AS DCCODE
+			, CM_DC.DCNAME                                      AS DCNAME
+			
+			, SUM(CASE WHEN MS_SKU.STORAGETYPE = '10' 
+			           THEN (CASE WHEN MS_UOM.BUNJA IS NULL THEN 0 ELSE TOSTO.CONFIRMQTY * MS_UOM.BUNMO / MS_UOM.BUNJA END) 
+			           ELSE 0 END) 								AS ROOM_TEMP
+			, SUM(CASE WHEN MS_SKU.STORAGETYPE = '20' 
+			           THEN (CASE WHEN MS_UOM.BUNJA IS NULL THEN 0 ELSE TOSTO.CONFIRMQTY * MS_UOM.BUNMO / MS_UOM.BUNJA END) 
+			           ELSE 0 END) 								AS REFRIGERATION
+			, SUM(CASE WHEN MS_SKU.STORAGETYPE = '30' 
+			           THEN (CASE WHEN MS_UOM.BUNJA IS NULL THEN 0 ELSE TOSTO.CONFIRMQTY * MS_UOM.BUNMO / MS_UOM.BUNJA END) 
+			           ELSE 0 END) 								AS FROZEN
+			
+			, SUM(SUM(CASE WHEN MS_UOM.BUNJA IS NULL THEN 0 
+			               ELSE TOSTO.CONFIRMQTY * MS_UOM.BUNMO / MS_UOM.BUNJA 
+			          END)) OVER()                              AS TOTAL_WEIGHT
+		FROM DM_DOCUMENT_D FROMSTO
+		
+		JOIN MS_SKU
+		  ON MS_SKU.STORERKEY = FROMSTO.STORERKEY
+		 AND MS_SKU.SKU       = FROMSTO.SKU
+		 AND MS_SKU.DEL_YN    = 'N'
+		 AND MS_SKU.STORAGETYPE IN ('10','20','30')
+		
+		LEFT JOIN CM_DC
+		  ON CM_DC.DCCODE = FROMSTO.DCCODE
+		
+		LEFT OUTER JOIN MS_UOM
+		  ON MS_UOM.STORERKEY = FROMSTO.STORERKEY
+		 AND MS_UOM.SKU       = FROMSTO.SKU
+		 AND MS_UOM.BASEUOM   = FROMSTO.UOM
+		 AND MS_UOM.UOM       = 'KG'
+		
+		JOIN DM_DOCUMENT_D TOSTO      
+		  ON TOSTO.STORERKEY  = FROMSTO.STORERKEY
+		 AND TOSTO.DOCTYPE    = 'DP'
+		 AND TOSTO.DOCDT      = FROMSTO.DOCDT
+		 AND TOSTO.DOCNO      = FROMSTO.DOCNO
+		 AND TOSTO.DOCLINE    = FROMSTO.DOCLINE
+		 AND TOSTO.WORKPROCESSCODE = 'STO'
+		 AND TOSTO.DEL_YN     = 'N'     
+		
+		WHERE FROMSTO.WORKPROCESSCODE = 'STO'
+		  AND FROMSTO.STORERKEY       = 'FW00'
+		  AND FROMSTO.DEL_YN          = 'N'       
+		
+		GROUP BY 
+		      FROMSTO.DCCODE
+		    , CM_DC.DCNAME
+		ORDER BY 
+		      FROMSTO.DCCODE
+    </select>
+    
+    <!-- CSV 파일 저장 INSERT -->
+    <insert id="insertDetailList">
+		INSERT	/* [omStockReocationService.sqlx][omStockReocationService.insertDetailList][재고재배치조회 정보 INSERT][JeongHyeongCheol][20260105] */ 
+			INTO ST_RELOC_SKU_INFO
+	  			(REQ_NO 
+		        ,CUSTKEY
+			    ,SKU
+			    ,STORAGETYPE 
+			    ,WD_DCCODE
+			    ,BEF_DCCODE
+			    ,AFT_DCCODE
+			    ,EDIT_CNTT
+			    ,OPT_EXCEPT_REASON	
+			    ,BEF_QTY
+			    ,AFT_QTY
+			    ,BEF_PLT_QTY
+			    ,AFT_PLT_QTY
+			    ,WD_WGT_30_SUM
+			    ,BEF_MOVE_QTY
+			    ,AFT_MOVE_QTY
+			    ,ADDDATE
+			    ,EDITDATE			    																 
+				,ADDWHO 
+				,EDITWHO)
+			<foreach collection="list" item="item" separator="UNION ALL">
+		        SELECT
+		             #{item.reqNo}
+		            ,#{item.custkey}
+		            ,#{item.sku}
+		            ,#{item.storagetype}
+		            ,#{item.wdDccode}
+		            ,#{item.befDccode}
+		            ,#{item.aftDccode}
+		            ,#{item.editCntt}
+		            ,#{item.optExceptReason}
+		            ,#{item.befQty}
+		            ,#{item.aftQty}
+		            ,#{item.befPltQty}
+		            ,#{item.aftPltQty}
+		            ,#{item.wdWgt30Sum}
+		            ,#{item.befMoveQty}
+		            ,#{item.aftMoveQty}
+		            ,SYSDATE
+		            ,SYSDATE
+		            ,#{item.gUserId}
+		            ,#{item.gUserId}
+		        FROM DUAL
+		    </foreach>
+    </insert>
+    
+    <!-- 재고재배치조회 ai 결과 상세 조회 (목록) -->
+	<select id="getDetailList" resultType="OmStockReocationResDto">
+		SELECT	/* [omStockReocationService.sqlx][omStockReocationService.getDetailList][재고재배치조회 ai 결과 상세 조회 (목록)][JeongHyeongCheol][20251222] */ 
+				 SRSI.REQ_NO					AS REQ_NO
+		        ,SRSI.CUSTKEY					AS CUSTKEY
+		        ,MC.DESCRIPTION					AS CUSTNAME
+			    ,SRSI.SKU						AS SKU
+			    ,MS.DESCRIPTION					AS SKUNAME
+			    ,FN_CODEDESCR('FW00', 'STORAGETYPE', SRSI.STORAGETYPE)				AS STORAGETYPE 
+			    ,CM_DC.DCNAME					AS WD_DCCODE
+			    ,SRSI.BEF_DCCODE				AS BEF_DCCODE
+			    ,SRSI.AFT_DCCODE				AS AFT_DCCODE
+			    ,SRSI.EDIT_CNTT					AS EDIT_CNTT
+			    ,SRSI.OPT_EXCEPT_REASON			AS OPT_EXCEPT_REASON
+			    ,SRSI.BEF_QTY					AS BEF_QTY
+			    ,SRSI.AFT_QTY					AS AFT_QTY
+			    ,SRSI.BEF_PLT_QTY				AS BEF_PLT_QTY
+			    ,SRSI.AFT_PLT_QTY				AS AFT_PLT_QTY
+			    ,SRSI.WD_WGT_30_SUM				AS WD_WGT_30_SUM
+			    ,SRSI.BEF_MOVE_QTY				AS BEF_MOVE_QTY
+			    ,SRSI.AFT_MOVE_QTY				AS AFT_MOVE_QTY
+	    FROM ST_RELOC_SKU_INFO SRSI
+	    LEFT JOIN MS_SKU MS
+	      ON MS.SKU = SRSI.SKU
+	    LEFT JOIN MS_CUST MC
+	      ON MC.CUSTKEY  = SRSI.CUSTKEY
+	     AND MC.CUSTTYPE = 'P'
+	     LEFT JOIN CM_DC
+		  ON CM_DC.DCCODE = SRSI.WD_DCCODE
+	    
+    </select>
+    
+    <!-- 현재고 배차안 asis tobe 상품 비교 (목록) -->
+	<select id="getSkuCompareList" resultType="OmStockReocationCompareResDto">
+		SELECT	/* [omStockReocationService.sqlx][omStockReocationService.getSkuCompareList][현재고 배차안 asis tobe 상품 비교 (목록)][JeongHyeongCheol][20260120] */ 
+				SKU_COUNTS.AF_COUNT AS TO_BE_CONVERSION_COUNT,
+			    SKU_COUNTS.BF_COUNT AS AS_IS_CONVERSION_COUNT,
+			    COUNT(SKU_COUNTS.SKU) AS COUNT_OF_SKUS
+			FROM
+			    (
+			        SELECT
+			            SKU,
+			            COUNT(CASE WHEN BEF_DCCODE = 'O' THEN 1 END) AS BF_COUNT,
+			            COUNT(CASE WHEN AFT_DCCODE = 'O' THEN 1 END) AS AF_COUNT
+			        FROM
+			            ST_RELOC_SKU_INFO
+			        WHERE 1=1
+			        <if test='skuMulti != null and skuMulti != ""'>
+						AND SKU IN 
+						<foreach collection="skuMulti" item="code" open="(" close=")" separator="," >
+				            #{code}
+				        </foreach>
+			    	</if>			        
+			        GROUP BY
+			            SKU
+			    ) SKU_COUNTS
+			GROUP BY
+			    SKU_COUNTS.BF_COUNT,
+			    SKU_COUNTS.AF_COUNT  
+			ORDER BY
+			    AS_IS_CONVERSION_COUNT,
+			    TO_BE_CONVERSION_COUNT 
+	    
+    </select>
+        
+</mapper>

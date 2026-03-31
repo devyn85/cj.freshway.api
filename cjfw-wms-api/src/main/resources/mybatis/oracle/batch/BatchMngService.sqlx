@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="batchMngService">
+	<!-- 배치 정보 조회(목록) -->
+	<select id="getBatchMngList" resultType="BatchMngResDto">
+        SELECT JOB_GUBUN
+             , JOB_NAME
+             , JOB_DESC
+             , JOB_INTERVAL
+             , JOB_CLASS_NAME
+             , JOB_SCHEDULE
+             , PARAM_DESC
+             , TIMEOUT_VALUE
+             , USE_YN
+             , ADDDATE
+             , EDITDATE
+             , ADDWHO
+             , EDITWHO
+             , LAST_RUN_START_TIME
+             , LAST_RUN_END_TIME
+             , CASE WHEN ERR_CODE <![CDATA[<]]> 0 THEN 'FAILED'
+                    ELSE JOB_STATUS
+                    END AS JOB_RESULT
+             , LAST_RUN_TIME
+             , JOB_RMK
+          FROM (
+                SELECT BATCH_H.JOB_GUBUN
+                     , BATCH_H.JOB_NAME
+                     , BATCH_H.JOB_DESC
+                     , BATCH_H.JOB_INTERVAL
+                     , BATCH_H.JOB_CLASS_NAME
+                     , BATCH_H.CRON_EXPRESSION                                AS JOB_SCHEDULE
+                     , ( SELECT CASE WHEN COUNT(1) > 0 THEN TO_CHAR(COUNT(1)) || '건'
+                                     ELSE ''
+                                    END
+                         FROM BATCH_D
+                         WHERE JOB_NAME = BATCH_H.JOB_NAME
+                       )                                                AS PARAM_DESC
+                     , BATCH_H.TIMEOUT_VALUE
+                     , BATCH_H.USE_YN
+                     , BATCH_H.ADDDATE
+                     , BATCH_H.EDITDATE
+                     , BATCH_H.ADDWHO
+                     , BATCH_H.EDITWHO
+                     , TO_CHAR(BATCH_JOB_EXECUTION.START_TIME,'YYYY-MM-DD HH24:MI:SS')    AS LAST_RUN_START_TIME
+                     , TO_CHAR(BATCH_JOB_EXECUTION.END_TIME,'YYYY-MM-DD HH24:MI:SS')      AS LAST_RUN_END_TIME
+                     , BATCH_H.JOB_STATUS                                     AS JOB_STATUS
+                     , ( SELECT MIN(RESULT_CODE) AS MIN_RESULT_CODE
+                           FROM MG_BATCH_LOG
+                          WHERE JOB_EXECUTION_ID = BATCH_JOB_EXECUTION.JOB_EXECUTION_ID
+                          GROUP BY JOB_EXECUTION_ID
+                       )                                                      AS ERR_CODE
+                     , ROUND(  EXTRACT(SECOND FROM (END_TIME - START_TIME)) +
+                               EXTRACT(MINUTE FROM (END_TIME - START_TIME)) * 60 +
+                               EXTRACT(HOUR FROM (END_TIME - START_TIME)) * 3600 +
+                               EXTRACT(DAY FROM (END_TIME - START_TIME)) * 86400 )  AS LAST_RUN_TIME
+                     , BATCH_H.JOB_RMK
+                FROM BATCH_H BATCH_H
+                  LEFT OUTER JOIN ( SELECT MAX(AA.JOB_EXECUTION_ID) AS JOB_EXECUTION_ID
+                                         , BB.JOB_NAME
+                                      FROM BATCH_JOB_EXECUTION AA
+                                      LEFT JOIN BATCH_JOB_INSTANCE BB on AA.JOB_INSTANCE_ID=BB.JOB_INSTANCE_ID
+                                     GROUP BY BB.JOB_NAME
+                  ) B ON BATCH_H.JOB_NAME = B.JOB_NAME
+                  LEFT OUTER JOIN BATCH_JOB_EXECUTION BATCH_JOB_EXECUTION ON B.JOB_EXECUTION_ID = BATCH_JOB_EXECUTION.JOB_EXECUTION_ID
+                 WHERE 1=1
+                <if test='jobNameDesc != null and jobNameDesc != ""'>
+                    AND (BATCH_H.JOB_NAME like '%' || #{jobNameDesc} || '%' OR BATCH_H.JOB_DESC LIKE '%' || #{jobNameDesc} ||'%')
+                </if>
+                <if test='jobGubun != null and jobGubun != ""'>
+                    AND BATCH_H.JOB_GUBUN = #{jobGubun}
+                </if>
+                <if test='jobInterval != null and jobInterval != ""'>
+                    AND BATCH_H.JOB_INTERVAL = #{jobInterval}
+                </if>
+                <if test='useYn != null and useYn != ""'>
+                    AND BATCH_H.USE_YN = #{useYn}
+                </if>
+          )
+        ORDER BY JOB_NAME
+    </select>
+    
+    <!-- 배치 정보 INSERT -->
+    <insert id="insertBatchH">
+		INSERT	/* [BatchMngService.sqlx][batchMngService.insertBatchMngList][배치 정보 INSERT][yewon.kim][20250704] */
+			INTO BATCH_H
+		  ( JOB_NAME
+          , JOB_CLASS_NAME
+          , CRON_EXPRESSION
+          , JOB_GUBUN
+          , JOB_INTERVAL
+          , JOB_DESC
+          , TIMEOUT_VALUE
+          , USE_YN
+          , ADDWHO
+          , ADDDATE
+          , EDITWHO
+          , EDITDATE
+          )
+		VALUES
+            ( #{jobName}
+            , #{jobClassName}
+            , #{jobSchedule}
+		    , #{jobGubun}
+		    , #{jobInterval}
+            , #{jobDesc}
+		    , #{timeoutValue}
+            , #{useYn}
+            , #{gUserId}
+            , SYSDATE
+            , #{gUserId}
+            , SYSDATE
+            )
+    </insert>
+
+    
+    
+    <!-- 배치 정보 UPDATE -->
+    <update id="updateBatchH">
+		UPDATE	/* [BatchMngService.sqlx][batchMngService.udateBatchH][배치 정보 UPDATE][yewon.kim][20250704] */
+			    BATCH_H
+		   SET  JOB_CLASS_NAME = #{jobClassName}
+		     ,  CRON_EXPRESSION  = #{jobSchedule}
+		     ,  JOB_DESC = #{jobDesc}
+		     ,  JOB_GUBUN = #{jobGubun}
+		     ,  JOB_INTERVAL = #{jobInterval}
+		     ,  TIMEOUT_VALUE = #{timeoutValue}
+		     ,  USE_YN = #{useYn}
+		     ,  EDITDATE = SYSDATE
+		     ,  EDITWHO = #{gUserId}
+		 WHERE  JOB_NAME = #{jobName}
+	</update>
+
+    <!-- 배치 정보 DELETE -->
+    <delete id="deleteBatchH">
+        DELETE BATCH_H WHERE JOB_NAME = #{jobName}
+    </delete>
+
+
+    <!-- QUARTZ JOB DETAIL 정보 -->
+	<select id="selectQrtzJobDetails" resultType="BatchMngResDto">
+        SELECT CASE WHEN COUNT(MAX(QRTZ_JOB_DETAILS.JOB_NAME)) > 0 THEN 'Y' ELSE 'N' END AS jobDetailYn
+             , MAX(QRTZ_CRON_TRIGGERS.CRON_EXPRESSION)             AS jobSchedule
+          FROM QRTZ_JOB_DETAILS
+          JOIN QRTZ_TRIGGERS
+            ON QRTZ_TRIGGERS.JOB_NAME = QRTZ_JOB_DETAILS.JOB_NAME
+           AND QRTZ_TRIGGERS.JOB_GROUP = QRTZ_JOB_DETAILS.JOB_GROUP
+          JOIN QRTZ_CRON_TRIGGERS
+            ON QRTZ_CRON_TRIGGERS.TRIGGER_NAME = QRTZ_TRIGGERS.TRIGGER_NAME
+           AND QRTZ_CRON_TRIGGERS.TRIGGER_GROUP = QRTZ_TRIGGERS.TRIGGER_GROUP
+         WHERE QRTZ_JOB_DETAILS.JOB_NAME = #{jobName}
+         GROUP BY QRTZ_CRON_TRIGGERS.CRON_EXPRESSION
+	</select>
+
+    <!-- QUARTZ 수기 등록: CRON 트리거 업데이트 -->
+    <update id="updateQrtzCronTriggers">
+        UPDATE QRTZ_CRON_TRIGGERS
+           SET CRON_EXPRESSION = #{jobSchedule}
+         WHERE TRIGGER_NAME = #{triggerName}
+           AND TRIGGER_GROUP = 'DEFAULT'
+    </update>
+</mapper>

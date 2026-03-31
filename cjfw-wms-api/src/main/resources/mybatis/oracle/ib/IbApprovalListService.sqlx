@@ -1,0 +1,360 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ibApprovalListService">
+      
+    <select id="ibApprovalListService_getMasterlist" resultType="IbApprovalListResDto">
+       SELECT    /* [ibApprovalListService.sqlx][getMasterlist][외부창고 결재내역 조회][sunho.kim][20250826] */
+                 IB_APPROVAL_MASTER.APPR_STATUS                                                  AS APPR_STATUS           /* 결재최종상태 */
+                ,CASE WHEN IB_APPROVAL_MASTER.APPR_STATUS IN ('0', '1')
+                      THEN '예정'
+                      ELSE CD1.BASEDESCR                                                    
+                  END                                                                            AS APPR_STATUS_NAME      /* 결재최종상태명 */
+                ,IB_APPROVAL_MASTER.APPR_NO                                                      AS APPR_NO               /* 결재문서번호 */
+                ,IB_APPROVAL_MASTER.TITLE                                                        AS TITLE                 /* 상신제목 */
+                ,IB_APPROVAL_MASTER.ADDWHO                                                       AS ADDWHO                /* 최초등록자 */
+                ,(SELECT USER_NM FROM FRAMEONE_USER WHERE USER_ID = IB_APPROVAL_MASTER.ADDWHO)   AS ADDWHONAME            /* 최초등록자명 */
+                ,TO_CHAR(IB_APPROVAL_MASTER.ADDDATE, 'YYYY-MM-DD HH24:MI:SS')                    AS ADDDATE               /* 최초등록일시 */
+                ,CASE
+                  WHEN IB_APPROVAL_MASTER.PROCESS_ID = 'IM_IV_001'
+                      THEN NULL
+                  WHEN IB_APPROVAL_MASTER.PROCESS_ID = 'IM_EX_001'
+                      THEN ATTACH1.CNT
+                  WHEN IB_APPROVAL_MASTER.PROCESS_ID = 'IM_EX_002'
+                      THEN ATTACH1.CNT
+                  WHEN IB_APPROVAL_MASTER.PROCESS_ID = 'EX_EX_002'
+                      THEN ATTACH2.CNT
+                  ELSE NULL 
+                 END                                                                             AS LOV_FILE              /* 첨부파일여부 */
+                ,NVL(FRAMEONE_USER.USER_NM, '')                                                  AS APPROVALWHONAME       /* 결재자명 */
+                ,TO_CHAR(IB_APPROVAL_LINE.APPR_DATE,'YYYY-MM-DD HH24:MI:SS')                     AS APPROVALDT            /* 기안/결재일시 */ 
+                ,IB_APPROVAL_MASTER.SERIALKEY                                                    AS SERIALKEY             /* 결재마스터일련번호 */
+                ,IB_APPROVAL_DOC.DOCUMENT_SN                                                     AS DOCUMENT_SN           /* 결재문서일련번호 */
+        FROM IB_APPROVAL_MASTER IB_APPROVAL_MASTER
+        
+        JOIN IB_APPROVAL_DOC
+          ON   IB_APPROVAL_DOC.APPR_SN = IB_APPROVAL_MASTER.SERIALKEY
+        
+        JOIN IB_APPROVAL_LINE
+          ON   IB_APPROVAL_LINE.APPR_SN = IB_APPROVAL_DOC.APPR_SN
+        <if test="lineType != null and lineType != ''">   
+          AND  IB_APPROVAL_LINE.LINE_TYPE   = #{lineType}        
+        </if>
+        <if test="personName != null and personName != ''"> 
+          AND  IB_APPROVAL_LINE.Person_Name LIKE '%' || #{personName}||'%'     
+        </if>
+        
+        LEFT OUTER JOIN (
+               SELECT S.DOC_ID, COUNT(S.SERIALKEY) AS CNT 
+                 FROM IB_EXPENSE_HTTP_DOC_ATTACH S
+                WHERE S.DOC_NAME = 'IMP_EXPENSE'
+                GROUP BY S.DOC_ID
+            ) ATTACH1    
+            ON  ATTACH1.DOC_ID = IB_APPROVAL_DOC.DOCUMENT_SN 
+        LEFT OUTER JOIN (
+               SELECT S.DOC_ID, COUNT(S.SERIALKEY) AS CNT 
+                 FROM IB_EXPENSE_HTTP_DOC_ATTACH S
+                WHERE S.DOC_NAME = 'EXP_EXPENSE'
+                GROUP BY S.DOC_ID
+            ) ATTACH2    
+            ON  ATTACH2.DOC_ID = IB_APPROVAL_DOC.DOCUMENT_SN 
+        
+        LEFT OUTER JOIN FRAMEONE_USER
+          ON  FRAMEONE_USER.USER_ID = IB_APPROVAL_LINE.PERSON_ID
+        
+        LEFT OUTER JOIN CM_CODE_STORER CD1
+           ON  CD1.STORERKEY = #{gStorerkey}
+           AND CD1.CODELIST  = 'APPROVAL_STATUS'   
+           AND CD1.BASECODE  = IB_APPROVAL_MASTER.APPR_STATUS
+        
+        WHERE 1=1
+          AND  IB_APPROVAL_MASTER.APPR_STATUS IN ('2','3')
+          AND  IB_APPROVAL_LINE.APPR_STATUS   IN ('2','3')
+        <if test="gAuthority != '00'">
+          AND  IB_APPROVAL_LINE.PERSON_ID     = #{gUserId}
+        </if>
+        <if test="dateType == 'ADDDATE'">
+          AND  IB_APPROVAL_MASTER.ADDDATE <![CDATA[>=]]> TO_DATE(#{dateFrom}, 'YYYYMMDD')
+          AND  IB_APPROVAL_MASTER.ADDDATE <![CDATA[<]]>  TO_DATE(#{dateTo}, 'YYYYMMDD') + 1
+        </if>       
+        <if test="dateType == 'EDITDATE'">
+          AND  IB_APPROVAL_MASTER.EDITDATE <![CDATA[>=]]> TO_DATE(#{dateFrom}, 'YYYYMMDD')
+          AND  IB_APPROVAL_MASTER.EDITDATE <![CDATA[<]]>  TO_DATE(#{dateTo}, 'YYYYMMDD') + 1
+        </if>   
+        ORDER BY APPR_NO DESC
+    </select>       
+
+    <select id="ibApprovalRequestService_getDataHeaderlist" resultType="HMap">
+        SELECT     /* [ibApprovalListService.sqlx][getDataHeaderlist][외부창고 결재내역 조회][sunho.kim][20250826] */
+                 IB_APPROVAL_MASTER.APPR_STATUS                                                              AS APPR_STATUS
+                ,FN_CODEDESCR(#{g_STORERKEY},'APPROVAL_STATUS',IB_APPROVAL_MASTER.APPR_STATUS)               AS APPR_STATUS_NAME
+                ,IB_APPROVAL_MASTER.APPR_NO                                                                  AS APPR_NO
+                ,IB_APPROVAL_MASTER.TITLE                                                                    AS TITLE
+                ,IB_APPROVAL_MASTER.ADDWHO                                                                   AS ADDWHO
+                ,(SELECT USER_NM FROM FRAMEONE_USER WHERE USER_ID = IB_APPROVAL_MASTER.ADDWHO)               AS ADDWHONAME
+                ,TO_CHAR(IB_APPROVAL_MASTER.ADDDATE, 'YYYY-MM-DD HH24:MI:SS')                                AS ADDDATE
+                ,IB_APPROVAL_MASTER.SERIALKEY                                                                AS SERIALKEY
+                ,IB_APPROVAL_DOC.DOCUMENT_SN                                                                 AS DOCUMENT_SN
+        FROM IB_APPROVAL_MASTER
+        JOIN IB_APPROVAL_DOC
+          ON   IB_APPROVAL_DOC.APPR_SN = IB_APPROVAL_MASTER.SERIALKEY
+        WHERE 1=1 
+        <if test="gAuthority != '00'">
+          AND  IB_APPROVAL_MASTER.DRAFTER_ID = #{gUserId}
+        </if>
+        
+        <if test="dateType == 'ADDDATE'">
+          AND    IB_APPROVAL_MASTER.ADDDATE <![CDATA[>=]]> TO_DATE(#{dateFrom}, 'YYYYMMDD')
+          AND    IB_APPROVAL_MASTER.ADDDATE <![CDATA[<]]>  TO_DATE(#{dateTo}, 'YYYYMMDD') + 1
+        </if>
+        <if test="dateType == 'EDITDATE'">
+          AND    IB_APPROVAL_MASTER.EDITDATE <![CDATA[>=]]> TO_DATE(#{dateFrom}, 'YYYYMMDD')
+          AND    IB_APPROVAL_MASTER.EDITDATE <![CDATA[<]]>  TO_DATE(#{dateTo}, 'YYYYMMDD') + 1
+        </if>   
+        <if test="lineType != null and lineType != ''">
+            <if test="personName != null and personName != ''">
+          AND    EXISTS (SELECT 1                                               
+                         FROM IB_APPROVAL_LINE                                              
+                         WHERE IB_APPROVAL_LINE.APPR_SN     = IB_APPROVAL_DOC.APPR_SN   
+                           AND IB_APPROVAL_LINE.LINE_TYPE   = #{lineType}
+                           AND IB_APPROVAL_LINE.Person_Name LIKE #{personName}||'%'  )
+            </if>                      
+        </if>
+    </select>
+    
+    <select id="getApprovalLine" resultType="IbApprovalListResDto">
+        SELECT     /* [ibApprovalListService.sqlx][getApprovalLine][외부창고 결재내역 라인 조회][sunho.kim][20250826] */
+                IB_APPROVAL_LINE.LINE_TYPE                                                    AS  LINE_TYPE 
+               ,FN_CODEDESCR(#{gStorerkey},'APPROVAL_LINETYPE',IB_APPROVAL_LINE.LINE_TYPE)    AS  LINE_TYPE_NAME
+               ,IB_APPROVAL_LINE.PERSON_POSITION                                              AS  PERSON_POSITION
+               ,IB_APPROVAL_LINE.PERSON_NAME                                                  AS  PERSON_NAME
+               ,DAMO.DEC(FRAMEONE_EMP.HANDPHONE_NO)                                           AS  PHONE
+               ,IB_APPROVAL_LINE.APPR_STATUS                                                  AS  APPR_STATUS
+               ,CD1.BASEDESCR                                                                 AS  APPR_STATUS_NAME
+               ,TO_CHAR(IB_APPROVAL_LINE.APPR_DATE, 'YYYY-MM-DD HH24:MI:SS')                  AS  APPR_DATE
+
+        FROM  IB_APPROVAL_LINE
+    
+        JOIN  FRAMEONE_USER
+        ON    FRAMEONE_USER.USER_ID = IB_APPROVAL_LINE.PERSON_ID
+    
+        JOIN  FRAMEONE_EMP
+        ON    FRAMEONE_EMP.EMP_NO = FRAMEONE_USER.EMP_NO
+        
+        LEFT OUTER JOIN CM_CODE_STORER CD1
+        ON   CD1.STORERKEY = #{gStorerkey}
+        AND  CD1.CODELIST  = 'APPROVAL_STATUS'   
+        AND  CD1.BASECODE  = IB_APPROVAL_LINE.APPR_STATUS
+        
+        WHERE 1=1
+        AND   IB_APPROVAL_LINE.APPR_SN = #{serialkey}
+        ORDER BY IB_APPROVAL_LINE.LINE_SEQ ASC
+    </select>   
+    
+    <select id="getApprovalStatus" resultType="String">
+        SELECT     /* [ibApprovalListService.sqlx][getApprovalStatus][외부창고 결재문서의 상태값 조회][sunho.kim][20250826] */
+                NVL(APPR_STATUS, '0') AS APPR_STATUS
+        FROM    IB_APPROVAL_MASTER
+        WHERE   1=1
+        AND     SERIALKEY  = #{serialkey}
+        AND     DRAFTER_ID = #{gUserId}
+    </select>
+    
+    <update id="updateApprovalMasterCancel">
+        UPDATE     /* [ibApprovalListService.sqlx][updateApprovalMasterCancel][외부창고 결재마스터 결재상신 취소][sunho.kim][20250826] */
+        IB_APPROVAL_MASTER 
+        SET     APPR_STATUS = '4'
+               ,EDITWHO     = #{gUserId}
+               ,EDITDATE    = SYSDATE
+        WHERE   SERIALKEY   = #{serialkey}
+    </update>
+    
+    <update id="updateApprovalLindCancel">
+        UPDATE     /* [ibApprovalListService.sqlx][updateApprovalLindCancel][외부창고 결재라인 결재상신 취소][sunho.kim][20250826] */
+        IB_APPROVAL_LINE 
+        SET     APPR_STATUS = '4'
+               ,EDITWHO     = #{gUserId}
+               ,EDITDATE    = SYSDATE
+        WHERE   APPR_SN     = #{serialkey}
+    </update>
+
+    <select id="getMasterlist" resultType="IbApprovalListResDto">
+        SELECT    /* [ibApprovalListService.sqlx][getMasterlist][외부창고 결재 조회][sunho.kim][20250826] */ 
+             A.APPR_NO                                                          AS APPR_NO              /* 결재문서번호 */
+            ,A.APPR_STATUS                                                      AS APPR_STATUS          /* 결재최종상태 */
+            ,CASE WHEN A.APPR_STATUS IN ('0', '1')
+                  THEN '예정'
+                  ELSE A.APPR_STATUS_NAME                                                    
+              END                                                               AS APPR_STATUS_NAME     /* 결재최종상태명 */
+            ,A.TITLE                                                            AS TITLE                /* 상신제목 */
+            ,A.ADDWHO                                                           AS ADDWHO               /* 결재요청자아이디 */
+            ,A.ADDDATE                                                          AS ADDDATE              /* 기안일시 */
+            ,A.ADDWHONAME                                                       AS ADDWHONAME           /* 결재요청자명 */
+            ,A.REQDT                                                            AS REQDT                /* 기안일시 */ 
+            ,A.AD_SN                                                            AS AD_SN                /* 결재문서일련번호 */
+            ,A.FILECOUNT                                                        AS FILECOUNT            /* 첨부파일건수 */
+            ,A.SERIALKEY                                                        AS SERIALKEY            /* 결재마스터일련번호 */
+            ,A.APPROVALWHO                                                      AS APPROVALWHO          /* 결재자아이디 */
+            ,A.APPROVALWHONAME                                                  AS APPROVALWHONAME      /* 결재자명 */
+            ,A.APPROVALDT                                                       AS APPROVALDT           /* 결재일시 */ 
+            ,A.EXPENSE_SN                                                       AS EXPENSE_SN           /* 경비처리일련번호 */
+            ,A.DOCUMENT_SN                                                      AS DOCUMENT_SN          /* 해당문서식별번호 */
+        FROM (
+            SELECT
+                IB_APPROVAL_MASTER.APPR_NO                                                        AS APPR_NO
+                ,IB_APPROVAL_MASTER.APPR_STATUS                                                   AS APPR_STATUS 
+                ,CD1.BASEDESCR                                                                    AS APPR_STATUS_NAME 
+                ,IB_APPROVAL_MASTER.TITLE                                                         AS TITLE
+                ,IB_APPROVAL_MASTER.DRAFTER_ID                                                    AS ADDWHO
+                ,TO_CHAR(IB_APPROVAL_MASTER.ADDDATE, 'YYYY-MM-DD HH24:MI:SS')                     AS ADDDATE
+                ,NVL(FRAMEONE_USER.USER_NM, '')                                                   AS ADDWHONAME 
+                ,TO_CHAR(IB_APPROVAL_MASTER.DRAFT_DATE,'YYYYMMDDHH24MISS')                        AS REQDT
+                ,IB_APPROVAL_DOC.SERIALKEY                                                        AS AD_SN
+                ,(SELECT COUNT(IB_EXPENSE_HTTP_DOC_ATTACH.SERIALKEY)
+                    FROM   IB_EXPENSE_HTTP_DOC_ATTACH
+                    WHERE  IB_EXPENSE_HTTP_DOC_ATTACH.DOC_ID = IB_APPROVAL_DOC.DOCUMENT_SN)       AS FILECOUNT
+                ,IB_APPROVAL_MASTER.SERIALKEY                                                     AS SERIALKEY
+                ,IB_APPROVAL_LINE.PERSON_ID                                                       AS APPROVALWHO
+                ,IB_APPROVAL_LINE.PERSON_NAME                                                     AS APPROVALWHONAME
+                ,TO_CHAR(IB_APPROVAL_LINE.APPR_DATE,'YYYYMMDDHH24MISS')                           AS APPROVALDT
+                ,IB_APPROVAL_MASTER.ATTRIBUTES2                                                   AS EXPENSE_SN
+                ,IB_APPROVAL_DOC.DOCUMENT_SN                                                      AS DOCUMENT_SN
+            FROM    IB_APPROVAL_MASTER
+            JOIN    IB_APPROVAL_DOC
+                ON    IB_APPROVAL_DOC.APPR_SN     = IB_APPROVAL_MASTER.SERIALKEY
+            LEFT OUTER JOIN (
+                    SELECT APPR_SN, MAX(SERIALKEY) SERIALKEY
+                    FROM IB_APPROVAL_LINE 
+                    WHERE LINE_TYPE = '2'   
+                      AND APPR_STATUS = '2'
+                    GROUP BY APPR_SN                     
+                    ) APPROVAL_LINE
+                ON   APPROVAL_LINE.APPR_SN        = IB_APPROVAL_MASTER.SERIALKEY         
+            
+            LEFT OUTER JOIN IB_APPROVAL_LINE  IB_APPROVAL_LINE
+                ON   IB_APPROVAL_LINE.SERIALKEY  = APPROVAL_LINE.SERIALKEY    
+            
+            LEFT OUTER JOIN FRAMEONE_USER
+                ON   FRAMEONE_USER.USER_ID       = IB_APPROVAL_MASTER.DRAFTER_ID
+    
+            LEFT OUTER JOIN CM_CODE_STORER CD1
+               ON  CD1.STORERKEY = #{gStorerkey}
+              AND  CD1.CODELIST  = 'APPROVAL_STATUS'   
+              AND  CD1.BASECODE  = IB_APPROVAL_MASTER.APPR_STATUS
+            
+            WHERE  1=1
+                AND  IB_APPROVAL_MASTER.DRAFTER_ID = #{gUserId}                                     /* 결재상신자ID */
+
+            <if test="apprStatus != null and apprStatus != ''">
+              <if test="apprStatus == '1'.toString()">
+                AND  IB_APPROVAL_MASTER.APPR_STATUS IN ('0', '1') 
+              </if>
+              <if test="apprStatus == '2'.toString()">
+                AND  IB_APPROVAL_MASTER.APPR_STATUS IN ('2') 
+              </if>  
+              <if test="apprStatus == '3'.toString()">
+                AND  IB_APPROVAL_MASTER.APPR_STATUS IN ('3')  
+              </if>
+              <if test="apprStatus == '4'.toString()">
+                AND  IB_APPROVAL_MASTER.APPR_STATUS IN ('4') 
+              </if>
+            </if>
+                AND  IB_APPROVAL_MASTER.ADDDATE <![CDATA[>=]]> TO_DATE(#{dateFrom}, 'YYYYMMDD')     /* 시작일자 */
+                AND  IB_APPROVAL_MASTER.ADDDATE <![CDATA[<]]>  TO_DATE(#{dateTo}, 'YYYYMMDD') + 1   /* 종료일자 */  
+        
+            UNION ALL 
+            
+            SELECT
+                 IB_APPROVAL_MASTER.APPR_NO                                                        AS APPR_NO
+                ,IB_APPROVAL_LINE.APPR_STATUS                                                      AS APPR_STATUS 
+                ,CD1.BASEDESCR                                                                     AS APPR_STATUS_NAME
+                ,IB_APPROVAL_MASTER.TITLE                                                          AS TITLE
+                ,IB_APPROVAL_MASTER.DRAFTER_ID                                                     AS ADDWHO
+                ,TO_CHAR(IB_APPROVAL_MASTER.ADDDATE, 'YYYY-MM-DD HH24:MI:SS')                      AS ADDDATE
+                ,NVL(FRAMEONE_USER.USER_NM, '')                                                    AS ADDWHONAME 
+                ,TO_CHAR(IB_APPROVAL_MASTER.DRAFT_DATE,'YYYYMMDDHH24MISS')                         AS REQDT
+                ,IB_APPROVAL_DOC.SERIALKEY                                                         AS AD_SN
+                ,(SELECT COUNT(IB_EXPENSE_HTTP_DOC_ATTACH.SERIALKEY)
+                    FROM   IB_EXPENSE_HTTP_DOC_ATTACH
+                    WHERE  IB_EXPENSE_HTTP_DOC_ATTACH.DOC_ID = IB_APPROVAL_DOC.DOCUMENT_SN)        AS FILECOUNT
+                ,IB_APPROVAL_MASTER.SERIALKEY                                                      AS SERIALKEY
+                ,IB_APPROVAL_LINE.PERSON_ID                                                        AS APPROVALWHO
+                ,NVL(FRAMEONE_USER2.USER_NM, '')                                                   AS APPROVALWHONAME
+                ,TO_CHAR(IB_APPROVAL_LINE.APPR_DATE,'YYYYMMDDHH24MISS')                            AS APPROVALDT  
+                ,IB_APPROVAL_MASTER.ATTRIBUTES2                                                    AS EXPENSE_SN
+                ,IB_APPROVAL_DOC.DOCUMENT_SN                                                       AS DOCUMENT_SN
+            FROM    IB_APPROVAL_MASTER
+            JOIN    IB_APPROVAL_DOC
+                ON    IB_APPROVAL_DOC.APPR_SN       = IB_APPROVAL_MASTER.SERIALKEY
+            JOIN    IB_APPROVAL_LINE
+                ON    IB_APPROVAL_LINE.APPR_SN      = IB_APPROVAL_DOC.APPR_SN
+              
+           <choose>
+           <when test="apprStatus != null and apprStatus != ''">   
+              <if test="apprStatus == '0'.toString()">
+                AND   IB_APPROVAL_LINE.LINE_TYPE   IN ('1', '2')          /* 결재자구분(1:합의,2:결재) */
+              </if>
+              <if test="apprStatus == '1'.toString()">
+                AND   IB_APPROVAL_LINE.APPR_STATUS IN ('1')               /* 결재자의 결재상태(1:미결) */
+                AND   IB_APPROVAL_LINE.LINE_TYPE   IN ('1', '2')          /* 결재자구분(1:합의,2:결재) */
+              </if>
+              <if test="apprStatus == '2'.toString()">
+                AND   IB_APPROVAL_LINE.APPR_STATUS IN ('2')               /* 결재자의 결재상태(2:완결) */
+                AND   IB_APPROVAL_LINE.LINE_TYPE   IN ('1', '2')          /* 결재자구분(1:합의,2:결재) */
+              </if>
+              <if test="apprStatus == '3'.toString()">
+                AND   IB_APPROVAL_LINE.APPR_STATUS IN ('3')               /* 결재자의 결재상태(3:반려) */
+                AND   IB_APPROVAL_LINE.LINE_TYPE   IN ('1', '2')          /* 결재자구분(1:합의,2:결재) */
+              </if>
+              <if test="apprStatus == '4'.toString()">
+                AND   IB_APPROVAL_LINE.APPR_STATUS IN ('4')               /* 결재자의 결재상태(4:상신취소) */
+                AND   IB_APPROVAL_LINE.LINE_TYPE   IN ('1', '2')          /* 결재자구분(1:합의,2:결재) */
+              </if>
+           </when>
+           <otherwise> 
+                AND   IB_APPROVAL_LINE.LINE_TYPE   IN ('1', '2')          /* 결재자구분(1:합의,2:결재) */    
+            </otherwise>
+           </choose>
+            
+            <if test="lineType != null and lineType != ''">   
+                AND   IB_APPROVAL_LINE.LINE_TYPE   = #{lineType}        
+            </if>
+            <if test="personName != null and personName != ''"> 
+                AND   IB_APPROVAL_LINE.Person_Name LIKE '%'||#{personName}||'%'     
+            </if>
+            
+                AND   IB_APPROVAL_LINE.PERSON_ID      = #{gUserId}
+            
+            LEFT OUTER JOIN FRAMEONE_USER
+                ON   FRAMEONE_USER.USER_ID   = IB_APPROVAL_MASTER.DRAFTER_ID
+              
+            LEFT OUTER JOIN FRAMEONE_USER FRAMEONE_USER2
+                ON   FRAMEONE_USER2.USER_ID = IB_APPROVAL_LINE.PERSON_ID  
+    
+            LEFT OUTER JOIN CM_CODE_STORER CD1
+                ON   CD1.STORERKEY = #{gStorerkey}
+                AND  CD1.CODELIST  = 'APPROVAL_STATUS'   
+                AND  CD1.BASECODE  = IB_APPROVAL_LINE.APPR_STATUS
+            
+            WHERE  1=1              
+            <if test="apprStatus != null and apprStatus != ''">
+              <if test="apprStatus == '1'.toString()">
+                AND  IB_APPROVAL_MASTER.APPR_STATUS IN ('0', '1') 
+              </if>
+              <if test="apprStatus == '2'.toString()">
+                AND  IB_APPROVAL_MASTER.APPR_STATUS IN ('2') 
+              </if>  
+              <if test="apprStatus == '3'.toString()">
+                AND  IB_APPROVAL_MASTER.APPR_STATUS IN ('3')  
+              </if>
+              <if test="apprStatus == '4'.toString()">
+                AND  IB_APPROVAL_MASTER.APPR_STATUS IN ('4') 
+              </if>
+            </if> 
+                AND  IB_APPROVAL_MASTER.ADDDATE <![CDATA[>=]]> TO_DATE(#{dateFrom}, 'YYYYMMDD')
+                AND  IB_APPROVAL_MASTER.ADDDATE <![CDATA[<]]>  TO_DATE(#{dateTo}, 'YYYYMMDD') + 1
+        ) A 
+        
+        ORDER BY APPR_NO DESC
+    </select>
+    
+</mapper>

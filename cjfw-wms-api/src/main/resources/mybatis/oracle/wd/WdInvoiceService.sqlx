@@ -1,0 +1,547 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="wdInvoiceService">
+
+    <!-- 납품서출력 헤더 -->
+	<select id="getMasterList" resultType="cjfw.wms.wd.dto.WdInvoiceResDto">
+            SELECT /* [wdInvoiceService.sqlx][wdInvoiceService.getDataHeaderlist][납품서출력] */
+                   '0'                      AS CHECKYN
+                  ,TM_INPLAN.CARNO          AS CARNO
+                  ,CASE WHEN FN_ISNUMBER(RIGHT(TM_INPLAN.CARNO,4)) = 1
+    	                THEN RIGHT(TM_INPLAN.CARNO,4)
+    	            ELSE '9999' END AS SHORTNO						/* 1차에서는 관리 안함, 2차는 CM_CAR.SHORTNO로 변경해야 함 */
+                  ,TM_INPLAN.PRIORITY       AS PRIORITY
+    		      ,TM_INPLAN.DELIVERYDT     AS DELIVERYDT
+    		      ,TM_INPLAN.DELIVERYGROUP  AS DELIVERYGROUP
+    		      ,COUNT(DISTINCT TM_INPLAN.CUSTKEY) AS CUSTCNT
+    		      ,COUNT(DISTINCT TM_INPLAN.SLIPNO)  AS SLIPCNT
+    		FROM   TM_INPLAN
+    		JOIN   DM_DOCUMENT_H
+    		ON      TM_INPLAN.DCCODE = DM_DOCUMENT_H.DCCODE
+			AND TM_INPLAN.DOCTYPE = DM_DOCUMENT_H.DOCTYPE
+			AND TM_INPLAN.SLIPDT = DM_DOCUMENT_H.DELIVERYDATE
+			AND TM_INPLAN.DOCNO = DM_DOCUMENT_H.DOCNO
+    		AND    DM_DOCUMENT_H.DEL_YN     =  'N'
+    		JOIN   DM_DOCUMENT_D
+    		ON    DM_DOCUMENT_D.DCCODE = DM_DOCUMENT_H.DCCODE
+			AND DM_DOCUMENT_D.DOCTYPE = DM_DOCUMENT_H.DOCTYPE
+			AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+			AND DM_DOCUMENT_D.DOCNO = DM_DOCUMENT_H.DOCNO
+    		AND    DM_DOCUMENT_D.DEL_YN     =  'N'
+    		WHERE  1=1
+    		AND    TM_INPLAN.DOCTYPE            IN('WD', 'RT')
+			<if test='fixdccode != "2690" and fixdccode != "2810" and fixdccode != "2260" and fixdccode != "2620"'>
+				AND    DM_DOCUMENT_H.WORKPROCESSCODE <![CDATA[<>]]> 'STO'
+			</if>
+			<if test='returninclude == "WD"'>
+				AND    TM_INPLAN.DOCTYPE = 'WD'
+			</if>
+			<if test='returninclude == "RT"'>
+				AND    TM_INPLAN.DOCTYPE = 'RT'
+			</if>
+    		<if test="invoicedt != null and invoicedt != ''">      AND   TM_INPLAN.DELIVERYDT	   = #{invoicedt}     </if>
+    		<if test="deliverygroup != null and deliverygroup != ''">  AND   TM_INPLAN.DELIVERYGROUP   = #{deliverygroup} </if>
+    		<!-- 차량 다중선택 -->
+			<if test="carnoMulti != null and carnoMulti != '' ">
+				<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+					<foreach collection="carnoMulti" item="item">
+						OR TM_INPLAN.CARNO IN
+						<foreach collection="item" item="code" open="(" close=")" separator=",">
+							#{code}
+						</foreach>
+					</foreach>
+				</trim>
+			</if>
+    		AND   TM_INPLAN.DELIVERYGROUP       <![CDATA[<>]]> 'RO'
+    		<!-- 고객 다중선택 -->
+			<if test="toCustkeyMulti != null and toCustkeyMulti != '' ">
+				<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+					<foreach collection="toCustkeyMulti" item="item">
+						OR DM_DOCUMENT_H.TO_CUSTKEY IN
+						<foreach collection="item" item="code" open="(" close=")" separator=",">
+							#{code}
+						</foreach>
+					</foreach>
+				</trim>
+			</if>
+        	<!-- 배송그룹 공통조회 조건 -->
+    		<if test="gMultiCourier != null and gMultiCourier != ''"> AND   DM_DOCUMENT_H.COURIER     = #{gMultiCourier} </if>
+			<!-- START.권한센터 -->
+			AND EXISTS (SELECT 1
+				FROM CM_USER_AUTHORITY
+				WHERE    CM_USER_AUTHORITY.DCCODE     = DM_DOCUMENT_D.DCCODE
+				AND    CM_USER_AUTHORITY.STORERKEY  = DM_DOCUMENT_D.STORERKEY
+				AND    CM_USER_AUTHORITY.ORGANIZE   = DM_DOCUMENT_D.ORGANIZE
+				AND    CM_USER_AUTHORITY.AREA       = DM_DOCUMENT_D.AREA
+				AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey}
+				AND CM_USER_AUTHORITY.USERID    = #{gUserId}
+				AND CM_USER_AUTHORITY.DCCODE    = #{fixdccode}
+				AND CM_USER_AUTHORITY.AREA      = #{gArea}
+				<!-- 창고.다중검색 -->
+				<if test='gOrganizeMulti != null and gOrganizeMulti.length > 0'>
+					AND CM_USER_AUTHORITY.ORGANIZE IN
+					<foreach collection="gOrganizeMulti" item="code" open="(" close=")" separator=",">
+						#{code}
+					</foreach>
+				</if>
+				)
+			<!-- END.권한센터	-->
+    		GROUP BY TM_INPLAN.DCCODE
+    		        ,TM_INPLAN.CARNO
+    		        ,TM_INPLAN.PRIORITY
+    		        ,TM_INPLAN.DELIVERYDT
+                    ,TM_INPLAN.DELIVERYGROUP
+    		ORDER BY TM_INPLAN.DELIVERYDT
+    		        ,TM_INPLAN.CARNO
+    		        ,TM_INPLAN.PRIORITY
+                    ,TM_INPLAN.DELIVERYGROUP
+	</select>
+	
+    <!-- 납품서출력 상세 -->
+    <select id="getDetailList" resultType="cjfw.wms.wd.dto.WdInvoiceDetailResDto"> 
+		SELECT /* [wdInvoiceService.sqlx][wdInvoiceService.getDataDetaillist][납품서출력] */
+			   '0'                        AS CHECKYN
+			  ,DM_DOCUMENT_H.STORERKEY    AS STORERKEY
+			  ,TM_INPLAN.DELIVERYDT       AS DELIVERYDT
+			  ,TM_INPLAN.CARNO            AS CARNO
+			  ,TM_INPLAN.PRIORITY         AS PRIORITY
+			  ,TM_INPLAN.DELIVERYGROUP    AS DELIVERYGROUP
+			  ,DM_DOCUMENT_H.TO_CUSTKEY   AS CUSTKEY
+			  ,MAX(DM_DOCUMENT_H.TO_CUSTNAME)  AS CUSTNAME
+              , MS_CUSTDLVINFO.TRUTHCUSTKEY						 AS TRUTHCUSTKEY
+              , FN_DESCR_CUST(DM_DOCUMENT_H.STORERKEY, MS_CUSTDLVINFO.TRUTHCUSTKEY) AS TRUTHCUSTNAME
+			  ,FN_CODEDESCR(DM_DOCUMENT_H.STORERKEY, 'INVOICETYPE', NVL(NVL(MS_CUST.INVOICETYPE, DM_DOCUMENT_H.INVOICETYPE),'STD'))  AS INVOICETYPEDESC
+			  ,''                         AS PRINTYN
+			  ,NVL(NVL(MS_CUST.INVOICETYPE, DM_DOCUMENT_H.INVOICETYPE),'STD')  AS INVOICETYPE
+			  ,' '				          AS DOCNO
+			  ,' '				          AS ORDERTYPE
+			  ,' '				          AS SLIPDT
+			  ,' '						  AS SLIPNO
+			  ,#{invoiceprinttype}         AS INVOICEPRINTTYPE
+			  ,NVL(DM_DOCUMENT_H.MNGPLC_ID, DM_DOCUMENT_H.TO_CUSTKEY)   AS TO_CUSTKEY
+			  ,MAX(MS_CUST.DESCRIPTION)   AS TO_CUSTNAME
+		FROM   TM_INPLAN
+		JOIN   DM_DOCUMENT_H
+            ON      TM_INPLAN.DCCODE = DM_DOCUMENT_H.DCCODE
+            AND TM_INPLAN.DOCTYPE = DM_DOCUMENT_H.DOCTYPE
+            AND TM_INPLAN.SLIPDT = DM_DOCUMENT_H.DELIVERYDATE
+            AND TM_INPLAN.DOCNO = DM_DOCUMENT_H.DOCNO
+            AND    DM_DOCUMENT_H.DEL_YN    = 'N'
+        JOIN MS_CUST
+			    ON      MS_CUST.STORERKEY   = DM_DOCUMENT_H.STORERKEY
+			    AND     MS_CUST.CUSTKEY     = NVL(DM_DOCUMENT_H.MNGPLC_ID, DM_DOCUMENT_H.TO_CUSTKEY)
+			    AND     MS_CUST.CUSTTYPE    = DM_DOCUMENT_H.TO_CUSTTYPE
+            JOIN MS_CUSTDLVINFO
+                  ON MS_CUST.STORERKEY = MS_CUSTDLVINFO.STORERKEY
+                 AND MS_CUST.CUSTKEY   = MS_CUSTDLVINFO.CUSTKEY
+                 AND MS_CUST.CUSTTYPE   = MS_CUSTDLVINFO.CUSTTYPE
+            WHERE  1=1
+              <!-- 고객 다중선택 -->
+                <if test="toCustkeyMulti != null and toCustkeyMulti != '' ">
+                    <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                        <foreach collection="toCustkeyMulti" item="item">
+                            OR MS_CUSTDLVINFO.TRUTHCUSTKEY IN
+                            <foreach collection="item" item="code" open="(" close=")" separator=",">
+                                #{code}
+                            </foreach>
+                        </foreach>
+                    </trim>
+                </if>
+				AND    TM_INPLAN.STORERKEY      =  #{gStorerkey}    
+				AND    TM_INPLAN.DCCODE         =  #{fixdccode}  
+				AND    TM_INPLAN.CARNO	        =  #{carno}
+				AND    TM_INPLAN.PRIORITY	    =  #{priority}
+				AND    TM_INPLAN.DELIVERYDT	    =  #{deliverydt}
+				AND    TM_INPLAN.DELIVERYGROUP	=  #{deliverygroup}
+				GROUP BY DM_DOCUMENT_H.STORERKEY
+				         ,TM_INPLAN.DELIVERYDT
+		                 ,TM_INPLAN.CARNO
+		                 ,TM_INPLAN.PRIORITY
+		                 ,TM_INPLAN.DELIVERYGROUP
+				         ,DM_DOCUMENT_H.TO_CUSTKEY
+				         ,MS_CUSTDLVINFO.TRUTHCUSTKEY
+				         ,DM_DOCUMENT_H.MNGPLC_ID
+				         ,DM_DOCUMENT_H.TO_CUSTNAME  
+				         ,DM_DOCUMENT_H.INVOICETYPE
+				         ,MS_CUST.INVOICETYPE
+				ORDER BY DM_DOCUMENT_H.TO_CUSTKEY
+					    ,NVL(MS_CUST.INVOICETYPE,DM_DOCUMENT_H.INVOICETYPE)
+    </select>
+
+
+	<!-- 납품서 RD 상세 -->
+    <select id="getDetailPrintInvoice" resultType="cjfw.wms.wd.dto.WdInvoicePrintDetailResDto">
+        SELECT /* [wdInvoiceService.sqlx][wdInvoiceService.getDetailPrintInvoice][납품서출력][김경은][20141017] */
+               SY_INVOICE_DETAIL.SKU                         AS "SKU"           /*상품코드*/
+              ,replace(SY_INVOICE_DETAIL.SKUNAME,'!@','! @') AS "SKUNAME"       /*상품명칭*/
+              ,SY_INVOICE_DETAIL.UOM                         AS "UOM"           /*단위*/
+              ,SY_INVOICE_DETAIL.CONFIRMQTY                  AS "CONFIRMQTY"    /*확정수량*/
+              ,SY_INVOICE_DETAIL.UNITPRICE                   AS "UNITPRICE"     /*단가*/
+              ,SY_INVOICE_DETAIL.SUPPLYPRICE                 AS "SUPPLYPRICE"   /*공급가*/
+              ,SY_INVOICE_DETAIL.TAXAMOUNT                   AS "TAXAMOUNT"     /*세액*/
+              ,SY_INVOICE_DETAIL.TOTAMOUNT                   AS "TOTAMOUNT"     /*총액*/
+              ,SY_INVOICE_DETAIL.HEADERKEY                   AS "HEADERKEY"     /*납품서생성키*/
+              ,SY_INVOICE_DETAIL.DOCNO                       AS "DOCNO"         /*문서번호*/
+              ,SY_INVOICE_DETAIL.STORAGETYPE                 AS "STORAGETYPE"   /*저장타입*/
+              <!-- ,SY_INVOICE_DETAIL.QTYPERBOX                   AS QTYPERBOX 2025.12.02 김동한 해당 컬럼 없는 것으로 파악함. -->
+        FROM   SY_INVOICE_DETAIL
+        WHERE  SY_INVOICE_DETAIL.PROCESSTYPE     = #{processtype}
+        AND    SY_INVOICE_DETAIL.PROCESSCREATOR  = #{gUserId}
+        AND    SY_INVOICE_DETAIL.SPID            = #{gSpid}
+        AND    SY_INVOICE_DETAIL.INVOICEPRINTKEY = #{invoiceprintkey}
+        ORDER BY SY_INVOICE_DETAIL.HEADERKEY, TO_NUMBER(SY_INVOICE_DETAIL.SORTKEY), SY_INVOICE_DETAIL.DOCNO, SY_INVOICE_DETAIL.LINENO, SY_INVOICE_DETAIL.SERIALKEY
+    </select>
+
+    <!-- 납품서 RD 상세(여신) -->
+    <select id="getCreditPrintInvoice" resultType="cjfw.wms.wd.dto.WdInvoicePrintDetailResDto">
+
+        SELECT /* [wdInvoiceService.sqlx][wdInvoiceService.getCreditPrintInvoice][납품서출력][김경은][20141017] */
+               SY_INVOICE_HEADER.CUSTKEY                             AS "TO_CUSTKEY"       /*거래처코드*/
+              ,MS_CREDITINFO.CREDITLIMIT                             AS "CREDITLIMIT"      /*여신한도*/
+              ,MS_CREDITINFO.BEFOREDAYBALANCE                        AS "BEFOREDAYBALANCE" /*전일잔고*/
+              ,MS_CREDITINFO.CURMONTHCHECK                           AS "CURMONTHCHECK"    /*당월구매금액*/
+              ,MS_CREDITINFO.ORDERBALANCE                            AS "ORDERBALANCE"     /*주문가능금액*/
+              ,MS_CREDITINFO.CURMONTHDEPOSIT                         AS "CURMONTHDEPOSIT"  /*당월입금금액*/
+              ,MS_CREDITINFO.BEFOREMONBALANCE                        AS "BEFOREMONBALANCE" /*전월잔고*/
+              ,MS_CREDITINFO.CURMONORDAMT                            AS "CURMONORDAMT"     /*당월누계매출(전일)*/
+              ,SY_INVOICE_HEADER.INVOICETYPE                         AS "INVOICETYPE"      /*납품서유형*/
+              ,SY_INVOICE_HEADER.DOCTYPE                             AS "DOCTYPE"          /*문서유형*/
+              ,CASE WHEN SY_INVOICE_HEADER.INVOICETYPE IN('05','10') THEN NULL
+                    ELSE SUM(SY_INVOICE_DETAIL.TOTAMOUNT)
+               END AS TOTAMOUNT
+              ,SY_INVOICE_HEADER.HEADERKEY          AS HEADERKEY
+        FROM SY_INVOICE_HEADER
+        JOIN SY_INVOICE_DETAIL
+        ON     SY_INVOICE_DETAIL.PROCESSTYPE     = SY_INVOICE_HEADER.PROCESSTYPE
+        AND    SY_INVOICE_DETAIL.PROCESSCREATOR  = SY_INVOICE_HEADER.PROCESSCREATOR
+        AND    SY_INVOICE_DETAIL.SPID            = SY_INVOICE_HEADER.SPID
+        AND    SY_INVOICE_DETAIL.HEADERKEY       = SY_INVOICE_HEADER.HEADERKEY
+        AND    SY_INVOICE_DETAIL.INVOICEPRINTKEY = SY_INVOICE_HEADER.INVOICEPRINTKEY
+        JOIN MS_CREDITINFO
+        ON   MS_CREDITINFO.CUSTKEY          = SY_INVOICE_HEADER.CUSTKEY
+        AND  MS_CREDITINFO.ACCOUNTYYYY      = SUBSTR(SY_INVOICE_HEADER.DOCDT,0,4)
+        AND  MS_CREDITINFO.ACCOUNTMM        = SUBSTR(SY_INVOICE_HEADER.DOCDT,5,2)
+        AND  MS_CREDITINFO.ACCOUNTDD        = SUBSTR(SY_INVOICE_HEADER.DOCDT,7,2)
+
+        WHERE  SY_INVOICE_HEADER.PROCESSTYPE     = #{processtype}
+        AND    SY_INVOICE_HEADER.PROCESSCREATOR  = #{gUserId}
+        AND    SY_INVOICE_HEADER.SPID            = #{gSpid}
+        AND    SY_INVOICE_HEADER.INVOICEPRINTKEY = #{invoiceprintkey}
+
+        GROUP BY
+             SY_INVOICE_HEADER.CUSTKEY
+             ,MS_CREDITINFO.CREDITLIMIT
+             ,MS_CREDITINFO.BEFOREDAYBALANCE
+             ,MS_CREDITINFO.CURMONTHCHECK
+             ,MS_CREDITINFO.ORDERBALANCE
+             ,MS_CREDITINFO.CURMONTHDEPOSIT
+             ,MS_CREDITINFO.BEFOREMONBALANCE
+             ,MS_CREDITINFO.CURMONORDAMT
+             ,SY_INVOICE_HEADER.INVOICETYPE
+             ,SY_INVOICE_HEADER.DOCTYPE
+             ,SY_INVOICE_HEADER.HEADERKEY
+        ORDER BY
+              SY_INVOICE_HEADER.CUSTKEY
+              ,SY_INVOICE_HEADER.HEADERKEY
+
+    </select>
+
+    <!-- 납품서 RD 상세(여신) -->
+    <select id="getDlvCostPrintInvoice" resultType="cjfw.wms.wd.dto.WdInvoicePrintResDto">
+        SELECT /* [wdInvoiceService.sqlx][wdInvoiceService.getDlvCostPrintInvoice][배송비내역 조회][ihkim3][20180730] */
+               T.HEADERKEY                 AS "HEADERKEY"     /*납품서생성키*/
+              ,NVL(SUM(T.PURCHASEPRICE),0) AS "PURCHASEPRICE" /*구매단가*/
+              ,NVL(SUM(T.VAT)          ,0) AS "VAT"           /*부가세*/
+              ,NVL(SUM(T.DELIVERYPRICE),0) AS "DELIVERYPRICE" /*배송비*/
+        FROM   (SELECT SY_INVOICE_HEADER.CUSTKEY
+                      ,SY_INVOICE_HEADER.HEADERKEY
+                      ,tm_custxcost.deliveryno
+                      ,MAX(TM_CUSTXCOST.PURCHASEPRICE) AS PURCHASEPRICE
+                      ,MAX(TM_CUSTXCOST.VAT          ) AS VAT
+                      ,MAX(TM_CUSTXCOST.DELIVERYPRICE) AS DELIVERYPRICE
+                FROM SY_INVOICE_HEADER
+                JOIN MS_CUSTXCOST ON  MS_CUSTXCOST.STORERKEY = #{gStorerkey}
+                                  AND MS_CUSTXCOST.MNGPLC_ID = SY_INVOICE_HEADER.DLV_COST_KEY
+                                  AND MS_CUSTXCOST.START_DATE <![CDATA[<=]]> SY_INVOICE_HEADER.DOCDT
+                                  AND MS_CUSTXCOST.END_DATE <![CDATA[>=]]> SY_INVOICE_HEADER.DOCDT
+                LEFT OUTER JOIN TM_CUSTXCOST ON  TM_CUSTXCOST.STORERKEY  = #{gStorerkey}
+                                             AND TM_CUSTXCOST.MNGPLC_ID  = SY_INVOICE_HEADER.DLV_COST_KEY
+                                             AND TM_CUSTXCOST.DELIVERYDT = SY_INVOICE_HEADER.DOCDT
+                                             AND TM_CUSTXCOST.DEL_YN     = 'N'
+                WHERE  SY_INVOICE_HEADER.PROCESSTYPE      = #{processtype}
+                AND    SY_INVOICE_HEADER.PROCESSCREATOR   = #{gUserId}
+                AND    SY_INVOICE_HEADER.SPID             = #{gSpid}
+                AND    SY_INVOICE_HEADER.INVOICEPRINTKEY  = #{invoiceprintkey}
+                AND    EXISTS(SELECT 1
+                              FROM   SY_INVOICE_DETAIL
+                              WHERE  SY_INVOICE_DETAIL.PROCESSTYPE     = SY_INVOICE_HEADER.PROCESSTYPE
+                              AND    SY_INVOICE_DETAIL.PROCESSCREATOR  = SY_INVOICE_HEADER.PROCESSCREATOR
+                              AND    SY_INVOICE_DETAIL.SPID            = SY_INVOICE_HEADER.SPID
+                              AND    SY_INVOICE_DETAIL.HEADERKEY       = SY_INVOICE_HEADER.HEADERKEY
+                              AND    SY_INVOICE_DETAIL.INVOICEPRINTKEY = SY_INVOICE_HEADER.INVOICEPRINTKEY )
+                GROUP BY SY_INVOICE_HEADER.CUSTKEY
+                        ,SY_INVOICE_HEADER.HEADERKEY
+                        ,tm_custxcost.deliveryno ) T
+        GROUP BY T.HEADERKEY
+        ORDER BY T.HEADERKEY
+    </select>
+
+    <select id="getDailyMemoFilePrint" resultType="cjfw.wms.wd.dto.WdInvoicePrintDetailResDto">
+        WITH FILE_TB AS (
+                SELECT ISSUENO
+                       ,LTRIM(MAX(SYS_CONNECT_BY_PATH(UPLOAD_RES_DOC_ID,',')) KEEP (DENSE_RANK LAST ORDER BY CURR), ',') AS UPLOAD_RES_DOC_ID
+                  FROM(
+                  SELECT ISSUENO, UPLOAD_RES_DOC_ID
+                         ,ROW_NUMBER() OVER (PARTITION BY ISSUENO ORDER BY UPLOAD_RES_DOC_ID) AS CURR
+                         ,ROW_NUMBER() OVER (PARTITION BY ISSUENO ORDER BY UPLOAD_RES_DOC_ID)-1 AS PREV
+                FROM  TM_ISSUE_FILE
+                WHERE DOC_NAME = 'CRMMEMO_FILE'
+                AND STATUS = 'Y'
+                )
+                GROUP BY ISSUENO
+                CONNECT BY PREV = PRIOR CURR AND ISSUENO = PRIOR ISSUENO
+                START WITH CURR = 1
+                )
+                /* [wdInvoiceService.sqlx][wdInvoiceService.getDailyMemoFilePrint]  */
+                SELECT A.CUSTKEY            AS TO_CUSTKEY
+                       ,A.CUSTKEY ||' '|| FN_DESCR_CUST('FW00',A.CUSTKEY) AS CUSTNM
+                       ,A.SOURCE_SYSTEM     AS SOURCE_SYSTEM_CD
+                       ,FN_CODEDESCR('FW00', 'CRM_MEMO_SOURCE', A.SOURCE_SYSTEM)     AS SOURCE_SYSTEM
+                       ,A.MEMOLEVEL         AS MEMOLEVEL
+                       ,A.DESCRIPTION       AS DESCRIPTION
+                       ,B.ISSUENO           AS ISSUENO
+                       ,B.UPLOAD_RES_DOC_ID AS UPLOAD_RES_DOC_ID
+                       ,''                  AS FILE1
+                       ,''                  AS FILE2
+                       ,''                  AS FILE3
+                       ,FN_FORMAT_MASK(SY_INVOICE_HEADER.DOCDT, '####-##-##') AS DELIVERYDT
+                FROM CRM_WMS_DAILYMEMO A
+                LEFT OUTER JOIN FILE_TB B ON to_char(A.SERIALKEY) = B.ISSUENO
+                JOIN SY_INVOICE_HEADER SY_INVOICE_HEADER ON SY_INVOICE_HEADER.CUSTKEY = A.CUSTKEY
+                        AND    SY_INVOICE_HEADER.PROCESSTYPE      = #{processtype}
+                        AND    SY_INVOICE_HEADER.PROCESSCREATOR   = #{gUserId}
+                        AND    SY_INVOICE_HEADER.SPID             = #{gSpid}
+                        AND    SY_INVOICE_HEADER.INVOICEPRINTKEY  = #{invoiceprintkey}
+                WHERE 1=1
+                AND A.STATUS = '03'
+                AND A.INQUIRYDATE >= TO_CHAR(SYSDATE, 'YYYYMMDD')
+                ORDER BY A.CUSTKEY ASC, A.MEMOLEVEL DESC
+
+    </select>
+
+     <select id="getCustXPopCount" resultType="cjfw.wms.wd.dto.WdInvoicePrintDetailResDto">
+         SELECT COUNT(*) AS CNT
+                  FROM MS_CUSTXPOP
+                 JOIN SY_INVOICE_HEADER SY_INVOICE_HEADER ON SY_INVOICE_HEADER.CUSTKEY = MS_CUSTXPOP.CUSTKEY
+                             AND    SY_INVOICE_HEADER.PROCESSTYPE      = #{processtype}
+                             AND    SY_INVOICE_HEADER.PROCESSCREATOR   = #{gUserId}
+                             AND    SY_INVOICE_HEADER.SPID             = #{gSpid}
+                             AND    SY_INVOICE_HEADER.INVOICEPRINTKEY  = #{invoiceprintkey}
+                  WHERE MS_CUSTXPOP.STORERKEY = 'FW00'
+                    AND MS_CUSTXPOP.DEL_YN = 'N'
+                    AND MS_CUSTXPOP.CUSTTYPE = 'C'
+    </select>
+
+     <select id="getCrmCustdlvinfo" resultType="cjfw.wms.wd.dto.WdInvoicePrintDetailResDto">
+        WITH FILE_TB_12 AS (
+				SELECT ISSUENO
+				       ,LTRIM(MAX(SYS_CONNECT_BY_PATH(UPLOAD_RES_DOC_ID,',')) KEEP (DENSE_RANK LAST ORDER BY CURR), ',') AS UPLOAD_RES_DOC_ID
+				  FROM(
+				  SELECT ISSUENO, UPLOAD_RES_DOC_ID
+				         ,ROW_NUMBER() OVER (PARTITION BY ISSUENO ORDER BY UPLOAD_RES_DOC_ID) AS CURR
+				         ,ROW_NUMBER() OVER (PARTITION BY ISSUENO ORDER BY UPLOAD_RES_DOC_ID)-1 AS PREV
+					FROM  CRM_CUSTDLVINFO_FILE
+					WHERE DOC_NAME = 'CRMDLVINFO_FILE'
+				          AND UPLOAD_HASH_ID = '12'
+				          AND STATUS = 'Y'
+							)
+					GROUP BY ISSUENO
+					CONNECT BY PREV = PRIOR CURR AND ISSUENO = PRIOR ISSUENO
+					START WITH CURR = 1
+				)
+        	, FILE_TB_13 AS (
+				SELECT ISSUENO
+				       ,LTRIM(MAX(SYS_CONNECT_BY_PATH(UPLOAD_RES_DOC_ID,',')) KEEP (DENSE_RANK LAST ORDER BY CURR), ',') AS UPLOAD_RES_DOC_ID
+				  FROM(
+				  SELECT ISSUENO, UPLOAD_RES_DOC_ID
+				         ,ROW_NUMBER() OVER (PARTITION BY ISSUENO ORDER BY UPLOAD_RES_DOC_ID) AS CURR
+				         ,ROW_NUMBER() OVER (PARTITION BY ISSUENO ORDER BY UPLOAD_RES_DOC_ID)-1 AS PREV
+					FROM  CRM_CUSTDLVINFO_FILE
+					WHERE DOC_NAME = 'CRMDLVINFO_FILE'
+				          AND UPLOAD_HASH_ID = '13'
+				          AND STATUS = 'Y'
+							)
+					GROUP BY ISSUENO
+					CONNECT BY PREV = PRIOR CURR AND ISSUENO = PRIOR ISSUENO
+					START WITH CURR = 1
+				)
+        	, FILE_TB_14 AS (
+				SELECT ISSUENO
+				       ,LTRIM(MAX(SYS_CONNECT_BY_PATH(UPLOAD_RES_DOC_ID,',')) KEEP (DENSE_RANK LAST ORDER BY CURR), ',') AS UPLOAD_RES_DOC_ID
+				  FROM(
+				  SELECT ISSUENO, UPLOAD_RES_DOC_ID
+				         ,ROW_NUMBER() OVER (PARTITION BY ISSUENO ORDER BY UPLOAD_RES_DOC_ID) AS CURR
+				         ,ROW_NUMBER() OVER (PARTITION BY ISSUENO ORDER BY UPLOAD_RES_DOC_ID)-1 AS PREV
+					FROM  CRM_CUSTDLVINFO_FILE
+					WHERE DOC_NAME = 'CRMDLVINFO_FILE'
+				          AND UPLOAD_HASH_ID = '14'
+				          AND STATUS = 'Y'
+							)
+					GROUP BY ISSUENO
+					CONNECT BY PREV = PRIOR CURR AND ISSUENO = PRIOR ISSUENO
+					START WITH CURR = 1
+				)
+        	, FILE_TB_15 AS (
+				SELECT ISSUENO
+				       ,LTRIM(MAX(SYS_CONNECT_BY_PATH(UPLOAD_RES_DOC_ID,',')) KEEP (DENSE_RANK LAST ORDER BY CURR), ',') AS UPLOAD_RES_DOC_ID
+				  FROM(
+				  SELECT ISSUENO, UPLOAD_RES_DOC_ID
+				         ,ROW_NUMBER() OVER (PARTITION BY ISSUENO ORDER BY UPLOAD_RES_DOC_ID) AS CURR
+				         ,ROW_NUMBER() OVER (PARTITION BY ISSUENO ORDER BY UPLOAD_RES_DOC_ID)-1 AS PREV
+					FROM  CRM_CUSTDLVINFO_FILE
+					WHERE DOC_NAME = 'CRMDLVINFO_FILE'
+				          AND UPLOAD_HASH_ID = '15'
+				          AND STATUS = 'Y'
+							)
+					GROUP BY ISSUENO
+					CONNECT BY PREV = PRIOR CURR AND ISSUENO = PRIOR ISSUENO
+					START WITH CURR = 1
+				)
+        	, FILE_TB_16 AS (
+				SELECT ISSUENO
+				       ,LTRIM(MAX(SYS_CONNECT_BY_PATH(UPLOAD_RES_DOC_ID,',')) KEEP (DENSE_RANK LAST ORDER BY CURR), ',') AS UPLOAD_RES_DOC_ID
+				  FROM(
+				  SELECT ISSUENO, UPLOAD_RES_DOC_ID
+				         ,ROW_NUMBER() OVER (PARTITION BY ISSUENO ORDER BY UPLOAD_RES_DOC_ID) AS CURR
+				         ,ROW_NUMBER() OVER (PARTITION BY ISSUENO ORDER BY UPLOAD_RES_DOC_ID)-1 AS PREV
+					FROM  CRM_CUSTDLVINFO_FILE
+					WHERE DOC_NAME = 'CRMDLVINFO_FILE'
+				          AND UPLOAD_HASH_ID = '16'
+				          AND STATUS = 'Y'
+							)
+					GROUP BY ISSUENO
+					CONNECT BY PREV = PRIOR CURR AND ISSUENO = PRIOR ISSUENO
+					START WITH CURR = 1
+				)
+        SELECT /* [wdInvoiceService.sqlx][wdInvoiceService.getCrmCustdlvinfo] */
+          DISTINCT
+          ''                          AS IFKEY
+          ,MS_CUSTDLVINFO.CUSTKEY                     AS CUSTKEY
+          ,MS_CUSTDLVINFO.CUSTKEY ||' '|| fn_descr_cust('FW00',MS_CUSTDLVINFO.CUSTKEY) AS CUSTNAME
+          ,MS_CUSTDLVINFO.CUSTTYPE                    AS CUSTTYPE
+          ,MS_CUSTDLVINFO.ADDRESSMATCHYN              AS ADDRESSMATCHYN
+          /*20251227@CRM_CUSTDLVINFO => MS_CUSTDLVINFO 통합 적용 BY SSS*/
+           ,MS_CUSTDLVINFO.TRUTHADDRESS1              AS ARRIVALADDRESS              --실착지주소
+           ,MS_CUSTDLVINFO.TRUTHADDRESS2              AS ARRIVALDETAILADDRESS        --실착지주소 상세
+           ,MS_CUSTDLVINFO.TRUTHZIPCODE               AS ARRIVALPOSTALCODE           --실착지주소 우편번호
+           ,MS_CUSTDLVINFO.FACEINSPECT               AS FTFINSPECTIONYN              --검수자 납품서 출력 여부
+          --
+          ,DAMO.DEC(MS_CUSTDLVINFO.INSPECTIONWORKERPHONE)       AS INSPECTIONWORKERPHONE
+          ,MS_CUSTDLVINFO.INSPECTORPRINTYN           AS INSPECTORPRINTYN
+          ,MS_CUSTDLVINFO.PARKINGHEIGHT               AS PARKINGHEIGHT
+          ,MS_CUSTDLVINFO.KEYTYPE                     AS KEYTYPE
+          ,MS_CUSTDLVINFO.KEYDETAIL                   AS KEYDETAIL
+          /*20251227@CRM_CUSTDLVINFO => MS_CUSTDLVINFO 통합 적용 BY SSS*/
+            ,FN_FORMAT_MASK(MS_CUSTDLVINFO.REQDLVTIME2_FROM,'##:##')    AS DELIVERYREQUESTTIMESTART --배송요청 일자
+            ,FN_FORMAT_MASK(MS_CUSTDLVINFO.REQDLVTIME2_TO,'##:##')      AS DELIVERYREQUESTTIMEEND   --배송요청 시간
+            --
+            ,MS_CUSTDLVINFO.DELIVERYAVAILABLETIME       AS DELIVERYAVAILABLETIME
+            ,MS_CUSTDLVINFO.BUILDINGOPENTIME            AS BUILDINGOPENTIME
+            /*20251227@CRM_CUSTDLVINFO => MS_CUSTDLVINFO 통합 적용 BY SSS*/
+            ,MS_CUSTDLVINFO.ACCESSWAY                    AS MOVEMENTENTRY        --이동 유형
+            ,MS_CUSTDLVINFO.FREEZEPLACE                  AS GOODSLOCATIONFROZEN  --냉동 상품 보관 위치
+            ,MS_CUSTDLVINFO.COLDPLACE                    AS GOODSLOCATIONREFRIG  --냉동 보관 위치
+            ,MS_CUSTDLVINFO.HTEMPERATURE                 AS GOODSLOCATIONROOM    --상온위치
+            ,MS_CUSTDLVINFO.LOADPLACE2                   AS RETURNLOCATION       --반품위치
+            --
+            ,FN_FORMAT_MASK(MS_CUSTDLVINFO.INITREQUESTDT, '####-##-##')              AS INITREQUESTDT
+            ,FN_FORMAT_MASK(MS_CUSTDLVINFO.INITREQUESTTIMESTART,'##:##')         AS INITREQUESTTIMESTART
+            ,FN_FORMAT_MASK(MS_CUSTDLVINFO.INITREQUESTTIMEEND,'##:##')           AS INITREQUESTTIMEEND
+            ,MS_CUSTDLVINFO.INITFTFINSPECTIONYN         AS INITFTFINSPECTIONYN
+            ,MS_CUSTDLVINFO.INITDELIVERYCONTACT         AS INITDELIVERYCONTACT
+            ,MS_CUSTDLVINFO.INITDELIVERYDESC            AS INITDELIVERYDESC
+            ,MS_CUSTDLVINFO.DELIVERYTYPE                AS DELIVERYTYPE
+            ,fn_codedescr(#{gStorerkey},'CRM_DLV_TMEPTARGET',MS_CUSTDLVINFO.TEMPTARGET)                  AS TEMPTARGET
+            ,MS_CUSTDLVINFO.LABELPRINTTYPE              AS LABELPRINTTYPE
+            ,MS_CUSTDLVINFO.DELIVERYNOTIYN              AS DELIVERYNOTIYN
+            ,DAMO.DEC(MS_CUSTDLVINFO.DELIVERYNOTIPHONE)           AS DELIVERYNOTIPHONE
+            ,FN_FORMAT_MASK(MS_CUSTDLVINFO.DELIVERYNOTITIMESTART,'##:##')        AS DELIVERYNOTITIMESTART
+            ,FN_FORMAT_MASK(MS_CUSTDLVINFO.DELIVERYNOTITIMEEND,'##:##')          AS DELIVERYNOTITIMEEND
+            ,MS_CUSTDLVINFO.EMPLOEENUMBER               AS EMPLOEENUMBER
+            ,MS_CUSTDLVINFO.CREATEDBYEMAIL              AS CREATEDBYEMAIL
+            ,(SELECT REPLACE(FN_GETUSERNAME(MS_CUSTDLVINFO.CREATEDBYNAME),'NOT FOUND',MS_CUSTDLVINFO.CREATEDBYNAME) from DUAL) AS CREATEDBYNAME
+            ,TO_CHAR(MS_CUSTDLVINFO.CREATEDDATE, 'yyyy-mm-dd hh24:mi:ss')                 AS CREATEDDATE
+            ,MS_CUSTDLVINFO.STORETYPE                   AS STORETYPE
+            ,MS_CUSTDLVINFO.EDMSFILEID                  AS EDMSFILEID
+            ,MS_CUSTDLVINFO.STATUS                      AS STATUS
+            , TO_CHAR(MS_CUSTDLVINFO.ADDDATE, 'yyyy-mm-dd hh24:mi:ss')       AS ADDDATE
+            , TO_CHAR(MS_CUSTDLVINFO.EDITDATE, 'yyyy-mm-dd hh24:mi:ss')      AS EDITDATE
+            ,(SELECT REPLACE(FN_GETUSERNAME(MS_CUSTDLVINFO.ADDWHO),'NOT FOUND',MS_CUSTDLVINFO.ADDWHO) from DUAL) AS ADDWHO
+            ,(SELECT REPLACE(FN_GETUSERNAME(MS_CUSTDLVINFO.EDITWHO),'NOT FOUND',MS_CUSTDLVINFO.EDITWHO) from DUAL) AS EDITWHO
+            ,fn_codedescr(#{gStorerkey},'CRM_DLV_BUILDINGOPENTIME',MS_CUSTDLVINFO.BUILDINGOPENTIME) AS BUILDINGOPENTIMENM
+            ,fn_codedescr(#{gStorerkey},'CRM_DLV_DELIVERYAVLTIME',MS_CUSTDLVINFO.DELIVERYAVAILABLETIME) AS DELIVERYAVAILABLETIMENM
+            ,fn_codedescr(#{gStorerkey},'CRM_DLV_DELIVERYTYPE',MS_CUSTDLVINFO.DELIVERYTYPE) AS DELIVERYTYPENM
+            ,fn_codedescr(#{gStorerkey},'CRM_DLV_KEYTYPE',MS_CUSTDLVINFO.KEYTYPE) AS KEYTYPENM
+            ,fn_codedescr(#{gStorerkey},'CRM_DLV_LABELPRINTTYPE',MS_CUSTDLVINFO.LABELPRINTTYPE) AS LABELPRINTTYPENM
+            ,fn_codedescr(#{gStorerkey},'CRM_DLV_PARKINGHEIGHT',MS_CUSTDLVINFO.PARKINGHEIGHT) AS PARKINGHEIGHTNM
+            ,FN_FORMAT_MASK((SELECT SY_INVOICE_HEADER.DOCDT
+							FROM SY_INVOICE_HEADER
+							WHERE SY_INVOICE_HEADER.PROCESSTYPE      = #{processtype}
+							            AND    SY_INVOICE_HEADER.PROCESSCREATOR   = #{gUserId}
+							            AND    SY_INVOICE_HEADER.SPID             = #{gSpid}
+							            AND    SY_INVOICE_HEADER.INVOICEPRINTKEY  = #{invoiceprintkey}
+							            AND    SY_INVOICE_HEADER.DOCTYPE  = 'WD'
+							ORDER BY 1 DESC
+							FETCH FIRST 1 ROW ONLY), '####-##-##')                 AS DELIVERYDT
+            ,FILE_TB_12.UPLOAD_RES_DOC_ID AS FILE12
+            ,FILE_TB_13.UPLOAD_RES_DOC_ID AS FILE13
+            ,FILE_TB_14.UPLOAD_RES_DOC_ID AS FILE14
+            ,FILE_TB_15.UPLOAD_RES_DOC_ID AS FILE15
+            ,FILE_TB_16.UPLOAD_RES_DOC_ID AS FILE16
+            ,'' AS FILE12_1
+            ,'' AS FILE12_2
+            ,'' AS FILE12_3
+            ,'' AS FILE12_4
+            ,'' AS FILE13_1
+            ,'' AS FILE13_2
+            ,'' AS FILE14_1
+            ,'' AS FILE14_2
+            ,'' AS FILE15_1
+            ,'' AS FILE15_2
+            ,'' AS FILE16_1
+            ,'' AS FILE16_2
+        FROM MS_CUSTDLVINFO
+        JOIN MS_CUST
+            ON MS_CUST.STORERKEY = MS_CUSTDLVINFO.STORERKEY
+            AND MS_CUST.CUSTKEY   = MS_CUSTDLVINFO.CUSTKEY
+            AND MS_CUST.CUSTTYPE   = MS_CUSTDLVINFO.CUSTTYPE
+		JOIN MS_CUSTDLVINFO TRUTH_MS_CUSTDLVINFO
+			ON MS_CUSTDLVINFO.CUSTKEY = TRUTH_MS_CUSTDLVINFO.TRUTHCUSTKEY
+		JOIN SY_INVOICE_HEADER
+			ON TRUTH_MS_CUSTDLVINFO.CUSTKEY = SY_INVOICE_HEADER.CUSTKEY
+			AND    SY_INVOICE_HEADER.PROCESSTYPE      = #{processtype}
+			AND    SY_INVOICE_HEADER.PROCESSCREATOR   = #{gUserId}
+			AND    SY_INVOICE_HEADER.SPID             = #{gSpid}
+			AND    SY_INVOICE_HEADER.INVOICEPRINTKEY  = #{invoiceprintkey}
+			AND    SY_INVOICE_HEADER.DOCTYPE  = 'WD'
+             <!-- 2026-02-11 FWNEXTWMS-4332 부분출력-->
+             <if test="toCustkeyMulti != null and toCustkeyMulti != '' ">
+                <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                    <foreach collection="toCustkeyMulti" item="item">
+                        OR SY_INVOICE_HEADER.CUSTKEY IN
+                        <foreach collection="item" item="code" open="(" close=")" separator=",">
+                            #{code}
+                        </foreach>
+                    </foreach>
+                </trim>
+            </if>
+        LEFT OUTER JOIN FILE_TB_12 ON MS_CUSTDLVINFO.CUSTKEY = FILE_TB_12.ISSUENO
+        LEFT OUTER JOIN FILE_TB_13 ON MS_CUSTDLVINFO.CUSTKEY = FILE_TB_13.ISSUENO
+        LEFT OUTER JOIN FILE_TB_14 ON MS_CUSTDLVINFO.CUSTKEY = FILE_TB_14.ISSUENO
+        LEFT OUTER JOIN FILE_TB_15 ON MS_CUSTDLVINFO.CUSTKEY = FILE_TB_15.ISSUENO
+        LEFT OUTER JOIN FILE_TB_16 ON MS_CUSTDLVINFO.CUSTKEY = FILE_TB_16.ISSUENO
+       WHERE 1=1
+         <!-- 2026-02-11 FWNEXTWMS-5488 온라인 출력 X -->
+         AND (MS_CUST.OTCO_GRP_ID IS NULL OR MS_CUST.OTCO_GRP_ID = '')
+    </select>
+</mapper>

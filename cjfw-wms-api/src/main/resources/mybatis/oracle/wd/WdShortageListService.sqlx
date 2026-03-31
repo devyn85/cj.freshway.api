@@ -1,0 +1,283 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="wdShortageListService">
+
+
+	<select id="getMasterList" resultType="WdShortageListResDto" fetchSize="1000">		
+		SELECT /* [wdShortageListService.sqlx][getMasterList][출고결품현황 목록 조회][공두경][2025.06.10] */
+			   * 
+            FROM  (
+                    SELECT WD_INPLAN.SLIPDT                                                                 AS SLIPDT           /*출고일자*/
+                         , WD_INPLAN.DOCNO                                                                  AS DOCNO            /*주문번호*/
+                         , DM_DOCUMENT_H.TO_CUSTKEY                                                         AS CUSTKEY          /*관리처코드*/
+                         , DM_DOCUMENT_H.TO_CUSTNAME                                                        AS CUSTNAME         /*관리처명*/
+                         , NVL(CD5.BASEDESCR,CD5.BASECODE)                                                  AS SALEORGANIZE     /*영업조직*/
+                         , NVL(CD4.BASEDESCR,CD4.BASECODE)                                                  AS SALEDEPARTMENT   /*사업장*/
+                         , NVL(CD3.BASEDESCR,CD3.BASECODE)                                                  AS SALEGROUP        /*영업그룹*/
+                         , NVL(MS_CUST.MA, MS_CUST.MANAME)                                                  AS MA               /*MA*/
+                         , MS_SKU.SOMDNAME                                                                  AS SOMDNAME         /*MD*/
+                         , FN_GETCUSTCLASSCODE(WD_INPLAN.STORERKEY, MS_CUST.CUSTSTRATEGY3, '1', 'DESCR')    AS SALECUSHRC1      /*영업경로(대)*/
+                         , FN_GETCUSTCLASSCODE(WD_INPLAN.STORERKEY, MS_CUST.CUSTSTRATEGY3, '2', 'DESCR')    AS SALECUSHRC2      /*영업경로(중)*/
+                         , FN_GETCUSTCLASSCODE(WD_INPLAN.STORERKEY, MS_CUST.CUSTSTRATEGY3, '3', 'DESCR')    AS SALECUSHRC3      /*영업경로(소)*/
+                         , WD_INPLAN.SKU                                                                    AS SKU              /*상품코드*/
+                         , MS_SKU.DESCRIPTION                                                               AS SKUNAME          /*상품명칭*/
+                         , '['||DM_DOCUMENT_D.PLANT||']'||FN_DESCR_PLANT(DM_DOCUMENT_D.PLANT)               AS PLANT_DESCR      /*플랜트*/
+                         , WD_INPLAN.UOM                                                                    AS UOM              /*단위*/
+                         , WD_INPLAN.CANCELQTY                                                              AS CANCELQTY        /*취소량*/
+                         , NVL(CD1.BASEDESCR,CD1.BASECODE)                                                  AS CHANNEL          /*저장유무*/
+                         , NVL(CD2.BASEDESCR,CD2.BASECODE)                                                  AS REASONCODE       /*사유코드*/
+                         , WD_INPLAN.REASONMSG                                                              AS REASONMSG        /*사유메시지*/
+                         , ''                                                                               AS FROM_CUSTKEY     /*협력사코드*/
+                         , ''                                                                               AS FROM_CUSTNAME    /*협력사명*/
+                         , DM_DOCUMENT_D.canceldate                                                         AS CANCELDATE       /*결품처리시간*/
+                         , '['||DM_DOCUMENT_D.cancelwho||']'||fn_getusername(DM_DOCUMENT_D.cancelwho)       AS CANCELWHO        /*결품처리자*/
+                         , TM_INPLAN.DELIVERYGROUP                                                          AS DELIVERYGROUP    /*POP번호*/
+                         , NVL(CD6.BASEDESCR,CD6.BASECODE)                                                  AS STORAGETYPE      /*저장조건*/
+                         , MS_DISTRICT.OTHER01                                                              AS DOCKNO           /*슈트번호*/
+                         ,TM_INPLAN.CARNO                                                                   AS CARNO            /*차량번호*/
+                         , DM_DOCUMENT_D.PLANT                                                              AS PLANT            /**/      
+                    FROM DM_DOCUMENT_D
+                    JOIN MS_SKU 
+                      ON MS_SKU.STORERKEY             =  DM_DOCUMENT_D.STORERKEY         
+                     AND MS_SKU.SKU                   =  DM_DOCUMENT_D.SKU
+                    JOIN   DM_DOCUMENT_H
+                    ON     DM_DOCUMENT_H.DCCODE         = DM_DOCUMENT_D.DCCODE
+                    AND    DM_DOCUMENT_H.STORERKEY      = DM_DOCUMENT_D.STORERKEY
+                    AND    DM_DOCUMENT_H.DOCTYPE        = DM_DOCUMENT_D.DOCTYPE
+                    AND    DM_DOCUMENT_H.DELIVERYDATE   = DM_DOCUMENT_D.DELIVERYDATE
+                    AND    DM_DOCUMENT_H.DOCNO          = DM_DOCUMENT_D.DOCNO
+                    <!-- 고객 다중선택 -->
+                    <if test="toCustkeyMulti != null and toCustkeyMulti != '' ">
+                        <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                            <foreach collection="toCustkeyMulti" item="item">
+                                OR DM_DOCUMENT_H.TO_CUSTKEY IN
+                                <foreach collection="item" item="code" open="(" close=")" separator=",">
+                                    #{code}      
+                                </foreach>
+                            </foreach>
+                        </trim>                                             
+                    </if>                    
+                    JOIN   MS_CUST           
+                    ON     MS_CUST.STORERKEY            = DM_DOCUMENT_H.STORERKEY         
+                    AND    MS_CUST.CUSTKEY              = DM_DOCUMENT_H.TO_CUSTKEY 
+                    AND    MS_CUST.CUSTTYPE             = DM_DOCUMENT_H.TO_CUSTTYPE
+                    JOIN   WD_INPLAN
+                    ON     WD_INPLAN.DCCODE         = DM_DOCUMENT_D.DCCODE
+                    AND    WD_INPLAN.STORERKEY      = DM_DOCUMENT_D.STORERKEY
+                    AND    WD_INPLAN.DOCTYPE        = DM_DOCUMENT_D.DOCTYPE
+                    AND    WD_INPLAN.SLIPDT          = DM_DOCUMENT_D.DELIVERYDATE
+                    AND    WD_INPLAN.DOCNO          = DM_DOCUMENT_D.DOCNO
+                    AND    WD_INPLAN.DOCLINE        = DM_DOCUMENT_D.DOCLINE
+                    AND    WD_INPLAN.DEL_YN = 'N'
+                    <if test="reason != null and reason != ''">   AND WD_INPLAN.REASONCODE           =            #{reason}         </if>   
+                    LEFT JOIN TM_INPLAN ON TM_INPLAN.DCCODE = WD_INPLAN.DCCODE
+                                             AND TM_INPLAN.STORERKEY = WD_INPLAN.STORERKEY
+                                             AND TM_INPLAN.DOCTYPE = WD_INPLAN.DOCTYPE
+                                             AND TM_INPLAN.SLIPDT = WD_INPLAN.SLIPDT
+                                             AND TM_INPLAN.SLIPNO = WD_INPLAN.SLIPNO
+                    LEFT JOIN MS_DISTRICT ON TM_INPLAN.DISTRICTTYPE     = MS_DISTRICT.DISTRICTTYPE 
+                                               AND TM_INPLAN.DELIVERYGROUP    = MS_DISTRICT.DISTRICTCODE
+                                               AND TM_INPLAN.DCCODE           = MS_DISTRICT.DCCODE  
+                    LEFT JOIN CM_CODE_STORER CD1  ON CD1.STORERKEY  = DM_DOCUMENT_D.STORERKEY AND CD1.CODELIST  = 'PUTAWAYTYPE'     AND CD1.BASECODE   = DM_DOCUMENT_D.CHANNEL
+                    LEFT JOIN CM_CODE_STORER CD2  ON CD2.STORERKEY  = WD_INPLAN.STORERKEY     AND CD2.CODELIST  = 'REASONCODE_WD'   AND CD2.BASECODE   = WD_INPLAN.REASONCODE
+                    LEFT JOIN CM_CODE_STORER CD3  ON CD3.STORERKEY  = WD_INPLAN.STORERKEY     AND CD3.CODELIST  = 'SALEGROUP'       AND CD3.BASECODE   = MS_CUST.SALEGROUP
+                    LEFT JOIN CM_CODE_STORER CD4  ON CD4.STORERKEY  = WD_INPLAN.STORERKEY     AND CD4.CODELIST  = 'SALEDEPARTMENT'  AND CD4.BASECODE   = MS_CUST.SALEDEPARTMENT
+                    LEFT JOIN CM_CODE_STORER CD5  ON CD5.STORERKEY  = WD_INPLAN.STORERKEY     AND CD5.CODELIST  = 'SALEORGANIZE'    AND CD5.BASECODE   = MS_CUST.OTHER04
+                    LEFT JOIN CM_CODE_STORER CD6  ON CD6.STORERKEY  = DM_DOCUMENT_D.STORERKEY AND CD6.CODELIST  = 'STORAGETYPE'     AND CD6.BASECODE   = MS_SKU.STORAGETYPE 
+                    WHERE 1=1  
+                    AND    DM_DOCUMENT_D.DOCTYPE    = 'WD'
+                    AND    DM_DOCUMENT_D.DEL_YN     = 'N'
+                    AND    DM_DOCUMENT_D.CHANNEL    = '1'                    
+                    AND    DM_DOCUMENT_D.DELIVERYDATE <![CDATA[>=]]> #{fromSlipdt}
+                    AND    DM_DOCUMENT_D.DELIVERYDATE <![CDATA[<=]]> #{toSlipdt}
+                    AND    DM_DOCUMENT_D.DCCODE     = #{fixdccode}
+                    <if test="organizeMulti != null and organizeMulti != ''">
+                       AND DM_DOCUMENT_D.ORGANIZE IN
+                       <foreach collection="organizeMulti" item="code" open="(" close=")" separator=",">
+                         #{code}
+                       </foreach>   
+                    </if>
+                    <if test="channel != null and channel != ''">   AND DM_DOCUMENT_D.CHANNEL    =    #{channel}   </if>                    
+                    <if test="somdname != null and somdname != ''"> AND MS_SKU.SOMDNAME          LIKE #{somdname}  </if>
+                    <!-- 문서번호 다중선택 -->
+                    <if test="docnoMulti != null and docnoMulti != ''">
+                       AND DM_DOCUMENT_D.DOCNO IN
+                       <foreach collection="docnoMulti" item="code" open="(" close=")" separator=",">
+                         #{code}
+                       </foreach>   
+                    </if>
+                    <!-- 상품 다중선택 -->
+                    <if test="sku != null and sku != '' ">
+                        <if test="skuMulti != null and skuMulti.size() > 0">
+                            <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                                <foreach collection="skuMulti" item="item">
+                                    OR DM_DOCUMENT_D.SKU IN
+                                    <foreach collection="item" item="code" open="(" close=")" separator=",">
+                                        #{code}      
+                                    </foreach>
+                                </foreach>
+                            </trim>                                             
+                        </if>
+                    </if>
+                    AND DM_DOCUMENT_D.CANCELQTY <![CDATA[>]]> 0
+                   <!-- START.권한센터 -->
+                    AND EXISTS (SELECT 1
+                                  FROM CM_USER_AUTHORITY 
+                                 WHERE CM_USER_AUTHORITY.DCCODE    = DM_DOCUMENT_D.DCCODE       
+                                   AND CM_USER_AUTHORITY.STORERKEY = DM_DOCUMENT_D.STORERKEY    
+                                   AND CM_USER_AUTHORITY.ORGANIZE  = DM_DOCUMENT_D.ORGANIZE     
+                                   AND CM_USER_AUTHORITY.AREA      = DM_DOCUMENT_D.AREA         
+                                   AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey}
+                                   AND CM_USER_AUTHORITY.USERID    = #{gUserId}
+                                   AND CM_USER_AUTHORITY.DCCODE    = #{fixdccode}
+                                   AND CM_USER_AUTHORITY.AREA      = #{gArea}   
+                                   <!-- 창고.다중검색 -->
+                                   <if test='organizeMulti != null and organizeMulti.length > 0'>
+                                       AND CM_USER_AUTHORITY.ORGANIZE IN
+                                       <foreach collection="organizeMulti" item="code" open="(" close=")" separator=",">
+                                         #{code}
+                                       </foreach>
+                                   </if>                       
+                               )
+                    <!-- END.권한센터   -->  
+                    UNION ALL
+                    SELECT WD_INPLAN.SLIPDT                         AS SLIPDT
+                         , WD_INPLAN.DOCNO                          AS DOCNO
+                         , DM_DOCUMENT_H.TO_CUSTKEY                 AS CUSTKEY
+                         , DM_DOCUMENT_H.TO_CUSTNAME                AS CUSTNAME
+                         , (SELECT FN_CODEDESCR(WD_INPLAN.STORERKEY,'SALEORGANIZE',   MS_CUST.OTHER04       ) FROM DUAL) AS SALEORGANIZE
+                         , (SELECT FN_CODEDESCR(WD_INPLAN.STORERKEY,'SALEDEPARTMENT', MS_CUST.SALEDEPARTMENT) FROM DUAL) AS SALEDEPARTMENT
+                         , (SELECT FN_CODEDESCR(WD_INPLAN.STORERKEY,'SALEGROUP',      MS_CUST.SALEGROUP     ) FROM DUAL) AS SALEGROUP
+                         , NVL(MS_CUST.MA, MS_CUST.MANAME)                                                   AS MA
+                         , MS_SKU.SOMDNAME                          AS SOMDNAME
+                         , FN_GETCUSTCLASSCODE(WD_INPLAN.STORERKEY, MS_CUST.CUSTSTRATEGY3, '1', 'DESCR')     AS SALECUSHRC1
+                         , FN_GETCUSTCLASSCODE(WD_INPLAN.STORERKEY, MS_CUST.CUSTSTRATEGY3, '2', 'DESCR')     AS SALECUSHRC2
+                         , FN_GETCUSTCLASSCODE(WD_INPLAN.STORERKEY, MS_CUST.CUSTSTRATEGY3, '3', 'DESCR')     AS SALECUSHRC3
+                         , WD_INPLAN.SKU                            AS SKU
+                         , MS_SKU.DESCRIPTION                       AS SKUNAME
+                         , '['||DM_DOCUMENT_D.PLANT||']'||FN_DESCR_PLANT(DM_DOCUMENT_D.PLANT)               AS PLANT_DESCR
+                         , WD_INPLAN.UOM                            AS UOM
+                         , WD_INPLAN.CANCELQTY                      AS CANCELQTY
+                         , FN_CODEDESCR (DM_DOCUMENT_D.STORERKEY,'PUTAWAYTYPE', DM_DOCUMENT_D.CHANNEL)      AS CHANNEL
+                         , FN_DESCR_CODE(WD_INPLAN.STORERKEY,'REASONCODE_WD',WD_INPLAN.REASONCODE)          AS REASONCODE
+                         , WD_INPLAN.REASONMSG                      AS REASONMSG
+                         , DM_DOCUMENT_H_PO.FROM_CUSTKEY            AS FROM_CUSTKEY
+                         , DM_DOCUMENT_H_PO.FROM_CUSTNAME           AS FROM_CUSTNAME
+                         , DM_DOCUMENT_D.canceldate                 AS CANCELDATE
+                         , '['||DM_DOCUMENT_D.cancelwho||']'||fn_getusername(DM_DOCUMENT_D.cancelwho)        AS CANCELWHO
+                         , TM_INPLAN.DELIVERYGROUP                  AS DELIVERYGROUP
+                         , (SELECT FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY, 'STORAGETYPE', MS_SKU.STORAGETYPE) FROM DUAL) AS STORAGETYPE
+                         , MS_DISTRICT.OTHER01                      AS DOCKNO
+                         , TM_INPLAN.CARNO                          AS CARNO
+                         , DM_DOCUMENT_D.PLANT                      AS PLANT
+                    FROM DM_DOCUMENT_D
+                    JOIN MS_SKU 
+                      ON MS_SKU.STORERKEY             =  DM_DOCUMENT_D.STORERKEY         
+                     AND MS_SKU.SKU                   =  DM_DOCUMENT_D.SKU
+                    JOIN   DM_DOCUMENT_H
+                    ON     DM_DOCUMENT_H.DCCODE         = DM_DOCUMENT_D.DCCODE
+                    AND    DM_DOCUMENT_H.STORERKEY      = DM_DOCUMENT_D.STORERKEY
+                    AND    DM_DOCUMENT_H.DOCTYPE        = DM_DOCUMENT_D.DOCTYPE
+                    AND    DM_DOCUMENT_H.DELIVERYDATE   = DM_DOCUMENT_D.DELIVERYDATE
+                    AND    DM_DOCUMENT_H.DOCNO          = DM_DOCUMENT_D.DOCNO
+                    <!-- 고객 다중선택 -->
+                    <if test="toCustkeyMulti != null and toCustkeyMulti != '' ">
+                        <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                            <foreach collection="toCustkeyMulti" item="item">
+                                OR DM_DOCUMENT_H.TO_CUSTKEY IN
+                                <foreach collection="item" item="code" open="(" close=")" separator=",">
+                                    #{code}      
+                                </foreach>
+                            </foreach>
+                        </trim>                                             
+                    </if>
+                    JOIN   MS_CUST           
+                    ON     MS_CUST.STORERKEY            = DM_DOCUMENT_H.STORERKEY         
+                    AND    MS_CUST.CUSTKEY              = DM_DOCUMENT_H.TO_CUSTKEY 
+                    AND    MS_CUST.CUSTTYPE             = DM_DOCUMENT_H.TO_CUSTTYPE
+                    JOIN   WD_INPLAN
+                    ON     WD_INPLAN.DCCODE         = DM_DOCUMENT_D.DCCODE
+                    AND    WD_INPLAN.STORERKEY      = DM_DOCUMENT_D.STORERKEY
+                    AND    WD_INPLAN.DOCTYPE        = DM_DOCUMENT_D.DOCTYPE
+                    AND    WD_INPLAN.SLIPDT         = DM_DOCUMENT_D.DELIVERYDATE
+                    AND    WD_INPLAN.DOCNO          = DM_DOCUMENT_D.DOCNO
+                    AND    WD_INPLAN.DOCLINE        = DM_DOCUMENT_D.DOCLINE
+                    AND    WD_INPLAN.DEL_YN = 'N'
+                    <if test="reason != null and reason != ''">   AND WD_INPLAN.REASONCODE       =  #{reason}     </if>
+                    LEFT JOIN TM_INPLAN ON TM_INPLAN.DCCODE = WD_INPLAN.DCCODE
+                                             AND TM_INPLAN.STORERKEY = WD_INPLAN.STORERKEY
+                                             AND TM_INPLAN.DOCTYPE = WD_INPLAN.DOCTYPE
+                                             AND TM_INPLAN.SLIPDT = WD_INPLAN.SLIPDT
+                                             AND TM_INPLAN.SLIPNO = WD_INPLAN.SLIPNO
+                    LEFT JOIN MS_DISTRICT ON TM_INPLAN.DISTRICTTYPE     = MS_DISTRICT.DISTRICTTYPE 
+                                               AND TM_INPLAN.DELIVERYGROUP    = MS_DISTRICT.DISTRICTCODE
+                                               AND TM_INPLAN.DCCODE           = MS_DISTRICT.DCCODE  
+                    LEFT OUTER JOIN
+                           DM_DOCUMENT_H DM_DOCUMENT_H_PO
+                    ON     DM_DOCUMENT_H_PO.DCCODE    = DM_DOCUMENT_D.DCCODE
+                    AND    DM_DOCUMENT_H_PO.STORERKEY = DM_DOCUMENT_D.STORERKEY
+                    AND    DM_DOCUMENT_H_PO.DOCTYPE   = 'DP'
+                    AND    DM_DOCUMENT_H_PO.DOCNO     = DM_DOCUMENT_D.POKEY
+                    
+                    WHERE 1=1  
+                    AND    DM_DOCUMENT_D.DOCTYPE    = 'WD'
+                    AND    DM_DOCUMENT_D.DEL_YN     = 'N'
+                    AND    DM_DOCUMENT_D.CHANNEL   IN ('2','3')
+                    AND    DM_DOCUMENT_D.DELIVERYDATE <![CDATA[>=]]> #{fromSlipdt}
+                    AND    DM_DOCUMENT_D.DELIVERYDATE <![CDATA[<=]]> #{toSlipdt} 
+                    AND    DM_DOCUMENT_D.DCCODE     = #{fixdccode}
+                    <if test="organizeMulti != null and organizeMulti != ''">
+                       AND DM_DOCUMENT_D.ORGANIZE IN
+                       <foreach collection="organizeMulti" item="code" open="(" close=")" separator=",">
+                         #{code}
+                       </foreach>   
+                    </if>
+                    <if test="channel != null and channel != ''">   AND DM_DOCUMENT_D.CHANNEL    =    #{channel}   </if>                    
+                    <if test="somdname != null and somdname != ''"> AND MS_SKU.SOMDNAME          LIKE #{somdname}  </if>
+                    <!-- 문서번호 다중선택 -->
+                    <if test="docnoMulti != null and docnoMulti != ''">
+                       AND DM_DOCUMENT_D.DOCNO IN
+                       <foreach collection="docnoMulti" item="code" open="(" close=")" separator=",">
+                         #{code}
+                       </foreach>   
+                    </if>
+                    <!-- 상품 다중선택 -->
+                    <if test="sku != null and sku != '' ">
+                        <if test="skuMulti != null and skuMulti.size() > 0">
+                            <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                                <foreach collection="skuMulti" item="item">
+                                    OR DM_DOCUMENT_D.SKU IN
+                                    <foreach collection="item" item="code" open="(" close=")" separator=",">
+                                        #{code}      
+                                    </foreach>
+                                </foreach>
+                            </trim>                                             
+                        </if>
+                    </if>
+                    AND DM_DOCUMENT_D.CANCELQTY <![CDATA[>]]> 0
+                    <!-- START.권한센터 -->
+                    AND EXISTS (SELECT 1
+                                  FROM CM_USER_AUTHORITY 
+                                 WHERE CM_USER_AUTHORITY.DCCODE    = DM_DOCUMENT_D.DCCODE       
+                                   AND CM_USER_AUTHORITY.STORERKEY = DM_DOCUMENT_D.STORERKEY    
+                                   AND CM_USER_AUTHORITY.ORGANIZE  = DM_DOCUMENT_D.ORGANIZE     
+                                   AND CM_USER_AUTHORITY.AREA      = DM_DOCUMENT_D.AREA         
+                                   AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey}
+                                   AND CM_USER_AUTHORITY.USERID    = #{gUserId}
+                                   AND CM_USER_AUTHORITY.DCCODE    = #{fixdccode}
+                                   AND CM_USER_AUTHORITY.AREA      = #{gArea}   
+                                   <!-- 창고.다중검색 -->
+                                   <if test='organizeMulti != null and organizeMulti.length > 0'>
+                                       AND CM_USER_AUTHORITY.ORGANIZE IN
+                                       <foreach collection="gOrganizeMulti" item="code" open="(" close=")" separator=",">
+                                         #{code}
+                                       </foreach>
+                                   </if>                       
+                               )
+                    <!-- END.권한센터   -->  
+                 )
+             ORDER BY CUSTKEY
+                     ,SKU
+		
+	</select>
+</mapper>

@@ -1,0 +1,195 @@
+package cjfw.wms.sys.dto;
+
+import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.Data;
+
+/**
+ * Copyright 2025. CJ OliveNetworks Co. all rights reserved.
+ * @author : JangGwangSeok (breaker3317@cj.net) 
+ * @date : 2025.05.15 
+ * @description : 그룹권한 조회 응답 DTO 
+ * @issues :<pre> 
+ * ----------------------------------------------------------- 
+ * DATE       AUTHOR                MAJOR_ISSUE 
+ * ----------------------------------------------------------- 
+ * 2025.05.15 JangGwangSeok (breaker3317@cj.net) 생성 </pre>
+ */
+@Data
+@Schema(description = "그룹권한 조회 응답 DTO")
+public class SysAuthorityResDto {
+	/** 권한그룹코드 */
+	@Schema(description = "권한그룹코드", example = "LOGISONE_00")
+	private String authCd;
+
+	/** 권한그룹명 */
+	@Schema(description = "권한그룹명", example = "시스템관리자")
+	private String authNm;
+	
+	/** 권한그룹구분 */
+	@Schema(description = "권한그룹구분", example = "1")
+	private String authCl;
+	
+	/** 시스템구분 */
+	@Schema(description = "시스템구분", example = "LOGISONE")
+	private String systemCl;
+	
+	/** 사용여부 */
+	@Schema(description = "사용여부", example = "1")
+	private String useYn;
+	
+	/** 프로그램코드 */
+	@Schema(description = "프로그램코드", example = "WM10100510")
+	private String progCd;
+	
+	/** 프로그램명 */
+	@Schema(description = "프로그램명", example = "고객정보")
+	private String progNm;
+	
+	/** 프로그램레벨 */
+	@Schema(description = "프로그램레벨", example = "4")
+	private String progLvl;
+	
+	/** 프로그램내부순번 */
+	@Schema(description = "프로그램내부순번", example = "0101010101")
+	private String progNo;	
+	
+	/** 조회권한 */
+	@Schema(description = "조회권한", example = "0")
+	private String searchYn;	
+	
+	/** 신규권한 */
+	@Schema(description = "신규권한", example = "0")
+	private String newYn;
+	
+	/** 삭제권한 */
+	@Schema(description = "삭제권한", example = "0")
+	private String deleteYn;
+	
+	/** 저장권한 */
+	@Schema(description = "저장권한", example = "0")
+	private String saveYn;
+	
+	/** 인쇄권한 */
+	@Schema(description = "인쇄권한", example = "0")
+	private String printYn;
+	
+	/** 사용자버튼1권한 */
+	@Schema(description = "사용자버튼1권한", example = "0")
+	private String btn1Yn;
+	
+	/** 사용자버튼2권한 */
+	@Schema(description = "사용자버튼2권한", example = "0")
+	private String btn2Yn;
+	
+	/** 사용자버튼3권한 */
+	@Schema(description = "사용자버튼3권한", example = "0")
+	private String btn3Yn;
+	
+	/** 사용자버튼4권한 */
+	@Schema(description = "사용자버튼4권한", example = "0")
+	private String btn4Yn;
+	
+	/** 사용자버튼5권한 */
+	@Schema(description = "사용자버튼5권한", example = "0")
+	private String btn5Yn;
+	
+	/** 사용자버튼6권한 */
+	@Schema(description = "사용자버튼6권한", example = "0")
+	private String btn6Yn;
+	
+	/** 사용자버튼7권한 */
+	@Schema(description = "사용자버튼7권한", example = "0")
+	private String btn7Yn;
+	
+	/** 사용자버튼8권한 */
+	@Schema(description = "사용자버튼8권한", example = "0")
+	private String btn8Yn;
+	
+	/** 사용자버튼9권한 */
+	@Schema(description = "사용자버튼9권한", example = "0")
+	private String btn9Yn;
+	
+	/** 사용자버튼10권한 */
+	@Schema(description = "사용자버튼10권한", example = "0")
+	private String btn10Yn;
+	
+	/** 사용자버튼1 */
+	@Schema(description = "사용자버튼1", example = "배송순위변경")
+	private String btn1Nm;
+
+	/** 사용자버튼2 */
+	@Schema(description = "사용자버튼2", example = "도착시간변경")
+	private String btn2Nm;
+
+	/** 사용자버튼3 */
+	@Schema(description = "사용자버튼3", example = "배차확정")
+	private String btn3Nm;
+
+	/** 사용자버튼4 */
+	@Schema(description = "사용자버튼4", example = "")
+	private String btn4Nm;
+
+	/** 사용자버튼5 */
+	@Schema(description = "사용자버튼5", example = "")
+	private String btn5Nm;
+
+	/** 사용자버튼6 */
+	@Schema(description = "사용자버튼6", example = "")
+	private String btn6Nm;
+
+	/** 사용자버튼7 */
+	@Schema(description = "사용자버튼7", example = "")
+	private String btn7Nm;
+
+	/** 사용자버튼8 */
+	@Schema(description = "사용자버튼8", example = "")
+	private String btn8Nm;
+
+	/** 사용자버튼9 */
+	@Schema(description = "사용자버튼9", example = "")
+	private String btn9Nm;
+
+	/** 사용자버튼10 */
+	@Schema(description = "사용자버튼10", example = "")
+	private String btn10Nm;
+	
+	/** 등록자ID */
+	@Schema(description = "등록자ID", example = "dev01")
+	private String regId;
+
+	/** 등록일시 */
+	@Schema(description = "등록일시", example = "2015-10-23 오후 6:08:43")
+	private String regDtm;
+
+	/** 수정자ID */
+	@Schema(description = "수정자ID", example = "dev01")
+	private String updId;
+
+	/** 수정일시 */
+	@Schema(description = "수정일시", example = "2021-10-27 오후 5:39:05")
+	private String updDtm;
+	
+	/** 상위권한그룹코드 */
+	@Schema(description = "상위권한그룹코드", example = "LOGISONE")
+	private String upAuthGroupCd;
+	
+	/** 하위권한그룹여부 */
+	@Schema(description = "하위권한그룹여부", example = "Y")
+	private String lowAuthYn;
+	
+	/** 등록자명 */
+	@Schema(description = "등록자명", example = "")
+	private String regNm;
+	
+	/** 수정자명 */
+	@Schema(description = "수정자명", example = "")
+	private String updNm;
+	
+	/** 거래처코드 */
+	@Schema(description = "거래처코드", example = "")
+	private String custKey;
+	
+	/** 커스텀 엑스트라 체크박스 */
+	@Schema(description = "커스텀 엑스트라 체크박스", example = "N")
+	private String customRowCheckYn = "N";
+}

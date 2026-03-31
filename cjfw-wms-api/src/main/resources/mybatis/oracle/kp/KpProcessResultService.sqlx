@@ -1,0 +1,217 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="kpProcessResultService">
+
+
+    <select id="getTab1MasterList" resultType="KpProcessResultResTab1Dto">        
+        SELECT  /* [KpProcessResultService.sqlx][KpProcessResultService.getTab1MasterList][공정별생산성 센터별] */  
+               FN_DESCR_DC(AA.DCCODE) AS DCCODE
+             , FN_DESCR_DC(AA.WDDCCODE) AS WDDCCODE
+             , FN_CODEDESCR(AA.STORERKEY, 'MOD_PRODUCTIVITY_KPI', AA.PROC) AS PROC
+             , FN_CODEDESCR(AA.STORERKEY, 'PUTAWAYTYPE', AA.CHANNEL) AS CHANNEL
+             , AA.STORAGETYPE
+             , CASE WHEN AA.PROC = '40' THEN LPAD(FLOOR(AA.MV_WORKTIME/60),2,0) || ':' || LPAD(MOD(AA.MV_WORKTIME,60),2,0)
+                    ELSE TO_CHAR(FLOOR((MAXSCAN - MINSCAN) * 24), 'FM99900') || ':' || TO_CHAR(FLOOR(MOD((MAXSCAN - MINSCAN) * 24 * 60, 60)), 'FM00') END  AS DIFFTM
+             , AA.MAXSCAN
+             , AA.MINSCAN
+             , AA.CNT1
+             , AA.CNT4
+             , NVL(AA.QTY,0) AS QTY
+             , CASE WHEN (AA.CNT1 = 0 OR ROUND(FLOOR((MAXSCAN - MINSCAN) * 24)||'.'||FLOOR(MOD((MAXSCAN - MINSCAN) * 24 * 60, 60) *10/6),2) = 0) THEN 0 ELSE ROUND(AA.CNT1 / ROUND(FLOOR((MAXSCAN - MINSCAN) * 24)||'.'||FLOOR(MOD((MAXSCAN - MINSCAN) * 24 * 60, 60) *10/6),2),2) END HCNT1
+             , CASE WHEN (NVL(AA.QTY,0) = 0 OR ROUND(FLOOR((MAXSCAN - MINSCAN) * 24)||'.'||FLOOR(MOD((MAXSCAN - MINSCAN) * 24 * 60, 60) *10/6),2) = 0) THEN 0 ELSE ROUND(AA.QTY / ROUND(FLOOR((MAXSCAN - MINSCAN) * 24)||'.'||FLOOR(MOD((MAXSCAN - MINSCAN) * 24 * 60, 60) *10/6),2),2) END HQTY
+             , AA.WORKCNT
+             , CASE WHEN AA.PROC = '40' THEN ROUND(AA.MV_WORKTIME/480,1)
+                    ELSE  ROUND((MAXSCAN - MINSCAN)*24*60/480,1) END  AS HTM 
+         FROM (
+                SELECT  A.DCCODE
+                    , A.WDDCCODE 
+                    , A.PROC
+                    , D.CHANNEL
+                    ,(SELECT CONVDESCR 
+                        FROM LOGISONESVC.CM_CODE_STORER CM_CODE 
+                       WHERE  CM_CODE.STORERKEY  IN ('%','STD','','FW00') 
+                         AND CM_CODE.CODELIST  = 'STORAGETYPE' 
+                         AND CM_CODE.BASECODE  = '10'
+                         AND ROWNUM = 1) AS STORAGETYPE
+                    , CASE WHEN PROC ='40' THEN COUNT(A.MV_WORKTIME) ELSE 0 END AS CNT4
+                    , CASE WHEN PROC <![CDATA[<>]]> '40' THEN SUM(1) ELSE 0 END AS CNT1
+                    , MIN(A.SCANDATE) AS MINSCAN
+                    , MAX(A.SCANDATE) AS MAXSCAN
+                    , SUM(A.QTY)      AS QTY
+                    , MAX(A.STORERKEY) AS STORERKEY
+                    , SUM(SUBSTR(MV_WORKTIME,1,2)*60 + SUBSTR(MV_WORKTIME,4,2)) AS MV_WORKTIME 
+                    , COUNT(DISTINCT A.ADDWHO) AS WORKCNT
+                 FROM KP_PROCESS_SCANRAW A
+                 LEFT OUTER JOIN DM_DOCUMENT_D D 
+                   ON 1=1
+                  AND A.WDDCCODE = D.DCCODE
+                  AND A.DOCDT = D.DELIVERYDATE
+                  AND A.DOCLINE = D.DOCLINE
+                  AND A.DOCNO = D.DOCNO
+                  AND A.STORERKEY = D.STORERKEY
+                  AND D.DEL_YN = 'N'
+                 LEFT OUTER JOIN MS_SKU C
+                   ON C.STORERKEY = D.STORERKEY
+                  AND C.SKU = D.SKU
+                  AND C.DEL_YN = 'N'
+                WHERE 1=1
+                 <if test="dcCode != null and dcCode != ''">
+                  AND A.DCCODE = #{dcCode}
+                 </if>
+                 <if test="processStep != null and processStep != ''">
+                  AND A.PROC = #{processStep}
+                 </if>
+                  AND A.STATUS = 'C'
+                  AND A.SCANDATE <![CDATA[ <= ]]> TO_DATE(#{toModifyDate} , 'YYYYMMDDHH24MISS')
+                  AND A.SCANDATE >= TO_DATE(#{fromModifyDate} , 'YYYYMMDDHH24MISS')
+                  GROUP BY   A.DCCODE, A.WDDCCODE, A.PROC, D.CHANNEL, FN_CODECONVDESCR('STD', 'STORAGETYPE', C.STORAGETYPE)
+              ) AA
+            ORDER BY AA.DCCODE, AA.WDDCCODE, AA.PROC, AA.CHANNEL, AA.STORAGETYPE ASC       
+    </select>   
+    <select id="getTab2MasterList" resultType="KpProcessResultResTab2Dto">
+          SELECT CASE WHEN AA.OTHER03 IS NULL THEN AA.ADDWHO  /* [kpProcessResultService.sqlx][kpProcessResultService.getTab2MasterList] [공정별생산성 작업자별] */    
+                      ELSE AA.ADDWHO||'_'||AA.OTHER03 END AS ID   
+               , FN_DESCR_DC(AA.DCCODE) AS DCCODE
+               , FN_DESCR_DC(AA.WDDCCODE) AS WDDCCODE
+               , FN_CODEDESCR(AA.STORERKEY, 'MOD_PRODUCTIVITY_KPI', AA.PROC) AS PROC
+               , FN_CODEDESCR(AA.STORERKEY, 'PUTAWAYTYPE', AA.CHANNEL) AS CHANNEL
+               , STORAGETYPE
+               , CASE WHEN AA.PROC = '40' THEN LPAD(FLOOR(AA.MV_WORKTIME/60),2,0) || ':' || LPAD(MOD(AA.MV_WORKTIME,60),2,0)
+                      ELSE TO_CHAR(FLOOR((MAXSCAN - MINSCAN) * 24), 'FM99900') || ':' || TO_CHAR(FLOOR(MOD((MAXSCAN - MINSCAN) * 24 * 60, 60)), 'FM00') END  AS DIFFTM
+               , AA.MAXSCAN
+               , AA.MINSCAN
+               , AA.CNT1
+               , AA.CNT4
+               , NVL(AA.QTY,0) AS QTY
+               , CASE WHEN (AA.CNT1 = 0 OR ROUND(FLOOR((MAXSCAN - MINSCAN) * 24)||'.'||FLOOR(MOD((MAXSCAN - MINSCAN) * 24 * 60, 60) *10/6),2) = 0) THEN 0 ELSE ROUND(AA.CNT1 / ROUND(FLOOR((MAXSCAN - MINSCAN) * 24)||'.'||FLOOR(MOD((MAXSCAN - MINSCAN) * 24 * 60, 60) *10/6),2),2) END HCNT1
+               , CASE WHEN (NVL(AA.QTY,0) = 0 OR ROUND(FLOOR((MAXSCAN - MINSCAN) * 24)||'.'||FLOOR(MOD((MAXSCAN - MINSCAN) * 24 * 60, 60) *10/6),2) = 0) THEN 0 ELSE ROUND(AA.QTY / ROUND(FLOOR((MAXSCAN - MINSCAN) * 24)||'.'||FLOOR(MOD((MAXSCAN - MINSCAN) * 24 * 60, 60) *10/6),2),2) END HQTY
+            FROM (
+                    SELECT A.ADDWHO
+                         , A.OTHER03
+                         , A.DCCODE
+                         , A.WDDCCODE 
+                         , A.PROC
+                         , D.CHANNEL
+                         , (SELECT CONVDESCR 
+                              FROM LOGISONESVC.CM_CODE_STORER CM_CODE 
+                             WHERE  CM_CODE.STORERKEY  IN ('%','STD','','FW00') 
+                               AND CM_CODE.CODELIST  = 'STORAGETYPE' 
+                               AND CM_CODE.BASECODE  = '10'
+                               AND ROWNUM = 1) AS STORAGETYPE
+                         , CASE WHEN PROC ='40' THEN COUNT(A.MV_WORKTIME) ELSE 0 END AS CNT4
+                         , CASE WHEN PROC <![CDATA[<>]]> '40' THEN SUM(1) ELSE 0 END AS CNT1
+                         , MIN(A.SCANDATE) AS MINSCAN
+                         , MAX(A.SCANDATE) AS MAXSCAN
+                         , SUM(A.QTY)      AS QTY
+                         , MAX(A.STORERKEY) AS STORERKEY
+                         , SUM(SUBSTR(MV_WORKTIME,1,2)*60 + SUBSTR(MV_WORKTIME,4,2)) AS MV_WORKTIME 
+                      FROM KP_PROCESS_SCANRAW A
+                      LEFT OUTER JOIN DM_DOCUMENT_D D 
+                        ON 1=1
+                       AND A.WDDCCODE = D.DCCODE
+                       AND A.DOCDT = D.DELIVERYDATE
+                       AND A.DOCLINE = D.DOCLINE
+                       AND A.DOCNO = D.DOCNO
+                       AND A.STORERKEY = D.STORERKEY
+                       AND D.DEL_YN = 'N'
+                      LEFT OUTER JOIN MS_SKU C
+                        ON C.STORERKEY = D.STORERKEY
+                       AND C.SKU = D.SKU
+                       AND C.DEL_YN = 'N'
+                     WHERE 1=1
+                    <if test="dcCode != null and dcCode != ''">
+                       AND A.DCCODE = #{dcCode}
+                    </if>
+                    <if test="processStep != null and processStep != ''">
+                       AND A.PROC = #{processStep}
+                    </if>
+                    <if test="userId != null and userId != ''">
+                       AND A.ADDWHO LIKE '%'|| #{userId}||'%'
+                    </if>             
+                       AND A.STATUS = 'C'
+                       AND A.SCANDATE <![CDATA[ <= ]]> TO_DATE(#{toModifyDate} , 'YYYYMMDDHH24MISS')
+                       AND A.SCANDATE >= TO_DATE(#{fromModifyDate} , 'YYYYMMDDHH24MISS')
+                     GROUP BY A.ADDWHO, A.OTHER03, A.DCCODE, A.WDDCCODE, A.PROC, D.CHANNEL, FN_CODECONVDESCR('STD', 'STORAGETYPE', C.STORAGETYPE)
+            ) AA
+           ORDER BY AA.ADDWHO, AA.DCCODE, AA.WDDCCODE, AA.PROC, AA.CHANNEL, AA.STORAGETYPE ASC 
+    </select>   
+     <select id="getTab3MasterList" resultType="KpProcessResultResTab3Dto">
+           SELECT CASE WHEN AA.OTHER03 IS NULL THEN AA.ADDWHO /* [kpProcessResultService.sqlx][kpProcessResultService.getTab3MasterList] [공정별생산성 RAW] */    
+                       ELSE AA.ADDWHO||'_'||AA.OTHER03 END AS ID   
+                , FN_DESCR_DC(AA.DCCODE) AS DCCODE
+                , AA.LABEL
+                , AA.BARCODE
+                , FN_DESCR_DC(AA.WDDCCODE) AS WDDCCODE
+                , FN_CODEDESCR(AA.STORERKEY, 'PUTAWAYTYPE', AA.CHANNEL) AS CHANNEL
+                , AA.STORAGETYPE
+                , AA.QTY
+                , CASE WHEN AA.PROC = 'S' THEN '이동시작'
+                       WHEN AA.PROC = 'E' THEN '이동종료'
+                       ELSE TO_CHAR(FN_CODEDESCR(AA.STORERKEY, 'MOD_PRODUCTIVITY_KPI', AA.PROC)) END AS PROC
+                , CASE WHEN AA.STATUS = 'C' THEN '반영'
+                       WHEN AA.STATUS = 'D' THEN '취소'
+                       WHEN AA.STATUS = 'E' THEN '미반영'
+                       ELSE '' END AS STATUS
+                , TO_CHAR(AA.SCANDATE, 'YYYY-MM-DD HH24:MI:SS') AS SCANDATE
+                , AA.OTHER01 AS DTLINFO
+                , AA.DEL_YN
+                , AA.SLIPDT
+             FROM (
+                    SELECT A.ADDWHO
+                         , A.OTHER03
+                         , A.DCCODE
+                         , CASE WHEN A.DOCLINE IS NULL OR A.DOCNO IS NULL THEN '이동라벨' ELSE '배송라벨' END AS LABEL
+                         , A.BARCODE
+                         , A.WDDCCODE 
+                         , D.CHANNEL
+                         , (SELECT CONVDESCR 
+                              FROM LOGISONESVC.CM_CODE_STORER CM_CODE 
+                             WHERE CM_CODE.STORERKEY  IN ('%','STD','','FW00') 
+                               AND CM_CODE.CODELIST  = 'STORAGETYPE' 
+                               AND CM_CODE.BASECODE  = '10'
+                               AND ROWNUM = 1) AS STORAGETYPE
+                         , A.QTY
+                         , CASE WHEN A.PROC = '40' THEN A.MV_TYPE ELSE A.PROC END AS PROC
+                         , A.STATUS
+                         , A.SCANDATE
+                         , A.STORERKEY
+                         , A.OTHER01
+                         , CASE WHEN A.PROC = '40' OR D.DEL_YN = 'N' THEN NULL
+                                ELSE '삭제' END AS  DEL_YN
+                         , B.SLIPDT AS SLIPDT
+                      FROM KP_PROCESS_SCANRAW A
+                      LEFT OUTER JOIN DM_DOCUMENT_D D 
+                        ON 1=1
+                       AND A.WDDCCODE = D.DCCODE
+                       AND A.DOCDT = D.DELIVERYDATE
+                       AND A.DOCLINE = D.DOCLINE
+                       AND A.DOCNO = D.DOCNO
+                       AND A.STORERKEY = D.STORERKEY
+                        <!--    AND D.DEL_YN = 'N'  삭제된 주문도 조회되게--> 
+                      LEFT OUTER JOIN MS_SKU C
+                        ON C.STORERKEY = D.STORERKEY
+                       AND C.SKU = D.SKU
+                       <!-- AND C.DEL_YN = 'N' -->
+                      LEFT OUTER JOIN WD_INVOICE B 
+                        ON B.INVOICENO = A.BARCODE 
+                       AND B.DCCODE = A.DCCODE
+                       AND B.STORERKEY = A.STORERKEY
+                       AND B.DOCDT = A.DOCDT
+                       AND B.DOCNO = A.DOCNO
+                       AND B.DOCLINE = A.DOCLINE
+                     WHERE 1=1               
+                       AND A.SCANDATE <![CDATA[ <= ]]> TO_DATE(#{toModifyDate} , 'YYYYMMDDHH24MISS')
+                       AND A.SCANDATE >= TO_DATE(#{fromModifyDate} , 'YYYYMMDDHH24MISS')
+                      <if test="dcCode != null and dcCode != ''">
+                       AND A.DCCODE = #{dcCode}
+                      </if>
+                      <if test="processStep != null and processStep != ''">
+                       AND A.PROC = #{processStep}
+                      </if>
+                     <if test="userId != null and userId != ''">
+                       AND A.ADDWHO LIKE '%'|| #{userId}||'%'
+                     </if>
+                   ) AA
+               ORDER BY AA.SCANDATE DESC
+     </select>
+</mapper>

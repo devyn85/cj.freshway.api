@@ -1,0 +1,178 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="msCustAddrCleansingService">
+
+    <!-- 주소정제 대상 고객정보(FOR 위경도정보) -->
+    <select id="selectGeocodeList" resultType="cjfw.batch.dto.MsCustResDto">
+        SELECT /* [msCustAddrCleansingService.sqlx][selectGeocodeList][주소정제 대상 고객정보(FOR 위경도정보))][김환수][2025.11.11] */
+               A.SERIALKEY      
+             , A.STORERKEY              /* 고객사코드(PK) */
+             , A.CUSTKEY                /* 거래처코드(PK) */
+             , A.CUSTTYPE               /* 거래처유형(PK) */
+             , CASE WHEN NVL(TRIM(A.ADDRESS1), '*') = NVL(TRIM(A.ADDRESS2), '*') 
+                    THEN TRIM(A.ADDRESS1)
+                    ELSE TRIM(A.ADDRESS1 || ' ' || A.ADDRESS2) 
+               END                                   AS ADDRESS1 /* 1순위(기본주소-지번:ADDRESS1+ADDRESS2) */ /* (*20260214) 동일주소 중복인 경우 한개만 사용 */ 
+             , CASE WHEN NVL(TRIM(A.ADDRESS3), '*') = NVL(TRIM(A.ADDRESS4), '*') 
+                    THEN TRIM(A.ADDRESS3)
+                    ELSE TRIM(A.ADDRESS3 || ' ' || A.ADDRESS4) 
+               END                                   AS ADDRESS3 /* 2순위(도로명주소   :ADDRESS3+ADDRESS4) */ /* (*20260214) 동일주소 중복인 경우 한개만 사용 */ 
+             , #{apiJob} AS API_JOB     /* API구분 */
+          FROM MS_CUST_PRD A /* 거래처마스터 */ 
+         WHERE 1=1
+           AND NOT EXISTS ( /* (*20251117) 기수행건 제외시킴 */
+                            SELECT 1
+                              FROM MG_ADDR_CLEAN_RESULT /* 주소정제 처리결과 */  
+                             WHERE 1=1
+                               AND SERIALKEY          = A.SERIALKEY  
+                               AND GEOCODE_SUCCESS_YN IS NOT NULL
+                          )
+           AND ROWNUM <![CDATA[<=]]> TO_NUMBER(#{fetchCnt})
+           AND ( /* 위도(Y)정보 체크 */
+                    TRIM(A.LATITUDE) IS NULL
+                 OR VALIDATE_CONVERSION(A.LATITUDE AS NUMBER) != 1
+                 /* 경도(X)정보 체크 */
+                 OR TRIM(A.LONGITUDE) IS NULL
+                 OR VALIDATE_CONVERSION(A.LONGITUDE AS NUMBER) != 1
+               )           
+           AND TRIM(A.ADDRESS1)||TRIM(A.ADDRESS2)||TRIM(A.ADDRESS3)||TRIM(A.ADDRESS4) IS NOT NULL
+    </select>
+
+    <!-- 주소정제 대상 고객정보(FOR 행정동코드) -->
+    <select id="selectAdmcodeList" resultType="cjfw.batch.dto.MsCustResDto">
+        SELECT /* [msCustAddrCleansingService.sqlx][selectAdmcodeList][주소정제 대상 고객정보(FOR 행정동코드))][김환수][2025.11.11] */
+               A.SERIALKEY      
+             , A.STORERKEY                    /* 고객사코드(PK) */
+             , A.CUSTKEY                      /* 거래처코드(PK) */
+             , A.CUSTTYPE                     /* 거래처유형(PK) */
+             , TRIM(A.LATITUDE)  AS LATITUDE  /* 위도(Y) */
+             , TRIM(A.LONGITUDE) AS LONGITUDE /* 경도(X) */
+             , #{apiJob}         AS API_JOB   /* API구분 */
+          FROM MS_CUST_PRD A /* 거래처마스터 */ 
+         WHERE 1=1
+           AND NOT EXISTS ( /* (*20251117) 기수행건 제외시킴 */
+                            SELECT 1
+                              FROM MG_ADDR_CLEAN_RESULT /* 주소정제 처리결과 */  
+                             WHERE 1=1
+                               AND SERIALKEY         = A.SERIALKEY  
+                               AND HJDONG_SUCCESS_YN IS NOT NULL 
+                          )
+           AND TRIM(HJDONG_CD) IS NULL
+               /* 위도(Y)정보 체크 */
+           AND TRIM(A.LATITUDE) IS NOT NULL
+           AND VALIDATE_CONVERSION(A.LATITUDE AS NUMBER) = 1
+               /* 경도(X)정보 체크 */
+           AND TRIM(A.LONGITUDE) IS NOT NULL
+           AND VALIDATE_CONVERSION(A.LONGITUDE AS NUMBER) = 1
+         ORDER BY A.EDITDATE DESC
+         FETCH FIRST TO_NUMBER(#{fetchCnt}) ROWS ONLY
+    </select>
+
+    <!-- 주소정제 결과(위경도값/행정동코드) 적용...단건 -->
+    <update id="updateMsCust">
+        UPDATE /* [msCustAddrCleansingService.sqlx][updateMsCust][주소정제(위경도값/행정동코드) 결과 적용.단건][김환수][2025.11.05] */ MS_CUST_PRD A /* 거래처마스터 */
+           SET A.EDITDATE  = SYSDATE
+             , A.EDITWHO   = 'BATCH'
+           <choose>
+             <when test='apiJob == "B"'>
+             , A.LATITUDE  = #{y}       /* 위도(Y) */
+             , A.LONGITUDE = #{x}       /* 경도(X) */
+             </when>
+             <when test='apiJob == "C"'>
+             , A.HJDONG_CD = #{admcd}   /* 행정동코드 */
+             </when>
+           </choose>
+         WHERE 1=1
+           AND A.STORERKEY = #{storerkey} <!-- 고객사코드(PK) -->
+           AND A.CUSTKEY   = #{custkey}   <!-- 거래처코드(PK) -->
+           AND A.CUSTTYPE  = #{custtype}  <!-- 거래처유형(PK) -->
+    </update>
+
+    <!-- 주소정제 결과(위경도값/행정동코드) 적용...BULK -->
+    <update id="updateMsCustBulk" parameterType="MsCustResDto">
+        MERGE /* [msCustAddrCleansingService.sqlx][updateMsCustBulk][주소정제(위경도값/행정동코드) 결과 적용.BULK][김환수][2025.11.05] */ INTO MS_CUST_PRD T /* 거래처마스터 */
+        USING ( /* UNION SQL 생성 */ 
+            <foreach collection="list" item="item" separator="UNION ALL">
+                SELECT #{item.serialkey} AS SERIALKEY
+                     , #{item.storerkey} AS STORERKEY, #{item.custkey} AS CUSTKEY, #{item.custtype} AS CUSTTYPE <!-- (PK):고객사코드,거래처코드,거래처유형 -->
+                     , #{item.x} AS X, #{item.y} AS Y, #{item.admcd} AS ADMCD, #{item.apiJob} AS API_JOB        <!-- (VALUE):위경도좌표값,행정동코드 -->
+                  FROM DUAL
+                 WHERE 1 = CASE #{item.apiJob}
+                                WHEN 'B' THEN CASE WHEN #{item.x}     IS NULL THEN 0 ELSE 1 END
+                                WHEN 'C' THEN CASE WHEN #{item.admcd} IS NULL THEN 0 ELSE 1 END
+                                ELSE 0
+                           END
+            </foreach>
+              ) S
+           ON (    T.STORERKEY = S.STORERKEY <!-- 고객사코드(PK) -->
+               AND T.CUSTKEY   = S.CUSTKEY   <!-- 거래처코드(PK) -->
+               AND T.CUSTTYPE  = S.CUSTTYPE  <!-- 거래처유형(PK) -->
+              ) 
+        WHEN MATCHED THEN
+             UPDATE SET /* ************************************************************************** */
+                        /* MS_CUST_PRD(임시)인 경우에만 TO_NCHAR() 사용됨. MS_CUST로 전환시 제거 요망 */
+                        /* ************************************************************************** */
+                        T.EDITDATE  = SYSDATE
+                      , T.EDITWHO   = 'BATCH'
+                      , T.LONGITUDE = CASE WHEN S.API_JOB = 'B' THEN TO_NCHAR(S.X) ELSE T.LONGITUDE END /* 경도(X) */
+                      , T.LATITUDE  = CASE WHEN S.API_JOB = 'B' THEN TO_NCHAR(S.Y) ELSE T.LATITUDE  END /* 위도(Y) */
+                      , T.HJDONG_CD = CASE WHEN S.API_JOB = 'C' THEN S.ADMCD ELSE T.HJDONG_CD END /* 행정동코드 */
+    </update>
+
+    <!-- API처리결과(처리일시/성공여부) 적용 -->
+    <update id="updateApiProcResult">
+        MERGE /* [msCustAddrCleansingService.sqlx][updateApiProcResult][API처리결과(처리일시/성공여부) 적용][김환수][2025.11.17] */ INTO MG_ADDR_CLEAN_RESULT A /* 주소정제 처리결과 */  
+        USING DUAL
+           ON ( A.SERIALKEY = TO_NUMBER(#{serialkey}) )
+        WHEN MATCHED THEN
+             UPDATE SET 
+                  <choose>
+                    <when test='apiJob == "B"'>
+                        A.GEOCODE_CLEAN_DATE = SYSDATE
+                      , A.GEOCODE_SUCCESS_YN = CASE WHEN #{status} = 'OK' THEN 'Y' ELSE 'N' END
+                      , A.GEOCODE_MSG        = #{errmsg}
+                    </when>
+                    <when test='apiJob == "C"'>
+                        A.HJDONG_CLEAN_DATE  = SYSDATE
+                      , A.HJDONG_SUCCESS_YN  = CASE WHEN #{status} = 'OK' THEN 'Y' ELSE 'N' END
+                      , A.HJDONG_MSG         = #{errmsg}
+                    </when>
+                  </choose>
+                      , A.EDITDATE = SYSDATE
+                      , A.EDITWHO  = 'BATCH'
+        WHEN NOT MATCHED THEN
+             INSERT ( A.SERIALKEY
+                    , A.GEOCODE_CLEAN_DATE
+                    , A.GEOCODE_SUCCESS_YN
+                    , A.GEOCODE_MSG
+                    , A.HJDONG_CLEAN_DATE
+                    , A.HJDONG_SUCCESS_YN
+                    , A.HJDONG_MSG
+                    , A.ADDWHO
+                    , A.EDITWHO
+                    )
+             VALUES ( TO_NUMBER(#{serialkey})
+                <choose>
+                  <when test='apiJob == "B"'>
+                    , SYSDATE
+                    , CASE WHEN #{status} = 'OK' THEN 'Y' ELSE 'N' END
+                    , #{errmsg}
+                    , NULL
+                    , NULL
+                    , NULL
+                  </when>
+                  <when test='apiJob == "C"'>
+                    , NULL
+                    , NULL
+                    , NULL
+                    , SYSDATE
+                    , CASE WHEN #{status} = 'OK' THEN 'Y' ELSE 'N' END
+                    , #{errmsg}
+                  </when>
+                </choose>
+                    , 'BATCH'
+                    , 'BATCH'
+                    )
+    </update>
+
+</mapper>

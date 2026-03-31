@@ -1,0 +1,875 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="msPopMngService">
+    
+    <!-- 거래처별POP관리 정보 조회 -->
+	<select id="getMasterList" resultType="MsPopMngResDto">
+		SELECT	* /* [msPopMngService.sqlx][msPopMngService.getMasterList][거래처별POP관리 조회][JeongHyeongCheol][20250718] */ 
+		FROM (
+        	SELECT  
+        	       MS_CUSTXPOP.SERIALKEY                AS SERIALKEY
+        	      ,MS_CUSTXPOP.DCCODE                   AS DCCODE
+        	      ,MS_CUSTXPOP.STORERKEY                AS STORERKEY
+			      ,MS_CUSTXPOP.CUSTTYPE                 AS CUSTTYPE
+			      ,MS_CUSTXPOP.CUSTKEY                  AS CUSTKEY
+			      ,MS_CUST.DESCRIPTION                  AS CUSTNAME
+			      ,MS_CUSTXPOP.FROMDATE                 AS FROMDATE
+			      ,MS_CUSTXPOP.TODATE                   AS TODATE
+			      ,MS_CUSTXPOP.POPTYPE                  AS POPTYPE
+			      ,MS_CUSTXPOP.POPNO                    AS POPNO
+			      ,MS_CUSTXPOP.ROLLTAINER_NO            AS ROLLTAINER_NO
+			      ,MS_CUSTXPOP.BCR_YN                   AS BCR_YN 
+			      ,MS_CUSTXPOP.POPNAME                  AS CARNO 				/* 차량번호 */
+			      ,CD1.BASEDESCR						AS CUSTGROUP
+			      ,'1'                                  AS SAVED
+			      ,'0' 									AS TIME_FLAG
+				  ,MS_CUST.LABELSTRATEGY				AS LABELSTRATEGY 		 /* 라벨출력 옵션 */
+				  ,MS_CUSTXPOP.DEL_YN					AS DEL_YN 				 /* 삭제여부 */
+				  ,MS_CUSTXPOP.ADDWHO					AS ADDWHO                /* 최초등록자*/
+				  ,MS_CUSTXPOP.ADDDATE					AS ADDDATE               /* 최초등록시간*/
+				  ,MS_CUSTXPOP.EDITWHO					AS EDITWHO               /* 최종변경자*/
+				  ,MS_CUSTXPOP.EDITDATE					AS EDITDATE              /* 최종변경시간*/	
+				  ,USER1.USER_NM 						AS REG_NM				 /* 등록자명 */
+				  ,USER2.USER_NM 						AS UPD_NM				 /* 수정자명 */			      
+			  FROM MS_CUSTXPOP
+			  JOIN CM_USER_AUTHORITY_DCXSTORER  
+		        ON CM_USER_AUTHORITY_DCXSTORER.USERID    = #{gUserId}
+		       AND CM_USER_AUTHORITY_DCXSTORER.DCCODE    = #{gDccode}
+		       AND CM_USER_AUTHORITY_DCXSTORER.STORERKEY	=  'FW00'
+		       AND CM_USER_AUTHORITY_DCXSTORER.STORERKEY = MS_CUSTXPOP.STORERKEY
+		      JOIN MS_CUST
+                ON MS_CUSTXPOP.STORERKEY = MS_CUST.STORERKEY
+               AND MS_CUSTXPOP.CUSTKEY   = MS_CUST.CUSTKEY
+               AND MS_CUSTXPOP.CUSTTYPE  = MS_CUST.CUSTTYPE
+         LEFT JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = MS_CUSTXPOP.ADDWHO  		/*등록자명*/
+		 LEFT JOIN FRAMEONE_USER USER2 ON USER2.USER_ID = MS_CUSTXPOP.EDITWHO  		/*수정자명*/
+		 LEFT JOIN CM_CODE_STORER CD1  ON CD1.STORERKEY  = MS_CUSTXPOP.STORERKEY
+		 							  AND CD1.CODELIST  = 'CUSTOMER-CUSTTYPE'
+		 							  AND CD1.BASECODE   = MS_CUST.CUSTGROUP
+		 							  AND    ROWNUM = 1
+		 
+			 WHERE 1=1
+			 AND MS_CUSTXPOP.DEL_YN = 'N'
+			 AND MS_CUSTXPOP.SERIALKEY = ( SELECT MIN(X.SERIALKEY) KEEP (DENSE_RANK FIRST ORDER BY X.FROMDATE DESC, X.TODATE ASC )
+		                                   FROM   MS_CUSTXPOP X
+		                                   WHERE  X.DCCODE    = MS_CUSTXPOP.DCCODE    
+		                                   AND    X.STORERKEY = MS_CUSTXPOP.STORERKEY
+		                                   AND    X.CUSTTYPE  = MS_CUSTXPOP.CUSTTYPE
+		                                   AND    X.CUSTKEY   = MS_CUSTXPOP.CUSTKEY
+		                                   AND 	  TO_CHAR(SYSDATE,'YYYYMMDD') BETWEEN X.FROMDATE AND X.TODATE
+		         						 )
+			<if test='dccode != null and dccode != ""'>
+				AND    MS_CUSTXPOP.DCCODE         = #{dccode}
+			</if>			
+    		<if test='custkeyMulti != null and custkeyMulti != ""'>
+				<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+	                <foreach collection="custkeyMulti" item="item">
+	                    OR MS_CUSTXPOP.CUSTKEY IN
+	                    <foreach collection="item" item="code" open="(" close=")" separator=",">
+	                        #{code}
+	                    </foreach>
+	                </foreach>
+	            </trim>				
+	    	</if>
+    		<if test='carnoMulti != null and carnoMulti != ""'>				
+		        <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+	                <foreach collection="carnoMulti" item="item">
+	                    OR MS_CUSTXPOP.POPNAME IN
+	                    <foreach collection="item" item="code" open="(" close=")" separator=",">
+	                        #{code}
+	                    </foreach>
+	                </foreach>
+	            </trim>	
+	    	</if>
+	    	<if test='popnoMulti != null and popnoMulti != ""'>				
+		        <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+	                <foreach collection="popnoMulti" item="item">
+	                    OR MS_CUSTXPOP.POPNO IN
+	                    <foreach collection="item" item="code" open="(" close=")" separator=",">
+	                        #{code}
+	                    </foreach>
+	                </foreach>
+	            </trim>	
+	    	</if>			   	
+			
+	         UNION ALL
+	         SELECT /* [msPopMngService.sqlx][msPopMngService.getMasterList][POP관리 조회(목록)] */ 
+        	       MS_CUSTXPOP.SERIALKEY                AS SERIALKEY
+        	      ,MS_CUSTXPOP.DCCODE                   AS DCCODE
+        	      ,MS_CUSTXPOP.STORERKEY                AS STORERKEY
+			      ,MS_CUSTXPOP.CUSTTYPE                 AS CUSTTYPE
+			      ,MS_CUSTXPOP.CUSTKEY                  AS CUSTKEY
+			      ,MS_CUST.DESCRIPTION                  AS CUSTNAME
+			      ,MS_CUSTXPOP.FROMDATE                 AS FROMDATE
+			      ,MS_CUSTXPOP.TODATE                   AS TODATE
+			      ,MS_CUSTXPOP.POPTYPE                  AS POPTYPE
+			      ,MS_CUSTXPOP.POPNO                    AS POPNO
+			      ,MS_CUSTXPOP.ROLLTAINER_NO            AS ROLLTAINER_NO
+			      ,MS_CUSTXPOP.BCR_YN                   AS BCR_YN
+			      ,MS_CUSTXPOP.POPNAME                  AS CARNO /* 차량번호 */
+			      ,CD1.BASEDESCR						AS CUSTGROUP
+			      ,'1'                                  AS SAVED
+			      ,'1' 									AS TIME_FLAG
+				  ,MS_CUST.LABELSTRATEGY				AS LABELSTRATEGY 		 /* 라벨출력 옵션 */
+				  ,MS_CUSTXPOP.DEL_YN					AS DEL_YN 				 /* 삭제여부 */
+				  ,MS_CUSTXPOP.ADDWHO					AS ADDWHO                /* 최초등록자*/
+				  ,MS_CUSTXPOP.ADDDATE					AS ADDDATE               /* 최초등록시간*/
+				  ,MS_CUSTXPOP.EDITWHO					AS EDITWHO               /* 최종변경자*/
+				  ,MS_CUSTXPOP.EDITDATE					AS EDITDATE              /* 최종변경시간*/
+				  ,USER1.USER_NM 						AS REG_NM				 /* 등록자명 */
+				  ,USER2.USER_NM 						AS UPD_NM				 /* 수정자명 */						      
+			  FROM MS_CUSTXPOP
+			  JOIN CM_USER_AUTHORITY_DCXSTORER  
+		        ON CM_USER_AUTHORITY_DCXSTORER.USERID    = #{gUserId}
+		       AND CM_USER_AUTHORITY_DCXSTORER.DCCODE    = #{gDccode}
+		       AND CM_USER_AUTHORITY_DCXSTORER.STORERKEY	=  'FW00'
+		       AND CM_USER_AUTHORITY_DCXSTORER.STORERKEY = MS_CUSTXPOP.STORERKEY
+		      JOIN MS_CUST
+                ON MS_CUSTXPOP.STORERKEY = MS_CUST.STORERKEY
+               AND MS_CUSTXPOP.CUSTKEY   = MS_CUST.CUSTKEY
+               AND MS_CUSTXPOP.CUSTTYPE  = MS_CUST.CUSTTYPE
+         LEFT JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = MS_CUSTXPOP.ADDWHO  		/*등록자명*/
+		 LEFT JOIN FRAMEONE_USER USER2 ON USER2.USER_ID = MS_CUSTXPOP.EDITWHO  		/*수정자명*/
+		 LEFT JOIN CM_CODE_STORER CD1  ON CD1.STORERKEY  = MS_CUSTXPOP.STORERKEY
+		 							  AND CD1.CODELIST   = 'CUSTOMER-CUSTTYPE'
+		 							  AND CD1.BASECODE   = MS_CUST.CUSTGROUP
+		 							  AND    ROWNUM = 1
+			 WHERE 1=1
+			 AND MS_CUSTXPOP.DEL_YN = 'N'
+			 AND MS_CUSTXPOP.FROMDATE > TO_CHAR(SYSDATE,'YYYYMMDD')
+			<if test='dccode != null and dccode != ""'>
+				AND    MS_CUSTXPOP.DCCODE         = #{dccode}
+			</if>
+			<if test='custkeyMulti != null and custkeyMulti != ""'>				
+		        <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+	                <foreach collection="custkeyMulti" item="item">
+	                    OR MS_CUSTXPOP.CUSTKEY IN
+	                    <foreach collection="item" item="code" open="(" close=")" separator=",">
+	                        #{code}
+	                    </foreach>
+	                </foreach>
+	            </trim>	
+	    	</if>
+    		<if test='carnoMulti != null and carnoMulti != ""'>
+		        <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+	                <foreach collection="carnoMulti" item="item">
+	                    OR MS_CUSTXPOP.POPNAME IN
+	                    <foreach collection="item" item="code" open="(" close=")" separator=",">
+	                        #{code}
+	                    </foreach>
+	                </foreach>
+	            </trim>	
+	    	</if>
+	    	<if test='popnoMulti != null and popnoMulti != ""'>
+		        <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+	                <foreach collection="popnoMulti" item="item">
+	                    OR MS_CUSTXPOP.POPNO IN
+	                    <foreach collection="item" item="code" open="(" close=")" separator=",">
+	                        #{code}
+	                    </foreach>
+	                </foreach>
+	            </trim>	
+	    	</if>			   	
+			
+		      )
+	     ORDER BY POPNO, CUSTKEY, FROMDATE
+    </select>
+    
+    <select id="getRolltainerList" resultType="MsPopMngResDto">
+		SELECT /* [msPopMngService.sqlx][msPopMngService.getRolltainerList][거래처별POP관리 조회][JeongHyeongCheol][20250718] */
+			 DISTINCT
+			 MS_DISTRICT.DISTRICTCODE   					AS POPNO					/* 센터권역코드 */	
+			,MS_DISTRICT.CARNO   							AS CARNO					/* 기본배송차량 */	
+			,MS_DISTRICT.DCCODE   							AS DCCODE					/* 센터코드 */
+			,MS_DISTRICT.ROLLTAINER_MAX   					AS ROLLTAINER_MAX			/* 롤테이너최대개수 */	
+			,MS_DISTRICT.ROLLTAINER_START_NO   				AS ROLLTAINER_START_NO		/* 롤테이너시작번호 */	
+			,MS_DISTRICT.ROLLTAINER_END_NO   				AS ROLLTAINER_END_NO		/* 롤테이너종료번호 */	
+		FROM MS_DISTRICT
+		
+     	WHERE MS_DISTRICT.DEL_YN = 'N'
+     	  AND MS_DISTRICT.DISTRICTTYPE = 'POP'
+ 	</select>
+ 	
+ 	<!-- 엑셀업로드 유효성체크-->
+	<select id="getValidateUpdate" resultType="String">
+		SELECT  /* [msPopMngService.sqlx][msPopMngService.getValidateUpdate][업데이트 유효성 체크][JeongHyeongCheol][20250805] */
+		    CASE 
+		        WHEN COUNT(1) > 0 
+		        THEN 'N' 
+		        ELSE 'Y' 
+		    END
+		FROM MS_CUSTXPOP
+		WHERE MS_CUSTXPOP.STORERKEY  = 'FW00'
+		AND   MS_CUSTXPOP.DCCODE     = #{dccode}
+		AND   MS_CUSTXPOP.CUSTKEY    = #{custkey}
+		AND   MS_CUSTXPOP.CUSTTYPE   = #{custtype}
+		AND   MS_CUSTXPOP.FROMDATE   = #{fromdate}
+    </select>
+    
+    <!-- update masterlist -->
+    <update id="updateMasterList">
+    	UPDATE MS_CUSTXPOP
+    	   SET   POPNO          = #{popno}
+                ,POPNAME        = #{carno}
+                ,ROLLTAINER_NO  = nvl(#{rolltainerNo},0)
+				,EDITWHO  		= #{gUserId}
+				,EDITDATE 		= SYSDATE
+    	 WHERE MS_CUSTXPOP.STORERKEY  = 'FW00'
+		 AND   MS_CUSTXPOP.DCCODE     = #{dccode}
+		 AND   MS_CUSTXPOP.CUSTKEY    = #{custkey}
+		 AND   MS_CUSTXPOP.CUSTTYPE   = #{custtype}
+		 AND   MS_CUSTXPOP.FROMDATE   = #{fromdate}
+    </update>
+ 	
+ 	<!-- delete masterlist -->
+    <update id="updateList">
+    	UPDATE MS_CUSTXPOP
+    	   SET  TODATE = #{todate}
+    	     ,  FROMDATE =#{fromdate}
+    	     , POPNO = #{popno}
+    	     , POPNAME = #{carno}
+    	     , ROLLTAINER_NO  = nvl(#{rolltainerNo},0)
+			 , EDITWHO  = #{gUserId}
+			 , EDITDATE = SYSDATE
+    	 WHERE 1=1
+    	 	AND SERIALKEY       = #{serialkey}
+    </update>
+            
+            <!-- insert masterlist -->
+    <insert id="insertMasterList">
+    	<selectKey keyProperty="newSerialkey" resultType="String" order="BEFORE">
+			SELECT SEQ_MS_CUSTXPOP.NEXTVAL FROM DUAL
+		</selectKey>
+		INSERT INTO MS_CUSTXPOP
+			 		(SERIALKEY 
+					,DCCODE
+					,STORERKEY 
+					,CUSTKEY
+					,CUSTTYPE 
+					,FROMDATE							 
+					,POPNO
+					,POPNAME																 
+					,ADDWHO 
+					,EDITWHO
+					,ROLLTAINER_NO
+					,BCR_YN
+					)
+				VALUES
+					(#{newSerialkey}
+					,#{dccode}
+					,#{storerkey}
+					,#{custkey}
+					,#{custtype}
+					,#{fromdate}
+					,#{popno}
+					,#{carno}
+					,#{gUserId}
+					,#{gUserId}
+					,nvl(#{rolltainerNo},0)
+					,#{bcrYn}
+					)
+    </insert>
+    
+    <!-- insert masterlist -->
+    <insert id="insertMasterList_backup">
+    	<selectKey keyProperty="newSerialkey" resultType="String" order="BEFORE">
+			SELECT SEQ_MS_CUSTXPOP.NEXTVAL FROM DUAL
+		</selectKey>
+		INSERT INTO MS_CUSTXPOP
+			 		(SERIALKEY 
+					,DCCODE
+					,STORERKEY 
+					,CUSTKEY
+					,CUSTTYPE 
+					,FROMDATE	
+					<if test="todate != null and todate != ''">
+                    ,TODATE
+                     </if>						 
+					,POPNO
+					,POPNAME																 
+					,ADDWHO 
+					,EDITWHO
+					,ROLLTAINER_NO
+					,BCR_YN
+					)
+				VALUES
+					(#{newSerialkey}
+					,#{dccode}
+					,#{storerkey}
+					,#{custkey}
+					,#{custtype}
+					,#{fromdate}
+					<if test="todate != null and todate != ''">
+					,#{todate}
+					</if>
+					,#{popno}
+					,#{carno}
+					,#{gUserId}
+					,#{gUserId}
+					,nvl(#{rolltainerNo},0)
+					,#{bcrYn}
+					)
+    </insert>
+     <!-- insert insertIFList -->
+    <insert id="insertIFList">
+    	INSERT INTO IF_MS_CUSTXPOP
+						(SERIALKEY 
+						,DCCODE
+						,STORERKEY 
+						,CUSTKEY 
+						,POPNAME 
+						,POPNO 
+						,FROMDATE 
+						,TODATE 
+						,STATUS 
+						,DEL_YN 
+						,IF_ID
+						,IF_DESTINATION
+						,IF_FLAG 
+						,IF_DATE 
+						,ADDDATE
+						,ADDWHO
+						,EDITDATE 
+						,EDITWHO
+						)
+				  SELECT SEQ_IF_MS_CUSTXPOP.NEXTVAL
+						,DCCODE
+						,STORERKEY
+						,CUSTKEY					
+						,POPNAME
+						,POPNO || CASE WHEN CORE_CM_STRATEGY.FN_ISINVOICEUSEROTAINERNO(#{dccode},#{storerkey}) = 'Y' THEN '-'||MS_CUSTXPOP.ROLLTAINER_NO END
+						,FROMDATE
+						,TODATE
+						,STATUS
+						,DEL_YN
+						,'SCM0310'
+						,'SRM'
+						,'N'
+						,SYSDATE
+						,ADDDATE
+						,ADDWHO
+						,EDITDATE
+						,EDITWHO
+				  FROM MS_CUSTXPOP
+				 WHERE 1=1
+		    	 	AND SERIALKEY       = #{serialkey}
+	
+    </insert>    
+    
+    <!-- insert insertHISList -->
+    <insert id="insertHISList">    	
+		INSERT INTO MS_CUSTXPOP_HISTORY
+			 		(SERIALKEY
+			 		,MODIFYDATE
+					,DCCODE
+					,STORERKEY 
+					,CUSTKEY
+					,CUSTTYPE 
+					,FROMDATE
+					,TODATE
+					,POPTYPE														 
+					,POPNO
+					,POPNAME
+					,MEMO
+					,STATUS
+					,DEL_YN
+					,ADDDATE
+					,EDITDATE																 
+					,ADDWHO 
+					,EDITWHO
+					,ROLLTAINER_NO						
+					)
+				SELECT 
+					 SERIALKEY 
+					,SYSDATE 				
+					,DCCODE
+					,STORERKEY
+					,CUSTKEY
+					,CUSTTYPE
+					,FROMDATE
+					,TODATE
+					,POPTYPE
+					,POPNO
+					,POPNAME
+					,MEMO
+					,STATUS
+					,DEL_YN
+					,ADDDATE
+					,EDITDATE
+					,ADDWHO
+					,EDITWHO
+					,ROLLTAINER_NO
+				 FROM MS_CUSTXPOP 
+				 WHERE 1=1
+		    	 	AND SERIALKEY       = #{serialkey}
+
+    </insert>    
+    
+    
+    <!-- insert insertIFList -->
+    <insert id="insertIFList_backup">
+    	INSERT INTO IF_MS_CUSTXPOP
+						(SERIALKEY 
+						,DCCODE
+						,STORERKEY 
+						,CUSTKEY 
+						,POPNAME 
+						,POPNO 
+						,FROMDATE 
+						,TODATE 
+						,STATUS 
+						,DEL_YN 
+						,IF_ID
+						,IF_DESTINATION
+						,IF_FLAG 
+						,IF_DATE 
+						,ADDDATE
+						,ADDWHO
+						,EDITDATE 
+						,EDITWHO
+						)
+				  SELECT SEQ_IF_MS_CUSTXPOP.NEXTVAL
+						,DCCODE
+						,STORERKEY
+						,CUSTKEY					
+						,POPNAME
+						,POPNO || CASE WHEN CORE_CM_STRATEGY.FN_ISINVOICEUSEROTAINERNO(#{dccode},#{storerkey}) = 'Y' THEN '-'||MS_CUSTXPOP.ROLLTAINER_NO END
+						,FROMDATE
+						,TODATE
+						,STATUS
+						,DEL_YN
+						,'SCM0310'
+						,'SRM'
+						,'N'
+						,SYSDATE
+						,ADDDATE
+						,ADDWHO
+						,EDITDATE
+						,EDITWHO
+				  FROM MS_CUSTXPOP
+				 WHERE 1=1
+				 <if test='isNew == "N"'>
+		    	 	AND SERIALKEY       = #{serialkey}
+		    	 </if>
+		    	 <if test='isNew == "Y"'>
+		    	 	AND MS_CUSTXPOP.STORERKEY  = 'FW00'
+				 	AND MS_CUSTXPOP.DCCODE     = #{dccode}
+				 	AND MS_CUSTXPOP.CUSTKEY    = #{custkey}
+				 	AND MS_CUSTXPOP.CUSTTYPE   = #{custtype}
+				 </if>
+    </insert>    
+    
+    <!-- insert insertHISList -->
+    <insert id="insertHISList_backup">    	
+		INSERT INTO MS_CUSTXPOP_HISTORY
+			 		(SERIALKEY
+			 		,MODIFYDATE
+					,DCCODE
+					,STORERKEY 
+					,CUSTKEY
+					,CUSTTYPE 
+					,FROMDATE
+					,TODATE
+					,POPTYPE														 
+					,POPNO
+					,POPNAME
+					,MEMO
+					,STATUS
+					,DEL_YN
+					,ADDDATE
+					,EDITDATE																 
+					,ADDWHO 
+					,EDITWHO
+					,ROLLTAINER_NO						
+					)
+				SELECT 
+					 SERIALKEY 
+					,SYSDATE 				
+					,DCCODE
+					,STORERKEY
+					,CUSTKEY
+					,CUSTTYPE
+					,FROMDATE
+					,TODATE
+					,POPTYPE
+					,POPNO
+					,POPNAME
+					,MEMO
+					,STATUS
+					,DEL_YN
+					,ADDDATE
+					,EDITDATE
+					,ADDWHO
+					,EDITWHO
+					,ROLLTAINER_NO
+				 FROM MS_CUSTXPOP 
+				 WHERE 1=1
+				 <if test='isNew == "N"'>
+		    	 	AND SERIALKEY       = #{serialkey}
+		    	 </if>
+		    	 <if test='isNew == "Y"'>
+					AND MS_CUSTXPOP.STORERKEY  = 'FW00'
+					AND MS_CUSTXPOP.DCCODE     = #{dccode}
+					AND MS_CUSTXPOP.CUSTKEY    = #{custkey}
+					AND MS_CUSTXPOP.CUSTTYPE   = #{custtype}
+				 </if>
+    </insert>    
+    
+    <!-- 일괄 재전송 내역 생성 -->
+    <update id="saveMasterResend">
+		INSERT INTO /* [msPopMngService.sqlx][msPopMngService.saveMasterResend][일괄 재전송 내역 생성] */
+		            IF_MS_CUSTXPOP
+					(SERIALKEY 
+					,DCCODE
+					,STORERKEY 
+					,CUSTKEY 
+					,POPNAME 
+					,POPNO 
+					,FROMDATE 
+					,TODATE 
+					,STATUS 
+					,DEL_YN 
+					,IF_ID
+					,IF_DESTINATION
+					,IF_FLAG 
+					,IF_DATE 
+					,ADDDATE
+					,ADDWHO
+					,EDITDATE 
+					,EDITWHO
+					)
+		SELECT SEQ_IF_MS_CUSTXPOP.NEXTVAL
+		      ,DCCODE
+		      ,STORERKEY
+		      ,CUSTKEY					
+		      ,POPNAME
+		      ,POPNO || CASE WHEN CORE_CM_STRATEGY.FN_ISINVOICEUSEROTAINERNO(T.DCCODE,T.STORERKEY) = 'Y' THEN '-'||T.ROLLTAINER_NO END
+		      ,FROMDATE
+		      ,TODATE
+		      ,STATUS
+		      ,DEL_YN
+		      ,'SCM0310'
+		      ,'SRM'
+		      ,'N'
+		      ,SYSDATE
+		      ,SYSDATE
+		      ,#{gUserId}
+		      ,SYSDATE
+		      ,#{gUserId}
+		FROM   (SELECT DCCODE
+		              ,STORERKEY
+		              ,CUSTKEY          
+		              ,POPNAME
+		              ,POPNO
+		              ,FROMDATE
+		              ,TODATE
+		              ,STATUS
+		              ,DEL_YN
+		              ,ROLLTAINER_NO
+		            FROM MS_CUSTXPOP
+		           WHERE DCCODE       = #{dccode}
+		             AND to_char(SYSDATE, 'yyyymmdd') BETWEEN MS_CUSTXPOP.fromdate AND MS_CUSTXPOP.todate
+		             AND STORERKEY    = 'FW00'
+		        UNION ALL
+		        SELECT DCCODE
+		              ,STORERKEY
+		              ,CUSTKEY					
+		              ,POPNAME
+		              ,POPNO
+		              ,FROMDATE
+		              ,TODATE
+		              ,STATUS
+		              ,DEL_YN
+		              ,ROLLTAINER_NO
+		            FROM MS_CUSTXPOP
+		           WHERE DCCODE       = #{dccode}
+		             AND to_char(SYSDATE, 'yyyymmdd') <![CDATA[<]]> MS_CUSTXPOP.fromdate
+		             AND MS_CUSTXPOP.fromdate <![CDATA[<=]]> MS_CUSTXPOP.todate
+		             AND STORERKEY    = 'FW00') T
+	</update>
+	
+	<!-- 임시 테이블 -->
+    <insert id="insertTemp" >
+        INSERT /* [msPopMngService.sqlx][insertTemp][임시 Tabele 등록] */
+        INTO SY_PROCESSTEMP_TM (PROCESSTYPE,PROCESSCREATOR,SPID,ADDWHO,EDITWHO
+        /**/
+        ,DCCODE
+        ,DELIVERYGROUP
+        ,OTHER02
+        ,OTHER01
+        ,CARNO
+        ,CUSTKEY
+        ,DELIVERYDT
+        ,SLIPDT
+        ,SLIPNO
+        ,SLIPTYPE
+        ,STORERKEY
+        ,CUSTTYPE
+        /**/
+        )
+        <foreach collection="list" item="item" separator="UNION ALL">
+            SELECT
+            #{item.processtype},#{item.gUserId},#{item.gSpid},#{item.gUserId},#{item.gUserId}
+            /**/
+            ,#{item.dccode}
+            ,#{item.deliverygroup}
+            ,#{item.other02}
+            ,#{item.other01}
+            ,#{item.carno}
+            ,#{item.custkey}
+            ,#{item.deliverydt}
+            ,#{item.slipdt}
+            ,#{item.slipno}
+            ,#{item.sliptype}
+            ,'FW00'
+            ,'C'
+            /**/
+            FROM DUAL
+        </foreach>
+    </insert>
+    
+	<!-- POP 일괄등록 결과 조회(목록) -->
+    <select id="getExcelUploadResult" resultType="MsPopMngResDto">
+    	SELECT /* [msPopMngService.sqlx][msPopMngService.getExcelUploadResult][POP관리 이력 조회(목록)][JeongHyeongCheol][20250718] */
+    	       SY_PROCESSTEMP_TM.DCCODE AS DCCODE
+              ,SY_PROCESSTEMP_TM.CUSTKEY
+              ,SY_PROCESSTEMP_TM.DELIVERYGROUP AS POPNO
+              ,SY_PROCESSTEMP_TM.OTHER02       AS BCR_YN
+              ,SY_PROCESSTEMP_TM.OTHER01       AS ROLLTAINER_NO
+              ,SY_PROCESSTEMP_TM.CARNO
+              ,SY_PROCESSTEMP_TM.DELIVERYDT    AS FROMDATE
+              ,SY_PROCESSTEMP_TM.PROCESSFLAG   AS PROCESS_YN
+              ,SY_PROCESSTEMP_TM.ERRMSG        AS PROCESS_MSG
+        FROM  SY_PROCESSTEMP_TM
+        WHERE SY_PROCESSTEMP_TM.PROCESSCREATOR = #{gUserId}
+        AND   SY_PROCESSTEMP_TM.PROCESSTYPE    = #{processtype}
+        AND   SY_PROCESSTEMP_TM.SPID           = #{gSpid}
+        ORDER BY SY_PROCESSTEMP_TM.SERIALKEY
+    </select>
+    
+    <select id="getCodeDetailList" resultType="MsPopMngPOPResDto">
+        SELECT  /* [CmCodeService.sqlx][getCodeDetailList][코드 상세 목록 조회][JangGwangSeok][2025.04.30] */
+		     #{authority}						AS AUTHORITY
+		    ,CM_CODE.SEQNO                   	AS SEQNO
+			
+		    ,CM_CODE.CODELIST                   AS CODELIST   /* 코드리스트 */
+		    
+		    ,CM_CODE.BASECODE                   AS BASECODE   /* 기본코드값 */
+		    ,CM_CODE.BASEDESCR                  AS BASEDESCR  /* 기본코드설명 */
+		    
+		    ,CM_CODE.ADDWHO						AS ADDWHO                /* 최초등록자*/
+			,CM_CODE.ADDDATE					AS ADDDATE               /* 최초등록시간*/
+			,CM_CODE.EDITWHO					AS EDITWHO               /* 최종변경자*/
+			,CM_CODE.EDITDATE					AS EDITDATE              /* 최종변경시간*/
+			,USER1.USER_NM 						AS REG_NM				 /* 등록자명 */
+			,USER2.USER_NM 						AS UPD_NM				 /* 수정자명 */	
+		FROM CM_CODE
+		LEFT JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = CM_CODE.ADDWHO  		/*등록자명*/
+		LEFT JOIN FRAMEONE_USER USER2 ON USER2.USER_ID = CM_CODE.EDITWHO  		/*수정자명*/
+		WHERE 1 = 1
+		    AND CM_CODE.STORERKEY = 'STD'
+		    <if test='codelist != null and codelist != ""'>
+				AND CM_CODE.CODELIST LIKE #{codelist}
+			</if>			
+			<if test='multiBasecode != null and multiBasecode.length > 0'>
+	            AND UPPER(CM_CODE.BASECODE) IN 
+	            <foreach collection="multiBasecode" item="item" open="(" separator="," close=")">
+	                #{item}
+	            </foreach>            
+	        </if>
+		UNION ALL
+		
+		SELECT
+			 #{authority}						AS AUTHORITY
+		    ,CM_CODE.SEQNO                   	AS SEQNO
+			,CM_CODE.CODELIST                   AS CODELIST   /* 코드리스트 */
+		    
+		    ,CM_CODE.BASECODE                   AS BASECODE   /* 기본코드값 */
+		    ,CM_CODE.BASEDESCR                  AS BASEDESCR  /* 기본코드설명 */
+		   
+		    ,CM_CODE.ADDWHO						AS ADDWHO                /* 최초등록자*/
+		    ,CM_CODE.ADDDATE					AS ADDDATE               /* 최초등록시간*/
+		    ,CM_CODE.EDITWHO					AS EDITWHO               /* 최종변경자*/
+		    ,CM_CODE.EDITDATE					AS EDITDATE              /* 최종변경시간*/
+		    ,USER1.USER_NM 						AS REG_NM				 /* 등록자명 */
+		    ,USER2.USER_NM 						AS UPD_NM				 /* 수정자명 */	
+		FROM CM_CODE
+		JOIN CM_USER_AUTHORITY_STORER
+		    ON CM_USER_AUTHORITY_STORER.USERID = #{gUserId}
+			AND CM_USER_AUTHORITY_STORER.STORERKEY = 'FW00'
+		    AND CM_USER_AUTHORITY_STORER.STORERKEY = CM_CODE.STORERKEY
+	    LEFT JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = CM_CODE.ADDWHO  		/*등록자명*/
+		LEFT JOIN FRAMEONE_USER USER2 ON USER2.USER_ID = CM_CODE.EDITWHO  		/*수정자명*/
+		WHERE 1 = 1
+			<if test='codelist != null and codelist != ""'>
+				AND CM_CODE.CODELIST LIKE #{codelist}
+			</if>
+    		<if test='multiBasecode != null and multiBasecode.length > 0'>
+	            AND UPPER(CM_CODE.BASECODE) IN 
+	            <foreach collection="multiBasecode" item="item" open="(" separator="," close=")">
+	                #{item}
+	            </foreach>            
+	        </if>
+    		
+		ORDER BY SEQNO
+    </select>
+    
+    <!-- codeList MERGE -->
+    <update id="saveCodeList">
+    	BEGIN
+        	MERGE INTO CM_CODE
+            	USING DUAL ON (CODELIST  		= #{codelist}
+                 		  AND BASECODE  		= #{dccode})
+
+            WHEN MATCHED THEN
+                UPDATE SET BASEDESCR		= #{basedescr}
+                          ,EDITWHO      	= #{gUserId}
+                          ,EDITDATE			= SYSDATE
+
+            WHEN NOT MATCHED THEN
+                INSERT
+	    			(CODELIST
+	    			,BASECODE
+	    			,BASEDESCR
+	    			,SEQNO
+	    			,ADDWHO
+	    			,EDITWHO)
+    			VALUES
+	    			(#{codelist}
+	    			,#{dccode}
+	    			,#{basedescr}
+	    			,(SELECT COALESCE(MAX(SEQNO), 0) + 1 FROM CM_CODE WHERE CODELIST = #{codelist})
+	    			,#{gUserId}
+	    			,#{gUserId});	    	
+		END;
+    </update>
+    
+    <!-- 대표POP변경 bulk update -->
+    <update id="updateBulkPOPList">
+    	UPDATE MS_CUSTXPOP MCP
+		   SET DEL_YN 	= 'Y'
+		      ,TODATE  	= TO_CHAR(SYSDATE, 'YYYYMMDD')
+		      ,ADDDATE 	= SYSTIMESTAMP 
+		      ,ADDWHO 	= #{gUserId}
+		WHERE 1=1 
+		   AND MCP.DCCODE 	= #{dccode}
+		   --AND CUSTKEY 		= '100071002' -- 테스트용
+		   AND NOT EXISTS (       
+		        SELECT 1
+		          FROM WD_INPLAN A
+		         WHERE ORGANIZE = #{dccode}
+		           AND ORGANIZE = MCP.DCCODE
+		           AND A.CUSTKEY = MCP.CUSTKEY
+		           AND SLIPDT BETWEEN ADD_MONTHS(SYSDATE,-12 * (
+		                                    SELECT BASEDESCR
+		                                      FROM CM_CODE 
+		                                     WHERE CODELIST = 'BASE_POP_CHG_TERM'
+		                                       AND BASECODE = (CASE 
+		                                                         WHEN EXISTS (SELECT 1 
+		                                                                        FROM CM_CODE 
+		                                                                       WHERE CODELIST = 'BASE_POP_CHG_TERM'
+		                                                                         AND BASECODE = A.ORGANIZE) 
+		                                                         THEN A.ORGANIZE
+		                                                         ELSE 'STD'
+		                                                       END)
+		                               ) ) AND SYSDATE
+		       )
+    </update>
+    <select id="chkVal" resultType="MsPopMngResDto">
+        SELECT
+               A.DATE_VAL
+             , B.DATA_VAL 
+             , SERIALKEY.SERIALKEY
+          FROM DUAL
+          LEFT OUTER JOIN (
+                           SELECT COUNT(1) AS DATE_VAL
+                             FROM MS_CUSTXPOP
+                            WHERE 1=1
+                            AND CUSTKEY = #{custkey}
+                            AND FROMDATE = #{fromdate}
+                            <if test="serialkey != null and serialkey != ''">
+                            AND SERIALKEY != #{serialkey} 
+                           </if>
+                           ) A
+                     ON 1=1      
+          LEFT OUTER JOIN (
+                           SELECT COUNT(1) AS DATA_VAL
+                             FROM MS_CUSTXPOP
+                            WHERE 1=1
+                              AND STORERKEY = 'FW00' 
+                              AND DCCODE = #{dccode} 
+                              AND CUSTKEY = #{custkey} 
+                              AND CUSTTYPE = #{custtype}
+                              AND FROMDATE = #{fromdate}
+                              AND POPNO = #{popno} 
+                              AND ROLLTAINER_NO = #{rolltainerNo}
+                              
+                          ) B
+                          ON 1=1
+         LEFT OUTER JOIN (
+                          SELECT CASE WHEN MAX(SERIALKEY) IS NOT NULL THEN TO_CHAR(MAX(SERIALKEY)) ELSE '' END AS SERIALKEY
+                            FROM MS_CUSTXPOP
+                           WHERE STORERKEY = 'FW00' AND DCCODE = #{dccode} AND CUSTKEY = #{custkey} AND CUSTTYPE = #{custtype}
+                             AND FROMDATE = #{fromdate} 
+                          ) SERIALKEY 
+                      ON 1=1
+    </select>
+    
+    
+    <select id="chkVal_backup" resultType="MsPopMngResDto">
+    SELECT
+		   
+		    T_PREV.PREV_FROMDT AS STA_DT,
+		    T_PREV.PREV_SERIAL AS PREV_SERIALKEY,
+		
+		    --T_NEXT.NEXT_FROMDT AS END_DT,
+		    T_NEXT.NEXT_SERIAL AS NEXT_SERIALKEY,
+		     CASE WHEN T_NEXT.NEXT_FROMDT IS NOT NULL 
+		         THEN TO_CHAR(TO_DATE(T_NEXT.NEXT_FROMDT, 'YYYYMMDD') - 1, 'YYYYMMDD') 
+		         ELSE '' END AS END_DT
+		,SERIALKEY.SERIALKEY AS CURR_SERIALKEY
+	FROM DUAL
+		-- [이전 행 추출]
+	LEFT OUTER JOIN (
+		    SELECT 
+		        MAX(FROMDATE) AS PREV_FROMDT,
+		        MAX(SERIALKEY) KEEP (DENSE_RANK LAST ORDER BY FROMDATE) AS PREV_SERIAL
+		    FROM MS_CUSTXPOP
+		    WHERE STORERKEY = 'FW00' AND DCCODE = #{dccode} AND CUSTKEY = #{custkey} AND CUSTTYPE = #{custtype} AND POPNO = #{popno}
+		      AND <![CDATA[ FROMDATE < #{fromdate} ]]>
+		      <if test="serialkey != null and serialkey != ''">
+              AND SERIALKEY != #{serialkey}
+              </if>
+	) T_PREV ON 1=1
+		-- [다음 행 추출]
+		LEFT OUTER JOIN (
+		    SELECT 
+		        MIN(FROMDATE) AS NEXT_FROMDT,
+		        MAX(SERIALKEY) KEEP (DENSE_RANK FIRST ORDER BY FROMDATE) AS NEXT_SERIAL
+		    FROM MS_CUSTXPOP
+		    WHERE STORERKEY = 'FW00' AND DCCODE = #{dccode} AND CUSTKEY = #{custkey} AND CUSTTYPE = #{custtype} AND POPNO = #{popno}
+		      AND <![CDATA[ FROMDATE > #{fromdate} ]]>
+		      <if test="serialkey != null and serialkey != ''">
+              AND SERIALKEY != #{serialkey}
+              </if>
+	) T_NEXT ON 1=1
+	LEFT OUTER JOIN (
+		    SELECT CASE WHEN MAX(SERIALKEY) IS NOT NULL THEN TO_CHAR(MAX(SERIALKEY)) ELSE '' END AS SERIALKEY
+		    FROM MS_CUSTXPOP
+		    WHERE STORERKEY = 'FW00' AND DCCODE = #{dccode} AND CUSTKEY = #{custkey} AND CUSTTYPE = #{custtype}
+		      AND FROMDATE = #{fromdate} 
+		     
+	) SERIALKEY ON 1=1
+    </select>
+    
+    <update id="prevUpdate">
+    UPDATE MS_CUSTXPOP
+       SET TODATE = TO_CHAR( TO_DATE(#{fromdate}, 'YYYYMMDD') - 1,'YYYYMMDD')
+         , EDITWHO  = #{gUserId}
+         , EDITDATE = SYSDATE
+     WHERE 1=1
+       AND SERIALKEY = #{serialkey}
+    </update>
+    
+    
+</mapper>

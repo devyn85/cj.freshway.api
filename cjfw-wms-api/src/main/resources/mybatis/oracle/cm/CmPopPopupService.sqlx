@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cmPopPopupService">
+	<!-- POP 정보 조회 -->	
+	<select id="getPopList" parameterType="cjfw.wms.cm.dto.CmPopPopupReqDto" resultType="cjfw.wms.cm.dto.CmPopPopupResDto">
+		SELECT /* [CmPopPopupService.sqlx][getPopPopupList][POP 목록 조회][YeoSeungCheol][2025.06.13] */
+			MS_DISTRICT.DCCODE         				AS dcCode
+			,FN_GETDCNAME(MS_DISTRICT.DCCODE) 		AS dcName
+			,MS_DISTRICT.DISTRICTCODE   			AS popCode
+			,MS_DISTRICT.DISTRICTNAME   			AS districtName
+		FROM MS_DISTRICT /*권역마스터*/
+		<!--
+		기준정보에서 JOIN 불필요에 따른 주석 by sss
+     	LEFT OUTER JOIN MS_DLV_DISTRICT DLV_DISTRICT ON DLV_DISTRICT.DCCODE = MS_DISTRICT.DCCODE AND DLV_DISTRICT.DLVDISTRICT_ID = MS_DISTRICT.WORKPOPNO AND DLV_DISTRICT.DEL_YN = 'N'
+     	-->
+     	WHERE MS_DISTRICT.DEL_YN = 'N'
+     	
+     	
+     	<!-- 멀티선택: 999 청크 OR-IN -->
+		<if test="codeGroups != null and codeGroups.size() &gt; 0">
+			<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+				<foreach collection="codeGroups" item="grp">
+					OR MS_DISTRICT.DISTRICTCODE IN
+					<foreach collection="grp" item="code" open="(" close=")" separator=",">
+						#{code}
+		      		</foreach>
+		    	</foreach>
+		  	</trim>
+		</if>
+
+      	<if test="dcCode != null and dcCode != ''">
+        	AND MS_DISTRICT.DCCODE = #{dcCode}
+      	</if>
+
+      	<if test="popCode != null and popCode != ''">
+        	AND (
+          		MS_DISTRICT.DISTRICTCODE 	LIKE '%' || #{popCode} || '%'
+          		OR MS_DISTRICT.DISTRICTNAME LIKE '%' || #{popCode} || '%'
+        	)
+        <!-- START.검색요건 -->
+        <choose>
+          <when test="keywordEng != null and keywordEng != ''">
+            <!-- 요건1. 영문변환 -->
+            <if test="popCode != keywordEng">
+              OR UPPER(MS_DISTRICT.DISTRICTNAME)
+                 LIKE '%' || UPPER(#{keywordEng}) || '%'
+            </if>
+            <!-- 요건2. 조합검색 -->
+            <if test="popCode.indexOf(' ') gt 0">
+              OR REGEXP_LIKE(
+                   UPPER(MS_DISTRICT.DISTRICTNAME),
+                   REGEXP_REPLACE(UPPER(#{keywordRegexp}), '[ ]+', '|')
+                 )
+              <if test="popCode != keywordEng">
+                OR REGEXP_LIKE(
+                     UPPER(MS_DISTRICT.DISTRICTNAME),
+                     REGEXP_REPLACE(UPPER(#{keywordEngRegexp}), '[ ]+', '|')
+                   )
+              </if>
+            </if>
+          </when>
+          <otherwise>
+            OR 1=2
+          </otherwise>
+        </choose>
+        <!-- END.검색요건 -->
+      </if>
+
+    	ORDER BY MS_DISTRICT.DCCODE, MS_DISTRICT.DISTRICTCODE
+	</select>
+</mapper>

@@ -1,0 +1,456 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="exdcDpWdAutoConfirmCancelService">
+
+    <sql id="procedureParams">
+          #{AVC_SYSTEM,         mode=IN, jdbcType=VARCHAR}
+        , #{AVC_EXECUTEMODE,    mode=IN, jdbcType=VARCHAR}
+        , #{AVC_COMMAND,        mode=IN, jdbcType=VARCHAR}
+        , #{AVC_DCCODE,         mode=IN, jdbcType=VARCHAR}
+        , #{AVC_STORERKEY,      mode=IN, jdbcType=VARCHAR}
+        , #{AVC_ORGANIZE,       mode=IN, jdbcType=VARCHAR}
+        , #{AVC_AREA,           mode=IN, jdbcType=VARCHAR}
+        , #{AVC_REQUESTCODE,    mode=IN, jdbcType=VARCHAR}
+        , #{AVC_REQUESTMSG,     mode=IN, jdbcType=VARCHAR}
+        , #{AVC_WORKER,         mode=IN, jdbcType=VARCHAR}
+        , #{AVC_SECURITYKEY,    mode=IN, jdbcType=VARCHAR}
+        , #{AI_SPID,            mode=IN, jdbcType=INTEGER}
+        , #{I_ERR,              mode=INOUT, jdbcType=INTEGER}
+        , #{VC_RESULTMSG,       mode=INOUT, jdbcType=VARCHAR}
+        , #{VC_RETURNMSG,       mode=INOUT, jdbcType=VARCHAR}
+        , AVC_LOG_PARAMS => #{AVC_LOG_PARAMS, mode=IN , jdbcType=VARCHAR} /*(20251020) BATCH LOG관련 PARAMS.*/
+    </sql>
+
+    <select id="callProcedureWd" statementType="CALLABLE" parameterType="BatchParamsUtil" resultType="BatchParamsUtil">
+        { CALL SPWD_SHIPMENT_EXDC_AUTO.EXECUTE( /* [exdcDpWdAutoConfirmCancelService.sqlx][callProcedureWd][가출고 취소 처리][김예원][20251211] */
+               <include refid="procedureParams"/>
+        ) }
+    </select>
+
+    <select id="callProcedureDp" statementType="CALLABLE" parameterType="BatchParamsUtil" resultType="BatchParamsUtil">
+        { CALL SPDP_RECEIPT_EXDC_AUTO.EXECUTE( /* [exdcDpWdAutoConfirmCancelService.sqlx][callProcedureDp][가출고 결품 처리][김예원][20251211] */
+               <include refid="procedureParams"/>
+        ) }
+    </select>
+
+    <select id="selectWdList" parameterType="cjfw.batch.job.autoconfirmcanceldpwd.ExdcDpWdAutoConfirmCancelReqDto" resultType="cjfw.batch.job.autoconfirmcanceldpwd.ExdcDpWdAutoConfirmCancelResDto">
+        SELECT /* [exdcDpWdAutoConfirmCancelService.sqlx][selectWdList][가출고 취소 대상 조회][김예원][20251211] */
+               WD_INPLAN.DCCODE                 			AS DCCODE
+              ,WD_INPLAN.STORERKEY              			AS STORERKEY
+              ,WD_INPLAN.ORGANIZE							AS ORGANIZE
+              ,WD_INPLAN.SLIPDT                 			AS SLIPDT
+              ,WD_INPLAN.SLIPNO                 			AS SLIPNO
+              ,WD_INPLAN.DOCNO								AS DOCNO
+              ,DM_EXDC_AUTOORD_CHECK.MAPKEY_NO				AS MAPKEY_NO	/* 매핑key (매핑테이블 update 용) */
+              ,DM_EXDC_AUTOORD_CHECK.TMP_SOKEY				AS TMP_SOKEY	/* 가SO번호 (매핑테이블 update 용) */
+        FROM
+            WD_INPLAN
+        JOIN
+            DM_DOCUMENT_D
+                ON     DM_DOCUMENT_D.DCCODE             = WD_INPLAN.DCCODE
+                AND    DM_DOCUMENT_D.STORERKEY          = WD_INPLAN.STORERKEY
+                AND    DM_DOCUMENT_D.DOCDT              = WD_INPLAN.DOCDT
+                AND    DM_DOCUMENT_D.DOCTYPE            = WD_INPLAN.DOCTYPE
+                AND    DM_DOCUMENT_D.DOCNO              = WD_INPLAN.DOCNO
+                AND    DM_DOCUMENT_D.DOCLINE            = WD_INPLAN.DOCLINE
+                AND    DM_DOCUMENT_D.DOCTYPE            = 'WD'
+                AND    DM_DOCUMENT_D.DEL_YN             = 'N'
+                AND    DM_DOCUMENT_D.CHANNEL            IN ('1','2','3')
+        JOIN
+            MS_SKU
+                ON     MS_SKU.STORERKEY                 = WD_INPLAN.STORERKEY
+                AND    MS_SKU.SKU                       = WD_INPLAN.SKU
+        JOIN
+            DM_EXDC_AUTOORD_CHECK
+                ON	   DM_EXDC_AUTOORD_CHECK.MAPKEY_NO 				= DM_DOCUMENT_D.MAPKEY_NO
+                AND    DM_EXDC_AUTOORD_CHECK.MAPKEY_LINE 			= DM_DOCUMENT_D.MAPKEY_LINE
+                AND    DM_EXDC_AUTOORD_CHECK.ISSUE_NO 				= DM_DOCUMENT_D.ISSUE_NO
+            and dm_exdc_autoord_check.real_yn = dm_document_d.real_yn
+            and dm_exdc_autoord_check.add_yn = dm_document_d.add_yn
+        WHERE  WD_INPLAN.DCCODE = '2170'
+        AND    WD_INPLAN.STORERKEY = 'FW00'
+        AND    DM_DOCUMENT_D.DELIVERYDATE BETWEEN TO_CHAR(SYSDATE-50,'YYYYMMDD') AND TO_CHAR(SYSDATE+7,'YYYYMMDD')
+        AND    ((DM_EXDC_AUTOORD_CHECK.TMP_DP_DEL_YN = 'Y' AND
+                CEIL(DM_DOCUMENT_D.CANCELQTY) = 0 AND
+                DM_DOCUMENT_D.STATUS = '90')
+                OR
+               (DM_EXDC_AUTOORD_CHECK.SERIALINFO_CFM_YN = '10' AND
+                CEIL(DM_DOCUMENT_D.CANCELQTY) = 0 AND
+                DM_DOCUMENT_D.STATUS = '90'))
+        AND    WD_INPLAN.DEL_YN        =  'N'
+        AND    WD_INPLAN.DCCODE        = '2170'
+        GROUP BY WD_INPLAN.DCCODE
+                ,WD_INPLAN.STORERKEY
+                ,WD_INPLAN.ORGANIZE
+                ,WD_INPLAN.DOCDT
+                ,WD_INPLAN.DOCNO
+                ,WD_INPLAN.DOCTYPE
+                ,WD_INPLAN.SLIPDT
+                ,WD_INPLAN.SLIPNO
+                ,DM_EXDC_AUTOORD_CHECK.MAPKEY_NO
+                ,DM_EXDC_AUTOORD_CHECK.TMP_SOKEY
+    </select>
+
+    <select id="selectWdDetailList" parameterType="cjfw.batch.job.autoconfirmcanceldpwd.ExdcDpWdAutoConfirmCancelReqDto" resultType="cjfw.batch.job.autoconfirmcanceldpwd.ExdcDpWdAutoConfirmCancelResDto">
+        SELECT /* [exdcDpWdAutoConfirmCancelService.sqlx][selectWdDetailList][가출고 취소 대상 상세 조회][김예원][20251211] */
+                      WD_INPLAN.DCCODE AS DCCODE
+                     ,WD_INPLAN.STORERKEY AS STORERKEY
+                     ,WD_INPLAN.ORGANIZE AS ORGANIZE
+                     ,WD_INPLAN.DOCDT AS DOCDT
+                     ,WD_INPLAN.DOCNO AS DOCNO
+                     ,WD_INPLAN.DOCLINE AS DOCLINE
+                     ,WD_INPLAN.SLIPDT AS SLIPDT
+                     ,WD_INPLAN.SLIPNO AS SLIPNO
+                     ,WD_INPLAN.SLIPLINE AS SLIPLINE
+                     ,WD_INPLAN.SKU AS SKU
+                     ,DM_DOCUMENT_D.STORERUOM AS UOM
+                     ,DM_DOCUMENT_D.BUNJA AS BUNJA
+                     ,DM_DOCUMENT_D.BUNMO AS BUNMO
+                     ,FN_UOMCAL  ( DM_DOCUMENT_D.BUNMO, DM_DOCUMENT_D.BUNJA, WD_INPLAN.CONFIRMQTY) AS CONFIRMQTY
+                     ,0 AS SHORTAGETRANQTY
+                     ,0 AS TRANQTY
+                     ,NVL(ST_SNINFO.LOTTABLE01, 'STD') AS LOTTABLE01
+                     ,DM_DOCUMENT_D.REFERENCE02 AS REFERENCE02
+                     ,NVL(DM_DOCUMENT_D.REFERENCE10, 0) AS REFERENCE10
+                     ,DM_DOCUMENT_D.REASONCODE AS REASONCODE
+                     ,DM_DOCUMENT_D.REASONMSG AS REASONMSG
+                     ,NVL(ST_SNINFO.STOCKID, WD_INPLAN.STOCKID) AS STOCKID
+                     ,WD_INPLAN.STOCKGRADE AS STOCKGRADE
+                     ,(CASE WHEN WD_INPLAN.DCCODE = '2170' AND NVL(MS_SKU.LINE01, 'N') = 'Y' AND NVL(WD_INVOICE_SN.ETCQTY2,0) = 0 THEN
+                          NVL(WD_INVOICE_SN.ETCQTY1, 0.0)
+                      ELSE
+                          0.0
+                      END) AS TRANBOX
+                     ,DM_EXDC_AUTOORD_CHECK.MAPKEY_NO			AS MAPKEY_NO	/* 매핑key (매핑테이블 update 용) */
+        		     ,DM_EXDC_AUTOORD_CHECK.MAPKEY_LINE			AS MAPKEY_LINE	/* 매핑key항번 (매핑테이블 update 용) */
+        		     ,DM_EXDC_AUTOORD_CHECK.TMP_SOKEY			AS TMP_SOKEY	/* 가SO번호 (매핑테이블 update 용) */
+        		     ,DM_EXDC_AUTOORD_CHECK.TMP_SOLINE			AS TMP_SOLINE	/* 가SO항번 (매핑테이블 update 용) */
+                 FROM
+                     WD_INPLAN
+                 JOIN
+                     DM_DOCUMENT_H
+                         ON     DM_DOCUMENT_H.DCCODE      = WD_INPLAN.DCCODE
+                         AND    DM_DOCUMENT_H.STORERKEY   = WD_INPLAN.STORERKEY
+                         AND    DM_DOCUMENT_H.DOCDT       = WD_INPLAN.DOCDT
+                         AND    DM_DOCUMENT_H.DOCTYPE     = WD_INPLAN.DOCTYPE
+                         AND    DM_DOCUMENT_H.DOCNO       = WD_INPLAN.DOCNO
+                         AND    DM_DOCUMENT_H.DOCTYPE     = 'WD'
+                         AND    DM_DOCUMENT_H.DEL_YN      = 'N'
+                 JOIN
+                     DM_DOCUMENT_D
+                         ON     DM_DOCUMENT_D.DCCODE      = WD_INPLAN.DCCODE
+                         AND    DM_DOCUMENT_D.STORERKEY   = WD_INPLAN.STORERKEY
+                         AND    DM_DOCUMENT_D.DOCTYPE     = WD_INPLAN.DOCTYPE
+                         AND    DM_DOCUMENT_D.DOCDT       = WD_INPLAN.DOCDT
+                         AND    DM_DOCUMENT_D.DOCNO       = WD_INPLAN.DOCNO
+                         AND    DM_DOCUMENT_D.DOCLINE     = WD_INPLAN.DOCLINE
+                         AND    DM_DOCUMENT_D.CHANNEL     IN ('1','2','3')
+                         AND    DM_DOCUMENT_D.DEL_YN      = 'N'
+                 JOIN
+        			 DM_EXDC_AUTOORD_CHECK
+        		       	ON	   DM_EXDC_AUTOORD_CHECK.MAPKEY_NO 				= DM_DOCUMENT_D.MAPKEY_NO
+        		        AND    DM_EXDC_AUTOORD_CHECK.MAPKEY_LINE 			= DM_DOCUMENT_D.MAPKEY_LINE
+        		        AND    DM_EXDC_AUTOORD_CHECK.ISSUE_NO 				= DM_DOCUMENT_D.ISSUE_NO
+        		        AND    DM_EXDC_AUTOORD_CHECK.TMP_SOKEY 				= DM_DOCUMENT_D.SOKEY
+        		        AND    DM_EXDC_AUTOORD_CHECK.TMP_SOLINE 			= DM_DOCUMENT_D.SOLINE
+                 JOIN
+                     MS_SKU
+                         ON     MS_SKU.STORERKEY          =  WD_INPLAN.STORERKEY
+                         AND    MS_SKU.SKU                =  WD_INPLAN.SKU
+                         AND    MS_SKU.DEL_YN             = 'N'
+                 LEFT OUTER JOIN
+                     WD_INVOICE_SN
+                         ON     WD_INVOICE_SN.DCCODE      = WD_INPLAN.DCCODE
+                         AND    WD_INVOICE_SN.STORERKEY   = WD_INPLAN.STORERKEY
+                         AND    WD_INVOICE_SN.DOCTYPE     = WD_INPLAN.DOCTYPE
+                         AND    WD_INVOICE_SN.WD_SLIPNO   = WD_INPLAN.SLIPNO
+                         AND    WD_INVOICE_SN.WD_SLIPDT   = WD_INPLAN.SLIPDT
+                         AND    WD_INVOICE_SN.WD_SLIPLINE = WD_INPLAN.SLIPLINE
+                         AND    WD_INVOICE_SN.SKU         = WD_INPLAN.SKU
+                 LEFT OUTER JOIN
+                     ST_SNINFO
+                         ON     ST_SNINFO.STORERKEY       = WD_INVOICE_SN.STORERKEY
+                         AND    ST_SNINFO.SKU             = WD_INVOICE_SN.SKU
+                         AND    ST_SNINFO.SERIALNO        = WD_INVOICE_SN.SERIALNO
+                         AND    ST_SNINFO.STOCKID         = WD_INVOICE_SN.STOCKID
+                 WHERE WD_INPLAN.DCCODE     =   #{dccode}
+                 AND   WD_INPLAN.STORERKEY  =   #{storerkey}
+                 AND   WD_INPLAN.SLIPDT     =   #{slipdt}
+                 AND   WD_INPLAN.SLIPNO     =   #{slipno}
+                 AND   WD_INPLAN.DOCNO IN (#{docno})
+                 ORDER BY
+                       SLIPLINE
+                     , SKU
+                     , DM_EXDC_AUTOORD_CHECK.MAPKEY_NO
+        		     , DM_EXDC_AUTOORD_CHECK.MAPKEY_LINE
+        		     , DM_EXDC_AUTOORD_CHECK.TMP_SOKEY
+        		     , DM_EXDC_AUTOORD_CHECK.TMP_SOLINE
+    </select>
+
+    <select id="checkExistDoc" parameterType="cjfw.batch.job.autoconfirmcanceldpwd.ExdcDpWdAutoConfirmCancelReqDto" resultType="int">
+        SELECT /* [exdcDpWdAutoConfirmCancelService.sqlx][checkExistDoc][외부창고 보관료 전표 유무 체크][minseong.choi][20200722] */
+               COUNT(1) AS CHECK_CNT
+        FROM   DM_DOCUMENT_D
+        JOIN   ST_EXDCSTORAGE
+        ON     ST_EXDCSTORAGE.YYYYMM   = ST_EXDCSTORAGE.YYYYMM
+        AND    ST_EXDCSTORAGE.DCCODE   = DM_DOCUMENT_D.DCCODE
+        AND    ST_EXDCSTORAGE.ORGANIZE = DM_DOCUMENT_D.ORGANIZE
+        AND    ST_EXDCSTORAGE.IO_FLAG  = DM_DOCUMENT_D.DOCTYPE
+        AND    ST_EXDCSTORAGE.DOCNO    = DM_DOCUMENT_D.DOCNO
+        AND    ST_EXDCSTORAGE.DOCLINE  = DM_DOCUMENT_D.DOCLINE
+        AND    ST_EXDCSTORAGE.STOCKID  = NVL(#{stockid},ST_EXDCSTORAGE.STOCKID)
+        JOIN   IB_EXPENSE_DISTRIBUTION
+        ON     IB_EXPENSE_DISTRIBUTION.DOCUMENT_TYPE_CODE = 'WH'
+        AND    IB_EXPENSE_DISTRIBUTION.DOCUMENT_SN        = ST_EXDCSTORAGE.SERIALKEY
+        JOIN   IB_EXPENSE
+        ON     IB_EXPENSE.SERIALKEY    = IB_EXPENSE_DISTRIBUTION.EXPENSE_SN
+        AND    IB_EXPENSE.IF_ID        = 'SCM0470'
+        WHERE  DM_DOCUMENT_D.DCCODE    = #{dccode}
+        AND    DM_DOCUMENT_D.DOCTYPE   = 'WD'
+        AND    DM_DOCUMENT_D.DOCNO     = #{slipno}
+        AND    DM_DOCUMENT_D.DOCLINE   = NVL(#{slipline},DM_DOCUMENT_D.DOCLINE)
+    </select>
+
+    <!-- 매핑테이블 Update (가SO취소 시) -->
+    <update id="updateMappingTableSO" parameterType="cjfw.batch.job.autoconfirmcanceldpwd.ExdcDpWdAutoConfirmCancelReqDto">
+		UPDATE /* [exdcDpWdAutoConfirmCancelService.sqlx][updateMappingTableSO][매핑테이블 Update(SO)][개발자][20200722] */ DM_EXDC_AUTOORD_CHECK
+		SET    EDITDATE 			= SYSDATE
+		      ,EDITWHO 				= #{worker}
+		      ,ERROR_CHECK			= #{errorCheck}
+		      ,ERROR_STATUS			= #{errorStatus}
+			  ,TMP_SO_STATUS 		= CASE WHEN #{errorCheck} = 'S' THEN '90' ELSE TMP_SO_STATUS END
+		WHERE  MAPKEY_NO 			= #{mapkeyNo}
+		AND    MAPKEY_LINE		 	= #{mapkeyLine}
+		AND    TMP_SOKEY 			= #{tmpSokey}
+		AND    TMP_SOLINE 			= #{tmpSoline}
+    </update>
+
+    <!-- 가입고 취소 대상 조회 -->
+    <select id="selectDpList" parameterType="cjfw.batch.job.autoconfirmcanceldpwd.ExdcDpWdAutoConfirmCancelReqDto" resultType="cjfw.batch.job.autoconfirmcanceldpwd.ExdcDpWdAutoConfirmCancelResDto">
+        SELECT /* [exdcDpWdAutoConfirmCancelService.sqlx][selectDpList][가입고 취소 대상 조회][minseong.choi][20200731] */
+		       DP_INPLAN.DCCODE                 			AS DCCODE
+		      ,DP_INPLAN.STORERKEY              			AS STORERKEY
+		      ,DP_INPLAN.ORGANIZE							AS ORGANIZE
+		      ,DP_INPLAN.SLIPDT                 			AS SLIPDT
+		      ,DP_INPLAN.SLIPNO                 			AS SLIPNO
+		      ,DM_EXDC_AUTOORD_CHECK.MAPKEY_NO				AS MAPKEY_NO	/* 매핑key (매핑테이블 update 용) */
+		      ,DM_EXDC_AUTOORD_CHECK.TMP_DPKEY				AS TMP_DPKEY	/* 가IV번호 (매핑테이블 update 용) */
+		FROM
+			DP_INPLAN
+		JOIN
+			DM_DOCUMENT_D
+		        ON     DM_DOCUMENT_D.DCCODE             = DP_INPLAN.DCCODE
+		        AND    DM_DOCUMENT_D.STORERKEY          = DP_INPLAN.STORERKEY
+		        AND    DM_DOCUMENT_D.DOCDT              = DP_INPLAN.DOCDT
+		        AND    DM_DOCUMENT_D.DOCTYPE            = DP_INPLAN.DOCTYPE
+		        AND    DM_DOCUMENT_D.DOCNO              = DP_INPLAN.DOCNO
+		        AND    DM_DOCUMENT_D.DOCLINE            = DP_INPLAN.DOCLINE
+		        AND    DM_DOCUMENT_D.DOCTYPE            = 'DP'
+		        AND    DM_DOCUMENT_D.DEL_YN             = 'N'
+		        AND    DM_DOCUMENT_D.CHANNEL            IN ('1','2','3')
+		JOIN
+			DM_EXDC_AUTOORD_CHECK
+		        ON	   DM_EXDC_AUTOORD_CHECK.MAPKEY_NO 				= DM_DOCUMENT_D.MAPKEY_NO
+		        AND    DM_EXDC_AUTOORD_CHECK.MAPKEY_LINE 			= DM_DOCUMENT_D.MAPKEY_LINE
+		        AND    DM_EXDC_AUTOORD_CHECK.ISSUE_NO 				= DM_DOCUMENT_D.ISSUE_NO
+		        AND    DM_EXDC_AUTOORD_CHECK.TMP_DPKEY 				= DM_DOCUMENT_D.DOCNO
+		        AND    DM_EXDC_AUTOORD_CHECK.TMP_DPLINE 			= DM_DOCUMENT_D.DOCLINE
+
+		WHERE  DP_INPLAN.DCCODE = '2170'
+        AND    DP_INPLAN.STORERKEY = 'FW00'
+
+        AND    DM_DOCUMENT_D.DELIVERYDATE BETWEEN TO_CHAR(SYSDATE-50,'YYYYMMDD') AND TO_CHAR(SYSDATE+7,'YYYYMMDD')
+        AND    ((DM_EXDC_AUTOORD_CHECK.TMP_DP_DEL_YN = 'Y' AND
+                CEIL(DM_DOCUMENT_D.CANCELQTY) = 0 AND
+                DM_DOCUMENT_D.STATUS = '90')
+                OR
+               (DM_EXDC_AUTOORD_CHECK.SERIALINFO_CFM_YN = '10' AND
+                CEIL(DM_DOCUMENT_D.CANCELQTY) = 0 AND
+                DM_DOCUMENT_D.STATUS = '90'))
+
+        /*AND    DP_INPLAN.DOCNO IN (SELECT TMP_DPKEY
+                                   FROM   DM_EXDC_AUTOORD_CHECK
+                                   WHERE  DM_EXDC_AUTOORD_CHECK.MAP_DIV	= '20'
+                                   AND    ((DM_EXDC_AUTOORD_CHECK.TMP_SO_STATUS = '90'
+                                   AND      DM_EXDC_AUTOORD_CHECK.TMP_DP_STATUS = '60'
+                                   AND      DM_EXDC_AUTOORD_CHECK.SERIALINFO_CFM_YN = '10')
+                                   OR     (DM_EXDC_AUTOORD_CHECK.TMP_SO_DEL_YN = 'Y' AND DM_EXDC_AUTOORD_CHECK.TMP_SO_STATUS = '90')))*/
+
+		AND    DP_INPLAN.DEL_YN        =  'N'
+		AND    DP_INPLAN.DCCODE        = '2170'
+
+		GROUP BY DP_INPLAN.DCCODE
+		        ,DP_INPLAN.STORERKEY
+		        ,DP_INPLAN.ORGANIZE
+		        ,DP_INPLAN.DOCDT
+		        ,DP_INPLAN.DOCNO
+		        ,DP_INPLAN.DOCTYPE
+		        ,DP_INPLAN.SLIPDT
+		        ,DP_INPLAN.SLIPNO
+		        ,DM_EXDC_AUTOORD_CHECK.MAPKEY_NO
+		        ,DM_EXDC_AUTOORD_CHECK.TMP_DPKEY
+    </select>
+
+
+    <!-- 가입고 취소  대상 디테일 조회 -->
+    <select id="selectDpDetailList" parameterType="cjfw.batch.job.autoconfirmcanceldpwd.ExdcDpWdAutoConfirmCancelReqDto" resultType="cjfw.batch.job.autoconfirmcanceldpwd.ExdcDpWdAutoConfirmCancelResDto">
+        SELECT /* [exdcDpWdAutoConfirmCancelService.sqlx][selectDpDetailList][가입고 취소 대상 상세 조회][minseong.choi][20200731] */
+             DP_INPLAN.DCCODE            AS DCCODE
+            ,DP_INPLAN.STORERKEY         AS STORERKEY
+            ,DP_INPLAN.ORGANIZE          AS ORGANIZE
+            ,DP_INPLAN.DOCDT             AS DOCDT
+            ,DP_INPLAN.DOCNO             AS DOCNO
+            ,DP_INPLAN.DOCLINE           AS DOCLINE
+            ,DP_INPLAN.SLIPDT            AS SLIPDT
+            ,DP_INPLAN.SLIPNO            AS SLIPNO
+            ,DP_INPLAN.SLIPLINE          AS SLIPLINE
+            ,DP_INPLAN.SKU               AS SKU
+            ,DM_DOCUMENT_D.BUNJA         AS BUNJA
+            ,DM_DOCUMENT_D.BUNMO         AS BUNMO
+            ,DM_DOCUMENT_D.STORERUOM     AS UOM
+            ,FN_UOMCAL(DM_DOCUMENT_D.BUNMO, DM_DOCUMENT_D.BUNJA
+            ,CASE
+                 WHEN DM_DOCUMENT_D.DCCODE IN ( SELECT
+                     BASECODE
+                 FROM
+                     CM_CODE WMS_MNG_DC
+                 WHERE
+                     WMS_MNG_DC.STORERKEY = 'FW00'
+                     AND    WMS_MNG_DC.CODELIST  = 'WMS_MNG_DC'
+                     AND    WMS_MNG_DC.DATA3     = 'Y'
+                     AND    WMS_MNG_DC.BASECODE  != '2170') THEN DP_INPLAN.CONFIRMQTY
+                 ELSE DP_INVOICE_SN.CONFIRMQTY
+             END) AS CONFIRMQTY
+             ,0                          AS SHORTAGETRANQTY
+             ,0                          AS TRANQTY
+             ,NVL(ST_SNINFO.LOTTABLE01, 'STD') AS LOTTABLE01
+             ,DM_DOCUMENT_D.REFERENCE02  AS REFERENCE02
+             ,UNISTR('V')  AS REASONCODE
+             ,DM_DOCUMENT_D.REASONMSG    AS REASONMSG
+             ,NVL(ST_SNINFO.STOCKID, DP_INPLAN.STOCKID) AS STOCKID
+             ,DP_INPLAN.STOCKGRADE       AS STOCKGRADE
+             ,CASE
+                 WHEN DP_INPLAN.DCCODE = '2170' AND NVL(MS_SKU.LINE01, 'N') = 'Y' AND NVL(DP_INVOICE_SN.ETCQTY2, 0) = 0 THEN
+                    NVL(DP_INVOICE_SN.ETCQTY1, 0)
+                 ELSE
+                    0
+              END AS TRANBOX
+             ,DM_EXDC_AUTOORD_CHECK.MAPKEY_NO			AS MAPKEY_NO
+             ,DM_EXDC_AUTOORD_CHECK.MAPKEY_LINE			AS MAPKEY_LINE
+             ,DM_EXDC_AUTOORD_CHECK.ISSUE_NO			AS ISSUE_NO
+             ,DM_EXDC_AUTOORD_CHECK.TMP_DPKEY			AS TMP_DPKEY
+             ,DM_EXDC_AUTOORD_CHECK.TMP_DPLINE			AS TMP_DPLINE
+        FROM
+            DP_INPLAN
+        JOIN
+            DM_DOCUMENT_H
+                ON    DM_DOCUMENT_H.DCCODE         = DP_INPLAN.DCCODE
+                AND   DM_DOCUMENT_H.STORERKEY      = DP_INPLAN.STORERKEY
+                AND   DM_DOCUMENT_H.DOCDT          = DP_INPLAN.DOCDT
+                AND   DM_DOCUMENT_H.DOCTYPE        = DP_INPLAN.DOCTYPE
+                AND   DM_DOCUMENT_H.DOCNO          = DP_INPLAN.DOCNO
+                AND   DM_DOCUMENT_H.DOCTYPE        = 'DP'
+                AND   DM_DOCUMENT_H.DEL_YN         = 'N'
+        JOIN
+            DM_DOCUMENT_D
+                ON    DM_DOCUMENT_D.DCCODE         = DP_INPLAN.DCCODE
+                AND   DM_DOCUMENT_D.STORERKEY      = DP_INPLAN.STORERKEY
+                AND   DM_DOCUMENT_D.DOCTYPE        = DP_INPLAN.DOCTYPE
+                AND   DM_DOCUMENT_D.DOCDT          = DP_INPLAN.DOCDT
+                AND   DM_DOCUMENT_D.DOCNO          = DP_INPLAN.DOCNO
+                AND   DM_DOCUMENT_D.DOCLINE        = DP_INPLAN.DOCLINE
+                AND   DM_DOCUMENT_D.CHANNEL        IN ('1','2','3')
+                AND   DM_DOCUMENT_D.DEL_YN         = 'N'
+        JOIN
+            DM_EXDC_AUTOORD_CHECK
+                ON	   DM_EXDC_AUTOORD_CHECK.MAPKEY_NO 				= DM_DOCUMENT_D.MAPKEY_NO
+                AND    DM_EXDC_AUTOORD_CHECK.MAPKEY_LINE 			= DM_DOCUMENT_D.MAPKEY_LINE
+                AND    DM_EXDC_AUTOORD_CHECK.TMP_DPKEY 				= DM_DOCUMENT_D.DOCNO
+                AND    DM_EXDC_AUTOORD_CHECK.TMP_DPLINE 			= DM_DOCUMENT_D.DOCLINE
+        JOIN
+            MS_SKU
+                ON    MS_SKU.STORERKEY             =  DP_INPLAN.STORERKEY
+                AND   MS_SKU.SKU                   =  DP_INPLAN.SKU
+        LEFT OUTER JOIN
+            DP_INVOICE_SN
+                ON    DP_INVOICE_SN.DCCODE         = DP_INPLAN.DCCODE
+                AND   DP_INVOICE_SN.STORERKEY      = DP_INPLAN.STORERKEY
+                AND   DP_INVOICE_SN.DOCTYPE        = DP_INPLAN.DOCTYPE
+                AND   DP_INVOICE_SN.SLIPNO         = DP_INPLAN.SLIPNO
+                AND   DP_INVOICE_SN.SLIPDT         = DP_INPLAN.SLIPDT
+                AND   DP_INVOICE_SN.SLIPLINE       = DP_INPLAN.SLIPLINE
+                AND   DP_INVOICE_SN.SKU            = DP_INPLAN.SKU
+        LEFT OUTER JOIN
+            ST_SNINFO
+                ON    ST_SNINFO.STORERKEY          = DP_INVOICE_SN.STORERKEY
+                AND   ST_SNINFO.SKU                = DP_INVOICE_SN.SKU
+                AND   ST_SNINFO.SERIALNO           = DP_INVOICE_SN.SERIALNO
+                AND   ST_SNINFO.STOCKID            = DP_INVOICE_SN.STOCKID
+        WHERE
+            DP_INPLAN.DCCODE                       =   #{dccode}
+                AND   DP_INPLAN.STORERKEY          =   #{storerkey}
+                AND   DP_INPLAN.SLIPDT             =   #{slipdt}
+                AND   DP_INPLAN.SLIPNO             =   #{slipno}
+        ORDER BY
+             SLIPLINE
+            ,SKU
+            ,DM_EXDC_AUTOORD_CHECK.MAPKEY_NO
+            ,DM_EXDC_AUTOORD_CHECK.MAPKEY_LINE
+            ,DM_EXDC_AUTOORD_CHECK.TMP_DPKEY
+            ,DM_EXDC_AUTOORD_CHECK.TMP_DPLINE
+    </select>
+
+    <!-- 매핑테이블 Update (가IV취소 시) -->
+    <update id="updateMappingTableIV" parameterType="cjfw.batch.job.autoconfirmcanceldpwd.ExdcDpWdAutoConfirmCancelReqDto">
+		UPDATE /* [exdcDpWdAutoConfirmCancelService.sqlx][updateMappingTableIV][매핑테이블 Update(IV)][minseong.choi][20200731] */ DM_EXDC_AUTOORD_CHECK
+		SET    EDITDATE 			= SYSDATE
+		      ,EDITWHO 				= #{worker}
+		      ,ERROR_CHECK			= #{errorCheck}
+		      ,ERROR_STATUS			= #{errorStatus}
+			  ,TMP_DP_STATUS 		= CASE WHEN #{errorCheck} = 'S' THEN '90' ELSE TMP_SO_STATUS END
+		WHERE  MAPKEY_NO 			= #{mapkeyNo}
+		AND    MAPKEY_LINE		 	= #{mapkeyLine}
+		AND    TMP_DPKEY 			= #{tmpDpkey}
+		AND    TMP_DPLINE 			= #{tmpDpline}
+    </update>
+
+    <insert id="saveApiLog" parameterType="cjfw.batch.job.autoconfirmcanceldpwd.ApiReqDto">
+        INSERT /* [exdcDpWdAutoConfirmCancelService.sqlx][saveApiLog][가납품서 취소 API 로깅][개발자][20250721] */
+          INTO MG_APILOG
+            ( /* SERIALKEY */ --COLUMN DEFUALT 
+              STORERKEY
+            , LOGDATE
+            , HTTPMETHOD
+            , URL
+            , SOURCEIP
+            , REQUESTBODY
+            , RESPONSEBODY
+            , STATUS
+            , ERRORMESSAGE
+            , ERRORSTACKTRACE
+            , REQUESTTIME
+            , RESPONSETIME
+            , LATENCY
+            , WORKER
+            )
+        VALUES
+            ( /* SEQ_MG_APILOG.NEXTVAL */
+              #{STORERKEY}
+            , TO_CHAR(SYSDATE, 'YYYYMMDD')
+            , #{HTTPMETHOD}
+            , #{URL}
+            , #{SOURCEIP}
+            , #{REQUESTBODY}
+            , #{RESPONSEBODY}
+            , #{STATUS}
+            , #{ERRORMESSAGE}
+            , #{ERRORSTACKTRACE}
+            , #{REQUESTTIME}
+            , #{RESPONSETIME}
+            , #{LATENCY}
+            , #{WORKER}
+            )
+    </insert>
+
+</mapper>

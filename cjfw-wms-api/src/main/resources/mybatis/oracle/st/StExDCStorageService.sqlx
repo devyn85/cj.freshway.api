@@ -1,0 +1,1325 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="stExDCStorageService">
+
+     <select id="getDataHeaderList" resultType="StExDCStorageResDto">       
+        SELECT  /* [stExDCStorageService.sqlx][getDataHeaderList][외부창고정산 목록 조회][sunho.kim][2025.07.17] */              
+             A.*
+            ,CASE WHEN A.GRPRICE = 0 OR A.BGRPRICE = 0 THEN '0%' ELSE ROUND((A.GRPRICE/A.BGRPRICE-1)*100,2) || '%' END                          AS GRRATE           /*입고료증감율*/
+            ,CASE WHEN A.GIPRICE = 0 OR A.BGIPRICE = 0 THEN '0%' ELSE ROUND((A.GIPRICE/A.BGIPRICE-1)*100,2) || '%' END                          AS GIRATE           /*출고료증감율*/
+            ,CASE WHEN A.STORAGEPRICE = 0 OR A.BSTORAGEPRICE = 0 THEN '0%' ELSE ROUND((A.STORAGEPRICE/A.BSTORAGEPRICE-1)*100,2) || '%' END      AS STORATE          /*창고료증감율*/
+            ,CASE WHEN A.GRPRICE = 0 OR A.BGRPRICE = 0 THEN 0 ELSE ROUND((A.GRPRICE/A.BGRPRICE-1) * A.GR_AMOUNT,0) END                          AS GRRATEAMT        /*입고료증감금액*/
+            ,CASE WHEN A.GIPRICE = 0 OR A.BGIPRICE = 0 THEN 0 ELSE ROUND((A.GIPRICE/A.BGIPRICE-1) * A.GI_AMOUNT,0) END                          AS GIRATEAMT        /*출고료증감금액*/
+            ,CASE WHEN A.STORAGEPRICE = 0 OR A.BSTORAGEPRICE = 0 THEN 0 ELSE ROUND((A.STORAGEPRICE/A.BSTORAGEPRICE-1) * A.STOCK_AMOUNT,0) END   AS STORATEAMT       /*창고료증감금액*/
+        FROM(
+            SELECT /*+ LEADING(ST_EXDCSTORAGE) INDEX(DM_DOCUMENT_H IX_DM_DOCUMENT_H_01) */
+               ST_EXDCSTORAGE.SERIALKEY                                                                             AS SERIALKEY          /*일련번호*/
+             , CD7.BASEDESCR                                                                                        AS STATUS             /*1=준비,2=보관료계산,3=비용생성,4=익월기초재고등록*/
+             , ST_EXDCSTORAGE.YYYYMM                                                                                AS YYYYMM             /*재고월 (YYYYMM)*/
+             , ST_EXDCSTORAGE.DOCNO                                                                                 AS DOCNO              /*문서번호*/
+             , ST_EXDCSTORAGE.DOCLINE                                                                               AS DOCLINE            /*문서라인번호*/
+             , ST_EXDCSTORAGE.PARENT_DOCNO                                                                          AS PARENT_DOCNO       /*이전 문서번호 (없을 경우 'X')*/
+             , ST_EXDCSTORAGE.PARENT_DOCLINE                                                                        AS PARENT_DOCLINE     /*이전 문서라인번호*/
+             , CD1.BASEDESCR                                                                                        AS IO_FLAG            /*DP : 입고, WD : 출고*/
+             , CD2.BASEDESCR                                                                                        AS IO_TYPE            /*발생유형명 B(Bonded WareHouse)=보세, G(General WareHouse)=일반*/
+             , CASE WHEN ST_EXDCSTORAGE.IO_FLAG = 'DP' 
+                    THEN CASE WHEN LEFT(ST_EXDCSTORAGE.DELIVERYDATE,6)  = TO_CHAR(SYSDATE, 'YYYYMM') 
+                              THEN CASE WHEN TRUNC(SYSDATE) - TO_DATE(ST_EXDCSTORAGE.DELIVERYDATE,'YYYYMMDD') + 1 <![CDATA[<]]> 0
+                                        THEN 0
+                                        ELSE TRUNC(SYSDATE) - TO_DATE(ST_EXDCSTORAGE.DELIVERYDATE,'YYYYMMDD') + 1
+                                   END
+                              WHEN LEFT(ST_EXDCSTORAGE.DELIVERYDATE,6) != TO_CHAR(SYSDATE, 'YYYYMM') 
+                              THEN LAST_DAY(TO_DATE(ST_EXDCSTORAGE.DELIVERYDATE,'YYYYMMDD')) - TO_DATE(ST_EXDCSTORAGE.DELIVERYDATE,'YYYYMMDD') + 1
+                              ELSE 0
+                         END
+                    ELSE CASE WHEN LEFT(ST_EXDCSTORAGE.DELIVERYDATE,6)  = TO_CHAR(INVENTORY_DATE, 'YYYYMM') 
+                              THEN TO_DATE(ST_EXDCSTORAGE.DELIVERYDATE,'YYYYMMDD') - ST_EXDCSTORAGE.INVENTORY_DATE + 1
+                              WHEN LEFT(ST_EXDCSTORAGE.DELIVERYDATE,6) != TO_CHAR(INVENTORY_DATE, 'YYYYMM') 
+                              THEN TO_DATE(ST_EXDCSTORAGE.DELIVERYDATE,'YYYYMMDD') - TO_DATE(LEFT(ST_EXDCSTORAGE.DELIVERYDATE,6) || '01', 'YYYYMMDD') + 1
+                              ELSE 0
+                         END                       
+               END                                                                                                  AS STORAGEDAYCNT      /*보관일수*/
+             , ST_EXDCSTORAGE.DELIVERYDATE                                                                          AS DELIVERYDATE       /*적용일자*/
+             , TO_CHAR(ST_EXDCSTORAGE.INVENTORY_DATE, 'YYYYMMDD')                                                   AS INVENTORY_DATE     /*외부창고 최초 입고일자*/ 
+             , TO_CHAR(ST_EXDCSTORAGE.WAREHOUSE_DATE, 'YYYYMMDD')                                                   AS WAREHOUSE_DATE     /*해당창고 최초 입고일자*/
+             , ST_EXDCSTORAGE.DCCODE                                                                                AS DCCODE             /*센터코드*/
+             , ST_EXDCSTORAGE.ORGANIZE                                                                              AS ORGANIZE           /*창고코드*/
+             , (SELECT FN_DESCR_ORGANIZE(ST_EXDCSTORAGE.DCCODE,ST_EXDCSTORAGE.ORGANIZE) FROM DUAL)                  AS ORGANIZENAME       /*창고명*/
+             , DECODE(ST_EXDCSTORAGE.IO_FLAG, 'WD', ST_EXDCSTORAGE.CUSTKEY
+                                            , NVL(ST_STOCK_SERIALINFODETAIL.CONTRACTCUSTKEY
+                                            , ST_EXDCSTORAGE.CUSTKEY) )                                             AS CUSTKEY            /*고객코드(거래처)*/
+             , CD3.BASEDESCR                                                                                        AS ITEM_STATUS        /*아이템의 상태 정상=N(Normal),통관전감모=BD(Bonded reDuction),통관전폐기=BS(Bonded Scrap),통관전반송=BR(Bonded Return),통관후감모=GD(General reDuction),통관후폐기=GS(General Scrap),통관후반송=GR(General Return) WMS는S1 보류S2 소진S3 폐기S4 불량STD 가용*/
+             , ST_EXDCSTORAGE.SKU                                                                                   AS SKU                /*상품코드*/
+             , MS_SKU.DESCRIPTION                                                                                   AS SKU_NM             /*상품명*/
+             , ST_EXDCSTORAGE.QUANTITY                                                                              AS QUANTITY           /*수량*/
+             , CASE WHEN ST_EXDCSTORAGE.IO_TYPE = 'G' 
+                          THEN DECODE(ST_EXDCSTORAGE.IO_FLAG, 'WD', 0, ST_EXDCSTORAGE.QUANTITY - NVL(ST_EXDCSTORAGE_STOCKID.QUANTITY,0))
+                    ELSE      DECODE(ST_EXDCSTORAGE.IO_FLAG, 'WD', 0, ST_EXDCSTORAGE.QUANTITY - NVL(ST_EXDCSTORAGE_PARENT_DOCNO.QUANTITY,0))
+               END                                                                                                  AS CURRSTOCK          /*현재고*/
+             , ST_EXDCSTORAGE.UOM                                                                                   AS UOM                /*단위*/
+             , ST_EXDCSTORAGE.BOXQTY                                                                                AS BOXQTY             /*박스수량*/
+             , CASE WHEN ST_EXDCSTORAGE.IO_TYPE = 'G' 
+                          THEN DECODE(ST_EXDCSTORAGE.IO_FLAG, 'WD', 0, ST_EXDCSTORAGE.BOXQTY - NVL(ST_EXDCSTORAGE_STOCKID.BOXQTY,0))
+                    ELSE      DECODE(ST_EXDCSTORAGE.IO_FLAG, 'WD', 0, ST_EXDCSTORAGE.BOXQTY - NVL(ST_EXDCSTORAGE_PARENT_DOCNO.BOXQTY,0))
+               END                                                                                                  AS QTYBOX             /*재고박스*/
+             , 'BOX'                                                                                                AS BOXUOM             /*박스단위*/
+             , MS_SKU.QTYPERBOX                                                                                     AS QTYPERBOX          /*박스입수*/
+             , ST_EXDCSTORAGE.POKEY                                                                                 AS POKEY              /*구매번호*/
+             , ST_EXDCSTORAGE.POLINE                                                                                AS POLINE             /*구매라인번호*/                                                                                                                             
+             , ST_EXDCSTORAGE.TCSPOKEY                                                                              AS TCSPOKEY           /*수출입발주번호*/
+             , ST_EXDCSTORAGE.CONVSERIALNO                                                                          AS CONVSERIALNO       /*선하증권번호*/
+             , ST_STOCK_SERIALINFODETAIL.CONTAINERNO                                                                AS CONTAINERNO        /*컨테이너 번호*/
+             , ST_EXDCSTORAGE.SERIALNO                                                                              AS SERIALNO           /*유통이력번호*/
+             , ST_EXDCSTORAGE.STOCKID                                                                               AS STOCKID            /*재고 구분 ID*/
+             , CD4.BASEDESCR                                                                                        AS CONTRACTTYPE       /*재고계약유형*/
+             , NVL(ST_EXDCSTORAGE.GR_AMOUNT,0)                                                                      AS GR_AMOUNT          /*입고료 */
+             , NVL(ST_EXDCSTORAGE.GI_AMOUNT,0)                                                                      AS GI_AMOUNT          /*출고료 */
+             , NVL(ST_EXDCSTORAGE.STOCK_AMOUNT,0)                                                                   AS STOCK_AMOUNT       /*창고료 */                      
+             , NVL(ST_EXDCSTORAGE.WGH_AMOUNT,0)                                                                     AS WGHPRICE           /*계근료 */
+             , NVL(ST_EXDCSTORAGE.WORK_AMOUNT,0)                                                                    AS WORK_AMOUNT        /*작업료 */
+             , NVL(ST_EXDCSTORAGE.PLT_AMOUNT,0)                                                                     AS PALLETPRICE        /*팔렛료 */     
+             , NVL(ST_EXDCSTORAGE.GR_AMOUNT,0) 
+                + NVL(ST_EXDCSTORAGE.GI_AMOUNT,0) 
+                + NVL(ST_EXDCSTORAGE.STOCK_AMOUNT,0) 
+                + NVL(ST_EXDCSTORAGE.WGH_AMOUNT,0) 
+                + NVL(ST_EXDCSTORAGE.WORK_AMOUNT,0) 
+                + NVL(ST_EXDCSTORAGE.PLT_AMOUNT,0)                                                                  AS SUM_AMOUNT         /*보관료 합계*/    
+             , ST_EXDCSTORAGE.MONTH_EXP_NO                                                                          AS MONTH_EXP_NO       /*월마감비용전표번호*/
+             , CD8.BASEDESCR                                                                                        AS CLAIM_FLAG         /*클레임생성여부*/
+             , CD9.BASEDESCR                                                                                        AS TAX_CLS            /*과/면세구분*/
+             , ST_EXDCSTORAGE.COSTCD                                                                                AS COSTCD             /*코스트센터코드*/
+             , CD5.BASEDESCR                                                                                        AS EXPENSETYPE        /*비용타입*/
+             , NVL(ST_EXDCSTORAGE.GRPRICE, 0)                                                                       AS GRPRICE            /*입고수수료*/
+             , NVL(ST_EXDCSTORAGE.GIPRICE, 0)                                                                       AS GIPRICE            /*출고수수료*/
+             , NVL(ST_EXDCSTORAGE.STORAGEPRICE, 0)                                                                  AS STORAGEPRICE       /*보관수수료*/             
+             , NVL(ST_EXDCSTORAGE.WGH_FEE_AMOUNT, 0)                                                                AS WGH_FEE            /*계근수수료*/
+             , NVL(ST_EXDCSTORAGE.WORK_FEE_AMOUNT, 0)                                                               AS WORK_FEE           /*작업수수료*/
+             , NVL(ST_EXDCSTORAGE.PLT_FEE_AMOUNT, 0)                                                                AS PALLET_FEE         /*팔렛수수료*/
+             , ST_EXDCSTORAGE.STOGRPRICE                                                                            AS STOGRPRICE         /*이체입고수수료*/
+             , ST_EXDCSTORAGE.STOGIPRICE                                                                            AS STOGIPRICE         /*이체출고수수료*/
+             , CASE WHEN ST_EXDCSTORAGE.IO_FLAG = 'WD' 
+                    THEN NVL( IB_EXPENSE_DISTRIBUTION.AMOUNT,0)
+                    ELSE 0
+               END                                                                                                  AS TRANSPRICE         /*운송료(비용전표)*/         
+             , CASE WHEN ST_EXDCSTORAGE.IO_FLAG = 'DP' 
+                    THEN NVL(IB_EXPENSE_DISTRIBUTION.SUPPLY_PRICE,0)
+                    ELSE 0
+               END                                                                                                  AS ETCPRICE           /*기타비용*/         
+             , ST_EXDCSTORAGE.ADDWHO                                                                                AS ADDWHO             /*최초등록자*/
+             , USER1.USER_NM                                                                                        AS ADDWHO_NM          /*최초등록자명*/
+             , TO_CHAR(ST_EXDCSTORAGE.ADDDATE,'YYYY-MM-DD HH24:MI:SS')                                              AS ADDDATE            /*최초등록시간*/
+             , ST_EXDCSTORAGE.EDITWHO                                                                               AS EDITWHO            /*최종변경자*/
+             , USER2.USER_NM                                                                                        AS EDITWHO_NM         /*최종변경자명*/
+             , TO_CHAR(ST_EXDCSTORAGE.EDITDATE,'YYYY-MM-DD HH24:MI:SS')                                             AS EDITDATE           /*최종변경시간*/
+             , CD6.BASEDESCR                                                                                        AS STORAGETYPE        /*저장조건*/
+             , NVL(ST_EXDCSTORAGE.IF_STORAGE_AMOUNT,0)                                                              AS IF_STORAGE_AMOUNT  /*기정산보관료*/
+             , NVL(ST_EXDCSTORAGE.IF_ETC_AMOUNT    ,0)                                                              AS IF_ETC_AMOUNT      /*기정산운송료*/
+             , NVL(ST_EXDCSTORAGE.STOCK_AMOUNT_SAFS,0)                                                              AS STOCK_AMOUNT_SAFS  /*보관료(영업공가)*/
+             , CASE WHEN ST_EXDCSTORAGE.TAX_CLS = 'W1' 
+                    THEN NVL(ST_EXDCSTORAGE.STOCK_AMOUNT_SAFS,0)
+                    WHEN ST_EXDCSTORAGE.TAX_CLS = 'X3' 
+                    THEN ROUND(NVL(ST_EXDCSTORAGE.STOCK_AMOUNT_SAFS,0) * 1.1)
+                    ELSE NVL(ST_EXDCSTORAGE.STOCK_AMOUNT_SAFS,0)
+               END                                                                                                  AS STOCK_AMOUNT_SAFS_TAXCLS /*보관료(영업)*/
+             , CASE WHEN ST_EXDCSTORAGE.MONTH_EXP_NO IS NULL 
+                    THEN 'Y'
+                    ELSE 'N'
+               END                                                                                                  AS EDITFLAG           /**/
+             , ST_EXDCSTORAGE.DELIVERYFLAG                                                                          AS DELIVERYFLAG       /*이체여부*/
+             , MS_SKU.NETWEIGHT                                                                                     AS NETWEIGHT          /*순중량*/
+             , MS_SKU.SOMDNAME                                                                                      AS SOMDNAME           /*MD*/
+             , SP1.SPECDESCR                                                                                        AS SKU_LDESC          /*상품 대분류*/       
+             , SP2.SPECDESCR                                                                                        AS SKU_DDESC          /*상품 세분류*/
+             , NVL(ROUND(E.GRPRICE,1),0)                                                                            AS BGRPRICE           /*전년 입고수수료*/
+             , NVL(ROUND(E.GIPRICE,1),0)                                                                            AS BGIPRICE           /*전년 출고수수료*/
+             , NVL(ROUND(E.STORAGEPRICE,1),0)                                                                       AS BSTORAGEPRICE      /*전년 창고수수료*/
+             , DM_DOCUMENT_H.TO_CUSTKEY                                                                             AS TO_CUSTKEY         /*관리처코드*/
+             , DM_DOCUMENT_H.TO_CUSTNAME                                                                            AS TO_CUSTNAME        /*관리처명*/
+             , CASE WHEN MS_SKU.SKUGROUP = FN_TPL_SKUGROUP() THEN 'Y' ELSE 'N' END                                      AS TPL_YN             /*위탁물류상품 여부*/ 
+        FROM   ST_EXDCSTORAGE
+        
+        JOIN  CM_USER_AUTHORITY                        
+            ON     CM_USER_AUTHORITY.USERID         = #{gUserId}                      
+            AND    CM_USER_AUTHORITY.DCCODE         = ST_EXDCSTORAGE.DCCODE                            
+            AND    CM_USER_AUTHORITY.STORERKEY      = ST_EXDCSTORAGE.STORERKEY                         
+            AND    CM_USER_AUTHORITY.ORGANIZE       = ST_EXDCSTORAGE.ORGANIZE                               
+            AND    CM_USER_AUTHORITY.DCCODE         = #{fixdccode}     
+          <if test="gStorerkey != null and gStorerkey !=''">
+            AND    CM_USER_AUTHORITY.STORERKEY      = #{gStorerkey}  
+          </if>
+          <if test="area != null and area !=''">    
+            AND    CM_USER_AUTHORITY.AREA           = #{area}       
+          </if> 
+          <if test="organizeMulti != null and organizeMulti != ''">
+            AND    CM_USER_AUTHORITY.ORGANIZE      IN
+            <foreach collection="organizeMulti" item="item" open="(" separator="," close=")">
+                 #{item}
+            </foreach> 
+          </if>
+        JOIN   MS_SKU
+            ON     MS_SKU.STORERKEY = ST_EXDCSTORAGE.STORERKEY
+            AND    MS_SKU.SKU       = ST_EXDCSTORAGE.SKU
+        <if test="skunm != null and skunm != ''">          
+            AND    MS_SKU.DESCRIPTION LIKE '%'||#{skunm}||'%'                                                        /* 상품명 */    
+        </if>
+        LEFT OUTER JOIN   ST_STOCK_SERIALINFODETAIL
+            ON     ST_STOCK_SERIALINFODETAIL.STORERKEY       = ST_EXDCSTORAGE.STORERKEY
+            AND    ST_STOCK_SERIALINFODETAIL.STOCKID         = ST_EXDCSTORAGE.STOCKID
+        LEFT OUTER JOIN DM_DOCUMENT_H
+            ON     DM_DOCUMENT_H.STORERKEY  = ST_EXDCSTORAGE.STORERKEY
+            AND    DM_DOCUMENT_H.DCCODE     = ST_EXDCSTORAGE.DCCODE
+            AND    DM_DOCUMENT_H.ORGANIZE   = ST_EXDCSTORAGE.ORGANIZE
+            AND    DM_DOCUMENT_H.DOCNO      = ST_EXDCSTORAGE.DOCNO
+            AND    DM_DOCUMENT_H.DOCTYPE    = 'WD'
+        
+        LEFT OUTER JOIN (SELECT X.DCCODE
+                              , X.YYYYMM
+                              , X.SKU
+                              , MAX(X.GRPRICE) AS GRPRICE
+                              , MAX(X.GIPRICE) AS GIPRICE
+                              , MAX(X.STORAGEPRICE) AS STORAGEPRICE
+                          FROM ST_EXDCSTORAGE X
+                          WHERE X.DCCODE        = #{fixdccode}
+                            AND X.STORERKEY     = #{gStorerkey}
+                          <if test="stockmonth != null and stockmonth != ''">     
+                            AND X.YYYYMM        = #{stockmonth}  
+                          </if>
+                          GROUP BY DCCODE,YYYYMM,SKU ) E
+                     ON E.DCCODE    = ST_EXDCSTORAGE.DCCODE 
+                    AND E.YYYYMM    = TO_CHAR(ADD_MONTHS(TO_DATE(ST_EXDCSTORAGE.YYYYMM,'YYYYMM'),-12) ,'YYYYMM') 
+                    AND E.SKU       = ST_EXDCSTORAGE.SKU  
+        LEFT OUTER JOIN (SELECT /*+ PUSH_PRED */
+                                DOCUMENT_SN
+                              , SUM(IB_EXPENSE_DISTRIBUTION.SUPPLY_PRICE) SUPPLY_PRICE
+                              , SUM(IB_EXPENSE_DISTRIBUTION.AMOUNT) AMOUNT
+                           FROM   IB_EXPENSE_DISTRIBUTION
+                           WHERE  1=1
+                           AND    EXISTS (SELECT 1
+                                          FROM   ST_EXDCSTORAGE_EXPENSE
+                                          WHERE  ST_EXDCSTORAGE_EXPENSE.EXDCSTORAGEKEY = IB_EXPENSE_DISTRIBUTION.DOCUMENT_SN
+                                          AND    ST_EXDCSTORAGE_EXPENSE.WORK_EXP_NO    = IB_EXPENSE_DISTRIBUTION.KEY_NO)
+                           GROUP BY DOCUMENT_SN
+                                     ) IB_EXPENSE_DISTRIBUTION
+                   ON IB_EXPENSE_DISTRIBUTION.DOCUMENT_SN = ST_EXDCSTORAGE.SERIALKEY
+        LEFT OUTER JOIN (  SELECT YYYYMM, DCCODE, ORGANIZE, IO_TYPE, STOCKID
+                                , SUM(X.QUANTITY) QUANTITY
+                                , SUM(X.BOXQTY) BOXQTY
+                             FROM ST_EXDCSTORAGE X 
+                            WHERE X.IO_FLAG       = 'WD'
+                              AND X.DCCODE        = #{fixdccode}
+                              AND X.STORERKEY     = #{gStorerkey}
+                            <if test="stockmonth != null and stockmonth != ''">     
+                              AND X.YYYYMM        = #{stockmonth}  
+                            </if>
+                           GROUP BY YYYYMM, DCCODE, ORGANIZE, IO_TYPE, STOCKID
+                                   ) ST_EXDCSTORAGE_STOCKID
+                    ON ST_EXDCSTORAGE_STOCKID.YYYYMM   = ST_EXDCSTORAGE.YYYYMM
+                   AND ST_EXDCSTORAGE_STOCKID.DCCODE   = ST_EXDCSTORAGE.DCCODE
+                   AND ST_EXDCSTORAGE_STOCKID.ORGANIZE = ST_EXDCSTORAGE.ORGANIZE
+                   AND ST_EXDCSTORAGE_STOCKID.IO_TYPE  = ST_EXDCSTORAGE.IO_TYPE
+                   AND ST_EXDCSTORAGE_STOCKID.STOCKID  = ST_EXDCSTORAGE.STOCKID      
+        LEFT OUTER JOIN (  SELECT YYYYMM, DCCODE, ORGANIZE, IO_TYPE, PARENT_DOCLINE, PARENT_DOCNO
+                                , SUM(X.QUANTITY) QUANTITY
+                                , SUM(X.BOXQTY) BOXQTY
+                             FROM ST_EXDCSTORAGE X 
+                             WHERE X.IO_FLAG  = 'WD'
+                               AND X.DCCODE        = #{fixdccode}
+                               AND X.STORERKEY     = #{gStorerkey}
+                             <if test="stockmonth != null and stockmonth != ''">     
+                               AND X.YYYYMM        = #{stockmonth}  
+                             </if>
+                            GROUP BY YYYYMM, DCCODE, ORGANIZE, IO_TYPE, PARENT_DOCLINE, PARENT_DOCNO
+                           ) ST_EXDCSTORAGE_PARENT_DOCNO
+                    ON ST_EXDCSTORAGE_PARENT_DOCNO.YYYYMM         = ST_EXDCSTORAGE.YYYYMM
+                   AND ST_EXDCSTORAGE_PARENT_DOCNO.DCCODE         = ST_EXDCSTORAGE.DCCODE
+                   AND ST_EXDCSTORAGE_PARENT_DOCNO.ORGANIZE       = ST_EXDCSTORAGE.ORGANIZE
+                   AND ST_EXDCSTORAGE_PARENT_DOCNO.PARENT_DOCNO   = ST_EXDCSTORAGE.DOCNO
+                   AND ST_EXDCSTORAGE_PARENT_DOCNO.PARENT_DOCLINE = ST_EXDCSTORAGE.DOCLINE    
+                   AND ST_EXDCSTORAGE_PARENT_DOCNO.IO_TYPE        = ST_EXDCSTORAGE.IO_TYPE    
+        
+        LEFT OUTER JOIN MS_SKUSPEC  SP1 
+                     ON SP1.STORERKEY    = MS_SKU.STORERKEY
+                    AND SP1.SPECCATEGORY = 'SKUGROUP'
+                    AND SP1.SPECCODE     = LEFT(MS_SKU.SKUGROUP,2)
+        LEFT OUTER JOIN MS_SKUSPEC  SP2 
+                     ON SP2.STORERKEY    = MS_SKU.STORERKEY
+                    AND SP2.SPECCATEGORY = 'SKUGROUP'
+                    AND SP2.SPECCODE     = MS_SKU.SKUGROUP      
+        LEFT OUTER JOIN CM_CODE_STORER CD1
+                    ON CD1.STORERKEY = ST_EXDCSTORAGE.STORERKEY
+                   AND CD1.CODELIST  = 'DOCTYPE_VESSEL'   
+                   AND CD1.BASECODE  = ST_EXDCSTORAGE.IO_FLAG
+        LEFT OUTER JOIN CM_CODE_STORER CD2
+                    ON CD2.STORERKEY = ST_EXDCSTORAGE.STORERKEY
+                   AND CD2.CODELIST  = 'IOTYPE_SN'   
+                   AND CD2.BASECODE  = ST_EXDCSTORAGE.IO_TYPE           
+        LEFT OUTER JOIN CM_CODE_STORER CD3
+                    ON CD3.STORERKEY = ST_EXDCSTORAGE.STORERKEY
+                   AND CD3.CODELIST  = 'STOCKSTATUS'   
+                   AND CD3.BASECODE  = ST_EXDCSTORAGE.ITEM_STATUS
+        LEFT OUTER JOIN CM_CODE_STORER CD4
+                    ON CD4.STORERKEY = ST_EXDCSTORAGE.STORERKEY
+                   AND CD4.CODELIST  = 'CONTRACTTYPE_SN'   
+                   AND CD4.BASECODE  = NVL(ST_STOCK_SERIALINFODETAIL.CONTRACTTYPE, ST_EXDCSTORAGE.CONTRACTTYPE)
+        LEFT OUTER JOIN CM_CODE_STORER CD5
+                    ON CD5.STORERKEY = ST_EXDCSTORAGE.STORERKEY
+                   AND CD5.CODELIST  = 'EXPENSETYPE'   
+                   AND CD5.BASECODE  = ST_EXDCSTORAGE.EXPENSETYPE                      
+        LEFT OUTER JOIN CM_CODE_STORER CD6
+                    ON CD6.STORERKEY = ST_EXDCSTORAGE.STORERKEY
+                   AND CD6.CODELIST  = 'STORAGETYPE'   
+                   AND CD6.BASECODE  = MS_SKU.STORAGETYPE
+        LEFT OUTER JOIN CM_CODE_STORER CD7
+                    ON CD7.STORERKEY = ST_EXDCSTORAGE.STORERKEY
+                   AND CD7.CODELIST  = 'STATUS_SN'   
+                   AND CD7.BASECODE  = ST_EXDCSTORAGE.STATUS
+        LEFT OUTER JOIN CM_CODE_STORER CD8
+                    ON CD8.STORERKEY = ST_EXDCSTORAGE.STORERKEY
+                   AND CD8.CODELIST  = 'YN'   
+                   AND CD8.BASECODE  = ST_EXDCSTORAGE.CLAIM_FLAG
+        LEFT OUTER JOIN CM_CODE_STORER CD9
+                    ON CD9.STORERKEY = ST_EXDCSTORAGE.STORERKEY
+                   AND CD9.CODELIST  = 'TAX_CLS'   
+                   AND CD9.BASECODE  = ST_EXDCSTORAGE.TAX_CLS
+                   
+        LEFT OUTER JOIN FRAMEONE_USER USER1
+                    ON USER1.USER_ID = ST_EXDCSTORAGE.ADDWHO  
+                    OR USER1.USER_NO = ST_EXDCSTORAGE.ADDWHO
+        LEFT OUTER JOIN FRAMEONE_USER USER2
+                    ON USER2.USER_ID = ST_EXDCSTORAGE.EDITWHO  
+                    OR USER2.USER_NO = ST_EXDCSTORAGE.EDITWHO 
+                   
+        WHERE 1=1
+            AND    ST_EXDCSTORAGE.DCCODE        = #{fixdccode}
+            AND    ST_EXDCSTORAGE.STORERKEY     = #{gStorerkey}
+        <if test="qtyxzero != 1">
+            AND    ST_EXDCSTORAGE.QUANTITY <![CDATA[>]]> 0                                                           /* 수량 0조회 */  
+        </if>
+        <if test="stockmonth != null and stockmonth != ''">     
+            AND    ST_EXDCSTORAGE.YYYYMM        =  #{stockmonth}                                                     /* 재고월 */  
+        </if>
+        <if test="magamcode != null and magamcode != ''">      
+            AND    ST_EXDCSTORAGE.STATUS        =  #{magamcode}                                                      /* 마감코드 */  
+        </if>
+        <if test="organizeMulti != null and organizeMulti != ''">
+            AND    ST_EXDCSTORAGE.ORGANIZE      IN                                                                   /* 창고코드 */
+            <foreach collection="organizeMulti" item="item" open="(" separator="," close=")">
+                 #{item}
+            </foreach> 
+        </if>
+        <if test="gubun != null and gubun != ''">          
+            AND    ST_EXDCSTORAGE.IO_FLAG       =  #{gubun}                                                          /* 구분 */  
+        </if>
+        <if test="type != null and type != ''">           
+            AND    ST_EXDCSTORAGE.IO_TYPE       =  #{type}                                                           /* 유형 */      
+        </if>   
+        <if test="taxCls != null and taxCls != ''">        
+            AND    ST_EXDCSTORAGE.TAX_CLS       =  #{taxCls}                                                         /* 세금코드(과/면세) */  
+        </if>        
+        <if test="docnoMulti != null and docnoMulti != ''">          
+            AND    ST_EXDCSTORAGE.DOCNO         IN                                                                   /* 입출고번호 */
+            <foreach collection="docnoMulti" item="item" open="(" separator="," close=")">
+                 #{item}
+            </foreach>
+        </if>
+        <if test="custkey != null and custkey != ''">        
+            AND    ST_EXDCSTORAGE.CUSTKEY       =  #{custkey}                                                        /* 고객코드 */
+        </if>
+        <if test="skuMulti != null and skuMulti != ''">          
+            AND    ST_EXDCSTORAGE.SKU           IN                                                                  /* 상품코드 */
+            <foreach collection="skuMulti" item="item" open="(" separator="," close=")">
+                 #{item}
+            </foreach>
+        </if>
+        <if test="pokey != null and pokey != ''">          
+            AND    ST_EXDCSTORAGE.POKEY         =  #{pokey}                                                          /* 발주번호 */
+        </if>
+        <if test="tcspokey != null and tcspokey != ''">       
+            AND    ST_EXDCSTORAGE.TCSPOKEY      =  #{tcspokey}                                                       /* 수출입발주번호 */
+        </if>
+        <if test="convserialnoMulti != null and convserialnoMulti != ''">        
+            AND    ST_EXDCSTORAGE.CONVSERIALNO  IN                                                                   /* 선하증권번호 */
+            <foreach collection="convserialnoMulti" item="item" open="(" separator="," close=")">
+                 #{item}
+            </foreach>
+        </if>
+        <if test="serialno != null and serialno != ''">       
+            AND    ST_EXDCSTORAGE.SERIALNO      =  #{serialno}                                                       /* 유통이력번호 */
+        </if>
+        <if test="stockid != null and stockid != ''">        
+            AND    ST_EXDCSTORAGE.STOCKID       =  #{stockid}                                                        /* Stock ID */
+        </if>
+        <if test="monthexpno != null and monthexpno != ''">   
+            AND    ST_EXDCSTORAGE.MONTH_EXP_NO  =  #{monthexpno}                                                     /* 마감비용번호 */
+        </if>
+        <if test="costcd != null and costcd != ''">         
+            AND    ST_EXDCSTORAGE.COSTCD        =  #{costcd}                                                         /* 코스트센터코드 */
+        </if>
+        <if test="containerno != null and containerno != ''">    
+            AND    ST_STOCK_SERIALINFODETAIL.CONTAINERNO IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL  /* 컨테이너 번호 */
+                                                            FROM (SELECT #{containerno} AS VAL FROM DUAL) A
+                                                            CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+        </if>
+        <if test="addwho != null and addwho != ''">       
+            AND    EXISTS (SELECT 1                                                                                  /* 등록자 */
+                           FROM   FRAMEONE_USER                                              
+                           WHERE (USER_ID  = ST_EXDCSTORAGE.ADDWHO                                        
+                               OR USER_NO  = ST_EXDCSTORAGE.ADDWHO)
+                           AND   (USER_ID  IN ( SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                                                FROM (SELECT #{addwho} AS VAL FROM DUAL) A
+                                                CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0 )
+                               OR USER_NO  IN ( SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                                                FROM (SELECT #{addwho} AS VAL FROM DUAL) A
+                                                CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0 )
+                               OR USER_NM  IN ( SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                                                FROM (SELECT #{addwho} AS VAL FROM DUAL) A
+                                                CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0 )
+                                 )
+                           )                                                                                     
+        </if>
+         <if test="editwho != null and editwho != ''">       
+            AND    EXISTS (SELECT 1                                                                                  /* 수정자 */
+                           FROM   FRAMEONE_USER                                              
+                           WHERE (USER_ID   = ST_EXDCSTORAGE.EDITWHO                                        
+                               OR USER_NO   = ST_EXDCSTORAGE.EDITWHO)
+                           AND   (USER_ID   IN ( SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                                                 FROM (SELECT #{editwho} AS VAL FROM DUAL) A
+                                                 CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0 )
+                               OR USER_NO   IN ( SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                                                 FROM (SELECT #{editwho} AS VAL FROM DUAL) A
+                                                 CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0 )
+                               OR USER_NM   IN ( SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                                                 FROM (SELECT #{editwho} AS VAL FROM DUAL) A
+                                                 CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0 )
+                                 )
+                           )                                                                                     
+        </if>
+        <if test="contracttype == 1">
+            AND    NVL(ST_EXDCSTORAGE.CONTRACTTYPE,'10') <![CDATA[<>]]> '90'                                         /* 당일매입매출제외 */
+        </if>
+        ) A
+        ORDER BY A.ORGANIZE
+               , A.CONVSERIALNO
+               , A.POKEY
+               , A.POLINE
+               , A.IO_TYPE
+               , A.IO_FLAG
+               , A.STOCKID
+               , A.DELIVERYDATE
+               , A.SERIALKEY
+    </select>    
+    
+ 
+    
+    <update id="saveConfirm">
+        UPDATE    /* [stExDCStorageService.sqlx][saveConfirm][외부창고관리 창고료 저장][sunho.kim][2025.07.17] */ 
+            ST_EXDCSTORAGE SET
+                    ST_EXDCSTORAGE.GR_AMOUNT     = NVL(#{grAmount},0)
+                  , ST_EXDCSTORAGE.GI_AMOUNT     = NVL(#{giAmount},0)
+                  , ST_EXDCSTORAGE.STOCK_AMOUNT  = NVL(#{stockAmount},0)
+                  , ST_EXDCSTORAGE.WGH_AMOUNT    = NVL(#{wghprice},0)
+                  , ST_EXDCSTORAGE.WORK_AMOUNT   = NVL(#{workAmount},0)
+                  , ST_EXDCSTORAGE.PLT_AMOUNT    = NVL(#{palletprice},0)
+                  , ST_EXDCSTORAGE.EDITDATE      = SYSDATE
+                  , ST_EXDCSTORAGE.EDITWHO       = #{gUserId}
+            WHERE ST_EXDCSTORAGE.SERIALKEY       = #{serialkey}
+            AND   ST_EXDCSTORAGE.MONTH_EXP_NO    IS NULL
+    </update>
+    
+    <select id="getWorkTransactionSN" resultType="Long">
+        SELECT    /* [stExDCStorageService.sqlx][getWorkTransactionSN][WorkTransactionSN 값 채번][sunho.kim][2025.07.17] */
+                SEQ_WORK_TRANSACTION_SN.NEXTVAL AS WORK_TRANSACTION_SN
+        FROM    DUAL                                                                             
+    </select>
+    
+    <insert id="insertExDCStorageExpense">
+        INSERT    /* [stExDCStorageService.sqlx][insertExDCStorageExpense][외부창고관리 기타비용 저장][sunho.kim][2025.07.17] */
+               INTO ST_EXDCSTORAGE_EXPENSE 
+               ( SERIALKEY
+               , EXDCSTORAGEKEY
+               , WORK_TRANSACTION_SN
+               ) 
+        VALUES ( SEQ_ST_EXDCSTORAGE_EXPENSE.NEXTVAL
+               , #{serialkey}
+               , #{workTransactionSn}
+               )
+    </insert>    
+    
+    <insert id="saveQtyEditLog">
+        INSERT    /* [stExDCStorageService.sqlx][saveQtyEditLog][외부창고관리 재고수량 수정로그][sunho.kim][2025.07.17] */
+        INTO MG_DATAMODIFYLOG
+            (TABLENAME
+            ,SERIALKEY
+            ,SOURCETYPE
+            ,DCCODE
+            ,STORERKEY
+            ,SEARCHKEY1
+            ,SEARCHKEY2
+            ,SEARCHKEY3
+            ,LOGDATA1
+            ,LOGDATA2
+            ,LOGDATA3
+            ,TRAFFICCOP
+            ,ARCHIVECOP
+            ,LOGDATE
+            ,LOGWHO)
+        ( SELECT 
+            'ST_EXDCSTORAGE'
+            ,ST_EXDCSTORAGE.SERIALKEY
+            ,'APP_ST_EXDCSTORAGE_QTY_UPDATE'
+            ,ST_EXDCSTORAGE.DCCODE
+            ,ST_EXDCSTORAGE.STORERKEY
+            ,ST_EXDCSTORAGE.ORGANIZE
+            ,ST_EXDCSTORAGE.STOCKID
+            ,ST_EXDCSTORAGE.SKU
+            ,'[수량:'||ST_EXDCSTORAGE.QUANTITY||'=>'||#{quantity}||',BOX수량:'||ST_EXDCSTORAGE.BOXQTY||'=>'||#{boxqty}||']'
+            ,''
+            ,''
+            ,''
+            ,''
+            ,SYSDATE
+            ,#{gUserId}
+          FROM ST_EXDCSTORAGE
+          WHERE  ST_EXDCSTORAGE.SERIALKEY = #{serialkey}
+          AND    ST_EXDCSTORAGE.DCCODE    = #{dccode}
+          AND    ST_EXDCSTORAGE.STORERKEY = #{gStorerkey}
+          AND    ST_EXDCSTORAGE.ORGANIZE  = #{organize}
+          AND    ST_EXDCSTORAGE.STOCKID   = #{stockid}
+          AND    ST_EXDCSTORAGE.SKU       = #{sku} )
+    </insert>   
+    
+    
+    <update id="saveQtyEdit">
+        UPDATE    /* [stExDCStorageService.sqlx][saveQtyEdit][외부창고관리 재고수량 수정][sunho.kim][2025.07.17] */ 
+               ST_EXDCSTORAGE
+        SET    ST_EXDCSTORAGE.QUANTITY = #{quantity}
+             , ST_EXDCSTORAGE.BOXQTY   = #{boxqty}
+             , ST_EXDCSTORAGE.EDITDATE = SYSDATE
+             , ST_EXDCSTORAGE.EDITWHO  = #{gUserId}
+        WHERE  ST_EXDCSTORAGE.SERIALKEY = #{serialkey}
+        AND    ST_EXDCSTORAGE.DCCODE    = #{dccode}
+        AND    ST_EXDCSTORAGE.STORERKEY = #{gStorerkey}
+        AND    ST_EXDCSTORAGE.ORGANIZE  = #{organize}
+        AND    ST_EXDCSTORAGE.STOCKID   = #{stockid}
+        AND    ST_EXDCSTORAGE.SKU       = #{sku} 
+    </update>   
+    
+    <select id="getDataExcelList" resultType="StExDCStorageResDto">
+        SELECT     /* [stExDCStorageService.sqlx][getDataExcelList][외부창고관리 엑셀 조회][sunho.kim][2025.07.17] */ 
+               ST_EXDCSTORAGE.SERIALKEY                                                                        AS SERIALKEY          /*일련번호*/
+             , CD7.BASEDESCR                                                                                   AS STATUS             /*1=준비,2=보관료계산,3=비용생성,4=익월기초재고등록*/   
+             , ST_EXDCSTORAGE.YYYYMM                                                                           AS YYYYMM             /*재고월 (YYYYMM)*/
+             , ST_EXDCSTORAGE.DOCNO                                                                            AS DOCNO              /*문서번호*/
+             , ST_EXDCSTORAGE.DOCLINE                                                                          AS DOCLINE            /*문서라인번호*/
+             , ST_EXDCSTORAGE.PARENT_DOCNO                                                                     AS PARENT_DOCNO       /*이전 문서번호 (없을 경우 'X')*/
+             , ST_EXDCSTORAGE.PARENT_DOCLINE                                                                   AS PARENT_DOCLINE     /*이전 문서라인번호*/
+             , CD1.BASEDESCR                                                                                   AS IO_FLAG            /*DP : 입고, WD : 출고*/
+             , CD2.BASEDESCR                                                                                   AS IO_TYPE            /*발생유형 B(Bonded WareHouse)=보세, G(General WareHouse)=일반*/
+             , CASE WHEN ST_EXDCSTORAGE.IO_FLAG = 'DP' 
+                    THEN CASE WHEN LEFT(ST_EXDCSTORAGE.DELIVERYDATE,6)  = TO_CHAR(SYSDATE, 'YYYYMM') 
+                              THEN CASE WHEN TRUNC(SYSDATE) - TO_DATE(ST_EXDCSTORAGE.DELIVERYDATE,'YYYYMMDD') + 1 <![CDATA[<]]> 0
+                                        THEN 0
+                                        ELSE TRUNC(SYSDATE) - TO_DATE(ST_EXDCSTORAGE.DELIVERYDATE,'YYYYMMDD') + 1
+                                   END
+                              WHEN LEFT(ST_EXDCSTORAGE.DELIVERYDATE,6) != TO_CHAR(SYSDATE, 'YYYYMM') 
+                              THEN LAST_DAY(TO_DATE(ST_EXDCSTORAGE.DELIVERYDATE,'YYYYMMDD')) - TO_DATE(ST_EXDCSTORAGE.DELIVERYDATE,'YYYYMMDD') + 1
+                              ELSE 0
+                         END
+                    ELSE CASE WHEN LEFT(ST_EXDCSTORAGE.DELIVERYDATE,6)  = TO_CHAR(INVENTORY_DATE, 'YYYYMM') 
+                              THEN TO_DATE(ST_EXDCSTORAGE.DELIVERYDATE,'YYYYMMDD') - ST_EXDCSTORAGE.INVENTORY_DATE + 1
+                              WHEN LEFT(ST_EXDCSTORAGE.DELIVERYDATE,6) != TO_CHAR(INVENTORY_DATE, 'YYYYMM') 
+                              THEN TO_DATE(ST_EXDCSTORAGE.DELIVERYDATE,'YYYYMMDD') - TO_DATE(LEFT(ST_EXDCSTORAGE.DELIVERYDATE,6) || '01', 'YYYYMMDD') + 1
+                              ELSE 0
+                         END                       
+               END                                                                                             AS STORAGEDAYCNT      /*보관일수*/
+             , ST_EXDCSTORAGE.DELIVERYDATE                                                                     AS DELIVERYDATE       /*적용일자*/
+             , TO_CHAR(ST_EXDCSTORAGE.INVENTORY_DATE, 'YYYY-MM-DD')                                            AS INVENTORY_DATE     /*외부창고 최초 입고일자*/                           
+             , TO_CHAR(ST_EXDCSTORAGE.WAREHOUSE_DATE, 'YYYY-MM-DD')                                            AS WAREHOUSE_DATE     /*해당창고 최초 입고일자*/
+             , ST_EXDCSTORAGE.DCCODE                                                                           AS DCCODE             /*센터코드*/
+             , ST_EXDCSTORAGE.ORGANIZE                                                                         AS ORGANIZE           /*창고코드*/
+             , (SELECT FN_DESCR_ORGANIZE(ST_EXDCSTORAGE.DCCODE,ST_EXDCSTORAGE.ORGANIZE) FROM DUAL)             AS ORGANIZENAME       /*창고명*/
+             , DECODE(ST_EXDCSTORAGE.IO_FLAG,'WD',ST_EXDCSTORAGE.CUSTKEY
+                                            ,NVL(ST_STOCK_SERIALINFODETAIL.CONTRACTCUSTKEY
+                                            ,ST_EXDCSTORAGE.CUSTKEY)  )                                        AS CUSTKEY            /*고객코드*/
+             , CD3.BASEDESCR                                                                                   AS ITEM_STATUS        /*아이템의 상태 정상=N(Normal),통관전감모=BD(Bonded reDuction),통관전폐기=BS(Bonded Scrap),통관전반송=BR(Bonded Return),통관후감모=GD(General reDuction),통관후폐기=GS(General Scrap),통관후반송=GR(General Return) WMS는S1 보류S2 소진S3 폐기S4 불량STD 가용*/
+             , ST_EXDCSTORAGE.SKU                                                                              AS SKU                /*상품코드*/
+             , MS_SKU.DESCRIPTION                                                                              AS SKU_NM             /*상품명*/
+             , ST_EXDCSTORAGE.QUANTITY                                                                         AS QUANTITY           /*처리수량*/
+             , CASE WHEN ST_EXDCSTORAGE.IO_TYPE = 'G' 
+                    THEN DECODE(ST_EXDCSTORAGE.IO_FLAG, 'WD', 0
+                                                            , ST_EXDCSTORAGE.QUANTITY 
+                                                             -NVL((SELECT SUM(X.QUANTITY)
+                                                                   FROM   ST_EXDCSTORAGE X 
+                                                                   WHERE  X.YYYYMM   = ST_EXDCSTORAGE.YYYYMM
+                                                                   AND    X.DCCODE   = ST_EXDCSTORAGE.DCCODE
+                                                                   AND    X.ORGANIZE = ST_EXDCSTORAGE.ORGANIZE
+                                                                   AND    X.IO_TYPE  = ST_EXDCSTORAGE.IO_TYPE
+                                                                   AND    X.STOCKID  = ST_EXDCSTORAGE.STOCKID
+                                                                   AND    X.IO_FLAG  = 'WD'), 0))
+                    ELSE DECODE(ST_EXDCSTORAGE.IO_FLAG, 'WD', 0
+                                                            , ST_EXDCSTORAGE.QUANTITY 
+                                                             -NVL((SELECT SUM(X.QUANTITY) 
+                                                                   FROM   ST_EXDCSTORAGE X 
+                                                                   WHERE  X.YYYYMM            = ST_EXDCSTORAGE.YYYYMM 
+                                                                   AND    X.DCCODE            = ST_EXDCSTORAGE.DCCODE
+                                                                   AND    X.ORGANIZE          = ST_EXDCSTORAGE.ORGANIZE
+                                                                   AND    X.PARENT_DOCNO      = ST_EXDCSTORAGE.DOCNO 
+                                                                   AND    X.PARENT_DOCLINE    = ST_EXDCSTORAGE.DOCLINE
+                                                                   AND    X.IO_TYPE           = ST_EXDCSTORAGE.IO_TYPE 
+                                                                   AND    X.IO_FLAG           = 'WD'), 0)) 
+               END                                                                                             AS CURRSTOCK          /*현재고*/
+             , ST_EXDCSTORAGE.UOM                                                                              AS UOM                /*단위*/
+             , ST_EXDCSTORAGE.BOXQTY                                                                           AS BOXQTY             /*박스수량*/
+             , CASE WHEN ST_EXDCSTORAGE.IO_TYPE = 'G' 
+                    THEN DECODE(ST_EXDCSTORAGE.IO_FLAG, 'WD', 0
+                                                            , ST_EXDCSTORAGE.BOXQTY 
+                                                             -NVL((SELECT SUM(X.BOXQTY)
+                                                                   FROM   ST_EXDCSTORAGE X 
+                                                                   WHERE  X.YYYYMM   = ST_EXDCSTORAGE.YYYYMM
+                                                                   AND    X.DCCODE   = ST_EXDCSTORAGE.DCCODE
+                                                                   AND    X.ORGANIZE = ST_EXDCSTORAGE.ORGANIZE
+                                                                   AND    X.IO_TYPE  = ST_EXDCSTORAGE.IO_TYPE
+                                                                   AND    X.STOCKID  = ST_EXDCSTORAGE.STOCKID
+                                                                   AND    X.IO_FLAG  = 'WD'), 0))
+                    ELSE DECODE(ST_EXDCSTORAGE.IO_FLAG, 'WD', 0
+                                                            , ST_EXDCSTORAGE.BOXQTY 
+                                                             -NVL((SELECT SUM(X.BOXQTY) 
+                                                                   FROM   ST_EXDCSTORAGE X 
+                                                                   WHERE  X.YYYYMM          = ST_EXDCSTORAGE.YYYYMM 
+                                                                   AND    X.DCCODE          = ST_EXDCSTORAGE.DCCODE
+                                                                   AND    X.ORGANIZE        = ST_EXDCSTORAGE.ORGANIZE
+                                                                   AND    X.PARENT_DOCNO    = ST_EXDCSTORAGE.DOCNO 
+                                                                   AND    X.PARENT_DOCLINE  = ST_EXDCSTORAGE.DOCLINE
+                                                                   AND    X.IO_TYPE         = ST_EXDCSTORAGE.IO_TYPE 
+                                                                   AND    X.IO_FLAG         = 'WD'), 0)) 
+               END                                                                                             AS QTYBOX             /*재고박스*/
+             , 'BOX'                                                                                           AS BOXUOM             /*박스단위*/
+             , MS_SKU.QTYPERBOX                                                                                AS QTYPERBOX          /*박스입수*/
+             , ST_EXDCSTORAGE.POKEY                                                                            AS POKEY              /*구매번호*/
+             , ST_EXDCSTORAGE.POLINE                                                                           AS POLINE             /*구매라인번호*/                                                                                                                             
+             , ST_EXDCSTORAGE.TCSPOKEY                                                                         AS TCSPOKEY           /*수출입발주번호*/
+             , ST_EXDCSTORAGE.CONVSERIALNO                                                                     AS CONVSERIALNO       /*선하증권번호*/
+             , ST_STOCK_SERIALINFODETAIL.CONTAINERNO                                                           AS CONTAINERNO        /*컨테이너 번호*/
+             , ST_EXDCSTORAGE.SERIALNO                                                                         AS SERIALNO           /*유통이력번호*/
+             , ST_EXDCSTORAGE.STOCKID                                                                          AS STOCKID            /*재고 구분 ID*/
+             , CD4.BASEDESCR                                                                                   AS CONTRACTTYPE       /*재고계약유형*/
+             , ST_EXDCSTORAGE.GR_AMOUNT                                                                        AS GR_AMOUNT          /*입고료 */
+             , ST_EXDCSTORAGE.GI_AMOUNT                                                                        AS GI_AMOUNT          /*출고료 */
+             , ST_EXDCSTORAGE.STOCK_AMOUNT                                                                     AS STOCK_AMOUNT       /*창고료 */
+             , ST_EXDCSTORAGE.WGH_AMOUNT                                                                       AS WGHPRICE           /*계근료 */
+             , ST_EXDCSTORAGE.WORK_AMOUNT                                                                      AS WORK_AMOUNT        /*작업료 */
+             , ST_EXDCSTORAGE.PLT_AMOUNT                                                                       AS PALLETPRICE        /*팔렛료 */     
+             , NVL(ST_EXDCSTORAGE.GR_AMOUNT,0) 
+                + NVL(ST_EXDCSTORAGE.GI_AMOUNT,0) 
+                + NVL(ST_EXDCSTORAGE.STOCK_AMOUNT,0) 
+                + NVL(ST_EXDCSTORAGE.WGH_AMOUNT,0) 
+                + NVL(ST_EXDCSTORAGE.WORK_AMOUNT,0) 
+                + NVL(ST_EXDCSTORAGE.PLT_AMOUNT,0)                                                             AS SUM_AMOUNT         /*보관료 합계*/  
+             , ST_EXDCSTORAGE.MONTH_EXP_NO                                                                     AS MONTH_EXP_NO       /*월마감비용전표번호*/
+             , CD8.BASEDESCR                                                                                   AS CLAIM_FLAG         /*클레임생성여부*/
+             , CD9.BASEDESCR                                                                                   AS TAX_CLS            /*과/면세구분*/
+             , ST_EXDCSTORAGE.COSTCD                                                                           AS COSTCD             /*코스트센터코드*/
+             , CD5.BASEDESCR                                                                                   AS EXPENSETYPE        /*비용타입*/
+             , ST_EXDCSTORAGE.GRPRICE                                                                          AS GRPRICE            /*입고수수료*/
+             , ST_EXDCSTORAGE.GIPRICE                                                                          AS GIPRICE            /*출고수수료*/
+             , ST_EXDCSTORAGE.STORAGEPRICE                                                                     AS STORAGEPRICE       /*보관수수료*/
+             , ST_EXDCSTORAGE.WGH_FEE_AMOUNT                                                                   AS WGH_FEE            /*계근수수료*/
+             , ST_EXDCSTORAGE.WORK_FEE_AMOUNT                                                                  AS WORK_FEE           /*작업수수료*/
+             , ST_EXDCSTORAGE.PLT_FEE_AMOUNT                                                                   AS PALLET_FEE         /*팔렛수수료*/
+             , ST_EXDCSTORAGE.STOGRPRICE                                                                       AS STOGRPRICE         /*이체입고수수료*/
+             , ST_EXDCSTORAGE.STOGIPRICE                                                                       AS STOGIPRICE         /*이체출고수수료*/
+             , CASE WHEN ST_EXDCSTORAGE.IO_FLAG = 'WD' 
+                    THEN NVL((SELECT SUM(IB_EXPENSE_DISTRIBUTION.AMOUNT)
+                              FROM   IB_EXPENSE_DISTRIBUTION
+                              WHERE  IB_EXPENSE_DISTRIBUTION.DOCUMENT_SN = ST_EXDCSTORAGE.SERIALKEY
+                              AND    EXISTS (SELECT 1
+                                             FROM   ST_EXDCSTORAGE_EXPENSE
+                                             WHERE  ST_EXDCSTORAGE_EXPENSE.EXDCSTORAGEKEY = IB_EXPENSE_DISTRIBUTION.DOCUMENT_SN
+                                             AND    ST_EXDCSTORAGE_EXPENSE.WORK_EXP_NO    = IB_EXPENSE_DISTRIBUTION.KEY_NO)
+                              ),0)
+                    ELSE 0
+               END                                                                                             AS TRANSPRICE         /*운송료(비용전표)*/
+             , CASE WHEN ST_EXDCSTORAGE.IO_FLAG = 'DP' 
+                    THEN NVL((SELECT SUM(IB_EXPENSE_DISTRIBUTION.SUPPLY_PRICE)
+                              FROM   IB_EXPENSE_DISTRIBUTION
+                              WHERE  IB_EXPENSE_DISTRIBUTION.DOCUMENT_SN = ST_EXDCSTORAGE.SERIALKEY
+                              AND    EXISTS (SELECT 1
+                                             FROM   ST_EXDCSTORAGE_EXPENSE
+                                             WHERE  ST_EXDCSTORAGE_EXPENSE.EXDCSTORAGEKEY = IB_EXPENSE_DISTRIBUTION.DOCUMENT_SN
+                                             AND    ST_EXDCSTORAGE_EXPENSE.WORK_EXP_NO    = IB_EXPENSE_DISTRIBUTION.KEY_NO)
+                              ),0)
+                    ELSE 0
+               END                                                                                             AS ETCPRICE           /*기타비용*/
+             , (SELECT MAX(USER_NM) 
+                FROM   FRAMEONE_USER 
+                WHERE  USER_ID = ST_EXDCSTORAGE.ADDWHO 
+                OR     USER_NO = ST_EXDCSTORAGE.ADDWHO)                                                        AS ADDWHO             /*최초등록자*/
+             , TO_CHAR(ST_EXDCSTORAGE.ADDDATE,'YYYY-MM-DD HH24:MI:SS')                                         AS ADDDATE            /*최초등록시간*/
+             , (SELECT MAX(USER_NM) 
+                FROM   FRAMEONE_USER 
+                WHERE  USER_ID = ST_EXDCSTORAGE.EDITWHO  
+                OR     USER_NO = ST_EXDCSTORAGE.EDITWHO)                                                       AS EDITWHO            /*최종변경자*/
+             , TO_CHAR(ST_EXDCSTORAGE.EDITDATE,'YYYY-MM-DD HH24:MI:SS')                                        AS EDITDATE           /*최종변경시간*/
+             , CD6.BASEDESCR                                                                                   AS STORAGETYPE        /*저장조건*/
+             , NVL(ST_EXDCSTORAGE.IF_STORAGE_AMOUNT,0)                                                         AS IF_STORAGE_AMOUNT  /*기정산보관료*/
+             , NVL(ST_EXDCSTORAGE.IF_ETC_AMOUNT    ,0)                                                         AS IF_ETC_AMOUNT      /*기정산운송료*/
+             , NVL(ST_EXDCSTORAGE.STOCK_AMOUNT_SAFS,0)                                                         AS STOCK_AMOUNT_SAFS  /*보관료(영업공가)*/
+             , CASE WHEN ST_EXDCSTORAGE.TAX_CLS = 'W1' 
+                    THEN NVL(ST_EXDCSTORAGE.STOCK_AMOUNT_SAFS,0)
+                    WHEN ST_EXDCSTORAGE.TAX_CLS = 'X3' 
+                    THEN ROUND(NVL(ST_EXDCSTORAGE.STOCK_AMOUNT_SAFS,0) * 1.1)
+                    ELSE NVL(ST_EXDCSTORAGE.STOCK_AMOUNT_SAFS,0)
+               END                                                                                             AS STOCK_AMOUNT_SAFS_TAXCLS /*보관료(영업)*/
+             , CASE WHEN ST_EXDCSTORAGE.MONTH_EXP_NO IS NULL 
+                    THEN 'Y'
+                    ELSE 'N'
+               END                                                                                             AS EDITFLAG           /**/
+             , ST_EXDCSTORAGE.DELIVERYFLAG                                                                     AS DELIVERYFLAG       /*이체여부*/
+        
+        LEFT OUTER JOIN CM_CODE_STORER CD1
+                    ON CD1.STORERKEY = ST_EXDCSTORAGE.STORERKEY
+                   AND CD1.CODELIST  = 'DOCTYPE_VESSEL'   
+                   AND CD1.BASECODE  = ST_EXDCSTORAGE.IO_FLAG
+        LEFT OUTER JOIN CM_CODE_STORER CD2
+                    ON CD2.STORERKEY = ST_EXDCSTORAGE.STORERKEY
+                   AND CD2.CODELIST  = 'IOTYPE_SN'   
+                   AND CD2.BASECODE  = ST_EXDCSTORAGE.IO_TYPE           
+        LEFT OUTER JOIN CM_CODE_STORER CD3
+                    ON CD3.STORERKEY = ST_EXDCSTORAGE.STORERKEY
+                   AND CD3.CODELIST  = 'STOCKSTATUS'   
+                   AND CD3.BASECODE  = ST_EXDCSTORAGE.ITEM_STATUS
+        LEFT OUTER JOIN CM_CODE_STORER CD4
+                    ON CD4.STORERKEY = ST_EXDCSTORAGE.STORERKEY
+                   AND CD4.CODELIST  = 'CONTRACTTYPE_SN'   
+                   AND CD4.BASECODE  = NVL(ST_STOCK_SERIALINFODETAIL.CONTRACTTYPE, ST_EXDCSTORAGE.CONTRACTTYPE)
+        LEFT OUTER JOIN CM_CODE_STORER CD5
+                    ON CD5.STORERKEY = ST_EXDCSTORAGE.STORERKEY
+                   AND CD5.CODELIST  = 'EXPENSETYPE'   
+                   AND CD5.BASECODE  = ST_EXDCSTORAGE.EXPENSETYPE                      
+        LEFT OUTER JOIN CM_CODE_STORER CD6
+                    ON CD6.STORERKEY = ST_EXDCSTORAGE.STORERKEY
+                   AND CD6.CODELIST  = 'STORAGETYPE'   
+                   AND CD6.BASECODE  = MS_SKU.STORAGETYPE
+        LEFT OUTER JOIN CM_CODE_STORER CD7
+                    ON CD7.STORERKEY = ST_EXDCSTORAGE.STORERKEY
+                   AND CD7.CODELIST  = 'STATUS_SN'   
+                   AND CD7.BASECODE  = ST_EXDCSTORAGE.STATUS 
+        LEFT OUTER JOIN CM_CODE_STORER CD8
+                    ON CD8.STORERKEY = ST_EXDCSTORAGE.STORERKEY
+                   AND CD8.CODELIST  = 'YN'   
+                   AND CD8.BASECODE  = ST_EXDCSTORAGE.CLAIM_FLAG
+        LEFT OUTER JOIN CM_CODE_STORER CD9
+                    ON CD9.STORERKEY = ST_EXDCSTORAGE.STORERKEY
+                   AND CD9.CODELIST  = 'TAX_CLS'   
+                   AND CD9.BASECODE  = ST_EXDCSTORAGE.TAX_CLS           
+        
+        FROM   ST_EXDCSTORAGE
+        
+        JOIN   MS_SKU
+            ON     MS_SKU.STORERKEY = ST_EXDCSTORAGE.STORERKEY
+            AND    MS_SKU.SKU       = ST_EXDCSTORAGE.SKU
+        <if test="skunm != null and skunm != ''">          
+            AND    MS_SKU.DESCRIPTION LIKE '%'||#{skunm}||'%'                                                        /* 상품명 */    
+        </if>
+        LEFT OUTER JOIN   ST_STOCK_SERIALINFODETAIL
+            ON     ST_STOCK_SERIALINFODETAIL.STORERKEY       = ST_EXDCSTORAGE.STORERKEY
+            AND    ST_STOCK_SERIALINFODETAIL.STOCKID         = ST_EXDCSTORAGE.STOCKID
+        
+        WHERE 1=1
+            AND   ST_EXDCSTORAGE.DCCODE         = #{fixdccode}
+            AND   ST_EXDCSTORAGE.STORERKEY      = #{gStorerkey}
+        <if test="qtyxzero != 1">
+            AND    ST_EXDCSTORAGE.QUANTITY <![CDATA[>]]> 0                                                           /* 수량 0조회 */  
+        </if>
+        <if test="stockmonth != null and stockmonth != ''">     
+            AND    ST_EXDCSTORAGE.YYYYMM        =  #{stockmonth}                                                     /* 재고월 */  
+        </if>
+        <if test="magamcode != null and magamcode != ''">      
+            AND    ST_EXDCSTORAGE.STATUS        =  #{magamcode}                                                      /* 마감코드 */  
+        </if>
+        <if test="organizeMulti != null and organizeMulti != ''">
+            AND    ST_EXDCSTORAGE.ORGANIZE      IN                                                                   /* 창고코드 */
+            <foreach collection="organizeMulti" item="item" open="(" separator="," close=")">
+                 #{item}
+            </foreach> 
+        </if>
+        <if test="gubun != null and gubun != ''">          
+            AND    ST_EXDCSTORAGE.IO_FLAG       =  #{gubun}                                                          /* 구분 */  
+        </if>
+        <if test="type != null and type != ''">           
+            AND    ST_EXDCSTORAGE.IO_TYPE       =  #{type}                                                           /* 유형 */      
+        </if> 
+        <if test="taxCls != null and taxCls != ''">        
+            AND    ST_EXDCSTORAGE.TAX_CLS       =  #{taxCls}                                                         /* 세금코드(과/면세) */  
+        </if>
+        <if test="docnoMulti != null and docnoMulti != ''">          
+            AND    ST_EXDCSTORAGE.DOCNO         IN                                                                   /* 입출고번호 */
+            <foreach collection="docnoMulti" item="item" open="(" separator="," close=")">
+                 #{item}
+            </foreach>
+        </if>
+        <if test="custkey != null and custkey != ''">        
+            AND    ST_EXDCSTORAGE.CUSTKEY       =  #{custkey}                                                        /* 고객코드 */
+        </if>
+        <if test="skuMulti != null and skuMulti != ''">          
+            AND    ST_EXDCSTORAGE.SKU           IN                                                                   /* 상품코드 */
+            <foreach collection="skuMulti" item="item" open="(" separator="," close=")">
+                 #{item}
+            </foreach>
+        </if>
+        <if test="pokey != null and pokey != ''">          
+            AND    ST_EXDCSTORAGE.POKEY         =  #{pokey}                                                          /* 발주번호 */
+        </if>
+        <if test="tcspokey != null and tcspokey != ''">       
+            AND    ST_EXDCSTORAGE.TCSPOKEY      =  #{tcspokey}                                                       /* 수출입발주번호 */
+        </if>
+        <if test="convserialnoMulti != null and convserialnoMulti != ''">        
+            AND    ST_EXDCSTORAGE.CONVSERIALNO  IN                                                                  /* 선하증권번호 */
+            <foreach collection="convserialnoMulti" item="item" open="(" separator="," close=")">
+                 #{item}
+            </foreach>
+        </if>
+        <if test="serialno != null and serialno != ''">       
+            AND    ST_EXDCSTORAGE.SERIALNO      =  #{serialno}                                                       /* 유통이력번호 */
+        </if>
+        <if test="stockid != null and stockid != ''">        
+            AND    ST_EXDCSTORAGE.STOCKID       =  #{stockid}                                                        /* Stock ID */
+        </if>
+        <if test="monthexpno != null and monthexpno != ''">   
+            AND    ST_EXDCSTORAGE.MONTH_EXP_NO  =  #{monthexpno}                                                     /* 마감비용번호 */
+        </if>
+        <if test="costcd != null and costcd != ''">         
+            AND    ST_EXDCSTORAGE.COSTCD        =  #{costcd}                                                         /* 코스트센터코드 */
+        </if>
+        <if test="containerno != null and containerno != ''">    
+            AND    ST_STOCK_SERIALINFODETAIL.CONTAINERNO IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                                                            FROM (SELECT #{containerno} AS VAL FROM DUAL) A
+                                                            CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+        </if>
+        <if test="addwho != null and addwho != ''">       
+            AND    EXISTS (SELECT 1                                                                                  /* 등록자 */
+                           FROM   FRAMEONE_USER                                              
+                           WHERE (USER_ID  = ST_EXDCSTORAGE.ADDWHO                                        
+                               OR USER_NO  = ST_EXDCSTORAGE.ADDWHO)
+                           AND   (USER_ID  IN ( SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                                                FROM (SELECT #{addwho} AS VAL FROM DUAL) A
+                                                CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0 )
+                               OR USER_NO  IN ( SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                                                FROM (SELECT #{addwho} AS VAL FROM DUAL) A
+                                                CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0 )
+                               OR USER_NM  IN ( SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                                                FROM (SELECT #{addwho} AS VAL FROM DUAL) A
+                                                CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0 )
+                                 )
+                           )                                                                                     
+        </if>
+        <if test="editwho != null and editwho != ''">       
+            AND    EXISTS (SELECT 1                                                                                  /* 수정자 */
+                           FROM   FRAMEONE_USER                                              
+                           WHERE (USER_ID   = ST_EXDCSTORAGE.EDITWHO                                        
+                               OR USER_NO   = ST_EXDCSTORAGE.EDITWHO)
+                           AND   (USER_ID   IN ( SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                                                 FROM (SELECT #{editwho} AS VAL FROM DUAL) A
+                                                 CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0 )
+                               OR USER_NO   IN ( SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                                                 FROM (SELECT #{editwho} AS VAL FROM DUAL) A
+                                                 CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0 )
+                               OR USER_NM   IN ( SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                                                 FROM (SELECT #{editwho} AS VAL FROM DUAL) A
+                                                 CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0 )
+                                 )
+                           )                                                                                     
+        </if>
+        <if test="contracttype == 1">
+            AND    NVL(ST_EXDCSTORAGE.CONTRACTTYPE,'10') <![CDATA[<>]]> '90'                                         /* 당일매입매출제외 */
+        </if>
+
+        ORDER BY ST_EXDCSTORAGE.ORGANIZE
+               , ST_EXDCSTORAGE.CONVSERIALNO
+               , ST_EXDCSTORAGE.POKEY
+               , ST_EXDCSTORAGE.POLINE
+               , ST_EXDCSTORAGE.IO_TYPE
+               , ST_EXDCSTORAGE.IO_FLAG
+               , ST_EXDCSTORAGE.STOCKID
+               , ST_EXDCSTORAGE.DELIVERYDATE
+               , ST_EXDCSTORAGE.SERIALKEY
+    </select>
+    
+    <select id="getTaxDiff" resultType="StExDCStorageResDto">
+        SELECT     /* [stExDCStorageService.sqlx][getTaxDiff][비용 조회][sunho.kim][2025.07.17] */
+            IB_EXPENSE.SERIALKEY AS EXPENSE_SN
+           ,NVL(( CASE WHEN MAX(IB_EXPENSE.TAX_RATE) = 0 THEN 0
+                 ELSE CASE WHEN TRUNC(MAX(IB_EXPENSE.SUPPLY_PRICE) / MAX(IB_EXPENSE.TAX_RATE)) <![CDATA[<>]]> SUM(IB_EXPENSE_DISTRIBUTION.TAX_AMOUNT) 
+                           THEN TRUNC(MAX(IB_EXPENSE.SUPPLY_PRICE - (NVL((SELECT SUM(SUPPLY_PRICE)
+                                                                     FROM IB_EXPENSE_DISTRIBUTION D
+                                                                     WHERE D.EXPENSE_SN = IB_EXPENSE.SERIALKEY
+                                                                       AND D.TAX_RATE = 0), 0))) / MAX(IB_EXPENSE.TAX_RATE)) 
+                               - SUM(IB_EXPENSE_DISTRIBUTION.TAX_AMOUNT)                                 
+                           ELSE 0
+                      END
+                 END), 0)  AS TAX_DIFF  
+        FROM    IB_EXPENSE 
+        JOIN    IB_EXPENSE_DISTRIBUTION
+          ON    IB_EXPENSE.SERIALKEY = IB_EXPENSE_DISTRIBUTION.EXPENSE_SN
+        WHERE   IB_EXPENSE.KEY_NO    = (SELECT WORK_EXP_NO
+                                        FROM   ST_EXDCSTORAGE_EXPENSE
+                                        WHERE  ROWNUM = 1
+                                          AND  WORK_EXP_NO IS NOT NULL
+                                          AND  WORK_TRANSACTION_SN = #{workTransactionSn})
+        GROUP BY IB_EXPENSE.SERIALKEY
+    </select>
+    
+    <select id="getJournalcodeList" resultType="StExDCEctFeePopupResDto">        
+        SELECT  /* [stExDCStorageService.sqlx][getMasterList][기타비용등록 목록 조회][sunho.kim][2025.07.21] */
+              SERIALKEY        AS SERIALKEY
+            , BASECODE         AS BASECODE
+            , BASEDESCR        AS BASEDESCR
+            , 0                AS TRANPRICE
+            , DATA1            AS DATA1
+            , DATA2            AS DATA2
+            , DATA3            AS DATA3
+            , DATA4            AS DATA4
+
+        FROM CM_CODE 
+        WHERE 1=1
+            AND CODELIST = 'JOURNALCODE'
+            AND BASECODE NOT IN ('K09', 'K10', 'K11', 'W01', 'W02', 'W03')
+    </select> 
+    
+    <insert id="insertSyProcessTempSimulation" parameterType="java.util.List">
+        INSERT    /* [stExDCStorageService.sqlx][insertSyProcessTempSimulation][임시저장 정보 Simulation 저장][sunho.kim][2025.08.24] */
+            INTO SY_PROCESSTEMP_SIMULATION (
+                PROCESSTYPE
+              , PROCESSCREATOR
+              , SPID              
+              , STORERKEY
+              , SKU
+              , GR_QTY
+              , GI_QTY
+              , PRICE_UOM
+              , BASE_GR_PRICE
+              , BASE_GI_PRICE
+              , BASE_STORAGE_PRICE
+              , BASE_PLT_PRICE
+              , BASE_WGH_PRICE
+              , BASE_WORK_PRICE
+              , CF_GR_PRICE
+              , CF_GI_PRICE
+              , CF_STORAGE_PRICE
+              , CF_PLT_PRICE
+              , CF_WGH_PRICE
+              , CF_WORK_PRICE
+              , ADDDATE
+              , EDITDATE 
+              , ADDWHO
+              , EDITWHO
+        )
+        <foreach collection="list" item="item" separator="UNION ALL">
+            SELECT
+                #{item.processtype}             AS PROCESSTYPE
+              , #{item.gUserId}                 AS PROCESSCREATOR
+              , #{item.gSpid}                   AS SPID
+              , #{item.storerkey}               AS STORERKEY 
+              , #{item.sku}                     AS SKU
+              , #{item.grQty}                   AS GR_QTY
+              , #{item.giQty}                   AS GI_QTY
+              , #{item.priceUom}                AS PRICE_UOM
+              , #{item.baseGrprice}             AS BASE_GR_PRICE
+              , #{item.baseGiprice}             AS BASE_GI_PRICE
+              , #{item.baseStorageprice}        AS BASE_STORAGE_PRICE
+              , #{item.basePltprice}            AS BASE_PLT_PRICE
+              , #{item.baseWghprice}            AS BASE_WGH_PRICE
+              , #{item.baseWorkprice}           AS BASE_WORK_PRICE
+              , #{item.cfGrprice}               AS CF_GR_PRICE
+              , #{item.cfGiprice}               AS CF_GI_PRICE
+              , #{item.cfStorageprice}          AS CF_STORAGE_PRICE
+              , #{item.cfPltprice}              AS CF_PLT_PRICE
+              , #{item.cfWghprice}              AS CF_WGH_PRICE
+              , #{item.cfWorkprice}             AS CF_WORK_PRICE
+              , SYSDATE                         AS ADDDATE
+              , SYSDATE                         AS EDITDATE
+              , #{item.gUserId}                 AS ADDWHO
+              , #{item.gUserId}                 AS EDITWHO
+            FROM DUAL
+        </foreach>
+    </insert>
+    
+    <select id="getWithTempTable" parameterType="java.util.List" resultType="StExDCStorageResDto">
+        WITH TEMP AS (    /* [stExDCStorageService.sqlx][getWithTempTable][외부창고정산 엑셀업로드 검증][sunho.kim][2025.10.22] */
+          SELECT 
+             T.*
+           , CD1.BASECODE    AS IO_FLAG
+           , CD2.BASECODE    AS IO_TYPE
+           , CD3.BASECODE    AS ITEM_STATUS 
+           , CD4.BASECODE    AS CONTRACTTYPE
+           , CD5.BASECODE    AS EXPENSETYPE 
+           , CD6.BASECODE    AS STORAGETYPE 
+           , CD7.BASECODE    AS STATUS  
+           , CD8.BASECODE    AS CLAIM_FLAG 
+           , CD9.BASECODE    AS TAX_CLS    
+           
+          FROM (
+          <foreach collection="list" item="item" separator="UNION ALL">
+            SELECT 
+                   #{item.storerkey}        AS STORERKEY
+                 , #{item.dccode}           AS DCCODE
+                 , #{item.serialkey}        AS SERIALKEY
+                 , #{item.status}           AS STATUS_NM
+                 , SUBSTR(REPLACE(#{item.yyyymm}, '-', ''), 1, 6)  AS YYYYMM
+                 , #{item.docno}            AS DOCNO
+                 , #{item.toCustkey}        AS TO_CUSTKEY
+                 , #{item.toCustname}       AS TO_CUSTNAME
+                 , #{item.docline}          AS DOCLINE 
+                 , #{item.parentDocno}      AS PARENT_DOCNO
+                 , #{item.parentDocline}    AS PARENT_DOCLINE
+                 , #{item.ioFlag}           AS IO_FLAG_NM
+                 , #{item.ioType}           AS IO_TYPE_NM
+                 , #{item.storagedaycnt}    AS STORAGEDAYCNT
+                 , DECODE(TRIM(#{item.deliverydate}), '　', NULL, REPLACE(#{item.deliverydate}, '-', ''))    AS DELIVERYDATE
+                 , DECODE(TRIM(#{item.inventoryDate}), '　', NULL, REPLACE(#{item.inventoryDate}, '-', ''))    AS INVENTORY_DATE
+                 , DECODE(TRIM(#{item.warehouseDate}), '　', NULL, REPLACE(#{item.warehouseDate}, '-', ''))    AS WAREHOUSE_DATE
+                 , #{item.organize}         AS ORGANIZE
+                 , #{item.organizename}     AS ORGANIZENAME
+                 , #{item.custkey}          AS CUSTKEY
+                 , #{item.itemStatus}       AS ITEM_STATUS_NM
+                 , #{item.somdname}         AS SOMDNAME
+                 , #{item.skuLdesc}         AS SKU_LDESC
+                 , #{item.skuDdesc}         AS SKU_DDESC
+                 , #{item.storagetype}      AS STORAGETYPE_NM
+                 , #{item.sku}              AS SKU 
+                 , #{item.skuNm}            AS SKU_NM
+                 , #{item.quantity}         AS QUANTITY
+                 , #{item.currstock}        AS CURRSTOCK
+                 , #{item.uom}              AS UOM
+                 , #{item.boxqty}           AS BOXQTY
+                 , #{item.qtybox}           AS QTYBOX 
+                 , #{item.boxuom}           AS BOXUOM 
+                 , #{item.qtyperbox}        AS QTYPERBOX 
+                 , #{item.netweight}        AS NETWEIGHT
+                 , #{item.pokey}            AS POKEY
+                 , #{item.poline}           AS POLINE
+                 , #{item.tcspokey}         AS TCSPOKEY
+                 , #{item.convserialno}     AS CONVSERIALNO
+                 , #{item.containerno}      AS CONTAINERNO
+                 , #{item.serialno}         AS SERIALNO
+                 , #{item.stockid}          AS STOCKID
+                 , #{item.contracttype}     AS CONTRACTTYPE_NM
+                 , #{item.grAmount}         AS GR_AMOUNT
+                 , #{item.giAmount}         AS GI_AMOUNT
+                 , #{item.stockAmount}      AS STOCK_AMOUNT
+                 , #{item.wghprice}         AS WGH_AMOUNT 
+                 , #{item.workAmount}       AS WORK_AMOUNT
+                 , #{item.palletprice}      AS PLT_AMOUNT
+                 , #{item.sumAmount}        AS SUM_AMOUNT
+                 , #{item.monthExpNo}       AS MONTH_EXP_NO
+                 , #{item.ifStorageAmount}  AS IF_STORAGE_AMOUNT
+                 , #{item.ifEtcAmount}      AS IF_ETC_AMOUNT
+                 , #{item.stockAmountSafs}  AS STOCK_AMOUNT_SAFS
+                 , #{item.stockAmountSafsTaxcls}  AS STOCK_AMOUNT_SAFS_TAXCLS
+                 , #{item.transprice}       AS TRANSPRICE
+                 , #{item.etcprice}         AS ETCPRICE
+                 , #{item.deliveryflag}     AS DELIVERYFLAG
+                 , #{item.claimFlag}        AS CLAIM_FLAG_NM
+                 , #{item.taxCls}           AS TAX_CLS_NM
+                 , #{item.costcd}           AS COSTCD
+                 , #{item.expensetype}      AS EXPENSETYPE_NM
+                 , #{item.grprice}          AS GRPRICE
+                 , #{item.giprice}          AS GIPRICE
+                 , #{item.storageprice}     AS STORAGEPRICE
+                 , #{item.wghFee}           AS WGH_FEE
+                 , #{item.workFee}          AS WORK_FEE
+                 , #{item.palletFee}        AS PALLET_FEE
+                 , #{item.bgrprice}         AS BGRPRICE
+                 , #{item.bgiprice}         AS BGIPRICE
+                 , #{item.bstorageprice}    AS BSTORAGEPRICE
+                 , #{item.grrate}           AS GRRATE
+                 , #{item.girate}           AS GIRATE
+                 , #{item.storate}          AS STORATE
+                 , #{item.grrateamt}        AS GRRATEAMT
+                 , #{item.girateamt}        AS GIRATEAMT
+                 , #{item.storateamt}       AS STORATEAMT
+                 , #{item.gUserId}          AS USER_ID
+            FROM DUAL
+          </foreach>
+          ) T 
+            LEFT OUTER JOIN CM_CODE_STORER CD1
+                    ON CD1.STORERKEY = T.STORERKEY
+                   AND CD1.CODELIST  = 'DOCTYPE_VESSEL'   
+                   AND CD1.BASEDESCR = T.IO_FLAG_NM
+            LEFT OUTER JOIN CM_CODE_STORER CD2
+                    ON CD2.STORERKEY = T.STORERKEY
+                   AND CD2.CODELIST  = 'IOTYPE_SN'   
+                   AND CD2.BASEDESCR = T.IO_TYPE_NM 
+            LEFT OUTER JOIN CM_CODE_STORER CD3
+                    ON CD3.STORERKEY = T.STORERKEY
+                   AND CD3.CODELIST  = 'STOCKSTATUS'   
+                   AND CD3.BASEDESCR = T.ITEM_STATUS_NM
+            LEFT OUTER JOIN CM_CODE_STORER CD4
+                    ON CD4.STORERKEY = T.STORERKEY
+                   AND CD4.CODELIST  = 'CONTRACTTYPE_SN'   
+                   AND CD4.BASEDESCR = T.CONTRACTTYPE_NM
+            LEFT OUTER JOIN CM_CODE_STORER CD5
+                    ON CD5.STORERKEY = T.STORERKEY
+                   AND CD5.CODELIST  = 'EXPENSETYPE'   
+                   AND CD5.BASEDESCR = T.EXPENSETYPE_NM 
+            LEFT OUTER JOIN CM_CODE_STORER CD6
+                    ON CD6.STORERKEY = T.STORERKEY
+                   AND CD6.CODELIST  = 'STORAGETYPE'   
+                   AND CD6.BASEDESCR = T.STORAGETYPE_NM
+            LEFT OUTER JOIN CM_CODE_STORER CD7
+                    ON CD7.STORERKEY = T.STORERKEY
+                   AND CD7.CODELIST  = 'STATUS_SN'   
+                   AND CD7.BASEDESCR = T.STATUS_NM
+            LEFT OUTER JOIN CM_CODE_STORER CD8
+                    ON CD8.STORERKEY = T.STORERKEY
+                   AND CD8.CODELIST  = 'YN'   
+                   AND CD8.BASEDESCR = T.CLAIM_FLAG_NM
+            LEFT OUTER JOIN CM_CODE_STORER CD9
+                    ON CD9.STORERKEY = T.STORERKEY
+                   AND CD9.CODELIST  = 'TAX_CLS'   
+                   AND CD9.BASEDESCR = T.TAX_CLS_NM
+        )
+        SELECT  
+           *
+        FROM (   
+            SELECT 
+               T.SERIALKEY                                                                                          AS SERIALKEY          /*일련번호*/
+             , CD7.BASEDESCR                                                                                        AS STATUS             /*1=준비,2=보관료계산,3=비용생성,4=익월기초재고등록*/
+             , T.YYYYMM                                                                                             AS YYYYMM             /*재고월 (YYYYMM)*/
+             , T.DOCNO                                                                                              AS DOCNO              /*문서번호*/
+             , T.DOCLINE                                                                                            AS DOCLINE            /*문서라인번호*/
+             , T.PARENT_DOCNO                                                                                       AS PARENT_DOCNO       /*이전 문서번호 (없을 경우 'X')*/
+             , T.PARENT_DOCLINE                                                                                     AS PARENT_DOCLINE     /*이전 문서라인번호*/
+             , CD1.BASEDESCR                                                                                        AS IO_FLAG            /*DP : 입고, WD : 출고*/
+             , CD2.BASEDESCR                                                                                        AS IO_TYPE            /*발생유형명 B(Bonded WareHouse)=보세, G(General WareHouse)=일반*/
+             , CASE WHEN T.IO_FLAG = 'DP'
+                    THEN CASE WHEN LEFT(T.DELIVERYDATE,6)  = TO_CHAR(SYSDATE, 'YYYYMM') 
+                              THEN CASE WHEN TRUNC(SYSDATE) - TO_DATE(T.DELIVERYDATE,'YYYYMMDD') + 1 <![CDATA[<]]> 0
+                                        THEN 0
+                                        ELSE TRUNC(SYSDATE) - TO_DATE(T.DELIVERYDATE,'YYYYMMDD') + 1
+                                   END
+                              WHEN LEFT(T.DELIVERYDATE,6) != TO_CHAR(SYSDATE, 'YYYYMM') 
+                              THEN LAST_DAY(TO_DATE(T.DELIVERYDATE,'YYYYMMDD')) - TO_DATE(T.DELIVERYDATE,'YYYYMMDD') + 1
+                              ELSE 0
+                         END
+                    ELSE CASE WHEN LEFT(T.DELIVERYDATE,6)  = LEFT(T.INVENTORY_DATE,6) 
+                              THEN TO_DATE(T.DELIVERYDATE,'YYYYMMDD') - TO_DATE(T.INVENTORY_DATE, 'YYYYMMDD') + 1
+                              WHEN LEFT(T.DELIVERYDATE,6) != LEFT(T.INVENTORY_DATE,6) 
+                              THEN TO_DATE(T.DELIVERYDATE,'YYYYMMDD') - TO_DATE(LEFT(T.DELIVERYDATE,6) || '01', 'YYYYMMDD') + 1
+                              ELSE 0
+                         END                       
+               END                                                                                                  AS STORAGEDAYCNT      /*보관일수*/
+             , T.DELIVERYDATE                                                                                       AS DELIVERYDATE       /*적용일자*/
+             , T.INVENTORY_DATE                                                                                     AS INVENTORY_DATE     /*외부창고 최초 입고일자*/ 
+             , T.WAREHOUSE_DATE                                                                                     AS WAREHOUSE_DATE     /*해당창고 최초 입고일자*/
+             , T.DCCODE                                                                                             AS DCCODE             /*센터코드*/
+             , (SELECT FN_GETDCNAME(T.DCCODE) FROM DUAL)                                                            AS DCNAME             /*물류센터명*/
+             , T.ORGANIZE                                                                                           AS ORGANIZE           /*창고코드*/
+             , (SELECT FN_DESCR_ORGANIZE(T.DCCODE,T.ORGANIZE) FROM DUAL)                                            AS ORGANIZENAME       /*창고명*/
+             , DECODE(T.IO_FLAG, 'WD', T.CUSTKEY
+                                            , NVL(ST_STOCK_SERIALINFODETAIL.CONTRACTCUSTKEY
+                                            , T.CUSTKEY) )                                                          AS CUSTKEY            /*고객코드(거래처)*/
+             , CD3.BASEDESCR                                                                                        AS ITEM_STATUS        /*아이템의 상태 정상=N(Normal),통관전감모=BD(Bonded reDuction),통관전폐기=BS(Bonded Scrap),통관전반송=BR(Bonded Return),통관후감모=GD(General reDuction),통관후폐기=GS(General Scrap),통관후반송=GR(General Return) WMS는S1 보류S2 소진S3 폐기S4 불량STD 가용*/
+             , T.SKU                                                                                                AS SKU                /*상품코드*/
+             , MS_SKU.DESCRIPTION                                                                                   AS SKU_NM             /*상품명*/
+             , T.QUANTITY                                                                                           AS QUANTITY           /*수량*/
+             , CASE WHEN T.IO_TYPE = 'G'
+                          THEN DECODE(T.IO_FLAG, 'WD', 0, T.QUANTITY - NVL(T.QUANTITY,0))
+                    ELSE      DECODE(T.IO_FLAG, 'WD', 0, T.QUANTITY - NVL(ST_EXDCSTORAGE_PARENT_DOCNO.QUANTITY,0))
+               END                                                                                                  AS CURRSTOCK          /*현재고*/
+             , T.UOM                                                                                                AS UOM                /*단위*/
+             , T.BOXQTY                                                                                             AS BOXQTY             /*박스수량*/
+             , CASE WHEN T.IO_TYPE = 'G' 
+                          THEN DECODE(T.IO_FLAG, 'WD', 0, T.BOXQTY - NVL(ST_EXDCSTORAGE_STOCKID.BOXQTY,0))
+                    ELSE      DECODE(T.IO_FLAG, 'WD', 0, T.BOXQTY - NVL(ST_EXDCSTORAGE_PARENT_DOCNO.BOXQTY,0))
+               END                                                                                                  AS QTYBOX             /*재고박스*/
+             , 'BOX'                                                                                                AS BOXUOM             /*박스단위*/
+             , MS_SKU.QTYPERBOX                                                                                     AS QTYPERBOX          /*박스입수*/
+             , T.POKEY                                                                                              AS POKEY              /*구매번호*/
+             , T.POLINE                                                                                             AS POLINE             /*구매라인번호*/                                                                                                                             
+             , T.TCSPOKEY                                                                                           AS TCSPOKEY           /*수출입발주번호*/
+             , T.CONVSERIALNO                                                                                       AS CONVSERIALNO       /*선하증권번호*/
+             , ST_STOCK_SERIALINFODETAIL.CONTAINERNO                                                                AS CONTAINERNO        /*컨테이너 번호*/
+             , T.SERIALNO                                                                                           AS SERIALNO           /*유통이력번호*/
+             , T.STOCKID                                                                                            AS STOCKID            /*재고 구분 ID*/
+             , CD4.BASEDESCR                                                                                        AS CONTRACTTYPE       /*재고계약유형*/
+             , NVL(T.GR_AMOUNT,0)                                                                                   AS GR_AMOUNT          /*입고료 */
+             , NVL(T.GI_AMOUNT,0)                                                                                   AS GI_AMOUNT          /*출고료 */
+             , NVL(T.STOCK_AMOUNT,0)                                                                                AS STOCK_AMOUNT       /*창고료 */                      
+             , NVL(T.WGH_AMOUNT,0)                                                                                  AS WGHPRICE           /*계근료 */
+             , NVL(T.WORK_AMOUNT,0)                                                                                 AS WORK_AMOUNT        /*작업료 */
+             , NVL(T.PLT_AMOUNT,0)                                                                                  AS PALLETPRICE        /*팔렛료 */     
+             , NVL(T.GR_AMOUNT,0) 
+                + NVL(T.GI_AMOUNT,0) 
+                + NVL(T.STOCK_AMOUNT,0) 
+                + NVL(T.WGH_AMOUNT,0) 
+                + NVL(T.WORK_AMOUNT,0) 
+                + NVL(T.PLT_AMOUNT,0)                                                                               AS SUM_AMOUNT         /*보관료 합계*/    
+             , T.MONTH_EXP_NO                                                                                       AS MONTH_EXP_NO       /*월마감비용전표번호*/
+             , CD8.BASEDESCR                                                                                        AS CLAIM_FLAG         /*클레임생성여부*/
+             , CD9.BASEDESCR                                                                                        AS TAX_CLS            /*과/면세구분*/
+             , T.COSTCD                                                                                             AS COSTCD             /*코스트센터코드*/
+             , CD5.BASEDESCR                                                                                        AS EXPENSETYPE        /*비용타입*/
+             , T.GRPRICE                                                                                            AS GRPRICE            /*입고수수료*/
+             , T.GIPRICE                                                                                            AS GIPRICE            /*출고수수료*/
+             , T.STORAGEPRICE                                                                                       AS STORAGEPRICE       /*보관수수료*/             
+             --, T.WGH_FEE_AMOUNT                                                                                     AS WGH_FEE            /*계근수수료*/
+             --, T.WORK_FEE_AMOUNT                                                                                    AS WORK_FEE           /*작업수수료*/
+             --, T.PLT_FEE_AMOUNT                                                                                     AS PALLET_FEE         /*팔렛수수료*/
+             --, T.STOGRPRICE                                                                                         AS STOGRPRICE         /*이체입고수수료*/
+             --, T.STOGIPRICE                                                                                         AS STOGIPRICE         /*이체출고수수료*/
+             , CASE WHEN T.IO_FLAG = 'WD' 
+                    THEN NVL( IB_EXPENSE_DISTRIBUTION.AMOUNT,0)
+                    ELSE 0
+               END                                                                                                  AS TRANSPRICE         /*운송료(비용전표)*/         
+             , CASE WHEN T.IO_FLAG = 'DP' 
+                    THEN NVL(IB_EXPENSE_DISTRIBUTION.SUPPLY_PRICE,0)
+                    ELSE 0
+               END                                                                                                  AS ETCPRICE           /*기타비용*/         
+             , CD6.BASEDESCR                                                                                        AS STORAGETYPE        /*저장조건*/
+             , NVL(T.IF_STORAGE_AMOUNT,0)                                                                           AS IF_STORAGE_AMOUNT  /*기정산보관료*/
+             , NVL(T.IF_ETC_AMOUNT    ,0)                                                                           AS IF_ETC_AMOUNT      /*기정산운송료*/
+             , NVL(T.STOCK_AMOUNT_SAFS,0)                                                                           AS STOCK_AMOUNT_SAFS  /*보관료(영업공가)*/
+             , CASE WHEN T.TAX_CLS = 'W1' 
+                    THEN NVL(T.STOCK_AMOUNT_SAFS,0)
+                    WHEN T.TAX_CLS = 'X3' 
+                    THEN ROUND(NVL(T.STOCK_AMOUNT_SAFS,0) * 1.1)
+                    ELSE NVL(T.STOCK_AMOUNT_SAFS,0)
+               END                                                                                                  AS STOCK_AMOUNT_SAFS_TAXCLS /*보관료(영업)*/
+             , CASE WHEN T.MONTH_EXP_NO IS NULL 
+                    THEN 'Y'
+                    ELSE 'N'
+               END                                                                                                  AS EDITFLAG           /**/
+             , T.DELIVERYFLAG                                                                                       AS DELIVERYFLAG       /*이체여부*/
+             , MS_SKU.NETWEIGHT                                                                                     AS NETWEIGHT          /*순중량*/
+             , MS_SKU.SOMDNAME                                                                                      AS SOMDNAME           /*MD*/
+             , FN_DESCR_SKUSPEC(MS_SKU.STORERKEY, 'SKUGROUP', LEFT(MS_SKU.SKUGROUP,2))                              AS SKU_LDESC          /*상품 대분류*/
+             , FN_DESCR_SKUSPEC(MS_SKU.STORERKEY, 'SKUGROUP', MS_SKU.SKUGROUP)                                      AS SKU_DDESC          /*상품 세분류*/             
+             , NVL(ROUND(E.GRPRICE,1),0)                                                                            AS BGRPRICE           /*전년 입고수수료*/
+             , NVL(ROUND(E.GIPRICE,1),0)                                                                            AS BGIPRICE           /*전년 출고수수료*/
+             , NVL(ROUND(E.STORAGEPRICE,1),0)                                                                       AS BSTORAGEPRICE      /*전년 창고수수료*/
+             , DM_DOCUMENT_H.TO_CUSTKEY                                                                             AS TO_CUSTKEY         /*관리처코드*/
+             , DM_DOCUMENT_H.TO_CUSTNAME                                                                            AS TO_CUSTNAME        /*관리처명*/
+            FROM   TEMP T
+     
+            JOIN   MS_SKU
+                ON     MS_SKU.STORERKEY = T.STORERKEY
+                AND    MS_SKU.SKU       = T.SKU
+            LEFT OUTER JOIN   ST_STOCK_SERIALINFODETAIL
+                ON     ST_STOCK_SERIALINFODETAIL.STORERKEY    = T.STORERKEY
+                AND    ST_STOCK_SERIALINFODETAIL.STOCKID      = T.STOCKID
+            LEFT OUTER JOIN DM_DOCUMENT_H
+                ON     DM_DOCUMENT_H.STORERKEY  = T.STORERKEY
+                AND    DM_DOCUMENT_H.DCCODE     = T.DCCODE
+                AND    DM_DOCUMENT_H.ORGANIZE   = T.ORGANIZE
+                AND    DM_DOCUMENT_H.DOCNO      = T.DOCNO
+                AND    DM_DOCUMENT_H.DOCTYPE    = 'WD'
+            LEFT OUTER JOIN (SELECT E.DCCODE
+                                  , E.YYYYMM
+                                  , E.SKU
+                                  , MAX(E.GRPRICE) AS GRPRICE
+                                  , MAX(E.GIPRICE) AS GIPRICE
+                                  , MAX(E.STORAGEPRICE) AS STORAGEPRICE
+                             FROM ST_EXDCSTORAGE E 
+                             GROUP BY DCCODE,YYYYMM,SKU ) E
+                     ON E.DCCODE    = T.DCCODE 
+                    AND E.YYYYMM    = TO_CHAR(ADD_MONTHS(TO_DATE(T.YYYYMM,'YYYYMM'),-12) ,'YYYYMM') 
+                    AND E.SKU       = T.SKU  
+            LEFT OUTER JOIN (SELECT DOCUMENT_SN
+                                  , SUM(IB_EXPENSE_DISTRIBUTION.SUPPLY_PRICE) SUPPLY_PRICE
+                                  , SUM(IB_EXPENSE_DISTRIBUTION.AMOUNT) AMOUNT
+                               FROM   IB_EXPENSE_DISTRIBUTION
+                               WHERE  1=1
+                               AND    EXISTS (SELECT 1
+                                              FROM   ST_EXDCSTORAGE_EXPENSE
+                                              WHERE  ST_EXDCSTORAGE_EXPENSE.EXDCSTORAGEKEY = IB_EXPENSE_DISTRIBUTION.DOCUMENT_SN
+                                              AND    ST_EXDCSTORAGE_EXPENSE.WORK_EXP_NO    = IB_EXPENSE_DISTRIBUTION.KEY_NO)
+                               GROUP BY DOCUMENT_SN
+                                     ) IB_EXPENSE_DISTRIBUTION
+                   ON IB_EXPENSE_DISTRIBUTION.DOCUMENT_SN = T.SERIALKEY
+            LEFT OUTER JOIN (  SELECT YYYYMM, DCCODE, ORGANIZE, IO_TYPE, STOCKID
+                                    , SUM(X.QUANTITY) QUANTITY
+                                    , SUM(X.BOXQTY) BOXQTY
+                                 FROM ST_EXDCSTORAGE X 
+                                WHERE X.IO_FLAG  = 'WD'
+                               GROUP BY YYYYMM, DCCODE, ORGANIZE, IO_TYPE, STOCKID
+                                   ) ST_EXDCSTORAGE_STOCKID
+                    ON ST_EXDCSTORAGE_STOCKID.YYYYMM   = T.YYYYMM
+                   AND ST_EXDCSTORAGE_STOCKID.DCCODE   = T.DCCODE
+                   AND ST_EXDCSTORAGE_STOCKID.ORGANIZE = T.ORGANIZE
+                   AND ST_EXDCSTORAGE_STOCKID.IO_TYPE  = T.IO_TYPE
+                   AND ST_EXDCSTORAGE_STOCKID.STOCKID  = T.STOCKID      
+            LEFT OUTER JOIN (  SELECT YYYYMM, DCCODE, ORGANIZE, IO_TYPE, PARENT_DOCLINE, PARENT_DOCNO
+                                    , SUM(X.QUANTITY) QUANTITY
+                                    , SUM(X.BOXQTY) BOXQTY
+                               FROM ST_EXDCSTORAGE X 
+                               WHERE X.IO_FLAG  = 'WD'
+                               GROUP BY YYYYMM, DCCODE, ORGANIZE, IO_TYPE, PARENT_DOCLINE, PARENT_DOCNO
+                                   ) ST_EXDCSTORAGE_PARENT_DOCNO
+                    ON ST_EXDCSTORAGE_PARENT_DOCNO.YYYYMM         = T.YYYYMM
+                   AND ST_EXDCSTORAGE_PARENT_DOCNO.DCCODE         = T.DCCODE
+                   AND ST_EXDCSTORAGE_PARENT_DOCNO.ORGANIZE       = T.ORGANIZE
+                   AND ST_EXDCSTORAGE_PARENT_DOCNO.PARENT_DOCNO   = T.DOCNO
+                   AND ST_EXDCSTORAGE_PARENT_DOCNO.PARENT_DOCLINE = T.DOCLINE    
+                   AND ST_EXDCSTORAGE_PARENT_DOCNO.IO_TYPE        = T.IO_TYPE    
+        
+            LEFT OUTER JOIN CM_CODE_STORER CD1
+                    ON CD1.STORERKEY = T.STORERKEY
+                   AND CD1.CODELIST  = 'DOCTYPE_VESSEL'   
+                   AND CD1.BASECODE  = T.IO_FLAG
+            LEFT OUTER JOIN CM_CODE_STORER CD2
+                    ON CD2.STORERKEY = T.STORERKEY
+                   AND CD2.CODELIST  = 'IOTYPE_SN'   
+                   AND CD2.BASECODE  = T.IO_TYPE 
+            LEFT OUTER JOIN CM_CODE_STORER CD3
+                    ON CD3.STORERKEY = T.STORERKEY
+                   AND CD3.CODELIST  = 'STOCKSTATUS'   
+                   AND CD3.BASECODE  = T.ITEM_STATUS
+            LEFT OUTER JOIN CM_CODE_STORER CD4
+                    ON CD4.STORERKEY = T.STORERKEY
+                   AND CD4.CODELIST  = 'CONTRACTTYPE_SN'   
+                   AND CD4.BASECODE  = NVL(ST_STOCK_SERIALINFODETAIL.CONTRACTTYPE, T.CONTRACTTYPE)
+            LEFT OUTER JOIN CM_CODE_STORER CD5
+                    ON CD5.STORERKEY = T.STORERKEY
+                   AND CD5.CODELIST  = 'EXPENSETYPE'   
+                   AND CD5.BASECODE  = T.EXPENSETYPE 
+            LEFT OUTER JOIN CM_CODE_STORER CD6
+                    ON CD6.STORERKEY = T.STORERKEY
+                   AND CD6.CODELIST  = 'STORAGETYPE'   
+                   AND CD6.BASECODE  = MS_SKU.STORAGETYPE
+            LEFT OUTER JOIN CM_CODE_STORER CD7
+                    ON CD7.STORERKEY = T.STORERKEY
+                   AND CD7.CODELIST  = 'STATUS_SN'   
+                   AND CD7.BASECODE  = T.STATUS
+            LEFT OUTER JOIN CM_CODE_STORER CD8
+                    ON CD8.STORERKEY = T.STORERKEY
+                   AND CD8.CODELIST  = 'YN'   
+                   AND CD8.BASECODE  = T.CLAIM_FLAG
+            LEFT OUTER JOIN CM_CODE_STORER CD9
+                    ON CD9.STORERKEY = T.STORERKEY
+                   AND CD9.CODELIST  = 'TAX_CLS'   
+                   AND CD9.BASECODE  = T.TAX_CLS
+        ) A
+        ORDER BY A.ORGANIZE
+               , A.CONVSERIALNO
+               , A.POKEY
+               , A.POLINE
+               , A.IO_TYPE
+               , A.IO_FLAG
+               , A.STOCKID
+               , A.DELIVERYDATE
+               , A.SERIALKEY  
+    </select>
+    
+    <select id="getAuthority" resultType="SysAuthorityUserResDto">
+        SELECT     /* [stExDCStorageService.sqlx][getAuthority][권한 조회][sunho.kim][2025.07.17] */
+            FRAMEONE_AUTH_USER.AUTH_CD 
+        FROM FRAMEONE_USER
+        LEFT OUTER JOIN FRAMEONE_AUTH_USER ON FRAMEONE_AUTH_USER.USER_ID = FRAMEONE_USER.USER_ID
+        WHERE 1 = 1
+        AND FRAMEONE_USER.USER_ID = #{gUserId}
+        AND FRAMEONE_USER.DEL_YN  = 'N'
+        AND NVL2(FRAMEONE_AUTH_USER.AUTH_CD, '1', '0') = '1'
+    </select>
+    
+</mapper>

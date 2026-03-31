@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="omCkApprovalService">
+    
+    <!-- CK주문결재내역 마스터 조회 (목록) -->
+	<select id="getMasterList" resultType="OmCkApprovalResDto">
+		SELECT	/* [omCkApprovalService.sqlx][omCkApprovalService.getMasterList][CK주문결재내역 마스터 조회 (목록)][JeongHyeongCheol][20250926] */ 
+            '0'                                                         		AS CHECKYN
+            ,CK_APPROVAL.SERIALKEY                                              AS SERIALKEY
+            ,CK_APPROVAL.REQUESTNO                                              AS REQUESTNO
+            ,CK_APPROVAL.REQUESTLINE                                            AS REQUESTLINE
+            ,CK_APPROVAL.DELIVERYDATE                                           AS DELIVERYDATE
+            ,CK_APPROVAL.SLIPDT                                                 AS SLIPDT
+            ,CK_APPROVAL.SKU                                                    AS SKU
+            ,FN_DESCR_SKU('FW00', CK_APPROVAL.SKU)                              AS SKUNAME
+            ,CK_APPROVAL.ORDERQTY                                               AS ORDERQTY
+            ,CK_APPROVAL.UOM                                                    AS UOM
+            ,CK_APPROVAL.APPR_STATUS                                            AS APPR_STATUS
+            ,CK_APPROVAL.ADDWHO						                            AS ADDWHO
+            ,CK_APPROVAL.ADDDATE              									AS ADDDATE
+            ,CK_APPROVAL.EDITWHO												AS EDITWHO
+            ,CK_APPROVAL.EDITDATE              									AS EDITDATE
+            ,USER1.USER_NM										 				AS REG_NM				  /* 등록자명 */
+			,USER2.USER_NM										 				AS UPD_NM				  /* 수정자명 */
+        FROM CK_APPROVAL
+        
+   LEFT JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = CK_APPROVAL.ADDWHO  		/*등록자명*/
+   LEFT JOIN FRAMEONE_USER USER2 ON USER2.USER_ID = CK_APPROVAL.EDITWHO  		/*수정자명*/
+        
+        WHERE 1=1
+        AND TO_DATE(CK_APPROVAL.DELIVERYDATE, 'YYYYMMDD') <![CDATA[>=]]> TO_DATE(#{dateFrom}, 'YYYYMMDD')
+        AND TO_DATE(CK_APPROVAL.DELIVERYDATE, 'YYYYMMDD') <![CDATA[<]]> TO_DATE(#{dateTo}, 'YYYYMMDD') + 1
+
+        <if test='requestno != null and requestno != ""'>
+            AND CK_APPROVAL.REQUESTNO = #{requestno}
+        </if>
+        
+        <if test='apprStatus != null and apprStatus != ""'>
+            AND CK_APPROVAL.APPR_STATUS = #{apprStatus}
+        </if>
+        <if test='skuMulti != null and skuMulti != ""'>
+            <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                <foreach collection="skuMulti" item="item">
+                    OR CK_APPROVAL.SKU IN
+                    <foreach collection="item" item="code" open="(" close=")" separator=",">
+                        #{code}
+                    </foreach>
+                </foreach>
+            </trim>            
+        </if>
+
+        ORDER BY SKU ASC, REQUESTNO DESC
+    </select>
+        	
+	<update id="saveMasterList">
+		BEGIN
+	        /* [omCkApprovalService.sqlx][omCkApprovalService.saveMasterList][저장][JeongHyeongCheol][20250926] */
+	         UPDATE CK_APPROVAL
+			   SET APPR_STATUS	= #{apprStatus}  
+			  	  ,EDITDATE     = SYSDATE
+				  ,EDITWHO      = #{gUserId}
+			 WHERE SERIALKEY    = #{serialkey} ;
+			 
+			 INSERT INTO IF_CK_APPROVALRESULT
+				(SERIALKEY,
+				REQUESTNO,
+				REQUESTLINE,
+				DELIVERYDATE,
+				GUBUN,
+				SLIPDT,
+				DOCNO,
+				DOCLINE,
+				SKU,
+				ORDERQTY,
+				UOM,
+				PLANT,
+				ORGANIZE,
+				APPR_STATUS,
+				ADDDATE,
+				EDITDATE,
+				ADDWHO,
+				EDITWHO,
+				IF_DESTINATION,
+				IF_FLAG,
+				IF_CNT,
+				IF_DATE,
+				IF_MEMO,
+				IF_ID)
+			SELECT
+				SERIALKEY,
+				REQUESTNO,
+				REQUESTLINE,
+				DELIVERYDATE,
+				GUBUN,
+				SLIPDT,
+				DOCNO,
+				DOCLINE,
+				SKU,
+				ORDERQTY,
+				UOM,
+				PLANT,
+				ORGANIZE,
+				#{apprStatus},
+				sysdate,
+				sysdate,
+				#{gUserId},
+				#{gUserId},
+				IF_DESTINATION,
+				'N',
+				IF_CNT,
+				IF_DATE,
+				IF_MEMO,
+				IF_ID
+			FROM IF_CK_APPROVAL
+			WHERE SERIALKEY = #{serialkey} ;
+		END;
+	</update>   
+    
+</mapper>

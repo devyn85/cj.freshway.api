@@ -1,0 +1,975 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="stStockLotMonitoringService">
+    
+    <!-- 유통기한 점검 조회 -->
+	<select id="getMasterList" resultType="StStockLotMonitoringResDto">
+		WITH WITH_PURCHASESTATS AS	/* [stStockLotMonitoringService.sqlx][stStockLotMonitoringService.getMasterList][유통기한 점검 조회(목록)][JeongHyeongCheol][20251014] */ 
+		(
+            SELECT
+					 MS_PURCHASESTATS.DCCODE
+					,MS_PURCHASESTATS.STORERKEY
+					,MS_PURCHASESTATS.SKU
+					,MS_PURCHASESTATS.ORGANIZE
+					,MS_PURCHASESTATS.AREA
+					,MAX(MS_PURCHASESTATS.SHIPQTY1W) 												AS SHIPQTY1W
+					,MAX(MS_PURCHASESTATS.SHIPQTY2W) 												AS SHIPQTY2W
+					,MAX(MS_PURCHASESTATS.SHIPQTY3W) 												AS SHIPQTY3W
+					,MAX(MS_PURCHASESTATS.SHIPDAY1W) 												AS SHIPDAY1W
+					,MAX(MS_PURCHASESTATS.SHIPDAY2W) 												AS SHIPDAY2W
+					,MAX(MS_PURCHASESTATS.SHIPDAY3W) 												AS SHIPDAY3W
+					,MAX(MS_PURCHASESTATS.ORDCNT1W) 												AS ORDCNT1W
+					,MAX(MS_PURCHASESTATS.ORDCNT2W) 												AS ORDCNT2W
+					,MAX(MS_PURCHASESTATS.ORDCNT3W) 												AS ORDCNT3W
+					,MAX(MS_PURCHASESTATS.STOCKAVGDAY) 												AS STOCKAVGDAY
+            FROM 	 MS_PURCHASESTATS
+            GROUP BY MS_PURCHASESTATS.DCCODE, MS_PURCHASESTATS.STORERKEY, MS_PURCHASESTATS.SKU, MS_PURCHASESTATS.ORGANIZE, MS_PURCHASESTATS.AREA
+        ),
+		WITH_BUYER AS (
+		    /* BUYER 정보를 미리 집계하여 중복 방지 */
+		    SELECT 
+			      DCCODE
+			    , STORERKEY
+			    , SKU
+			    , MIN(BUYERKEY) KEEP (DENSE_RANK FIRST ORDER BY CUSTTYPE DESC) AS BUYERKEY
+			    , MIN(CUSTTYPE) AS CUSTTYPE
+			FROM MS_PURCHASEMST
+			WHERE BUYERKEY != 'STD'
+			GROUP BY DCCODE, STORERKEY, SKU
+		)
+        SELECT
+             ST_STOCK.DCCODE 																		AS DCCODE
+            ,ST_STOCK.ORGANIZE 																		AS ORGANIZE
+            ,FN_CODEDESCR(ST_STOCK.STORERKEY, 'STOCKTYPE', ST_STOCK.STOCKTYPE) 						AS STOCKTYPE
+            ,FN_CODEDESCR(ST_STOCK.STORERKEY, 'STOCKGRADE', ST_STOCK.STOCKGRADE) 					AS STOCKGRADE
+            ,MS_LOCATION.ZONE 																		AS ZONE
+            ,MS_LOCATION.PLT_FLG 																	AS PLT_FLG
+            ,ST_STOCK.LOC 																			AS LOC
+            ,ST_STOCK.SKU 																			AS SKU
+            ,MS_SKU.DESCRIPTION 																	AS SKUNAME
+            ,ST_STOCK.UOM 																			AS UOM
+            ,ROUND(ST_STOCK.QTY, 2)																	AS QTY
+            ,MS_SKU.QTYPERBOX 																		AS QTYPERBOX
+            ,ST_STOCK.OPENQTY 																		AS OPENQTY
+            ,ST_STOCK.QTYALLOCATED 																	AS QTYALLOCATED
+            ,ST_STOCK.QTYPICKED
+            ,CASE
+               WHEN MS_SKU.DURATIONTYPE = '1' THEN '유통(~까지)'
+               WHEN MS_SKU.DURATIONTYPE = '2' THEN '제조(까지)'
+               WHEN MS_SKU.DURATIONTYPE = '3' THEN '유통기간 해당 없음'
+               WHEN MS_SKU.DURATIONTYPE = '4' THEN '유통(~까지)'
+               WHEN MS_SKU.DURATIONTYPE = 'N' THEN '유통기간 해당 없음'
+               ELSE UNISTR('')
+			 END AS DURATIONTYPE_NAME
+            ,FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01, 'Y') AS NEARDURATIONYN
+            ,CASE 
+            	WHEN VALIDATE_CONVERSION(REPLACE(CM_LOT.LOTTABLE01, '-', '') AS DATE, 'YYYYMMDD') = 0
+    			THEN CM_LOT.LOTTABLE01
+            	ELSE TO_CHAR(TO_DATE(REPLACE(CM_LOT.LOTTABLE01, '-', ''), 'YYYYMMDD'), 'YYYY-MM-DD')									
+             END AS LOTTABLE01
+            
+            /*START.제조일자/소비일자*/
+			/*
+			* 기준일(제조) ~까지 : DURATIONTYPE =1 일때 , LOTTABLE01 - DURATION 
+			*             DURATIONTYPE =2 일때 LOTTABLE01 
+			* 기준일(소비) ~부터 : DURATIONTYPE =1 일때 LOTTABLE01
+			*             DURATIONTYPE =2일때 LOTTABLE01 + DURATION  -1
+			*/
+			
+			/* 2026-03-11 KSH 상품소비기한-유통기한점검: 제조일자를 재고조회의 제조일와 동일하게 조회 FWNEXTWMS-8120 양준영 요청 */
+			,/*CASE WHEN VALIDATE_CONVERSION(CM_LOT.LOTTABLE01 AS DATE, 'YYYYMMDD') = 1  
+			      THEN (CASE WHEN MS_SKU.DURATIONTYPE = '1' 
+			                 THEN TO_CHAR(TO_DATE(REPLACE(CM_LOT.LOTTABLE01,'-',''),'YYYYMMDD') - MS_SKU.DURATION,'YYYY-MM-DD')
+			                 WHEN MS_SKU.DURATIONTYPE = '2'
+			                 THEN TO_CHAR(TO_DATE(REPLACE(CM_LOT.LOTTABLE01,'-',''),'YYYYMMDD'),'YYYY-MM-DD')
+			                 ELSE TO_CHAR(TO_DATE(REPLACE(CM_LOT.LOTTABLE01,'-',''),'YYYYMMDD') - MS_SKU.DURATION,'YYYY-MM-DD') END)
+			      ELSE CM_LOT.LOTTABLE01 END                
+			 */
+			 LOGISONESVC.FN_LOTTABLE_INFO('1',ST_STOCK.STORERKEY,CM_LOT.LOTTABLE01,MS_SKU.DURATIONTYPE,MS_SKU.DURATION,'')     
+			 AS MANUFACTUREDT   /*제조일자*/
+			 
+			,CASE WHEN VALIDATE_CONVERSION(CM_LOT.LOTTABLE01 AS DATE, 'YYYYMMDD') = 1  
+			      THEN (CASE WHEN MS_SKU.DURATIONTYPE = '1' 
+			                 THEN TO_CHAR(TO_DATE(REPLACE(CM_LOT.LOTTABLE01,'-',''),'YYYYMMDD'),'YYYY-MM-DD')
+			                 WHEN MS_SKU.DURATIONTYPE = '2'
+			                 THEN TO_CHAR(TO_DATE(REPLACE(CM_LOT.LOTTABLE01,'-',''),'YYYYMMDD') + MS_SKU.DURATION -1,'YYYY-MM-DD')
+			                 ELSE TO_CHAR(TO_DATE(REPLACE(CM_LOT.LOTTABLE01,'-',''),'YYYYMMDD'),'YYYY-MM-DD') END)
+			      ELSE CM_LOT.LOTTABLE01 END                AS EXPIREDT          /*소비일자*/
+            
+            ,FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01, 'N0') ||'/'|| MS_SKU.DURATION AS DURATION_TERM
+            ,CASE WHEN CM_LOT.LOTTABLE01 = 'STD' THEN UNISTR('') ELSE
+               ROUND(FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01,'N')/NULLIF(MS_SKU.DURATION, 0)*100,0)||'%' END PERSENT
+            ,CASE
+               WHEN CM_LOT.LOTTABLE01 = 'STD' THEN UNISTR('')
+               WHEN ROUND(FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01,'N')/NULLIF(MS_SKU.DURATION, 0)*100,0) <![CDATA[<]]> 30 THEN '30%미만'
+               WHEN ROUND(FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01,'N')/NULLIF(MS_SKU.DURATION, 0)*100,0) <![CDATA[<]]> 50 THEN '50%미만'
+               /* 2026-03-11 KSH 상품소비기한-유통기한점검: 소비기한잔여(구분)이 소비기간(잔여(%)가 50%인 경우 50%이상으로 표시 FWNEXTWMS-8122 */
+               WHEN ROUND(FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01,'N')/NULLIF(MS_SKU.DURATION, 0)*100,0) <![CDATA[>=]]> 50 THEN '50%이상'
+			 END AS PERCENT_DIV
+            ,ST_SERIALINFO.SERIALNO 																AS SERIALNO
+            ,FN_CODEDESCR(MS_SKU.STORERKEY, 'STORAGETYPE', MS_SKU.STORAGETYPE) 						AS STORAGETYPE
+            ,MS_SKU.DURATION 																		AS DURATION
+            ,MS_SKU.DURATIONTYPE 																	AS DURATIONTYPE
+            ,NVL(WITH_PURCHASESTATS.SHIPQTY1W,0) 													AS SHIPQTY1W
+            ,NVL(WITH_PURCHASESTATS.SHIPQTY2W,0) 													AS SHIPQTY2W
+            ,NVL(WITH_PURCHASESTATS.SHIPQTY3W,0) 													AS SHIPQTY3W
+            ,NVL(WITH_PURCHASESTATS.SHIPDAY1W, 0) 												    AS SHIPDAY1W
+            ,NVL(WITH_PURCHASESTATS.SHIPDAY2W, 0) 												    AS SHIPDAY2W
+            ,NVL(WITH_PURCHASESTATS.SHIPDAY3W, 0) 												    AS SHIPDAY3W
+            ,NVL(WITH_PURCHASESTATS.ORDCNT1W,0) 													AS ORDCNT1W
+            ,NVL(WITH_PURCHASESTATS.ORDCNT2W,0) 													AS ORDCNT2W
+            ,NVL(WITH_PURCHASESTATS.ORDCNT3W,0) 													AS ORDCNT3W
+            ,ROUND(NVL(WITH_PURCHASESTATS.STOCKAVGDAY,0),2) 										AS AVG30
+            ,ROUND(ST_STOCK.QTY/DECODE(ROUND(NVL(WITH_PURCHASESTATS.SHIPQTY1W,0)/DECODE(26-NVL(WITH_PURCHASESTATS.SHIPDAY1W, 0),0,NULL,26-NVL(WITH_PURCHASESTATS.SHIPDAY1W, 0)),1),0,NULL,ROUND(NVL(WITH_PURCHASESTATS.SHIPQTY1W,0)/DECODE(26-NVL(WITH_PURCHASESTATS.SHIPDAY1W, 0),0,NULL,26-NVL(WITH_PURCHASESTATS.SHIPDAY1W, 0)),1)),0) AS GAPDT
+			,TO_CHAR(
+			    CASE 
+			        WHEN WITH_PURCHASESTATS.STOCKAVGDAY IS NULL 
+			             OR WITH_PURCHASESTATS.STOCKAVGDAY = 0
+			             OR ST_STOCK.QTY IS NULL
+			        THEN NULL
+			        ELSE SYSDATE + LEAST(
+			                ROUND(ST_STOCK.QTY / WITH_PURCHASESTATS.STOCKAVGDAY),
+			                36500
+			             )
+			    END
+			, 'YYYY-MM-DD') AS EXHAUSTIONDT
+			,CASE
+			    -- 재고 기반 계산 불가
+			    WHEN WITH_PURCHASESTATS.STOCKAVGDAY IS NULL 
+			         OR WITH_PURCHASESTATS.STOCKAVGDAY = 0
+			         OR ST_STOCK.QTY IS NULL
+			    THEN ''
+			
+			    -- LOT 이상값 차단
+			    WHEN CM_LOT.LOTTABLE01 IS NULL
+			         OR CM_LOT.LOTTABLE01 = ''
+			         OR LENGTH(REPLACE(CM_LOT.LOTTABLE01,'-','')) <![CDATA[<>]]> 8
+			    THEN ''
+				ELSE (
+					CASE
+					    WHEN MS_SKU.DURATION = 9999 THEN '소진가능'
+					
+					    WHEN CM_LOT.LOTTABLE01 = 'STD' THEN ''
+					
+					    -- NULL + '' 케이스 차단
+					    WHEN WITH_PURCHASESTATS.STOCKAVGDAY IS NULL
+					         OR WITH_PURCHASESTATS.STOCKAVGDAY = 0
+					         OR ST_STOCK.QTY IS NULL
+					         OR ROUND(ST_STOCK.QTY / NULLIF(WITH_PURCHASESTATS.STOCKAVGDAY,0)) IS NULL
+					    THEN ''
+					
+					    WHEN LENGTH(REPLACE(CM_LOT.LOTTABLE01,'-','')) <![CDATA[<>]]> 8 THEN ''
+					
+					    ELSE
+					        CASE
+					            WHEN TO_DATE(REPLACE(CM_LOT.LOTTABLE01,'-',''), 'YYYYMMDD') <![CDATA[<=]]> SYSDATE + 5
+					            THEN '소진불가'
+					
+					            WHEN TO_DATE(REPLACE(CM_LOT.LOTTABLE01,'-',''), 'YYYYMMDD') <![CDATA[<]]>
+					                 SYSDATE + ROUND(
+					                     ST_STOCK.QTY /
+					                     NULLIF(WITH_PURCHASESTATS.STOCKAVGDAY, 0)
+					                 )
+					            THEN '소진불가'
+					
+					            ELSE '소진가능'
+					        END
+					END
+				)
+			END AS EXHAUSTIONCHK
+            , FN_DESCR_CODE(ST_STOCK.STORERKEY, 'BUYERKEY', B.BUYERKEY) AS BUYERNAME
+        FROM ST_STOCK    
+              
+        <!-- END.권한센터	--> 
+        JOIN MS_SKU
+          ON MS_SKU.STORERKEY = ST_STOCK.STORERKEY
+         AND MS_SKU.SKU = ST_STOCK.SKU
+        <if test='storagetype != null and storagetype != ""'>
+            AND MS_SKU.STORAGETYPE LIKE #{storagetype}
+        </if>
+        <if test='skuMulti != null and skuMulti != ""'>
+            <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                <foreach collection="skuMulti" item="item">
+                    OR MS_SKU.SKU IN
+                    <foreach collection="item" item="code" open="(" close=")" separator=",">
+                        #{code}
+                    </foreach>
+                </foreach>
+            </trim>
+        </if>
+        JOIN CM_LOT
+          ON CM_LOT.STORERKEY = ST_STOCK.STORERKEY
+         AND CM_LOT.LOT = ST_STOCK.LOT
+         AND CM_LOT.DEL_YN = 'N'
+        <if test='lottable01yn != null and lottable01yn == "Y"'>
+            AND CM_LOT.LOTTABLE01 <![CDATA[<>]]> 'STD'
+            /* 추가: 소비기한 임박여부가 Y인 것만 조회 */
+            AND FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01, 'Y') = 'Y'
+        </if>
+        <if test='lottable01yn != null and lottable01yn == "N"'>
+            --AND CM_LOT.LOTTABLE01 = 'STD'
+            /* 추가: 소비기한 임박여부가 N인 것만 조회 (필요 시) */
+            AND CM_LOT.LOTTABLE01 <![CDATA[<>]]> 'STD'
+            AND FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01, 'Y') = 'N'
+        </if>
+        JOIN MS_LOCATION
+          ON MS_LOCATION.DCCODE = ST_STOCK.DCCODE
+         AND MS_LOCATION.LOC = ST_STOCK.LOC
+        LEFT OUTER JOIN ST_SNINFO ST_SERIALINFO
+          ON ST_STOCK.STORERKEY = ST_SERIALINFO.STORERKEY
+         AND ST_STOCK.SKU = ST_SERIALINFO.SKU
+         AND ST_STOCK.STOCKID = ST_SERIALINFO.STOCKID
+        LEFT OUTER JOIN WITH_PURCHASESTATS
+          ON WITH_PURCHASESTATS.DCCODE = ST_STOCK.DCCODE
+         AND WITH_PURCHASESTATS.STORERKEY = ST_STOCK.STORERKEY
+         AND WITH_PURCHASESTATS.SKU = ST_STOCK.SKU
+         AND WITH_PURCHASESTATS.ORGANIZE = ST_STOCK.ORGANIZE
+         AND WITH_PURCHASESTATS.AREA = ST_STOCK.AREA
+         
+        LEFT OUTER JOIN WITH_BUYER B
+		  ON B.DCCODE 		= ST_STOCK.DCCODE
+		 AND B.STORERKEY 	= ST_STOCK.STORERKEY
+		 AND B.SKU 			= ST_STOCK.SKU
+        
+        WHERE 1=1
+          AND ST_STOCK.STORERKEY = 'FW00'
+          
+      
+        <if test='fixdccode != null and fixdccode != ""'>
+            AND ST_STOCK.DCCODE = #{fixdccode}
+        </if>
+        <if test='organizeMulti != null and organizeMulti != ""'>
+            AND ST_STOCK.ORGANIZE IN
+            <foreach collection="organizeMulti" item="item" open="(" close=")" separator=",">
+                #{item}
+            </foreach>
+        </if>
+        <!-- START.권한센터 -->   
+    	AND EXISTS (SELECT 1
+                      FROM CM_USER_AUTHORITY 
+                     WHERE CM_USER_AUTHORITY.DCCODE    = ST_STOCK.DCCODE    
+                       AND CM_USER_AUTHORITY.STORERKEY = ST_STOCK.STORERKEY 
+                       AND CM_USER_AUTHORITY.ORGANIZE  = ST_STOCK.ORGANIZE  
+                       AND CM_USER_AUTHORITY.AREA      = ST_STOCK.AREA  
+                       AND CM_USER_AUTHORITY.USERID    = #{gUserId}
+                       AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey}
+			           <!-- START.다중센터 -->
+			           <choose>   
+			           	   <when test="fixdccode != null or fixdccode != ''">
+			  	              AND CM_USER_AUTHORITY.DCCODE = #{fixdccode}
+			           	   </when>
+			               <otherwise>
+			                  AND 1=2 /*full방지*/
+			               </otherwise>			    
+			           </choose>
+			           <!-- END.다중센터 -->                         
+                       AND CM_USER_AUTHORITY.AREA      = #{gArea}   
+			           <!-- 창고.다중검색 -->
+			           <if test="organizeMulti != null and organizeMulti != ''">
+				           AND CM_USER_AUTHORITY.ORGANIZE IN
+				           <foreach collection="organizeMulti" item="code" open="(" close=")" separator=",">
+				             #{code}
+				           </foreach>
+			           </if>                       
+                   )     
+        <if test='stocktype != null and stocktype != ""'>
+            AND ST_STOCK.STOCKTYPE = #{stocktype}
+        </if>
+        <if test='stockgrade != null and stockgrade != ""'>
+            AND ST_STOCK.STOCKGRADE = #{stockgrade}
+        </if>
+        <if test='fromloc != null and fromloc != ""'>
+            AND ST_STOCK.LOC <![CDATA[>=]]> #{fromloc}
+        </if>
+        <if test='toloc != null and toloc != ""'>
+            AND ST_STOCK.LOC <![CDATA[<=]]> #{toloc}
+        </if>
+        <if test='zone != null and zone != ""'>
+            AND EXISTS (SELECT 1
+                        FROM TABLE(FN_SPLIT_ARRAY(#{zone},',')) T
+                        WHERE T.COLUMN_VALUE = MS_LOCATION.ZONE )
+        </if>
+        <if test='serialno != null and serialno != ""'>
+            AND ST_SERIALINFO.SERIALNO = #{serialno}
+        </if>
+        <if test='loccategory != null and loccategory != ""'>
+            AND MS_LOCATION.LOCCATEGORY LIKE #{loccategory}
+        </if>
+        <if test='lottable01 != null and lottable01 != ""'>
+            AND CM_LOT.LOTTABLE01 = #{lottable01}
+        </if>
+        <if test='zeroQtyYn != null and zeroQtyYn == "1"'>
+            AND ST_STOCK.QTY <![CDATA[<>]]> 0
+        </if>
+        <if test='exhaustionchk != null and exhaustionchk != ""'>
+		    AND (
+		        CASE
+		            WHEN MS_SKU.DURATION = 9999 
+		            THEN 'Y'
+		            WHEN CM_LOT.LOTTABLE01 = 'STD' 
+		            THEN 'EMPTY'
+		            ELSE
+		                CASE
+		                    WHEN TO_DATE(CM_LOT.LOTTABLE01, 'YYYYMMDD') <![CDATA[<=]]> 
+		                    	SYSDATE + 5 
+		                    THEN 'N'
+		                    WHEN TO_DATE(CM_LOT.LOTTABLE01, 'YYYYMMDD') <![CDATA[<]]> 
+		                    	SYSDATE + ROUND(ST_STOCK.QTY / DECODE(WITH_PURCHASESTATS.STOCKAVGDAY, 0, NULL, WITH_PURCHASESTATS.STOCKAVGDAY)) 
+		                    THEN 'N'
+		                    ELSE 'Y'
+		                END
+		        END
+		    ) = #{exhaustionchk}
+		</if>
+		
+		<if test='buyerkey != null and buyerkey != ""'>
+		AND B.BUYERKEY = #{buyerkey}
+		</if>
+        <if test='neardurationyn != null and neardurationyn != ""'>
+        AND FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01, 'Y') = #{neardurationyn}
+        </if>
+        
+        <choose>
+            <when test='sortkey != null and sortkey == "LOC"'>
+                ORDER BY ST_STOCK.DCCODE
+                , ST_STOCK.LOC
+                , ST_STOCK.STORERKEY
+                , ST_STOCK.SKU
+                , CM_LOT.LOTTABLE01
+            </when>
+            <when test='sortkey != null and sortkey == "DATE"'>
+                ORDER BY ST_STOCK.DCCODE
+                , ST_STOCK.STORERKEY
+                , ST_STOCK.SKU
+                , CM_LOT.LOTTABLE01
+            </when>
+            <otherwise>
+        		ORDER BY ST_STOCK.LOC            
+            </otherwise>
+        </choose>
+    </select>
+    
+    <!-- 유통기한 요약장표 소비기한 조회 -->
+	<select id="getDurationList" resultType="StStockLotMonitoringDurationResDto">
+		WITH WITH_PURCHASESTATS AS (	/* [stStockLotMonitoringService.sqlx][stStockLotMonitoringService.getDurationList][유통기한 요약장표 소비기한 조회(목록)][JeongHyeongCheol][20251014] */ 
+		    SELECT 
+		         DCCODE
+				,STORERKEY
+				,SKU
+				,ORGANIZE
+				,AREA
+				,MAX(STOCKAVGDAY) AS STOCKAVGDAY
+		    FROM MS_PURCHASESTATS
+		    GROUP BY DCCODE, STORERKEY, SKU, ORGANIZE, AREA
+		),
+		WITH_BUYER AS (
+		    /* BUYER 정보를 미리 집계하여 중복 방지 */
+		    SELECT 
+		         DCCODE
+		        ,STORERKEY
+		        ,SKU
+		        ,MAX(BUYERKEY) AS BUYERKEY
+		    FROM MS_PURCHASEMST
+		    WHERE BUYERKEY != 'STD'
+		    GROUP BY DCCODE, STORERKEY, SKU
+		),
+		BASE_DATA AS (
+		    SELECT 
+		         ST_STOCK.DCCODE
+				,MS_SKU.SKU
+				,ST_STOCK.QTY
+				,TRUNC(SYSDATE) + FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01,'N') AS REAL_EXP_DATE
+				,CASE
+		            WHEN CM_LOT.LOTTABLE01 = 'STD' THEN UNISTR('')
+		            WHEN ROUND(FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01,'N') / NULLIF(MS_SKU.DURATION, 0) * 100,0) <![CDATA[<]]> 15 THEN '15% 미만'
+		            WHEN ROUND(FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01,'N') / NULLIF(MS_SKU.DURATION, 0) * 100,0) <![CDATA[<]]> 30 THEN '30% 미만'
+		            WHEN ROUND(FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01,'N') / NULLIF(MS_SKU.DURATION, 0) * 100,0) <![CDATA[<]]> 50 THEN '50% 미만'
+		         END AS PERCENT_DIV
+				,TO_CHAR(SYSDATE + LEAST(ROUND(ST_STOCK.QTY / NULLIF(WITH_PURCHASESTATS.STOCKAVGDAY, 0)), 36500), 'YYYYMMDD') AS EXHAUSTIONDT_STR
+				/*,CASE 
+					WHEN NVL(MS_SKUCHAIN.SKU,'N') ='N' 
+					THEN 'N' 
+					ELSE 'Y' 
+				 END AS EXCLUSIVE_YN */
+				 ,NVL(MS_SKU.REFERENCE15, 'N') AS EXCLUSIVE_YN        -- 02/24 MS_SKU.REFERENCE15으로 전용/범용구분(BY 양준영)
+		    FROM ST_STOCK
+		    JOIN MS_SKU 
+			  ON MS_SKU.STORERKEY 	= ST_STOCK.STORERKEY 
+			 AND MS_SKU.SKU 		= ST_STOCK.SKU
+		    --LEFT JOIN MS_SKUCHAIN 
+			--  ON MS_SKUCHAIN.STORERKEY 	= ST_STOCK.STORERKEY 
+			-- AND MS_SKUCHAIN.SKU 		= ST_STOCK.SKU 
+		    JOIN CM_LOT 
+			  ON CM_LOT.STORERKEY 	= ST_STOCK.STORERKEY 
+			 AND CM_LOT.LOT 		= ST_STOCK.LOT 
+			 AND CM_LOT.DEL_YN 		= 'N'
+		    JOIN MS_LOCATION 
+			  ON MS_LOCATION.DCCODE = ST_STOCK.DCCODE 
+			 AND MS_LOCATION.LOC 	= ST_STOCK.LOC
+		    LEFT JOIN WITH_PURCHASESTATS 
+			  ON ST_STOCK.DCCODE 	= WITH_PURCHASESTATS.DCCODE 
+			 AND ST_STOCK.STORERKEY = WITH_PURCHASESTATS.STORERKEY 
+			 AND ST_STOCK.SKU 		= WITH_PURCHASESTATS.SKU
+			 
+			LEFT OUTER JOIN WITH_BUYER B
+			  ON B.DCCODE 		= ST_STOCK.DCCODE
+			 AND B.STORERKEY 	= ST_STOCK.STORERKEY
+			 AND B.SKU 			= ST_STOCK.SKU
+		 
+		    WHERE 1 = 1
+				<if test='storagetype != null and storagetype != ""'>
+		            AND MS_SKU.STORAGETYPE LIKE #{storagetype}
+		        </if>
+				<if test='skuMulti != null and skuMulti != ""'>
+		            <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+		                <foreach collection="skuMulti" item="item">
+		                    OR MS_SKU.SKU IN
+		                    <foreach collection="item" item="code" open="(" close=")" separator=",">
+		                        #{code}
+		                    </foreach>
+		                </foreach>
+		            </trim>
+		        </if>		
+				
+				<if test='lottable01yn != null and lottable01yn == "Y"'>
+		            AND CM_LOT.LOTTABLE01 <![CDATA[<>]]> 'STD'
+		            /* 추가: 소비기한 임박여부가 Y인 것만 조회 (필요 시) */
+		            AND FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01, 'Y') = 'Y'
+		        </if>
+		        <if test='lottable01yn != null and lottable01yn == "N"'>
+		            --AND CM_LOT.LOTTABLE01 = 'STD'
+		            /* 추가: 소비기한 임박여부가 N인 것만 조회 (필요 시) */
+		            AND CM_LOT.LOTTABLE01 <![CDATA[<>]]> 'STD'
+		            AND FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01, 'Y') = 'N'
+		        </if>
+				<if test='lottable01 != null and lottable01 != ""'>
+		            AND CM_LOT.LOTTABLE01 = #{lottable01}
+		        </if>
+		        		
+				AND ST_STOCK.STORERKEY = 'FW00'
+				<if test="fixdccode != null and fixdccode != ''">
+					AND ST_STOCK.DCCODE    = #{fixdccode}  
+				</if>
+				<if test='organizeMulti != null and organizeMulti != ""'>
+		            AND ST_STOCK.ORGANIZE IN
+		            <foreach collection="organizeMulti" item="item" open="(" close=")" separator=",">
+		                #{item}
+		            </foreach>
+		        </if>
+				<if test='stocktype != null and stocktype != ""'>
+		            AND ST_STOCK.STOCKTYPE = #{stocktype}
+		        </if>
+		        <if test='stockgrade != null and stockgrade != ""'>
+		            AND ST_STOCK.STOCKGRADE = #{stockgrade}
+		        </if>
+		        <if test='fromloc != null and fromloc != ""'>
+		            AND ST_STOCK.LOC <![CDATA[>=]]> #{fromloc}
+		        </if>
+		        <if test='toloc != null and toloc != ""'>
+		            AND ST_STOCK.LOC <![CDATA[<=]]> #{toloc}
+		        </if>
+				<if test='zeroQtyYn != null and zeroQtyYn == "1"'>
+		            AND ST_STOCK.QTY <![CDATA[<>]]> 0
+		        </if>
+		        
+				<if test='zone != null and zone != ""'>
+		            AND EXISTS (SELECT 1
+		                        FROM TABLE(FN_SPLIT_ARRAY(#{zone},',')) T
+		                        WHERE T.COLUMN_VALUE = MS_LOCATION.ZONE )
+		        </if>
+				<if test='loccategory != null and loccategory != ""'>
+		            AND MS_LOCATION.LOCCATEGORY LIKE #{loccategory}
+		        </if>
+		        
+		        <if test='exhaustionchk != null and exhaustionchk != ""'>
+				    AND (
+				        CASE
+				            WHEN MS_SKU.DURATION = 9999 
+				            THEN 'Y'
+				            WHEN CM_LOT.LOTTABLE01 = 'STD' 
+				            THEN 'EMPTY'
+				            ELSE
+				                CASE
+				                    WHEN TO_DATE(CM_LOT.LOTTABLE01, 'YYYYMMDD') <![CDATA[<=]]> 
+				                    	SYSDATE + 5 
+				                    THEN 'N'
+				                    WHEN TO_DATE(CM_LOT.LOTTABLE01, 'YYYYMMDD') <![CDATA[<]]> 
+				                    	SYSDATE + ROUND(ST_STOCK.QTY / DECODE(WITH_PURCHASESTATS.STOCKAVGDAY, 0, NULL, WITH_PURCHASESTATS.STOCKAVGDAY)) 
+				                    THEN 'N'
+				                    ELSE 'Y'
+				                END
+				        END
+				    ) = #{exhaustionchk}
+				</if>
+				
+				<if test='buyerkey != null and buyerkey != ""'>
+					AND B.BUYERKEY = #{buyerkey}
+				</if>
+				
+				<choose>
+		            <when test='sortkey != null and sortkey == "LOC"'>
+		                ORDER BY ST_STOCK.DCCODE
+		                , ST_STOCK.LOC
+		                , ST_STOCK.STORERKEY
+		                , ST_STOCK.SKU
+		                , CM_LOT.LOTTABLE01
+		            </when>
+		            <when test='sortkey != null and sortkey == "DATE"'>
+		                ORDER BY ST_STOCK.DCCODE
+		                , ST_STOCK.STORERKEY
+		                , ST_STOCK.SKU
+		                , CM_LOT.LOTTABLE01
+		            </when>
+		            <otherwise>
+		        		ORDER BY ST_STOCK.LOC            
+		            </otherwise>
+		        </choose>
+				
+		),
+		CALC_STATUS AS (
+		    SELECT 
+		         PERCENT_DIV
+				,EXCLUSIVE_YN
+				,QTY
+				,FLOOR(MONTHS_BETWEEN(TRUNC(REAL_EXP_DATE, 'MM'), TRUNC(SYSDATE, 'MM'))) AS MONTH_DIFF
+				,CASE 
+		            WHEN TO_DATE(EXHAUSTIONDT_STR, 'YYYYMMDD') <![CDATA[<=]]> REAL_EXP_DATE THEN '소진가능(예상)'
+		            ELSE '소진불가(예상)'
+		         END AS EXHAUST_STATUS
+		    FROM BASE_DATA
+		    WHERE PERCENT_DIV IS NOT NULL
+		),
+		DATA_AGG AS (
+		    SELECT
+		         CASE WHEN GROUPING(EXHAUST_STATUS) = 1 THEN '전체' ELSE EXHAUST_STATUS END AS COL_GUBUN
+				,CASE 
+		            WHEN GROUPING(PERCENT_DIV) = 1 
+					THEN 
+						CASE 
+							WHEN GROUPING(EXHAUST_STATUS) = 1 
+							THEN '' 
+							ELSE '합계' 
+						END
+		            ELSE PERCENT_DIV
+		        END AS COL_PERCENT
+				,CASE 
+		            WHEN GROUPING(EXCLUSIVE_YN) = 1 
+					THEN 
+						CASE 
+							WHEN GROUPING(PERCENT_DIV) = 0 
+							THEN '소계' 
+							ELSE '' 
+						END
+		            ELSE  DECODE(EXCLUSIVE_YN, 'Y', '전용', 'N', '범용') 
+		        END AS COL_TYPE
+				,DECODE(CASE 
+							WHEN GROUPING(EXHAUST_STATUS) = 1 
+							THEN '전체' 
+							ELSE EXHAUST_STATUS 
+						END, '전체', 1, '소진가능(예상)', 2, '소진불가(예상)', 3) AS SORT_1
+				,CASE 
+					WHEN GROUPING(PERCENT_DIV) = 1 
+					THEN 'ZZ' 
+					ELSE PERCENT_DIV 
+				 END AS SORT_2
+				,GROUPING(EXCLUSIVE_YN) AS SORT_3
+				,DECODE(EXCLUSIVE_YN, 'Y', 1, 'N', 2) AS SORT_4
+				,SUM(CASE 
+						WHEN MONTH_DIFF = 0 
+						THEN QTY 
+						ELSE 0 
+					END) AS V_M0
+				,SUM(CASE 
+						WHEN MONTH_DIFF = 1 
+						THEN QTY 
+						ELSE 0 
+					END) AS V_M1
+				,SUM(CASE 
+						WHEN MONTH_DIFF = 2 
+						THEN QTY 
+						ELSE 0 
+					END) AS V_M2
+				,SUM(CASE 
+						WHEN MONTH_DIFF = 3 
+						THEN QTY 
+						ELSE 0 
+					END) AS V_M3
+				,SUM(CASE 
+						WHEN MONTH_DIFF = 4 
+						THEN QTY 
+						ELSE 0 
+					END) AS V_M4
+				,SUM(QTY) AS V_TOTAL
+		    FROM CALC_STATUS
+			WHERE MONTH_DIFF IN (0,1,2,3,4)
+		    GROUP BY GROUPING SETS (
+		        (),
+		        (EXHAUST_STATUS),
+		        (EXHAUST_STATUS, PERCENT_DIV),
+		        (EXHAUST_STATUS, PERCENT_DIV, EXCLUSIVE_YN)
+		    )
+		)
+		SELECT 
+		     COL_GUBUN 		AS GUBUN
+			,COL_PERCENT 	AS PERCENT
+			,COL_TYPE 		AS TYPE
+			,COL_M0 		AS COL_M0
+			,COL_M1 		AS COL_M1
+			,COL_M2 		AS COL_M2
+			,COL_M3 		AS COL_M3
+			,COL_M4 		AS COL_M4
+			,COL_TOTAL 		AS COL_TOTAL
+		FROM (
+		    SELECT 
+		         0 AS ROW_ORDER
+				,1 AS SORT_1
+				,' ' AS SORT_2
+				,0 AS SORT_3
+				,0 AS SORT_4
+				,'구분' AS COL_GUBUN
+				,'잔여 소비기한' AS COL_PERCENT
+				,'전용/범용' AS COL_TYPE
+				,TO_CHAR(SYSDATE, 'FMMM')||'월' AS COL_M0               -- 1번째 달
+				,TO_CHAR(ADD_MONTHS(SYSDATE, 1), 'FMMM')||'월' AS COL_M1		 -- 2번째 달
+				,TO_CHAR(ADD_MONTHS(SYSDATE, 2), 'FMMM')||'월' AS COL_M2 -- 3번째 달
+				,TO_CHAR(ADD_MONTHS(SYSDATE, 3), 'FMMM')||'월' AS COL_M3 -- 4번째 달
+				,TO_CHAR(ADD_MONTHS(SYSDATE, 4), 'FMMM')||'월' AS COL_M4 -- 5번째 달
+				,'합계' AS COL_TOTAL
+		    FROM DUAL   
+		    UNION ALL   
+		    SELECT 
+		        1 AS ROW_ORDER, SORT_1, SORT_2, SORT_3, SORT_4,
+		        COL_GUBUN, COL_PERCENT, COL_TYPE,
+		        
+		        -- 2026-03-10 KSH 그리드에서 마우시 우클릭시 SUM,AVG 표시를 위해서 수정 FWNEXTWMS-7980
+		        -- TRIM(TO_CHAR(V_M0, '999,999,999,999')) AS COL_M0,
+		        -- TRIM(TO_CHAR(V_M1, '999,999,999,999')) AS COL_M1,
+		        -- TRIM(TO_CHAR(V_M2, '999,999,999,999')) AS COL_M2,
+		        -- TRIM(TO_CHAR(V_M3, '999,999,999,999')) AS COL_M3,
+		        -- TRIM(TO_CHAR(V_M4, '999,999,999,999')) AS COL_M4,
+		        -- TRIM(TO_CHAR(V_TOTAL, '999,999,999,999')) AS COL_TOTAL
+		        TRIM(TO_CHAR(V_M0   )) AS COL_M0,
+		        TRIM(TO_CHAR(V_M1   )) AS COL_M1,
+		        TRIM(TO_CHAR(V_M2   )) AS COL_M2,
+		        TRIM(TO_CHAR(V_M3   )) AS COL_M3,
+		        TRIM(TO_CHAR(V_M4   )) AS COL_M4,
+		        TRIM(TO_CHAR(V_TOTAL)) AS COL_TOTAL
+		        
+		    FROM DATA_AGG
+		)
+		ORDER BY ROW_ORDER, SORT_1, SORT_2, SORT_3 DESC, SORT_4
+    </select>
+    
+    <!-- 유통기한 요약장표 저장조건 조회 -->
+	<select id="getStoragetypeList" resultType="StStockLotMonitoringStoragetypeResDto">
+		WITH WITH_PURCHASESTATS AS (	/* [stStockLotMonitoringService.sqlx][stStockLotMonitoringService.getStoragetypeList][유통기한 요약장표 소비기한 조회(목록)][JeongHyeongCheol][20251014] */ 
+		    SELECT 
+		         DCCODE
+				,STORERKEY
+				,SKU
+				,ORGANIZE
+				,AREA
+				,MAX(STOCKAVGDAY) AS STOCKAVGDAY
+		    FROM MS_PURCHASESTATS
+		    GROUP BY DCCODE, STORERKEY, SKU, ORGANIZE, AREA
+		),
+		WITH_BUYER AS (
+		    /* BUYER 정보를 미리 집계하여 중복 방지 */
+		    SELECT 
+		         DCCODE
+		        ,STORERKEY
+		        ,SKU
+		        ,MAX(BUYERKEY) AS BUYERKEY
+		    FROM MS_PURCHASEMST
+		    WHERE BUYERKEY != 'STD'
+		    GROUP BY DCCODE, STORERKEY, SKU
+		),
+		BASE_DATA AS (
+		    SELECT 
+		         ST_STOCK.DCCODE
+				,MS_SKU.SKU
+				,ST_STOCK.QTY
+				,MS_SKU.STORAGETYPE
+				,TRUNC(SYSDATE) + FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01,'N') AS REAL_EXP_DATE
+				,CASE
+		            WHEN CM_LOT.LOTTABLE01 = 'STD' THEN UNISTR('')
+		            WHEN ROUND(FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01,'N') / NULLIF(MS_SKU.DURATION, 0) * 100,0) <![CDATA[<]]> 15 THEN '15% 미만'
+		            WHEN ROUND(FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01,'N') / NULLIF(MS_SKU.DURATION, 0) * 100,0) <![CDATA[<]]> 30 THEN '30% 미만'
+		            WHEN ROUND(FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01,'N') / NULLIF(MS_SKU.DURATION, 0) * 100,0) <![CDATA[<]]> 50 THEN '50% 미만'
+		         END AS PERCENT_DIV
+				,TO_CHAR(SYSDATE + LEAST(ROUND(ST_STOCK.QTY / NULLIF(WITH_PURCHASESTATS.STOCKAVGDAY, 0)), 36500), 'YYYYMMDD') AS EXHAUSTIONDT_STR
+				/* ,CASE 
+					WHEN NVL(MS_SKUCHAIN.SKU,'N') ='N' 
+					THEN 'N' 
+					ELSE 'Y' 
+				 END AS EXCLUSIVE_YN */
+				 ,NVL(MS_SKU.REFERENCE15, 'N') AS EXCLUSIVE_YN        -- 02/24 MS_SKU.REFERENCE15으로 전용/범용구분(BY 양준영)
+		    FROM ST_STOCK
+		    JOIN MS_SKU 
+			  ON MS_SKU.STORERKEY 	= ST_STOCK.STORERKEY 
+			 AND MS_SKU.SKU 		= ST_STOCK.SKU
+		    --LEFT JOIN MS_SKUCHAIN 
+			--  ON MS_SKUCHAIN.STORERKEY 	= ST_STOCK.STORERKEY 
+			-- AND MS_SKUCHAIN.SKU 		= ST_STOCK.SKU 
+		    JOIN CM_LOT 
+			  ON CM_LOT.STORERKEY 	= ST_STOCK.STORERKEY 
+			 AND CM_LOT.LOT 		= ST_STOCK.LOT 
+			 AND CM_LOT.DEL_YN 		= 'N'
+		    JOIN MS_LOCATION 
+			  ON MS_LOCATION.DCCODE = ST_STOCK.DCCODE 
+			 AND MS_LOCATION.LOC 	= ST_STOCK.LOC
+		    LEFT JOIN WITH_PURCHASESTATS 
+			  ON ST_STOCK.DCCODE 	= WITH_PURCHASESTATS.DCCODE 
+			 AND ST_STOCK.STORERKEY = WITH_PURCHASESTATS.STORERKEY 
+			 AND ST_STOCK.SKU 		= WITH_PURCHASESTATS.SKU
+			 
+			LEFT OUTER JOIN WITH_BUYER B
+			  ON B.DCCODE 		= ST_STOCK.DCCODE
+			 AND B.STORERKEY 	= ST_STOCK.STORERKEY
+			 AND B.SKU 			= ST_STOCK.SKU
+			 
+		    WHERE 1 = 1
+				AND ST_STOCK.STORERKEY = 'FW00'
+				<if test='storagetype != null and storagetype != ""'>
+					AND MS_SKU.STORAGETYPE LIKE #{storagetype}
+				</if>
+				<if test='skuMulti != null and skuMulti != ""'>
+					<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+						<foreach collection="skuMulti" item="item">
+							OR MS_SKU.SKU IN
+							<foreach collection="item" item="code" open="(" close=")" separator=",">
+								#{code}
+							</foreach>
+						</foreach>
+					</trim>
+				</if>		
+				
+				<if test='lottable01yn != null and lottable01yn == "Y"'>
+					AND CM_LOT.LOTTABLE01 <![CDATA[<>]]> 'STD'
+					AND FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01, 'Y') = 'Y'
+				</if>
+				<if test='lottable01yn != null and lottable01yn == "N"'>
+					--AND CM_LOT.LOTTABLE01 = 'STD'
+					/* 추가: 소비기한 임박여부가 N인 것만 조회 (필요 시) */
+		            AND CM_LOT.LOTTABLE01 <![CDATA[<>]]> 'STD'
+		            AND FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01, 'Y') = 'N'
+				</if>
+				<if test='lottable01 != null and lottable01 != ""'>
+					AND CM_LOT.LOTTABLE01 = #{lottable01}
+				</if>
+						
+				AND ST_STOCK.STORERKEY = 'FW00'
+				<if test="fixdccode != null and fixdccode != ''">
+					AND ST_STOCK.DCCODE    = #{fixdccode}  
+				</if>
+				<if test='organizeMulti != null and organizeMulti != ""'>
+					AND ST_STOCK.ORGANIZE IN
+					<foreach collection="organizeMulti" item="item" open="(" close=")" separator=",">
+						#{item}
+					</foreach>
+				</if>
+				<if test='stocktype != null and stocktype != ""'>
+					AND ST_STOCK.STOCKTYPE = #{stocktype}
+				</if>
+				<if test='stockgrade != null and stockgrade != ""'>
+					AND ST_STOCK.STOCKGRADE = #{stockgrade}
+				</if>
+				<if test='fromloc != null and fromloc != ""'>
+					AND ST_STOCK.LOC <![CDATA[>=]]> #{fromloc}
+				</if>
+				<if test='toloc != null and toloc != ""'>
+					AND ST_STOCK.LOC <![CDATA[<=]]> #{toloc}
+				</if>
+				<if test='zeroQtyYn != null and zeroQtyYn == "1"'>
+					AND ST_STOCK.QTY <![CDATA[<>]]> 0
+				</if>
+				
+				<if test='zone != null and zone != ""'>
+					AND EXISTS (SELECT 1
+								FROM TABLE(FN_SPLIT_ARRAY(#{zone},',')) T
+								WHERE T.COLUMN_VALUE = MS_LOCATION.ZONE )
+				</if>
+				<if test='loccategory != null and loccategory != ""'>
+					AND MS_LOCATION.LOCCATEGORY LIKE #{loccategory}
+				</if>
+				
+				<if test='exhaustionchk != null and exhaustionchk != ""'>
+				    AND (
+				        CASE
+				            WHEN MS_SKU.DURATION = 9999 
+				            THEN 'Y'
+				            WHEN CM_LOT.LOTTABLE01 = 'STD' 
+				            THEN 'EMPTY'
+				            ELSE
+				                CASE
+				                    WHEN TO_DATE(CM_LOT.LOTTABLE01, 'YYYYMMDD') <![CDATA[<=]]> 
+				                    	SYSDATE + 5 
+				                    THEN 'N'
+				                    WHEN TO_DATE(CM_LOT.LOTTABLE01, 'YYYYMMDD') <![CDATA[<]]> 
+				                    	SYSDATE + ROUND(ST_STOCK.QTY / DECODE(WITH_PURCHASESTATS.STOCKAVGDAY, 0, NULL, WITH_PURCHASESTATS.STOCKAVGDAY)) 
+				                    THEN 'N'
+				                    ELSE 'Y'
+				                END
+				        END
+				    ) = #{exhaustionchk}
+				</if>
+				
+				<if test='buyerkey != null and buyerkey != ""'>
+					AND B.BUYERKEY = #{buyerkey}
+				</if>
+				
+				<choose>
+					<when test='sortkey != null and sortkey == "LOC"'>
+						ORDER BY ST_STOCK.DCCODE
+						, ST_STOCK.LOC
+						, ST_STOCK.STORERKEY
+						, ST_STOCK.SKU
+						, CM_LOT.LOTTABLE01
+					</when>
+					<when test='sortkey != null and sortkey == "DATE"'>
+						ORDER BY ST_STOCK.DCCODE
+						, ST_STOCK.STORERKEY
+						, ST_STOCK.SKU
+						, CM_LOT.LOTTABLE01
+					</when>
+					<otherwise>
+						ORDER BY ST_STOCK.LOC            
+					</otherwise>
+				</choose> 
+		),
+		CALC_STATUS AS (
+		    SELECT 
+		         PERCENT_DIV
+				,EXCLUSIVE_YN
+				,STORAGETYPE
+				,QTY
+				,FLOOR(MONTHS_BETWEEN(TRUNC(REAL_EXP_DATE, 'MM'), TRUNC(SYSDATE, 'MM'))) AS MONTH_DIFF
+				,CASE 
+		            WHEN TO_DATE(EXHAUSTIONDT_STR, 'YYYYMMDD') <![CDATA[<=]]> REAL_EXP_DATE 
+					THEN '소진가능(예상)'
+		            ELSE '소진불가(예상)'
+		         END AS EXHAUST_STATUS
+		    FROM BASE_DATA
+		    WHERE PERCENT_DIV IS NOT NULL
+		),
+		DATA_AGG AS (
+		    SELECT
+		         CASE 
+		            WHEN GROUPING(EXHAUST_STATUS) = 1 
+					THEN '전체' 
+		            ELSE EXHAUST_STATUS 
+		         END AS COL_GUBUN
+				,CASE 
+		            WHEN GROUPING(EXCLUSIVE_YN) = 1 
+					THEN 
+		                 CASE 
+							WHEN GROUPING(EXHAUST_STATUS) = 1 
+							THEN '' 
+							ELSE '합계' 
+						 END
+		            ELSE DECODE(EXCLUSIVE_YN, 'N', '범용', 'Y', '전용') 
+		         END AS COL_TYPE_GRP
+				,CASE
+					WHEN GROUPING(EXHAUST_STATUS) = 1 
+	                THEN ''
+	                ELSE
+	                	CASE 
+				            WHEN GROUPING(STORAGETYPE) = 1 
+							THEN '소계' 
+				            ELSE 
+				                 DECODE(STORAGETYPE, 
+				                    '30', '냉동', 
+				                    '20', '냉장', 
+				                    '10', '실온', 
+				                    '기타('||STORAGETYPE||')')
+						 END
+				 END AS COL_STORAGE
+				,DECODE(CASE 
+							WHEN GROUPING(EXHAUST_STATUS) = 1 
+							THEN '전체' 
+							ELSE EXHAUST_STATUS 
+						END, '전체', 1, '소진가능(예상)', 2, '소진불가(예상)', 3) 		AS SORT_1
+				,GROUPING(EXCLUSIVE_YN) 										AS SORT_2 	-- 범용/전용 그룹핑 여부
+				,EXCLUSIVE_YN 													AS SORT_3   -- 범용(N) -> 전용(Y) 순서
+				,GROUPING(STORAGETYPE) 											AS SORT_4  	-- 소계가 위로 오게(1), 상세가 아래로(0)
+		        ,DECODE(STORAGETYPE, '30', 1, '20', 2, '10', 3, 99) 			AS SORT_5	-- 저장조건 정렬 (냉동 -> 냉장 -> 실온 순서로 보이게 설정)
+				-- 5개월치 데이터 (0~4)        
+				,SUM(CASE WHEN MONTH_DIFF = 0 THEN QTY ELSE 0 END) AS V_M0
+				,SUM(CASE WHEN MONTH_DIFF = 1 THEN QTY ELSE 0 END) AS V_M1
+				,SUM(CASE WHEN MONTH_DIFF = 2 THEN QTY ELSE 0 END) AS V_M2
+				,SUM(CASE WHEN MONTH_DIFF = 3 THEN QTY ELSE 0 END) AS V_M3
+				,SUM(CASE WHEN MONTH_DIFF = 4 THEN QTY ELSE 0 END) AS V_M4
+				,SUM(QTY) AS V_TOTAL
+		    FROM CALC_STATUS
+		    WHERE MONTH_DIFF IN (0,1,2,3,4)
+		    GROUP BY GROUPING SETS (
+		        (),                                              -- 1. 전체 합계
+		        (EXHAUST_STATUS),                                -- 2. 상태별 합계 (소진가능/불가)
+		        (EXHAUST_STATUS, EXCLUSIVE_YN),                  -- 3. 상태 > 전용/범용 소계
+		        (EXHAUST_STATUS, EXCLUSIVE_YN, STORAGETYPE)      -- 4. 상태 > 전용/범용 > 저장조건 상세
+		    )
+		)
+		SELECT 
+		     COL_GUBUN 		AS GUBUN
+			,COL_TYPE_GRP 	AS TYPE
+			,COL_STORAGE 	AS STORAGETYPE
+			,COL_M0 		AS COL_M0
+			,COL_M1 		AS COL_M1
+			,COL_M2 		AS COL_M2
+			,COL_M3 		AS COL_M3
+			,COL_M4 		AS COL_M4
+			,COL_TOTAL 		AS COL_TOTAL
+		FROM (
+		    SELECT 
+		         0 			AS ROW_ORDER
+				,1 			AS SORT_1
+				,0 			AS SORT_2
+				,' ' 		AS SORT_3
+				,0 			AS SORT_4
+				,0 			AS SORT_5
+				,'구분' 		AS COL_GUBUN
+				,'전용/범용' 	AS COL_TYPE_GRP
+				,'저장조건' 	AS COL_STORAGE
+				,TO_CHAR(SYSDATE, 'FMMM')||'월' AS COL_M0
+				,TO_CHAR(ADD_MONTHS(SYSDATE, 1), 'FMMM')||'월' AS COL_M1
+				,TO_CHAR(ADD_MONTHS(SYSDATE, 2), 'FMMM')||'월' AS COL_M2
+				,TO_CHAR(ADD_MONTHS(SYSDATE, 3), 'FMMM')||'월' AS COL_M3
+				,TO_CHAR(ADD_MONTHS(SYSDATE, 4), 'FMMM')||'월' AS COL_M4
+				,'합계' AS COL_TOTAL
+		    FROM DUAL    
+		    UNION ALL
+		    SELECT 
+		         1 AS ROW_ORDER
+				,SORT_1
+				,SORT_2
+				,SORT_3
+				,SORT_4
+				,SORT_5
+				,COL_GUBUN, COL_TYPE_GRP, COL_STORAGE
+				
+				-- 2026-03-10 KSH 그리드에서 마우시 우클릭시 SUM,AVG 표시를 위해서 수정 FWNEXTWMS-7980
+				-- ,TRIM(TO_CHAR(V_M0, '999,999,999,999')) AS COL_M0
+				-- ,TRIM(TO_CHAR(V_M1, '999,999,999,999')) AS COL_M1
+				-- ,TRIM(TO_CHAR(V_M2, '999,999,999,999')) AS COL_M2
+				-- ,TRIM(TO_CHAR(V_M3, '999,999,999,999')) AS COL_M3
+				-- ,TRIM(TO_CHAR(V_M4, '999,999,999,999')) AS COL_M4
+				-- ,TRIM(TO_CHAR(V_TOTAL, '999,999,999,999')) AS COL_TOTAL
+				,TRIM(TO_CHAR(V_M0   )) AS COL_M0
+				,TRIM(TO_CHAR(V_M1   )) AS COL_M1
+				,TRIM(TO_CHAR(V_M2   )) AS COL_M2
+				,TRIM(TO_CHAR(V_M3   )) AS COL_M3
+				,TRIM(TO_CHAR(V_M4   )) AS COL_M4
+				,TRIM(TO_CHAR(V_TOTAL)) AS COL_TOTAL
+				
+		    FROM DATA_AGG
+		)
+		ORDER BY 
+		    ROW_ORDER,
+		    SORT_1,   
+		    SORT_2 DESC, 
+		    SORT_3,    
+		    SORT_4 DESC, 
+		    SORT_5
+    </select>
+    
+</mapper>

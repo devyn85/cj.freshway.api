@@ -1,0 +1,233 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cmUserService">
+    
+    <select id="getUserAuth" resultType="CmMainUserResDto">
+        SELECT /* [CmUserService.sqlx][getUserAuth][로그인 전 사용자 정보 조회][JangGwangSeok][2025.05.09] */
+		     USER_ID 			/* 사용자ID */
+		    ,USER_NM 			/* 사용자명 */
+		    ,PWD_NO 			/* 패스워드 */
+		    ,FAIL_IN_CNT 		/* 연속로그인실패수 */
+		    ,PWD_CHG_DT 		/* 최종패스워드갱신일자 */
+		    ,TO_CHAR(NVL(TO_DATE(TO_CHAR(SYSDATE, 'YYYYMMDD'), 'YYYYMMDD') - TO_DATE(TO_CHAR(PASSWDVALIDDATE, 'YYYYMMDD'), 'YYYYMMDD'), 0)) AS PWDREVBYDIFF /* 암호만료기간 */
+		    ,TO_CHAR(NVL(TO_DATE(TO_CHAR(SYSDATE, 'YYYYMMDD'), 'YYYYMMDD') - TO_DATE(TO_CHAR(USEVALIDDATE, 'YYYYMMDD'), 'YYYYMMDD'), 0)) AS USEREVBYDIFF /* 사용만료기간 */
+		    ,TO_CHAR(NVL(TO_DATE(TO_CHAR(SYSDATE, 'YYYYMMDD'), 'YYYYMMDD') - TO_DATE(TO_CHAR(FINAL_IN_DTM, 'YYYYMMDD'), 'YYYYMMDD'), 0)) AS LOGINDTDIFF /* 최종로그인일시 */
+		    ,TMP_PWD_YN 		/* 임시비밀번호발급여부 */
+		    ,USER_STS_CD 		/* 사용자상태코드 */
+		    ,ALLOW_ALL_IP_YN 	/* 모든 네트워크 아이피 허용 여부 */
+		    ,NON_REGULAR_YN		/* 비정규직여부 */
+		    ,SSO_USE_YN			/* SSO사용여부 */
+		FROM FRAMEONE_USER
+		WHERE 1 = 1
+			<if test='gUserId != null and gUserId != ""'>
+				AND USER_ID = #{gUserId}
+			</if>
+			<if test='userNo != null and userNo != ""'>
+				AND USER_NO = #{userNo}
+			</if>
+			<if test='ssoLoginYn != null and ssoLoginYn == "Y"'>
+				AND EMPTYPE IN ('01', '02', '03')
+			</if>
+			AND USER_STS_CD != '99'
+			AND USE_YN = '1'
+    </select>
+    
+    <select id="getCmUser" resultType="CmMainUserResDto">
+        SELECT /* [CmUserService.sqlx][getUserData][로그인 후 사용자 정보 조회][JangGwangSeok][2025.05.19] */
+			 A.USER_ID							/* 사용자ID */
+			,A.USER_NM							/* 사용자명 */
+			,A.USER_NO							/* 통합회원번호 */
+			,A.USER_STS_CD						/* 사용자상태코드 */
+			,A.EMPTYPE							/* 소속구분 */
+			,A.EMP_NO							/* 사원번호 */
+			,A.STARTSYS_CL AS START_SYS_CL		/* 초기시스템구분 */
+			,B.MAIL_ID AS EMAIL_ADDR			/* 이메일 */
+			,DAMO.DEC(B.HANDPHONE_NO) AS MOB_NO	/* 핸드폰번호 */
+			,DAMO.DEC(B.COTEL_NO) AS TEL_NO		/* 회사전화번호 */
+			,A.COM_CD							/* 회사코드 */
+			,B.DEPT_CD							/* 부서코드 */
+			,B.DEPTHR_NM AS DEPARTMENT			/* 부서 */
+			,A.LANG_CODE						/* 다국어코드 */
+			,A.DEF_DCCODE						/* 기본센터코드 */
+			,A.DEF_STORERKEY					/* 기본고객코드 */
+			,A.DEF_ORGANIZE						/* 기본조직코드 */
+			,A.DEF_AREA							/* 기본창고코드 */
+			,A.AUTHORITY 						/* 권한코드 */
+			,A.SPID								/* 접속DB SPID */
+			,A.REP_USER_ID_YN					/* 대표사용자ID여부 */
+			,A.WEB_USE_YN						/* 웹사용여부 */
+			,A.DC_APP_USER_YN					/* 센터APP사용여부 */
+			,A.DLV_APP_USER_YN					/* 배송APP사용여부 */
+			,A.CUSTKEY							/* 업체코드 */
+			,NVL2(
+			    NULLIF(TRIM(A.CUSTKEY), ''),
+			    '['||A.CUSTKEY||']'||
+				CASE
+			        WHEN A.EMPTYPE = 'A01' THEN C.DESCRIPTION 			/*화주 업체*/
+			        WHEN A.EMPTYPE = 'B01' THEN E.DESCRIPTION			/*물류협력사 업체*/
+			        WHEN A.EMPTYPE = 'C01' THEN D.DESCRIPTION			/*배송 업체*/
+			        ELSE ''
+			    END,
+			    ''
+			) AS CUSTKEY_NM						/* 업체명 */
+		FROM FRAMEONE_USER A
+		LEFT OUTER JOIN FRAMEONE_EMP B
+			ON A.EMP_NO = B.EMP_NO 
+			AND A.COM_CD = B.COM_CD
+		LEFT JOIN MS_CUST C /*화주 업체*/
+			ON C.CUSTKEY = A.CUSTKEY
+			AND A.EMPTYPE = 'A01'
+		LEFT JOIN MS_CUST E /*물류협력사 업체*/
+			ON E.CUSTKEY = A.CUSTKEY
+			AND E.STORERKEY = 'FW00'
+			AND E.CUSTTYPE IN ('P', 'D')
+			AND A.EMPTYPE = 'B01'
+		LEFT JOIN MS_CARRIER D /*배송 업체*/
+			ON D.CARRIERKEY = A.CUSTKEY
+			AND D.CARRIERTYPE = 'SUBC'
+			AND A.EMPTYPE = 'C01'
+		WHERE 1 = 1
+			<if test='gUserId != null and gUserId != ""'>
+				AND A.USER_ID = #{gUserId}
+			</if>
+			<if test='userNo != null and userNo != ""'>
+				AND A.USER_NO = #{userNo}
+			</if>
+			AND A.USE_YN = '1'
+    </select>
+    
+    <select id="getCmUserAuthority" resultType="CmMainUserAuthResDto">
+        SELECT /* [CmUserService.sqlx][getCmUserAuthority][사용자 접속 권한 정보 조회][JangGwangSeok][2025.05.12] */
+		     CM_USER_AUTHORITY.DCCODE                       							/* 창고코드 */
+        	,'['||CM_USER_AUTHORITY.DCCODE||']'||CM_USER_AUTHORITY.DCNAME AS DCNAME		/* 센터명 */
+		    ,CM_USER_AUTHORITY.STORERKEY AS STORERKEY 									/* 고객사코드 MS_COMPANY코드 */
+		    ,'['||STORERKEY||']'||STORERNAME AS STORERNAME 								/* 고객사명 */
+		    ,CM_USER_AUTHORITY.ORGANIZE AS ORGANIZE 									/* 조직코드 */
+		    ,'['||ORGANIZE||']'||ORGANIZENAME AS ORGANIZENAME 							/* 조직명 */
+		    ,CM_USER_AUTHORITY.AREA AS AREA 											/* 창고코드 SAP 창고 혹은 별도의 창고 코드 */
+		    ,'['||AREA||']'||AREANAME AS AREANAME 										/* 창고명 */
+		    ,CM_USER_AUTHORITY.AUTHORITY AS AUTHORITY 									/* 접속권한 */
+		    ,CM_USER_AUTHORITY.FLOATMASK  AS FLOATMASK 									/* 기본표시FLOATMASK */
+		    ,CM_DC.ARRORD																/* 정렬순서 */
+		FROM CM_USER_AUTHORITY
+		JOIN CM_USER
+			ON CM_USER.USERID = CM_USER_AUTHORITY.USERID
+		LEFT OUTER JOIN CM_DC
+      		ON CM_DC.DCCODE = CM_USER_AUTHORITY.DCCODE
+		WHERE CM_USER_AUTHORITY.USERID = #{gUserId}
+			AND CM_DC.DISPLAY_YN = 'Y'
+		ORDER BY 
+			 CM_DC.ARRORD
+		    ,CASE WHEN CM_USER_AUTHORITY.DCCODE = CM_USER.DEF_DCCODE THEN 1 ELSE 999 END
+		    ,CASE WHEN CM_USER_AUTHORITY.STORERKEY = CM_USER.DEF_STORERKEY THEN 1 ELSE 999 END
+		    ,CASE WHEN CM_USER_AUTHORITY.ORGANIZE = CM_USER.DEF_ORGANIZE  THEN 1 ELSE 999 END
+		    ,CASE WHEN CM_USER_AUTHORITY.AREA = CM_USER.DEF_AREA THEN 1 ELSE 999 END
+		    ,CM_USER_AUTHORITY.DCCODE
+		    ,CM_USER_AUTHORITY.STORERKEY
+		    ,CM_USER_AUTHORITY.ORGANIZE
+		    ,CM_USER_AUTHORITY.AREA
+    </select>
+    
+    <select id="getUserRoleList" resultType="CmUserRoleResDto">
+        SELECT /* [CmUserService.sqlx][getUserRoleList][사용자 권한그룹코드 목록 조회][JangGwangSeok][2025.05.15] */
+		    AUTH_CD		/* 권한그룹코드 */
+		FROM FRAMEONE_AUTH_USER
+		WHERE USER_ID = #{gUserId}
+    </select>
+    
+    <select id="getUserBySelType" resultType="CmMainUserResDto">
+        SELECT /* [CmUserService.sqlx][getUserBySelType][검색유형별 사용자 정보 조회][JangGwangSeok][2025.07.30] */
+        	<choose>
+		        <when test="selType == 'telNo'">
+		             DAMO.DEC(B.HANDPHONE_NO) 	AS MOB_NO		/* 핸드폰번호 */
+		            ,DAMO.DEC(B.COTEL_NO) 		AS TEL_NO		/* 회사전화번호 */
+		        </when>
+		        <when test="selType == 'userNm'">
+		             A.USER_NM					/* 사용자명 */
+		            ,A.DEPARTMENT				/* 부서명 */
+		        </when>
+		    </choose>
+		FROM FRAMEONE_USER A
+		LEFT OUTER JOIN FRAMEONE_EMP B
+			ON A.EMP_NO = B.EMP_NO 
+			AND A.COM_CD = B.COM_CD
+		WHERE 1 = 1
+			<if test='userId != null and userId != ""'>
+				AND A.USER_ID = #{userId}
+			</if>
+			AND A.USE_YN = '1'
+    </select>
+    
+    <select id="getUserEmailByUserId" resultType="CmMainUserResDto">
+        SELECT /* [CmUserService.sqlx][getUserEmailByUserId][검색유형별 사용자 정보 조회][c_bae][2025.09.19] */
+        	B.MAIL_ID AS EMAIL_ADDR			/* 이메일 */
+		FROM FRAMEONE_USER A
+		LEFT OUTER JOIN FRAMEONE_EMP B
+			ON A.EMP_NO = B.EMP_NO 
+			AND A.COM_CD = B.COM_CD
+		WHERE 1 = 1
+			<if test='userId != null and userId != ""'>
+				AND A.USER_ID = #{userId}
+			</if>
+			AND A.USE_YN = '1'
+    </select>
+    
+    <update id="updateSecurityRules">
+    	UPDATE /* [CmUserService.sqlx][updateSecurityRules][로그인 성공여부에 따른 보안 정보 수정][breaker3317][2025.10.21] */ FRAMEONE_USER 
+    	<if test='SUCCESS_YN == "0"'>	/* 로그인 실패 시 */
+			SET 
+				 FAIL_IN_CNT = DECODE(FAIL_IN_CNT, NULL, 1, FAIL_IN_CNT+1) 
+				,FAIL_TOT_CNT = DECODE(FAIL_TOT_CNT, NULL, 1, FAIL_TOT_CNT+1)
+				,FAIL_IN_DTM  = SYSDATE
+		</if>
+        <if test='SUCCESS_YN == "1"'>	/* 로그인 성공 시 */
+			SET 
+				 FINAL_IN_DTM = SYSDATE
+			 	,LOGIN_IP_NO = #{IP_ADDR}
+			 	,FAIL_IN_CNT = 0
+		</if>
+		<if test='SUCCESS_YN == "2"'>	/* 로그아웃 시 */
+			SET FINAL_OUT_DTM = SYSDATE
+		</if>
+		<if test='SUCCESS_YN == "3"'>	/* 계정잠금 처리 */
+			SET USER_STS_CD = '02'
+		</if>
+		WHERE USER_ID = #{userId}
+    </update>
+    
+    <select id="getUserAllowedIpList" resultType="HMap">
+        SELECT /* [CmUserService.sqlx][getUserAllowedIpList][사용자별 허용 IP 조회][breaker3317][2025.10.21] */
+        	 USER_ID
+			,ETHERNETADDRESS AS IP_ADDR
+		FROM FRAMEONE_USER
+		WHERE USER_ID = #{userId}
+    </select>
+    
+    <insert id="insertLoginNewTx">
+        INSERT /* [CmUserService.sqlx][insertLoginNewTx][로그인 로그 기록][breaker3317][2025.10.21] */ INTO FRAMEONE_USERLOGIN_LOG
+        (
+             USER_ID
+            ,LOGIN_DTM
+            ,LOGIN_IP_NO
+            ,LOGIN_SUCC_YN
+            ,REG_ID
+            ,REG_DTM
+        )
+        VALUES
+        (
+             #{userId}
+            ,SYSDATE
+            ,#{IP_ADDR}
+            ,#{loginSuccYn}
+            ,#{userId}
+            ,SYSDATE
+        )
+    </insert>
+    
+    <update id="updateUserRefreshToken">
+        UPDATE /* [CmUserService.sqlx][updateUserRefreshToken][refreshToken DB 업데이트][breaker3317][2025.11.15] */ FRAMEONE_USER
+        	SET REFRESH_TOKEN = #{refreshToken}
+        WHERE USER_ID = #{userId}
+    </update>
+
+</mapper>

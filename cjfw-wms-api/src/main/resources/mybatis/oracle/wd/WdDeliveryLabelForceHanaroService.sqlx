@@ -1,0 +1,408 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="wdDeliveryLabelForceHanaroService">
+
+
+	<select id="getTab1MasterList" resultType="WdDeliveryLabelForceHanaroResDto">		
+		WITH T_ST_STOCK AS ( /* 현재고로 있는 상품 유통기한 */
+		  SELECT ST_STOCK.SKU           AS SKU
+		        ,MIN(CM_LOT.LOTTABLE01) AS LOTTABLE01
+		    FROM ST_STOCK
+		    JOIN CM_LOT
+		      ON ST_STOCK.STORERKEY 			 = CM_LOT.STORERKEY
+		     AND ST_STOCK.LOT       			 = CM_LOT.LOT
+		     AND CM_LOT.DEL_YN      			 = 'N'
+		   WHERE ST_STOCK.DCCODE 				 = #{fixdccode}
+		     AND ST_STOCK.STORERKEY	    		 = #{gStorerkey}
+		   GROUP BY ST_STOCK.SKU
+		) 
+		SELECT /* [WdDeliveryLabelForceHanaroService.sqlx][getTab1MasterList][분류표출력 조회][공두경][2025.07.14] */
+		       TBL.TO_CUSTKEY			AS TO_CUSTKEY			/*관리처코드*/
+		      ,TBL.LBL_CUSTNAME1		AS LBL_CUSTNAME1		/*납품처명1*/
+		      ,TBL.LBL_SKU				AS LBL_SKU				/*상품코드*/
+		      ,TBL.LBL_SKUNAME1			AS LBL_SKUNAME1			/*상품명1*/
+		      ,TBL.LBL_SKUNAME2			AS LBL_SKUNAME2			/*상품명2*/
+		      ,TBL.LBL_QTYPERBOX		AS LBL_QTYPERBOX		/*입수량*/
+		      ,TBL.LBL_QTY				AS LBL_QTY				/*수량*/
+		      ,TBL.LBL_QTY2				AS LBL_QTY2				/*총주문수량*/
+		      ,TBL.LBL_EABARCODE		AS LBL_EABARCODE		/*EA바코드*/
+		      ,TBL.LBL_BOXBARCODE		AS LBL_BOXBARCODE		/*BOX바코드*/
+		      ,TBL.LBL_BARCODE1			AS LBL_BARCODE1			/*바코드1*/
+		      ,(SELECT CASE WHEN REGEXP_LIKE(T_ST_STOCK.LOTTABLE01, '^\d{8}$') THEN FN_FORMAT_MASK2(T_ST_STOCK.LOTTABLE01,'####-##-##')
+				        	ELSE T_ST_STOCK.LOTTABLE01
+				    	END
+                  FROM T_ST_STOCK
+                 WHERE T_ST_STOCK.SKU = TBL.LBL_SKU)	AS LBL_STOCK_LOTTABLE01	/*유통기한*/
+		      ,TBL.DOCNO				AS DOCNO				/*문서번호*/
+		      ,TBL.DOCLINE				AS DOCLINE				/*품목번호*/
+		      ,TBL.LBL_DELIVERYDT		AS LBL_DELIVERYDT       /*배송일자*/
+		      ,TBL.LBL_CNT				AS LBL_CNT				/**/
+		  FROM ( 
+		        SELECT DM_DOCUMENT_H.TO_CUSTKEY                           				AS TO_CUSTKEY
+				      ,SUBSTR(NVL(MS_CUST.DESCRIPTION,DM_DOCUMENT_H.TO_CUSTNAME),1,30) 	AS LBL_CUSTNAME1    
+				      ,TO_CHAR(MS_SKU.QTYPERBOX)||MS_SKU.BASEUOM||'/BOX '  				AS LBL_QTYPERBOX   
+				      ,REPLACE((CASE WHEN INSTR(MS_SKU.DESCRIPTION,'(') > 0 THEN SUBSTR(MS_SKU.DESCRIPTION,1,INSTR(MS_SKU.DESCRIPTION,'(')-1) 
+								    ELSE SUBSTR(MS_SKU.DESCRIPTION,1,30) END), '~','-') AS LBL_SKUNAME1            
+				      ,REPLACE((CASE WHEN INSTR(MS_SKU.DESCRIPTION,'(') > 0 THEN SUBSTR(MS_SKU.DESCRIPTION,INSTR(MS_SKU.DESCRIPTION,'('),512) 
+								    ELSE SUBSTR(MS_SKU.DESCRIPTION,31,255) END), '~','-') AS LBL_SKUNAME2       			
+				      ,NVL(DM_DOCUMENT_D.SKU,' ')                                       AS LBL_SKU           
+				      ,MS_SKU.BARCODE2                                                  AS LBL_EABARCODE     
+				      ,MS_SKU.BARCODE1                                                  AS LBL_BOXBARCODE    
+				      ,DM_DOCUMENT_D.DOCNO                                  			AS DOCNO
+				      ,DM_DOCUMENT_D.DOCLINE                                			AS DOCLINE
+				      ,DM_DOCUMENT_D.DELIVERYDATE                          				AS LBL_DELIVERYDT    
+				      ,CASE WHEN DM_DOCUMENT_D.STORERUOM = 'BOX' OR DM_DOCUMENT_D.STORERUOM = 'EA' THEN '1BOX' ELSE
+                       (RTRIM(TO_CHAR((DM_DOCUMENT_D.ORDERQTY + DM_DOCUMENT_D.ORDERADJUSTQTY) *
+                                   DM_DOCUMENT_D.BUNMO / DM_DOCUMENT_D.BUNJA,
+                                   'FM99999999999990.99999'),
+                           '.') || DM_DOCUMENT_D.STORERUOM) END 						AS LBL_QTY,
+                    RTRIM(TO_CHAR((DM_DOCUMENT_D.ORDERQTY + DM_DOCUMENT_D.ORDERADJUSTQTY) *
+                                   DM_DOCUMENT_D.BUNMO / DM_DOCUMENT_D.BUNJA,
+                                   'FM99999999999990.99999'),
+                           '.') || DM_DOCUMENT_D.STORERUOM 								AS LBL_QTY2
+				      ,CASE WHEN DM_DOCUMENT_D.STORERUOM = 'BOX' THEN TO_CHAR((DM_DOCUMENT_D.ORDERQTY + DM_DOCUMENT_D.ORDERADJUSTQTY) * DM_DOCUMENT_D.BUNMO / DM_DOCUMENT_D.BUNJA) 
+				      	WHEN DM_DOCUMENT_D.STORERUOM = 'EA' THEN TO_CHAR(NVL(TRUNC( DM_DOCUMENT_D.ORDERQTY / NVL(MS_SKU.QTYPERBOX,1) ),0))
+				      	ELSE '1' END 													AS LBL_CNT
+				      ,TO_CHAR(CEIL(TO_DATE(DM_DOCUMENT_D.DELIVERYDATE,'YYYYMMDD') - TO_DATE('19000101','YYYYMMDD')) + 1)
+			             ||LPAD(DM_DOCUMENT_D.DOCNO,10,'0')
+			             ||LPAD(TO_CHAR(DM_DOCUMENT_D.DOCLINE) , 4, '0' ) 
+			             ||LPAD(TO_CHAR(TRUNC((DM_DOCUMENT_D.ORDERQTY + DM_DOCUMENT_D.ORDERADJUSTQTY) 
+			                                    * DM_DOCUMENT_D.BUNMO 
+			                                    / DM_DOCUMENT_D.BUNJA ,2) *100) , 6, '0' )
+			             ||'001'                                                        AS LBL_BARCODE1 
+				FROM   DM_DOCUMENT_D
+				JOIN   DM_DOCUMENT_H                    
+				ON     DM_DOCUMENT_H.DCCODE             = DM_DOCUMENT_D.DCCODE
+				AND    DM_DOCUMENT_H.STORERKEY          = DM_DOCUMENT_D.STORERKEY
+				AND    DM_DOCUMENT_H.DOCTYPE            = DM_DOCUMENT_D.DOCTYPE
+				AND    DM_DOCUMENT_H.DELIVERYDATE       = DM_DOCUMENT_D.DELIVERYDATE
+				AND    DM_DOCUMENT_H.DOCNO              = DM_DOCUMENT_D.DOCNO
+				AND    DM_DOCUMENT_H.DEL_YN             = 'N'
+				<!-- 고객 다중선택 -->
+				<if test="toCustkeyMulti != null and toCustkeyMulti != '' ">
+			    	<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+			    		<foreach collection="toCustkeyMulti" item="item">
+			    			OR DM_DOCUMENT_H.TO_CUSTKEY IN
+			    			<foreach collection="item" item="code" open="(" close=")" separator=",">
+			    				#{code} 	 
+			          		</foreach>
+			        	</foreach>
+			      	</trim>			                                    
+	            </if>
+				JOIN   MS_SKU
+				ON     MS_SKU.STORERKEY                 = DM_DOCUMENT_D.STORERKEY
+				AND    MS_SKU.SKU                       = DM_DOCUMENT_D.SKU
+				AND    MS_SKU.DEL_YN                    = 'N'
+				<!-- 상품 다중선택 -->
+				<if test="sku != null and sku != '' ">
+					<if test="skuMulti != null and skuMulti.size() > 0">
+						<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+							<foreach collection="skuMulti" item="item">
+								OR DM_DOCUMENT_D.SKU IN
+								<foreach collection="item" item="code" open="(" close=")" separator=",">
+									#{code} 	 
+					      		</foreach>
+					    	</foreach>
+					  	</trim>			                                    
+			    	</if>
+		        </if>
+				LEFT JOIN MS_CUST                 
+				ON     MS_CUST.STORERKEY                      = DM_DOCUMENT_H.STORERKEY
+				AND    MS_CUST.CUSTTYPE                       = DM_DOCUMENT_H.TO_CUSTTYPE
+				AND    MS_CUST.CUSTKEY                        = DECODE(DM_DOCUMENT_H.STORERKEY,'FW00',DM_DOCUMENT_H.MNGPLC_ID
+				                                                                              ,DM_DOCUMENT_H.TO_CUSTKEY)
+				WHERE  DM_DOCUMENT_D.STORERKEY          = #{gStorerkey}
+		        <!--AND    DM_DOCUMENT_D.DCCODE             = #{fixdccode}-->
+		        <!-- 2025.12.31 김동한 AS-IS 와 동일하게 1000 KTX센터 로 하드코딩함 -->
+		        AND    DM_DOCUMENT_D.DCCODE             = '1000'
+		        AND    DM_DOCUMENT_D.DEL_YN             = 'N'
+		        AND 	MS_CUST.CUSTSTRATEGY4 			= '11'
+				<if test="taskdt != null and taskdt != ''">	AND DM_DOCUMENT_D.DELIVERYDATE	=	#{taskdt} 		</if>
+		       ) TBL , 
+                 (SELECT LEVEL NUM FROM DUAL CONNECT BY LEVEL <![CDATA[<=]]> 1000) B                
+                 WHERE B.NUM BETWEEN 1 AND TBL.LBL_CNT 
+                 ORDER BY TBL.LBL_BARCODE1
+
+    </select>
+    
+    <select id="getTab2MasterList" resultType="WdDeliveryLabelForceCoupangResDto">		
+		SELECT /* [WdDeliveryLabelForceHanaroService.sqlx][getTab2MasterList][쿠팡 조회][공두경][2025.07.15] */
+			   TBL.TO_CUSTKEY				/*관리처코드*/
+		      ,TBL.LBL_CUSTNAME1			/*납품처명1*/
+		      ,TBL.LBL_CUSTNAME2			/*입수량*/
+		      ,TBL.LBL_SKU					/*상품코드*/
+		      ,TBL.LBL_SKUNAME1				/*상품명1*/
+		      ,TBL.LBL_SKUNAME2				/*상품명2*/
+		      ,TBL.LBL_QTY					/*수량*/
+		      ,TBL.LBL_PAGENO1				/*차량번호*/
+		      ,TBL.LBL_CARGROUP				/*출차조*/
+		      ,TBL.LBL_DELIVERYGROUP		/*POP*/
+			  ,TBL.LBL_DELIVERYGROUP_CHG	/*POP2*/
+		      ,TBL.LBL_LOC					/*로케이션*/
+		      ,TBL.LBL_STORAGETYPE			/*저장조건*/
+		      ,TBL.LBL_DELIVERYDT			/*배송일자*/
+		      ,TBL.LBL_PAGENO2				/*페이지번호*/
+		      ,TBL.LBL_BARCODE1				/*바코드1*/
+		      ,TBL.LBL_BOXBARCODE		    /*박스바코드*/
+	  		  ,TBL.LBL_EABARCODE			/*EA바코드*/
+		      ,(SELECT CASE WHEN REGEXP_LIKE(MAX(CM_LOT.LOTTABLE01), '^\d{8}$') THEN FN_FORMAT_MASK2(MAX(CM_LOT.LOTTABLE01),'####-##-##')
+				        	ELSE MAX(CM_LOT.LOTTABLE01)
+				    	END 
+				  FROM CM_LOT WHERE CM_LOT.LOT = ST_LOT AND CM_LOT.DEL_YN = 'N') LBL_STOCK_LOTTABLE01		/*유통기한*/
+			  ,TBL.PICK_NO					/*피킹번호*/
+	  		  ,TBL.PICK_BATCH_NO			/*대배치키*/
+			  ,TBL.LBL_MANUDATE				/**/
+		      ,TBL.LBL_QTY_2				/**/
+		      ,TBL.LBL_PLACEOFORIGIN		/**/
+		      ,SUBSTR(NVL(TBL.LBL_FROM_CUSTNAME, ' '), 1, 30)      AS LBL_FROM_CUSTNAME	/**/      
+		      ,TBL.LBL_ROUTENAME			/**/
+			  ,TBL.LOC_YN					/**/
+			  ,TBL.INVOICESORT				/**/
+			  ,TBL.SKUPRIORITY				/**/
+			  ,TBL.PREDELIVERYGROUP			/**/
+			  ,TBL.PRINT_YN					/**/
+			  ,TBL.LBL_ETC_MSG				/**/
+			  ,TBL.DELIVERYGROUP_SEQ		/**/
+			  ,TBL.LBL_SMS_YN
+		      ,TBL.LBL_COUPANG_YN		/*쿠팡관리처 공통코드 등록 여부 */
+		  FROM ( 
+		        SELECT /*+ LEADING(WD_INVOICE) */
+		        	   MAX(WD_INVOICE.SLIPDT)	      															AS LBL_MANUDATE                
+				      ,MAX(CASE WHEN TRUNC(MONTHS_BETWEEN(SYSDATE,MS_CUST.ADDDATE)) = 0 OR MS_CUSTDLVINFO.QCTYPE = 'Y' 
+				      			THEN '(R)' END)
+				      	||CASE WHEN MAX(DM_DOCUMENT_H.B2C_YN)='Y' 
+				      		   THEN SUBSTR(MAX(NVL(DM_DOCUMENT_H.TO_CUSTNAME,MS_CUST.DESCRIPTION)),1,30) 
+				      		   ELSE SUBSTR(MAX(NVL(MS_CUST.DESCRIPTION,DM_DOCUMENT_H.TO_CUSTNAME)),1,30) END 	AS LBL_CUSTNAME1  
+				      ,MAX(CASE WHEN MS_SKU.QTYPERBOX > 1 
+				                THEN '( '||TO_CHAR(MS_SKU.QTYPERBOX)||MS_SKU.BASEUOM||'/BOX )' 
+				                ELSE '' END)  															AS LBL_CUSTNAME2  
+				      ,MAX(REPLACE((CASE WHEN INSTR(MS_SKU.DESCRIPTION,'(') > 0 
+				      					 THEN SUBSTR(MS_SKU.DESCRIPTION,1,INSTR(MS_SKU.DESCRIPTION,'(')-1) 
+								    	 ELSE SUBSTR(MS_SKU.DESCRIPTION,1,30) END), '~','-'))  					AS LBL_SKUNAME1           
+				      ,MAX(REPLACE((CASE WHEN INSTR(MS_SKU.DESCRIPTION,'(') > 0 
+				      					 THEN SUBSTR(MS_SKU.DESCRIPTION,INSTR(MS_SKU.DESCRIPTION,'('),512) 
+								    	 ELSE SUBSTR(MS_SKU.DESCRIPTION,31,255) END), '~','-'))      			AS LBL_SKUNAME2           
+				      ,RTRIM(TO_CHAR(MAX(WD_INVOICE.CONFIRMQTY) * MAX(DM_DOCUMENT_D.BUNMO) / MAX(DM_DOCUMENT_D.BUNJA),'FM99999999999990.99999'),'.')                               
+				       	||MAX(DM_DOCUMENT_D.STORERUOM)                                        					AS LBL_QTY       
+				      ,''                                                                    					AS LBL_QTY_2
+				      ,MAX(WD_INPLAN.CARNO)                                                  					AS LBL_PAGENO1   
+				      ,MAX(NVL((SELECT MAX(NVL(CM_CODE.BASEDESCR,CM_CODE.BASECODE))                 
+								FROM CM_CODE_STORER CM_CODE             
+								WHERE CM_CODE.STORERKEY  = 'FW00'            
+								AND   CM_CODE.CODELIST  = 'CARGROUP'          
+								AND   CM_CODE.BASECODE  = CM_CAR.CARGROUP),'NODATA'))      AS LBL_CARGROUP  
+				      ,DECODE(MAX(( SELECT MAX(NVL(CM_CODE.BASEDESCR,CM_CODE.BASECODE))                  
+										FROM CM_CODE_STORER CM_CODE              
+										WHERE CM_CODE.STORERKEY  = MS_SKU.STORERKEY             
+										AND   CM_CODE.CODELIST  = 'COUNTRY'             
+										AND   CM_CODE.BASECODE  = MS_SKU.COUNTRYOFORIGIN))             
+										,'NOT FOUND','','FW'||LEFT(MAX(( SELECT MAX(NVL(CM_CODE.BASEDESCR,CM_CODE.BASECODE))                        
+																	   FROM CM_CODE_STORER CM_CODE                    
+																	   WHERE CM_CODE.STORERKEY  = MS_SKU.STORERKEY                   
+																	   AND   CM_CODE.CODELIST  = 'COUNTRY'                   
+																	   AND   CM_CODE.BASECODE  = MS_SKU.COUNTRYOFORIGIN)),1)             
+								||MAX(MS_SKU.COUNTRYOFORIGIN) )              									AS LBL_PLACEOFORIGIN           
+					  ,MAX(WD_INVOICE.SLIPDT)                                         							AS LBL_DELIVERYDT   
+				      ,CASE WHEN MAX(DM_DOCUMENT_H.B2C_YN) = 'Y' 
+				            THEN MAX(TM_INPLAN.DELIVERYGROUP) || CASE WHEN CORE_CM_STRATEGY.FN_ISINVOICEUSEROTAINERNO(MAX(DM_DOCUMENT_D.DCCODE),MAX(DM_DOCUMENT_D.STORERKEY)) = 'Y' 
+	             													  THEN '-' || NVL(MAX(WD_INPLAN.MIXBOXKEY), '0') END
+	            		    ELSE MAX(WD_INPLAN.DELIVERYGROUP) || CASE WHEN CORE_CM_STRATEGY.FN_ISINVOICEUSEROTAINERNO(MAX(DM_DOCUMENT_D.DCCODE),MAX(DM_DOCUMENT_D.STORERKEY)) = 'Y' 
+	             													  THEN '-' || NVL(MAX(WD_INPLAN.MIXBOXKEY), '0') END
+	          			    END 																				AS LBL_DELIVERYGROUP
+				      ,MAX(NVL(MS_CUST.DESCRIPTION, ' '))                                    					AS LBL_FROM_CUSTNAME				      
+				      ,CASE WHEN MAX(DM_DOCUMENT_D.DCCODE)  IN ( '2620', '2250' ) AND MAX(WD_INVOICE.DLV_DATA03) = 'CROSS' 
+				            THEN DECODE(#{crossdc},'',MAX(MS_SKUDCSET.LOC),MAX(MS_SKUDCSET_CROSS.LOC)) 
+				            WHEN MAX(DM_DOCUMENT_D.DCCODE) NOT IN ( '2620', '2250' ) 
+				            THEN DECODE(#{crossdc},'',MAX(MS_SKUDCSET.LOC),MAX(MS_SKUDCSET_CROSS.LOC)) 
+		                    ELSE MAX(MS_SKUDCSET.LOC) END                                                       AS LBL_LOC  
+				      ,MAX(NVL(WD_INVOICE.PAGE_NO,' '))                                      					AS LBL_PAGENO2
+				      ,MAX(NVL(WD_INPLAN.SKU,' '))                                           					AS LBL_SKU    
+				      ,MAX(NVL(WD_INVOICE.ROUTE,' '))                                        					AS LBL_ROUTENAME
+				      ,WD_INVOICE.INVOICENO                                                  					AS LBL_BARCODE1 
+				      ,MAX(( SELECT MAX(NVL(CM_CODE.BASEDESCR,CM_CODE.BASECODE))                
+								FROM CM_CODE_STORER CM_CODE            
+								WHERE CM_CODE.STORERKEY  = MS_SKU.STORERKEY            
+								AND   CM_CODE.CODELIST  = 'STORAGETYPE'           
+								AND   CM_CODE.BASECODE  = MS_SKU.STORAGETYPE)) 									AS LBL_STORAGETYPE
+				      ,MAX(MS_SKU.STORAGETYPE) 																	AS STORAGETYPE  
+				      ,DECODE( CASE WHEN MAX(DM_DOCUMENT_D.DCCODE)  IN ('2620', '2250') AND MAX(WD_INVOICE.DLV_DATA03) = 'CROSS' 
+				      				THEN DECODE(#{crossdc},'',MAX(MS_SKUDCSET.LOC),MAX(MS_SKUDCSET_CROSS.LOC)) 
+						            WHEN MAX(DM_DOCUMENT_D.DCCODE) NOT IN ( '2620', '2250' ) 
+						            THEN DECODE(#{crossdc},'',MAX(MS_SKUDCSET.LOC),MAX(MS_SKUDCSET_CROSS.LOC)) 
+				                    ELSE MAX(MS_SKUDCSET.LOC)END ,NULL ,2 ,'STD' ,2 ,1)                      	AS LOC_YN
+				      ,SUBSTR(WD_INVOICE.INVOICENO,0,19)||SUBSTR(WD_INVOICE.INVOICENO,26,3) 					AS INVOICESORT
+				      ,NVL(MAX(MS_SKUDCSET.OTHER01),'5')                       									AS SKUPRIORITY
+				      ,MAX(DM_DOCUMENT_H.TO_CUSTKEY)                           									AS TO_CUSTKEY
+				      ,MAX(TM_INPLAN.PREDELIVERYGROUP)	                       									AS PREDELIVERYGROUP
+				      ,MAX(WD_INVOICE.PRINT_YN)	                               									AS PRINT_YN
+				      ,CASE WHEN LEFT(MAX(MS_SKU.SKUGROUP),2) IN ('20','30','40') 
+				        	THEN '본 배송분류표는 식품위생법상의 고지사항과는 무관합니다.'
+				            ELSE '본 배송분류표는 관련법상의 고지사항과는 무관합니다.' END 									AS LBL_ETC_MSG
+				      ,SUBSTR(MAX(WD_INPLAN.DELIVERYGROUP),2,LENGTH(MAX(WD_INPLAN.DELIVERYGROUP))) 				AS DELIVERYGROUP_SEQ
+				      ,NVL(MAX(MS_SKUDCSET.SMS_YN),'N') 														AS LBL_SMS_YN
+				      ,CASE WHEN MAX(WD_INVOICE.DCCODE) = '2260' AND MIN(WD_INVOICE.PRINT_CNT) > 1 AND MAX(NVL(TM_INPLAN.PREDELIVERYGROUP,' ')) <![CDATA[<>]]> ' ' AND MAX(NVL(TM_INPLAN.PREDELIVERYGROUP,' ')) <![CDATA[<>]]> MAX(NVL(WD_INPLAN.DELIVERYGROUP,' ')) 
+		                        THEN MAX(NVL(TM_INPLAN.PREDELIVERYGROUP,' ')) ||'>'
+		                        ELSE '' END
+		               || MAX(WD_INPLAN.DELIVERYGROUP)
+				       || CASE WHEN CORE_CM_STRATEGY.FN_ISINVOICEUSEROTAINERNO(MAX(DM_DOCUMENT_D.DCCODE),MAX(DM_DOCUMENT_D.STORERKEY)) = 'Y' 
+				               THEN '-'||NVL(MAX(WD_INPLAN.MIXBOXKEY),'0') END 									AS LBL_DELIVERYGROUP_CHG
+				     ,  MAX(WD_TASK.PICK_NO)                                   									AS PICK_NO                 
+				     ,	MAX(WD_TASK.PICK_BATCH_NO)                             									AS PICK_BATCH_NO         
+				     ,	MAX(WD_INVOICE.DOCNO)                                  									AS DOCNO
+				     ,	MAX(WD_INVOICE.DOCLINE)                                									AS DOCLINE
+				     ,	MAX(MS_SKU.BARCODE2)                                   									AS LBL_EABARCODE
+			         ,	MAX(MS_SKU.BARCODE1)                                   									AS LBL_BOXBARCODE
+			         ,	MAX(WD_TASK.LOT)                                   	   									AS ST_LOT
+			         ,CASE WHEN FN_CODEVALUE('FW00', 'COUPANGLABEL_CUST', MAX(DM_DOCUMENT_H.MNGPLC_ID), 'BASECODE') IS NOT NULL
+			        	   THEN 'Y'
+			               ELSE 'N' END                                                                 		AS LBL_COUPANG_YN
+				FROM   WD_INVOICE
+				JOIN   WD_INPLAN
+				ON     WD_INPLAN.DCCODE                 = WD_INVOICE.DCCODE
+				AND    WD_INPLAN.STORERKEY              = WD_INVOICE.STORERKEY
+				AND    WD_INPLAN.SLIPDT                 = WD_INVOICE.SLIPDT
+				AND    WD_INPLAN.SLIPNO                 = WD_INVOICE.SLIPNO
+				AND    WD_INPLAN.SLIPLINE               = WD_INVOICE.SLIPLINE
+				AND    WD_INPLAN.DEL_YN                 = 'N'
+				JOIN   WD_TASK
+		        ON     WD_TASK.DCCODE                   = WD_INVOICE.DCCODE
+		        AND    WD_TASK.STORERKEY                = WD_INVOICE.STORERKEY
+		        AND    WD_TASK.SLIPDT                   = WD_INVOICE.SLIPDT
+		        AND    WD_TASK.SLIPNO                   = WD_INVOICE.SLIPNO
+		        AND    WD_TASK.SLIPLINE                 = WD_INVOICE.SLIPLINE
+		        AND    WD_TASK.PICK_LIST_NO             = WD_INVOICE.PICK_LIST_NO
+		        AND    WD_TASK.PROCESSQTY    > 0
+		        AND    WD_TASK.TASKSYSTEM IS NOT NULL		
+		        <!-- 대배치키 다중선택 -->
+				<if test="pickbatchnoMulti != null and pickbatchnoMulti != ''">
+			       AND WD_TASK.PICK_BATCH_NO IN
+			       <foreach collection="pickbatchnoMulti" item="code" open="(" close=")" separator=",">
+			         #{code}
+			       </foreach>   
+		        </if>
+		        <!-- 피킹번호 다중선택 -->
+				<if test="picknoMulti != null and picknoMulti != ''">
+			       AND WD_TASK.PICK_NO IN
+			       <foreach collection="picknoMulti" item="code" open="(" close=")" separator=",">
+			         #{code}
+			       </foreach>   
+		        </if>
+				<if test="tasksystem != null and tasksystem != ''">		AND WD_TASK.TASKSYSTEM	=  #{tasksystem}		</if>
+				JOIN   DM_DOCUMENT_D
+				ON     DM_DOCUMENT_D.DCCODE             = WD_INVOICE.DCCODE
+				AND    DM_DOCUMENT_D.STORERKEY          = WD_INVOICE.STORERKEY
+				AND    DM_DOCUMENT_D.DOCTYPE            = WD_INVOICE.DOCTYPE
+				AND    DM_DOCUMENT_D.DELIVERYDATE       = WD_INVOICE.SLIPDT
+				AND    DM_DOCUMENT_D.DOCNO              = WD_INVOICE.DOCNO
+				AND    DM_DOCUMENT_D.DOCLINE            = WD_INVOICE.DOCLINE
+				AND    DM_DOCUMENT_D.CHANNEL            = '1' 
+				AND    DM_DOCUMENT_D.DEL_YN             = 'N'
+				JOIN   DM_DOCUMENT_H                    
+				ON     DM_DOCUMENT_H.DCCODE             = DM_DOCUMENT_D.DCCODE
+				AND    DM_DOCUMENT_H.STORERKEY          = DM_DOCUMENT_D.STORERKEY
+				AND    DM_DOCUMENT_H.DOCTYPE            = DM_DOCUMENT_D.DOCTYPE
+				AND    DM_DOCUMENT_H.DELIVERYDATE       = DM_DOCUMENT_D.DELIVERYDATE
+				AND    DM_DOCUMENT_H.DOCNO              = DM_DOCUMENT_D.DOCNO
+				AND    DM_DOCUMENT_H.DEL_YN             = 'N'
+				<if test="ordertype != null and ordertype != ''">	AND DM_DOCUMENT_H.ORDERTYPE	    =  #{ordertype}			</if>
+				<!-- 고객 다중선택 -->
+				<if test="toCustkeyMulti != null and toCustkeyMulti != '' ">
+			    	<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+			    		<foreach collection="toCustkeyMulti" item="item">
+			    			OR DM_DOCUMENT_H.TO_CUSTKEY IN
+			    			<foreach collection="item" item="code" open="(" close=")" separator=",">
+			    				#{code} 	 
+			          		</foreach>
+			        	</foreach>
+			      	</trim>			                                    
+	            </if>
+				JOIN   MS_SKU
+				ON     MS_SKU.STORERKEY                 = DM_DOCUMENT_D.STORERKEY
+				AND    MS_SKU.SKU                       = DM_DOCUMENT_D.SKU
+				AND    MS_SKU.DEL_YN                    = 'N'
+				<!-- 상품 다중선택 -->
+				<if test="sku != null and sku != '' ">
+					<if test="skuMulti != null and skuMulti.size() > 0">
+						<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+							<foreach collection="skuMulti" item="item">
+								OR WD_INPLAN.SKU IN
+								<foreach collection="item" item="code" open="(" close=")" separator=",">
+									#{code} 	 
+					      		</foreach>
+					    	</foreach>
+					  	</trim>			                                    
+			    	</if>
+		        </if>
+				<if test="skugroup != null and skugroup != ''">			AND LEFT(MS_SKU.SKUGROUP,2)	=  #{skugroup}		</if>
+				<if test="storagetype != null and storagetype != ''">	AND MS_SKU.STORAGETYPE 	    =  #{storagetype}	</if>
+			    LEFT JOIN   
+			           TM_INPLAN
+			    ON     WD_INPLAN.DCCODE                 = TM_INPLAN.DCCODE
+			    AND    WD_INPLAN.DOCTYPE                = TM_INPLAN.DOCTYPE
+			    AND    WD_INPLAN.SLIPDT                 = TM_INPLAN.SLIPDT
+			    AND    WD_INPLAN.SLIPNO                 = TM_INPLAN.SLIPNO
+			    AND    WD_INPLAN.DEL_YN                 = 'N'
+				LEFT JOIN   
+				       MS_SKUDCSET
+				ON     MS_SKUDCSET.DCCODE               = DM_DOCUMENT_D.DCCODE
+				AND    MS_SKUDCSET.STORERKEY            = DM_DOCUMENT_D.STORERKEY
+				AND    MS_SKUDCSET.SKU                  = DM_DOCUMENT_D.SKU
+				AND    MS_SKUDCSET.DEL_YN               = 'N'
+		        LEFT JOIN MS_SKUDCSET MS_SKUDCSET_CROSS		               
+		        ON	   MS_SKUDCSET_CROSS.STORERKEY            = DM_DOCUMENT_D.STORERKEY   
+		        <if test="crossdc != null and crossdc != ''">			AND MS_SKUDCSET_CROSS.DCCODE	=  #{crossdc}		</if>
+		        AND    MS_SKUDCSET_CROSS.SKU                  = DM_DOCUMENT_D.SKU   
+		        AND    MS_SKUDCSET_CROSS.DEL_YN               = 'N'
+				LEFT JOIN MS_CUST                 
+				ON     MS_CUST.STORERKEY                      = DM_DOCUMENT_H.STORERKEY
+				AND    MS_CUST.CUSTTYPE                       = DM_DOCUMENT_H.TO_CUSTTYPE
+				AND    MS_CUST.CUSTKEY                        = DECODE(DM_DOCUMENT_H.STORERKEY,'FW00',DM_DOCUMENT_H.MNGPLC_ID,DM_DOCUMENT_H.TO_CUSTKEY)
+				LEFT JOIN MS_CUSTDLVINFO
+				ON	   MS_CUSTDLVINFO.STORERKEY	  = DM_DOCUMENT_H.STORERKEY
+				AND	   MS_CUSTDLVINFO.DLVCUSTKEY  = DM_DOCUMENT_H.TO_CUSTKEY
+				AND	   MS_CUSTDLVINFO.CUSTTYPE	  = DM_DOCUMENT_H.TO_CUSTTYPE
+				LEFT JOIN CM_CAR
+				ON	   WD_INPLAN.CARNO	  			= CM_CAR.CARNO
+				AND	   WD_INPLAN.DEL_YN  			= 'N'
+				WHERE  WD_INVOICE.DCCODE		= #{fixdccode}
+				AND    WD_INVOICE.STORERKEY		= #{gStorerkey}
+				AND    WD_INVOICE.CONFIRMQTY     <![CDATA[>]]>  0
+				AND    WD_INVOICE.DEL_YN                = 'N'
+				<if test="taskdt != null and taskdt != ''">			AND WD_INVOICE.SLIPDT	=  #{taskdt}		</if>
+				<if test="printmethod != null and printmethod != ''">	
+					<if test="printmethod == 'NEW'.toString()">
+						AND    WD_INVOICE.PRINT_YN        IN ('0','N')
+		                AND    WD_INVOICE.CONFIRMQTY > 0
+					</if>
+					<if test="printmethod == 'OLD'.toString()">
+						AND    WD_INVOICE.PRINT_YN   NOT IN ('0','N') 
+					</if>
+				</if>
+				<if test="crossdocktype != null and crossdocktype != ''">	AND MS_SKUDCSET.CROSSDOCKTYPE	=  #{crossdocktype}		</if>				
+	            <!-- START.권한센터 -->
+			    AND EXISTS (SELECT 1
+		                      FROM CM_USER_AUTHORITY 
+		                     WHERE CM_USER_AUTHORITY.DCCODE    = DM_DOCUMENT_D.DCCODE       
+		                       AND CM_USER_AUTHORITY.STORERKEY = DM_DOCUMENT_D.STORERKEY    
+		                       AND CM_USER_AUTHORITY.ORGANIZE  = DM_DOCUMENT_D.ORGANIZE     
+		                       AND CM_USER_AUTHORITY.AREA      = DM_DOCUMENT_D.AREA         
+		                       AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey}
+		                       AND CM_USER_AUTHORITY.USERID    = #{gUserId}
+		                       AND CM_USER_AUTHORITY.DCCODE    = #{fixdccode}
+		                       AND CM_USER_AUTHORITY.AREA      = #{gArea}   
+					           <!-- 창고.다중검색 -->
+					           <if test='gOrganizeMulti != null and gOrganizeMulti.length > 0'>
+						           AND CM_USER_AUTHORITY.ORGANIZE IN
+						           <foreach collection="gOrganizeMulti" item="code" open="(" close=")" separator=",">
+						             #{code}
+						           </foreach>
+					           </if>                       
+		                   )
+			    <!-- END.권한센터	-->
+				GROUP BY WD_INVOICE.INVOICENO
+		       ) TBL
+		       WHERE LBL_COUPANG_YN = 'Y'
+
+    </select>
+    
+</mapper>

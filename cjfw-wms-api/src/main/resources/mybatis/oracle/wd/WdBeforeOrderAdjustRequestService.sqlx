@@ -1,0 +1,294 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="wdBeforeOrderAdjustRequestService">
+
+<select id="getMasterList" resultType="WdBeforeOrderAdjustRequestResDTO">
+    /* [wdBeforeOrderAdjustRequestService.sqlx][wdBeforeOrderAdjustRequestService.getMasterlist][사전주문조정의뢰 목록][jangjaehyun][20250925] */
+    WITH T_ST_STOCK_OPENQTY AS ( /* 2026.01.30 CJ프레시웨이 WMS 구축  추가(ST_STOCK->VW_ST_STOCK, ST_STOCK_OPENQTY->T_ST_STOCK_OPENQTY) */
+		    SELECT ST_STOCK.DCCODE       AS  DCCODE
+		        ,ST_STOCK.STORERKEY    AS  STORERKEY
+		        ,ST_STOCK.ORGANIZE     AS  ORGANIZE
+		        ,ST_STOCK.AREA         AS  AREA
+		        ,ST_STOCK.SKU          AS  SKU
+		        ,MAX(MS_SKU.DESCRIPTION)    AS  DESCRIPTION
+		        ,ST_STOCK.UOM          AS  UOM
+		        ,SUM(ST_STOCK.QTY)     AS  QTY
+		        ,SUM(ST_STOCK.BOXQTY)  AS  BOXQTY
+		        ,SUM(CASE WHEN (ST_STOCK.QTY-ST_STOCK.QTYALLOCATED-ST_STOCK.QTYPICKED) <![CDATA[<]]> 0  THEN 0
+		            ELSE ST_STOCK.QTY-ST_STOCK.QTYALLOCATED-ST_STOCK.QTYPICKED
+		           END ) as OPENQTY
+		        ,MAX(MS_LOCATION.PLT_FLG) AS PLT_FLG
+		    FROM   VW_ST_STOCK ST_STOCK
+		    JOIN   MS_SKU
+		    ON     MS_SKU.STORERKEY        = ST_STOCK.STORERKEY
+		    AND    MS_SKU.SKU              = ST_STOCK.SKU
+		    JOIN   MS_LOCATION
+		    ON     MS_LOCATION.DCCODE      = ST_STOCK.DCCODE
+		    AND    MS_LOCATION.LOC         = ST_STOCK.LOC
+		    AND    MS_LOCATION.LOCTYPE     IN ('STAGE','PICK','KEEP','CROSS','FIRSTOUT','LONGSTAY','CANCEL')
+		    AND    ((MS_LOCATION.LOCCATEGORY IN ('RACK','YARD') AND ST_STOCK.DCCODE NOT IN ('2690','2620')) OR (MS_LOCATION.LOCCATEGORY IN ('RACK','YARD','AUTO') AND ST_STOCK.DCCODE IN ('2690','2620')))
+		    AND    MS_LOCATION.LOCFLAG     = 'GOOD'
+		    AND    CASE WHEN MS_LOCATION.DCCODE = '2690' AND MS_LOCATION.LOCTYPE='STAGE' THEN 'Y'
+		          WHEN MS_LOCATION.DCCODE = '2600' AND MS_LOCATION.LOCTYPE='STAGE' THEN 'Y'
+		          ELSE MS_LOCATION.OUT_YN
+		        END = 'Y'
+		    AND    MS_LOCATION.DEL_YN      = 'N'
+		    AND    MS_LOCATION.STOCKTYPE   = 'GOOD'
+		    JOIN   CM_LOT
+		    ON     CM_LOT.STORERKEY        = ST_STOCK.STORERKEY
+		    AND    CM_LOT.LOT              = ST_STOCK.LOT
+		    AND    'TRUE' = CASE
+		               WHEN CM_LOT.LOTTABLE01   = 'STD' OR  MS_SKU.DURATIONTYPE = 'N'
+		               THEN 'TRUE'
+		               WHEN     MS_SKU.DURATIONTYPE = '1' AND FN_ISDATE(CM_LOT.LOTTABLE01) = 1
+		                  AND TO_DATE(CM_LOT.LOTTABLE01,'YYYYMMDD') <![CDATA[<]]> TRUNC(SYSDATE)
+		               THEN 'FALSE'
+		               WHEN     MS_SKU.DURATIONTYPE IN ('2','3') AND FN_ISDATE(CM_LOT.LOTTABLE01) = 1
+		                  AND TO_DATE(CM_LOT.LOTTABLE01,'YYYYMMDD') + MS_SKU.DURATION - 1 <![CDATA[<]]> TRUNC(SYSDATE)
+		               THEN 'FALSE'
+		               ELSE 'TRUE'
+		            END
+		    WHERE 1=1
+		    <if test="gMultiDccode != null and gMultiDccode != ''">
+				AND ST_STOCK.DCCODE IN (
+				<foreach item="code" collection="gMultiDccode.split(',')" separator="," open="" close="">
+					#{code}
+				</foreach>
+				)
+			</if>
+		    GROUP BY ST_STOCK.DCCODE
+		        ,ST_STOCK.STORERKEY
+		        ,ST_STOCK.ORGANIZE
+		        ,ST_STOCK.AREA
+		        ,ST_STOCK.SKU
+		        ,ST_STOCK.UOM
+		  )
+    SELECT WD.*
+        <choose>
+            <when test='beforeorderYn == "N" or beforeorderYn == null or beforeorderYn == ""'> /* 주문조정 전 */
+                <!--, WD_QTY - ST_OPENQTY - DP_QTY AS SHORTAGEQTY 26.01.21 수정 -->
+                , CASE WHEN ( NVL(WD_QTY,0) - NVL(ST_OPENQTY,0) - NVL(DP_QTY,0)) <![CDATA[<]]> 0 THEN 0 ELSE ( NVL(WD_QTY,0) - NVL(ST_OPENQTY,0) - NVL(DP_QTY,0) ) END AS SHORTAGEQTY
+            </when>
+            <otherwise> /* 주문조정 후 */
+                , 0 AS SHORTAGEQTY
+            </otherwise>
+        </choose>
+    FROM (
+        SELECT '0' AS CHECKYN
+            , WD_INPLAN.STORERKEY AS STORERKEY
+            , FN_CODEDESCR(WD_INPLAN.STORERKEY, 'COURIER', DM_DOCUMENT_H.COURIER) AS COURIER
+            , WD_INPLAN.DCCODE AS DCCODE
+            , WD_INPLAN.DOCDT AS DOCDT
+            , WD_INPLAN.DOCNO AS DOCNO
+            , WD_INPLAN.DOCLINE AS DOCLINE
+            , DM_DOCUMENT_D.DELIVERYDATE AS DELIVERYDATE
+            <!-- , DM_DOCUMENT_H.TO_VATNO AS TO_VATNO
+            , DM_DOCUMENT_H.TO_VATOWNER AS TO_VATOWNER -->
+            , NVL(SALE_CUST.CUSTKEY, DM_DOCUMENT_H.TO_CUSTKEY) AS TO_VATNO
+            , NVL(SALE_CUST.DESCRIPTION, DM_DOCUMENT_H.TO_CUSTNAME) AS TO_VATOWNER
+            , DM_DOCUMENT_H.TO_CUSTKEY AS TO_CUSTKEY
+            , DM_DOCUMENT_H.TO_CUSTNAME AS TO_CUSTNAME
+            , DM_DOCUMENT_H.MNGPLC_ID AS MNGPLC_ID
+            , (SELECT FN_DESCR_CUST(DM_DOCUMENT_H.STORERKEY, DM_DOCUMENT_H.MNGPLC_ID) FROM DUAL) AS MNGPLC_NAME
+            , WD_INPLAN.SLIPDT AS SLIPDT
+            , WD_INPLAN.SLIPNO AS SLIPNO
+            , WD_INPLAN.SLIPLINE AS SLIPLINE
+            , WD_INPLAN.SKU AS SKU
+            , MS_SKU.DESCRIPTION AS SKUNAME
+            , FN_CODEDESCR(WD_INPLAN.STORERKEY, 'PUTAWAYTYPE', DM_DOCUMENT_D.CHANNEL) AS CHANNEL
+            , DM_DOCUMENT_D.STOREROPENQTY AS ORDERQTY
+            , DM_DOCUMENT_D.OPENQTY + DM_DOCUMENT_D.OPENADJUSTQTY AS OPENQTY
+            , DM_DOCUMENT_D.ORDERQTY AS TRANQTY
+            , DM_DOCUMENT_D.STORERUOM AS UOM
+            , DM_DOCUMENT_D.PLANT AS PLANT
+            , '['||DM_DOCUMENT_D.PLANT||']'||FN_DESCR_PLANT(DM_DOCUMENT_D.PLANT) AS PLANT_DESCR
+            , NVL(DM_SHORTAGEPLAN.DOCNO, 'X') AS SHORTAGEDOCNO
+            , SUM(DM_DOCUMENT_D.ORDERQTY + DM_DOCUMENT_D.ORDERADJUSTQTY - DM_DOCUMENT_D.PROCESSQTY) OVER (PARTITION BY DM_DOCUMENT_D.DCCODE,DM_DOCUMENT_D.STORERKEY,DM_DOCUMENT_D.ORGANIZE,DM_DOCUMENT_D.AREA,DM_DOCUMENT_D.SKU) AS WD_QTY
+            , 0 AS DP_QTY
+            , (SELECT NVL(SUM(OPENQTY),0)
+                 FROM T_ST_STOCK_OPENQTY ST_STOCK
+                WHERE ST_STOCK.DCCODE = DM_DOCUMENT_D.DCCODE
+                  AND ST_STOCK.STORERKEY = DM_DOCUMENT_D.STORERKEY
+                  AND ST_STOCK.ORGANIZE = DM_DOCUMENT_D.ORGANIZE
+                  AND ST_STOCK.AREA = DM_DOCUMENT_D.AREA
+                  AND ST_STOCK.SKU = DM_DOCUMENT_D.SKU
+               ) AS ST_OPENQTY_N
+            <choose>
+                <when test='beforeorderYn == "N" or beforeorderYn == null or beforeorderYn == ""'> /* 주문조정 전 */
+                    , NVL(ST_STOCK_JOIN.QTYALLOCATED, 0) AS QTYALLOCATED
+         			, NVL(ST_STOCK_JOIN.QTYPICKED, 0) AS QTYPICKED
+                    , DM_DOCUMENT_D.UOM AS BASEUOM
+                    , (SELECT NVL(SUM(QTY),0)
+                         FROM T_ST_STOCK_OPENQTY ST_STOCK
+                        WHERE ST_STOCK.DCCODE = DM_DOCUMENT_D.DCCODE
+                          AND ST_STOCK.STORERKEY = DM_DOCUMENT_D.STORERKEY
+                          AND ST_STOCK.ORGANIZE = DM_DOCUMENT_D.ORGANIZE
+                          AND ST_STOCK.AREA = DM_DOCUMENT_D.AREA
+                          AND ST_STOCK.SKU = DM_DOCUMENT_D.SKU
+                       ) AS QTY
+                    , (SELECT NVL(SUM(OPENQTY),0)
+                         FROM T_ST_STOCK_OPENQTY ST_STOCK
+                        WHERE ST_STOCK.DCCODE = DM_DOCUMENT_D.DCCODE
+                          AND ST_STOCK.STORERKEY = DM_DOCUMENT_D.STORERKEY
+                          AND ST_STOCK.ORGANIZE = DM_DOCUMENT_D.ORGANIZE
+                          AND ST_STOCK.AREA = DM_DOCUMENT_D.AREA
+                          AND ST_STOCK.SKU = DM_DOCUMENT_D.SKU
+                       ) AS ST_OPENQTY
+                </when>
+                <otherwise> /* 주문조정 후 */
+                    , 0 AS QTYALLOCATED
+                    , 0 AS QTYPICKED
+                    , '-' AS BASEUOM
+                    , 0 AS QTY
+                    , 0 AS ST_OPENQTY
+                </otherwise>
+            </choose>
+            , DM_DOCUMENT_H.WORKPROCESSCODE AS WORKPROCESSCODE
+            , DM_SHORTAGEPLAN.DEL_YN AS DEL_YN
+            , DM_SHORTAGEPLAN.MD_RMK AS MD_RMK
+            , DM_SHORTAGEPLAN.TEXT AS TEXT
+            , DM_SHORTAGEPLAN.ALTSKU AS ALTSKU
+            , (SELECT DESCRIPTION
+                 FROM MS_SKU
+                WHERE STORERKEY = DM_SHORTAGEPLAN.STORERKEY
+                  AND SKU = DM_SHORTAGEPLAN.ALTSKU
+                  AND DEL_YN = 'N'
+              ) AS ALTSKUNM
+            , (SELECT FN_GETCUSTCLASSCODE(WD_INPLAN.STORERKEY, MS_CUST.CUSTSTRATEGY3, '1', 'DESCR')
+                 FROM DUAL
+              ) AS SALECUSHRC1
+            , (SELECT FN_CODEDESCR(WD_INPLAN.STORERKEY, 'ORDERTYPE_WD', WD_INPLAN.ORDERTYPE)
+                 FROM DUAL
+              ) AS ORDERTYPE
+            , (SELECT USER_NM
+                 FROM FRAMEONE_USER
+                WHERE EMP_NO = DM_DOCUMENT_H.TO_EMPNAME1
+              ) AS TO_EMPNAME
+            , TO_CHAR(WD_INPLAN.ADDDATE, 'YYYY-MM-DD') AS ORDERDATE
+            , TO_CHAR(WD_INPLAN.ADDDATE, 'hh24:mi:ss') AS ORDERTIME
+            , DM_SHORTAGEPLAN.RE_DELIVERYDATE AS RE_DELIVERYDATE
+        FROM DM_DOCUMENT_D
+	    JOIN WD_INPLAN
+	        ON WD_INPLAN.DCCODE = DM_DOCUMENT_D.DCCODE
+	       AND WD_INPLAN.STORERKEY = DM_DOCUMENT_D.STORERKEY
+	       AND WD_INPLAN.ORGANIZE = DM_DOCUMENT_D.ORGANIZE
+	       AND WD_INPLAN.AREA = DM_DOCUMENT_D.AREA
+	       AND WD_INPLAN.DOCTYPE = DM_DOCUMENT_D.DOCTYPE
+	       AND WD_INPLAN.SLIPDT = DM_DOCUMENT_D.DELIVERYDATE
+	       AND WD_INPLAN.DOCNO = DM_DOCUMENT_D.DOCNO
+	       AND WD_INPLAN.DOCLINE = DM_DOCUMENT_D.DOCLINE
+	       AND WD_INPLAN.DEL_YN = 'N'            
+	    JOIN DM_DOCUMENT_H
+	        ON DM_DOCUMENT_H.DCCODE = DM_DOCUMENT_D.DCCODE
+	       AND DM_DOCUMENT_H.STORERKEY = DM_DOCUMENT_D.STORERKEY
+	       AND DM_DOCUMENT_H.ORGANIZE = DM_DOCUMENT_D.ORGANIZE
+	       AND DM_DOCUMENT_H.DELIVERYDATE = DM_DOCUMENT_D.DELIVERYDATE
+	       AND DM_DOCUMENT_H.DOCNO = DM_DOCUMENT_D.DOCNO
+	       AND DM_DOCUMENT_H.DOCTYPE = DM_DOCUMENT_D.DOCTYPE
+	       AND DM_DOCUMENT_H.STATUS <![CDATA[<]]> '90'
+	       AND DM_DOCUMENT_H.DEL_YN = 'N'
+	    LEFT OUTER JOIN DM_SHORTAGEPLAN
+	        ON DM_DOCUMENT_D.DCCODE = DM_SHORTAGEPLAN.DCCODE
+	       AND DM_DOCUMENT_D.STORERKEY = DM_SHORTAGEPLAN.STORERKEY
+	       AND DM_DOCUMENT_D.ORGANIZE = DM_SHORTAGEPLAN.ORGANIZE
+	       AND DM_DOCUMENT_D.AREA = DM_SHORTAGEPLAN.AREA
+	       AND DM_DOCUMENT_D.DOCNO = DM_SHORTAGEPLAN.DOCNO
+	       AND DM_DOCUMENT_D.DOCLINE = DM_SHORTAGEPLAN.DOCLINE
+	       AND DM_DOCUMENT_D.DOCTYPE = DM_SHORTAGEPLAN.DOCTYPE           
+	    JOIN MS_CUST
+	        ON MS_CUST.STORERKEY = DM_DOCUMENT_H.STORERKEY
+	       AND MS_CUST.CUSTTYPE = DM_DOCUMENT_H.TO_CUSTTYPE
+	       AND MS_CUST.CUSTKEY = DM_DOCUMENT_H.TO_CUSTKEY
+	       AND MS_CUST.DEL_YN = 'N'
+	    LEFT OUTER JOIN MS_CUST SALE_CUST
+	        ON SALE_CUST.STORERKEY = DM_DOCUMENT_H.STORERKEY
+	       AND SALE_CUST.CUSTTYPE = DM_DOCUMENT_H.TO_CUSTTYPE
+	       AND SALE_CUST.CUSTKEY = SUBSTR(DM_DOCUMENT_H.TO_CUSTKEY, 1, LENGTH(DM_DOCUMENT_H.TO_CUSTKEY) - 1)
+	       AND MS_CUST.DEL_YN = 'N'
+	    JOIN MS_SKU
+	        ON MS_SKU.STORERKEY = DM_DOCUMENT_D.STORERKEY
+	       AND MS_SKU.SKU = DM_DOCUMENT_D.SKU
+	       AND MS_SKU.DEL_YN = 'N'
+	    /* VW_ST_STOCK 인라인 뷰 조인 추가 */
+	    LEFT OUTER JOIN (
+	        SELECT DCCODE, STORERKEY, ORGANIZE, AREA, SKU
+	             , SUM(QTYALLOCATED) AS QTYALLOCATED
+	             , SUM(QTYPICKED) AS QTYPICKED
+	        FROM VW_ST_STOCK
+	        GROUP BY DCCODE, STORERKEY, ORGANIZE, AREA, SKU
+	    ) ST_STOCK_JOIN
+	        ON ST_STOCK_JOIN.DCCODE = DM_DOCUMENT_D.DCCODE
+	       AND ST_STOCK_JOIN.STORERKEY = DM_DOCUMENT_D.STORERKEY
+	       AND ST_STOCK_JOIN.ORGANIZE = DM_DOCUMENT_D.ORGANIZE
+	       AND ST_STOCK_JOIN.AREA = DM_DOCUMENT_D.AREA
+	       AND ST_STOCK_JOIN.SKU = DM_DOCUMENT_D.SKU
+        WHERE 1=1
+        <if test="beforeorderYn != null and beforeorderYn != ''">
+        	<choose>
+                <when test='beforeorderYn == "Y"'>
+                AND DM_DOCUMENT_D.PROCPOSS_YN = 'R'
+                </when>
+                <otherwise>
+                AND DM_DOCUMENT_D.PROCPOSS_YN <![CDATA[<>]]> 'R'
+                </otherwise>
+            </choose>
+        </if>
+        <if test="gMultiDccode != null and gMultiDccode != ''">
+			AND DM_DOCUMENT_D.DCCODE IN (
+			<foreach item="code" collection="gMultiDccode.split(',')" separator="," open="" close="">
+				#{code}
+			</foreach>
+			)
+		</if>
+            AND DM_DOCUMENT_D.STORERKEY = #{gStorerkey}
+        <if test="fromSlipDt != null and fromSlipDt != ''">
+        	AND DM_DOCUMENT_D.DELIVERYDATE <![CDATA[>=]]> #{fromSlipDt}
+        </if>
+        <if test="toSlipDt != null and toSlipDt != ''">
+        	AND DM_DOCUMENT_D.DELIVERYDATE <![CDATA[<=]]> #{toSlipDt}
+        </if>
+            AND DM_DOCUMENT_D.DOCTYPE = 'WD'
+            AND DM_DOCUMENT_D.CHANNEL = '1' /* 저장품만 */
+            AND DM_DOCUMENT_D.STATUS <![CDATA[<]]> '90'
+        <!--if test='beforeorderYn == "N"'> BPO 요청 삭제 260106
+            <if test='multiSku != null and multiSku !=""'>
+                AND DM_DOCUMENT_D.ORDERQTY + DM_DOCUMENT_D.ORDERADJUSTQTY > 0
+                AND DM_DOCUMENT_D.ORDERQTY + DM_DOCUMENT_D.ORDERADJUSTQTY > DM_DOCUMENT_D.PROCESSQTY
+            </if>
+        </if-->
+            AND DM_DOCUMENT_D.DEL_YN = 'N'
+            <if test='multiSku != null and multiSku !=""'>
+		    AND WD_INPLAN.SKU IN
+		        (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+		                    FROM (SELECT #{multiSku} AS VAL FROM DUAL) A
+		                 CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+		    </if>
+    ) WD
+    WHERE 1=1
+    <if test='beforeorderYn == "N" or beforeorderYn == null or beforeorderYn == ""'> <!-- 주문조정 전 또는 전체 -->
+        <if test='stockYn == "0"'>
+            AND ST_OPENQTY_N + DP_QTY - WD_QTY <![CDATA[<]]> 0
+        </if>
+    </if>
+    <if test="docDt != null and docDt != ''">
+        AND DOCDT = #{docDt}
+    </if>
+    <if test='multiDocno != null and multiDocno !=""'>
+        AND DOCNO IN
+        (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                    FROM (SELECT #{multiDocno} AS VAL FROM DUAL) A
+                 CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+    </if>
+    <if test='multiToCustkey != null and multiToCustkey !=""'>
+        AND TO_CUSTKEY IN
+        (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                    FROM (SELECT #{multiToCustkey} AS VAL FROM DUAL) A
+                 CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+    </if>    
+    <if test="gMultiCourier != null and gMultiCourier != ''">
+        AND COURIERCODE = #{gMultiCourier}
+    </if>
+        AND WORKPROCESSCODE = 'SO'    
+    </select>            	
+    
+</mapper>

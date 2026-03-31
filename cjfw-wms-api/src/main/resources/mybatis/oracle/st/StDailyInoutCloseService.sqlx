@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="stDailyInoutCloseService">
+	<select id="getMasterList" resultType="StDailyInoutCloseResDto">
+        /* [stDailyInoutColseService.sqlx][stDailyInoutCloseService.getMasterList][수불마감 정보 조회(목록)][jangjaehyun][20250722] */
+        SELECT
+            ST_DAILYINOUTCLOSE.SERIALKEY          AS SERIALKEY,         /* 데이터 번호 */
+            ST_DAILYINOUTCLOSE.DCCODE             AS DCCODE,            /* 센터코드 */
+            ST_DAILYINOUTCLOSE.STORERKEY          AS STORERKEY,         /* 고객사코드 */
+            ST_DAILYINOUTCLOSE.INOUTDT            AS INOUTDT,           /* 수불일자 */
+            ST_DAILYINOUTCLOSE.DEL_YN             AS DEL_YN,            /* 삭제여부 */
+            ST_DAILYINOUTCLOSE.ADDDATE            AS ADDDATE,           /* 최초등록일자 */
+            ST_DAILYINOUTCLOSE.EDITDATE           AS EDITDATE,          /* 최종변경시간 */
+            ST_DAILYINOUTCLOSE.ADDWHO             AS ADDWHO,            /* 최초등록자 */
+            ST_DAILYINOUTCLOSE.EDITWHO            AS EDITWHO,           /* 최종변경자 */
+            ST_DAILYINOUTCLOSE.STATUS             AS STATUS,            /* 상태 */
+            ST_DAILYINOUTCLOSE.SAP_INOUT_CLOSE_YN AS SAP_INOUT_CLOSE_YN,/* SAP수불마감여부 */
+            USER1.USER_NM AS ADDWHO_NM,  /*등록자명*/
+			USER2.USER_NM AS EDITWHO_NM  /*수정자명*/
+        FROM ST_DAILYINOUTCLOSE
+        LEFT JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = ST_DAILYINOUTCLOSE.ADDWHO  /*등록자명*/
+        LEFT JOIN FRAMEONE_USER USER2 ON USER2.USER_ID = ST_DAILYINOUTCLOSE.EDITWHO  /*수정자명*/
+        WHERE 1=1
+        <if test="inoutDt != null and inoutDt != ''">
+            AND ST_DAILYINOUTCLOSE.INOUTDT <![CDATA[>=]]> #{inoutDt}||'01'
+            AND ST_DAILYINOUTCLOSE.INOUTDT <![CDATA[<=]]> #{inoutDt}||'31'
+        </if>
+        <if test="delYn != null and delYn != ''">
+            AND ST_DAILYINOUTCLOSE.DEL_YN = #{delYn}
+        </if>
+        <if test='multiDcCode != null and multiDcCode.length > 0'>
+		   AND ST_DAILYINOUTCLOSE.DCCODE IN
+		   <foreach collection="multiDcCode" item="dccodeItem" open="(" separator="," close=")">
+		      #{dccodeItem}
+		   </foreach>
+		</if>
+    </select>
+
+    <insert id="insertMaster">
+        /* [stDailyInoutColseService.sqlx][stDailyInoutCloseService.insertMaster][수불마감 정보 INSERT][jangjaehyun][20250722] */
+        MERGE INTO st_dailyinoutclose old_data
+        USING ( SELECT #{serialKey} AS SERIALKEY,
+                       #{dcCode}    AS DCCODE,
+                       #{gStorerkey} AS STORERKEY,
+                       #{inoutDt}   AS INOUTDT,
+                       #{delYn}     AS DEL_YN,
+                       #{status}    AS STATUS
+                  FROM DUAL ) new_data
+        ON ( old_data.DCCODE = new_data.DCCODE
+         AND old_data.STORERKEY = new_data.STORERKEY
+         AND old_data.INOUTDT = new_data.INOUTDT )
+        WHEN MATCHED THEN
+            UPDATE
+               SET status   = new_data.STATUS,
+                   del_yn   = new_data.DEL_YN,
+                   EDITWHO  = #{gUserId},
+                   EDITDATE = SYSDATE
+        WHEN NOT MATCHED THEN
+            INSERT (serialkey, dccode, storerkey, inoutdt, status,
+                    del_yn, trafficcop, archivecop, adddate, editdate,
+                    addwho, editwho)
+            VALUES (seq_st_dailyinoutclose.nextval, new_data.dccode, new_data.storerkey, new_data.INOUTDT, new_data.STATUS,
+                    new_data.DEL_YN, NULL, NULL, SYSDATE, SYSDATE,
+                    #{gUserId}, #{gUserId})
+    </insert>
+
+    <update id="updateMaster">
+        /* [stDailyInoutColseService.sqlx][stDailyInoutCloseService.update][수불마감 정보 UPDATE][jangjaehyun][20250722] */
+        UPDATE ST_DAILYINOUTCLOSE
+           SET DCCODE    = #{dcCode},
+               STORERKEY = #{gStorerkey},
+               INOUTDT   = #{inoutDt},
+               DEL_YN    = #{delYn},
+               STATUS    = #{status},
+               EDITDATE  = SYSDATE,
+               EDITWHO   = #{gUserId}
+         WHERE SERIALKEY = #{serialKey}
+    </update>
+
+    <update id="saveBatchClose">
+        /* [stDailyInoutColseService.sqlx][stDailyInoutCloseService.saveBatchClose][수불 일괄 마감][jangjaehyun][20250722] */
+        MERGE INTO st_dailyinoutclose old_data
+        USING ( SELECT a.dccode,
+                       #{gStorerkey} AS STORERKEY,
+                       TO_CHAR(LAST_DAY(TO_DATE(#{inoutDt}, 'yyyymm')), 'yyyymmdd') AS INOUTDT
+                  FROM cm_dc a
+                 WHERE a.del_yn = 'N' AND (a.real_dc_yn <![CDATA[<>]]> 'N' OR a.real_dc_yn IS NULL) ) new_data
+        ON ( old_data.DCCODE = new_data.DCCODE
+         AND old_data.STORERKEY = new_data.STORERKEY
+         AND old_data.INOUTDT = new_data.INOUTDT )
+        WHEN MATCHED THEN
+            UPDATE
+               SET status   = '90',
+                   del_yn   = 'N',
+                   EDITWHO  = #{gUserId},
+                   EDITDATE = SYSDATE
+        WHEN NOT MATCHED THEN
+            INSERT (serialkey, dccode, storerkey, inoutdt, status,
+                    del_yn, trafficcop, archivecop, adddate, editdate,
+                    addwho, editwho)
+            VALUES (seq_st_dailyinoutclose.nextval, new_data.dccode, new_data.storerkey, new_data.INOUTDT, '90',
+                    'N', NULL, NULL, SYSDATE, SYSDATE,
+                    #{gUserId}, #{gUserId})
+    </update>	
+	 
+</mapper>

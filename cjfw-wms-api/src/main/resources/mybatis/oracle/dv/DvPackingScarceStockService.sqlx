@@ -1,0 +1,196 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+  PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+  "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="dvPackingScarceStockService">
+
+    <!-- 부족분리스트 목록 조회 -->
+    <select id="getDvPackingScarceStockList" resultType="cjfw.wms.dv.dto.DvPackingScarceStockResDto">
+		SELECT /* [dvPackingScarceStockService.sqlx][dvPackingScarceStockResDto.getDvPackingScarceStockList][부족분리스트][ch.y][2025-06-10] */
+			WD2.*
+		 FROM (
+		 		SELECT LAG('D',	1,	'M') OVER(PARTITION BY WD.DCCODE, WD.STORERKEY, WD.SKU ORDER BY WD.DCCODE, WD.STORERKEY, WD.SKU) 		AS HD_TYPE
+					 ,WD.DCCODE
+					 ,WD.STORERKEY
+					 ,WD.MNGPLC_ID 																AS MNGPLC
+					 ,CUST1.DESCRIPTION 														AS MNGPLCNM
+					 ,WD.SKU
+					 ,WD.DELIVERYGROUP
+					 ,WD.DESCRIPTION															AS SKUNAME
+					 ,CD1.BASEDESCR																AS STORAGETYPE
+					 ,WD.ORDERQTY
+					 ,WD.QTYALLOCATED
+					 ,WD.QTYPICKED
+					 ,WD.UOM
+					 ,WD.STOCK_QTY
+					 ,WD.SUM_QTYALLOCATED
+					 ,WD.SUM_QTYPICKED
+					<if test="allocatedyn 	== 1">,WD.STOCK_QTY - WD.SUM_QTYALLOCATED 		AS SHORT_QTY </if>
+					<if test="pickedyn 		== 1">,WD.STOCK_QTY - WD.SUM_QTYPICKED 			AS SHORT_QTY </if>
+	        			,WD.STOCK_UOM
+			    FROM (
+						SELECT M1.*
+							 ,STO_STOCK.STOCK_QTY AS STOCK_QTY
+							 ,STO_STOCK.UOM AS STOCK_UOM
+							 ,SUM(QTYALLOCATED) OVER(PARTITION BY M1.DCCODE, M1.STORERKEY, M1.SKU ORDER BY M1.DCCODE, M1.STORERKEY, M1.SKU) 		AS SUM_QTYALLOCATED
+							 ,SUM(QTYPICKED) OVER(PARTITION BY M1.DCCODE, M1.STORERKEY, M1.SKU ORDER BY M1.DCCODE, M1.STORERKEY, M1.SKU) 			AS SUM_QTYPICKED
+						 FROM (
+								SELECT M4.*
+								 FROM (SELECT M1.DCCODE 					AS DCCODE
+											 ,M1.STORERKEY 					AS STORERKEY
+											 ,M1.MNGPLC_ID 					AS MNGPLC_ID
+											 ,M1.SKU						AS SKU
+											 ,MAX(M1.DELIVERYGROUP) 		AS DELIVERYGROUP
+											 ,MAX(M1.DESCRIPTION) 			AS DESCRIPTION
+											 ,MAX(M1.STORAGETYPE) 			AS STORAGETYPE
+											 ,SUM(M1.ORDERQTY) 				AS ORDERQTY
+											 ,SUM(M1.QTYALLOCATED) 			AS QTYALLOCATED
+											 ,SUM(M1.QTYPICKED) 			AS QTYPICKED
+											 ,MAX(M1.UOM) 					AS UOM
+											 ,MAX(M1.STOCKGRADE) 			AS STOCKGRADE
+									 FROM (
+											SELECT DM_DOCUMENT_D.DCCODE     	AS DCCODE
+												 ,DM_DOCUMENT_D.STORERKEY  		AS STORERKEY
+												 ,DM_DOCUMENT_H.MNGPLC_ID  		AS MNGPLC_ID
+												 ,WD_INPLAN.SKU            		AS SKU
+												 ,TM_INPLAN.DELIVERYGROUP  		AS DELIVERYGROUP
+												 ,MS_SKU.DESCRIPTION       		AS DESCRIPTION
+												 ,MS_SKU.STORAGETYPE       		AS STORAGETYPE
+												 ,DM_DOCUMENT_D.ORDERQTY   		AS ORDERQTY
+												 ,DM_DOCUMENT_D.PROCESSQTY 		AS QTYALLOCATED
+												 ,DM_DOCUMENT_D.WORKQTY    		AS QTYPICKED
+												 ,DM_DOCUMENT_D.UOM        		AS UOM
+												 ,DM_DOCUMENT_D.STOCKGRADE 		AS STOCKGRADE
+											FROM DM_DOCUMENT_D
+				                    		JOIN DM_DOCUMENT_H
+				                        	ON DM_DOCUMENT_H.DCCODE 				= DM_DOCUMENT_D.DCCODE
+					                        AND DM_DOCUMENT_H.STORERKEY 			= DM_DOCUMENT_D.STORERKEY
+					                        AND DM_DOCUMENT_H.ORGANIZE 				= DM_DOCUMENT_D.ORGANIZE
+					                        AND DM_DOCUMENT_H.DOCTYPE 				= DM_DOCUMENT_D.DOCTYPE
+					                        AND DM_DOCUMENT_H.DOCDT 				= DM_DOCUMENT_D.DOCDT
+					                        AND DM_DOCUMENT_H.DOCNO 				= DM_DOCUMENT_D.DOCNO
+					                        AND DM_DOCUMENT_H.DOCTYPE 				= 'WD'
+					                        AND DM_DOCUMENT_H.WORKPROCESSCODE 				<![CDATA[<>]]> 'STO'
+					                        AND NVL(DM_DOCUMENT_H.IF_SEND_TYPE, 'SO') 		<![CDATA[<>]]> 'STODC'
+					                        <if test="toVatno 			!= null and toVatno 		!= ''"> AND DM_DOCUMENT_H.TO_VATNO 	= #{toVatno} </if>
+					                        <!-- 배송그룹 공통조회 조건 -->
+					                        <if test="gMultiCourier 	!= null and gMultiCourier 	!= ''"> AND DM_DOCUMENT_H.COURIER 	= #{gMultiCourier} </if>
+			                    			JOIN WD_INPLAN
+			                        		ON WD_INPLAN.DCCODE 			= DM_DOCUMENT_D.DCCODE
+					                        AND WD_INPLAN.STORERKEY 		= DM_DOCUMENT_D.STORERKEY
+					                        AND WD_INPLAN.ORGANIZE 			= DM_DOCUMENT_D.ORGANIZE
+					                        AND WD_INPLAN.AREA 				= DM_DOCUMENT_D.AREA
+					                        AND WD_INPLAN.DOCTYPE 			= DM_DOCUMENT_D.DOCTYPE
+					                        AND WD_INPLAN.DOCDT 			= DM_DOCUMENT_D.DOCDT
+					                        AND WD_INPLAN.DOCNO 			= DM_DOCUMENT_D.DOCNO
+					                        AND WD_INPLAN.DOCLINE 			= DM_DOCUMENT_D.DOCLINE
+					                        AND WD_INPLAN.DEL_YN = 'N'
+					                        <if test="slipdt != null and slipdt != ''"> AND WD_INPLAN.SLIPDT = #{slipdt} </if>
+					                        LEFT OUTER JOIN TM_INPLAN
+				                            ON TM_INPLAN.DCCODE 		= WD_INPLAN.DCCODE
+				                            AND TM_INPLAN.STORERKEY 	= WD_INPLAN.STORERKEY
+				                            AND TM_INPLAN.DOCTYPE 		= WD_INPLAN.DOCTYPE
+				                            AND TM_INPLAN.SLIPDT 		= WD_INPLAN.SLIPDT
+				                            AND TM_INPLAN.SLIPNO 		= WD_INPLAN.SLIPNO
+				                            <if test="sku != null and sku != ''">
+				                                <if test="slipdt != null and slipdt != ''"> AND TM_INPLAN.SLIPDT = #{slipdt} </if>
+				                            </if>
+				                            AND TM_INPLAN.DEL_YN = 'N'
+			                    			JOIN MS_SKU
+			                        		ON MS_SKU.STORERKEY = DM_DOCUMENT_D.STORERKEY
+					                        AND MS_SKU.SKU = DM_DOCUMENT_D.SKU
+					                        AND MS_SKU.DEL_YN = 'N'
+					                        <if test="storagetype != null and storagetype != ''"> AND MS_SKU.STORAGETYPE = #{storagetype} </if>
+			                    			WHERE 1=1
+					                        AND DM_DOCUMENT_D.DCCODE = #{fixdccode}
+					                        <if test="organizeMulti != null and organizeMulti != ''">
+                                               AND DM_DOCUMENT_D.ORGANIZE IN
+                                               <foreach collection="organizeMulti" item="code" open="(" close=")" separator=",">
+                                                 #{code}
+                                               </foreach>   
+                                            </if>
+					                        AND DM_DOCUMENT_D.DOCTYPE = 'WD'
+					                        <if test="allocatedyn 	== 1"> AND DM_DOCUMENT_D.STATUS 		= '40' </if>
+					                        <if test="pickedyn 		== 1"> AND DM_DOCUMENT_D.STATUS 		= '50' </if>
+					                        <if test="slipdt 		!= null and slipdt 		!= ''"> AND DM_DOCUMENT_D.DELIVERYDATE = #{slipdt} </if>
+					                        <if test="sku 			!= null and sku 		!= ''">AND DM_DOCUMENT_D.SKU IN (
+										    		SELECT TRIM(REGEXP_SUBSTR(#{sku}, '[^,]+', 1, LEVEL)) AS VAL FROM DUAL CONNECT BY LEVEL <![CDATA[<=]]> REGEXP_COUNT(#{sku}, '[^,]+')
+												)
+										  	</if>
+					                        <!-- START.권한센터 -->
+										    AND EXISTS (SELECT 1
+									                      FROM CM_USER_AUTHORITY 
+									                     WHERE CM_USER_AUTHORITY.DCCODE    = DM_DOCUMENT_D.DCCODE       
+									                       AND CM_USER_AUTHORITY.STORERKEY = DM_DOCUMENT_D.STORERKEY    
+									                       AND CM_USER_AUTHORITY.ORGANIZE  = DM_DOCUMENT_D.ORGANIZE     
+									                       AND CM_USER_AUTHORITY.AREA      = DM_DOCUMENT_D.AREA         
+									                       AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey}
+									                       AND CM_USER_AUTHORITY.USERID    = #{gUserId}
+									                       AND CM_USER_AUTHORITY.DCCODE    = #{fixdccode}
+									                       AND CM_USER_AUTHORITY.AREA      = #{gArea}   
+												           <!-- 창고.다중검색 -->
+												           <if test="organizeMulti != null and organizeMulti != ''">
+                                                               AND CM_USER_AUTHORITY.ORGANIZE IN
+                                                               <foreach collection="organizeMulti" item="code" open="(" close=")" separator=",">
+                                                                 #{code}
+                                                               </foreach>
+                                                           </if>                      
+									                   )
+										    <!-- END.권한센터	--> 
+			                			) M1
+			                	GROUP BY M1.DCCODE, M1.STORERKEY, M1.MNGPLC_ID, M1.SKU
+			            	) M4
+			        ) M1
+			        LEFT OUTER JOIN (
+			            SELECT
+			                ST_STOCK.STORERKEY
+			                ,ST_STOCK.DCCODE
+			                ,ST_STOCK.SKU
+			                ,ST_STOCK.STOCKGRADE
+			                <if test="stockyn == 1">,SUM(QTY) 																										AS STOCK_QTY </if>
+			                <if test="openyn == 1">,SUM(OPENQTY) 																									AS STOCK_QTY </if>
+			                <if test="realityyn == 1">,SUM(QTY) - SUM(QTYEXPECTED) - SUM(QTYRESERVE) - SUM(QTYALLOCATED) - SUM(QTYPICKED) - SUM(QTYHOLD) 			AS STOCK_QTY </if>
+			                ,MAX(UOM) 																																AS UOM
+			            FROM ST_STOCK
+			            LEFT OUTER JOIN MS_SKUDCSET
+			                ON MS_SKUDCSET.STORERKEY 		= ST_STOCK.STORERKEY
+				                AND MS_SKUDCSET.Dccode 			= ST_STOCK.Dccode
+				                AND MS_SKUDCSET.SKU 			= ST_STOCK.SKU
+			            WHERE 1=1
+			                AND ST_STOCK.STORERKEY = 'FW00' /**P*/
+			                AND ST_STOCK.DCCODE = #{fixdccode} /**P*/
+			                <if test="organizeMulti != null and organizeMulti != ''">
+                               AND ST_STOCK.ORGANIZE IN
+                               <foreach collection="organizeMulti" item="code" open="(" close=")" separator=",">
+                                 #{code}
+                               </foreach>   
+                            </if>
+			                <if test="sku != null and sku != ''">AND ST_STOCK.SKU IN (
+						    		SELECT TRIM(REGEXP_SUBSTR(#{sku}, '[^,]+', 1, LEVEL)) AS VAL FROM DUAL CONNECT BY LEVEL <![CDATA[<=]]> REGEXP_COUNT(#{sku}, '[^,]+')
+								)
+						  	</if>
+			            GROUP BY
+			                ST_STOCK.STORERKEY
+			                ,ST_STOCK.DCCODE
+			                ,ST_STOCK.SKU
+			                ,STOCKGRADE
+			        ) STO_STOCK
+			            ON M1.DCCODE 			= STO_STOCK.DCCODE
+				            AND M1.STORERKEY 		= STO_STOCK.STORERKEY
+				            AND M1.SKU 				= STO_STOCK.SKU
+				            AND M1.STOCKGRADE 		= STO_STOCK.STOCKGRADE
+			    ) WD
+				LEFT JOIN MS_CUST  			CUST1   ON (CUST1.STORERKEY = WD.STORERKEY AND CUST1.CUSTKEY  	= WD.MNGPLC_ID 			AND CUST1.CUSTTYPE  = 'C' )
+				LEFT JOIN CM_CODE_STORER 	CD1 	ON (CD1.STORERKEY 	= WD.STORERKEY AND CD1.CODELIST 	= 'STORAGETYPE' 		AND CD1.BASECODE 	= WD.STORAGETYPE)
+			) WD2
+			WHERE WD2.SHORT_QTY <![CDATA[<]]> 0
+			ORDER BY STORAGETYPE
+					, SKU
+					, HD_TYPE DESC
+					, MNGPLC
+					, DELIVERYGROUP
+
+    </select>
+
+   
+</mapper>

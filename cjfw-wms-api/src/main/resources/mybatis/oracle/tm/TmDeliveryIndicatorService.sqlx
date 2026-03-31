@@ -1,0 +1,858 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="tmDeliveryIndicatorService">
+		<!-- 일별: 착지수/보고/보고율 -->
+		<!-- <select id="getHeaderListByDay" resultType="TmDeliveryIndicatorResDto">
+		WITH BASE_DATA AS (
+		    SELECT
+		               I.DCCODE                                                                 AS DCCODE                /* 물류센터 */
+		             , I.DELIVERYDT                                                             AS DELIVERYDT            /* 배송일자 */
+		             , I.CONTRACTTYPE                                                           AS CONTRACTTYPE          /* 계약코드유형 */
+		             , COUNT(DISTINCT I.CUSTKEY)                                                AS ARRIVAL_COUNT         /* 실착지수 */
+		      FROM (
+		            SELECT DCCODE, DELIVERYDT, SLIPDT, CUSTKEY, CONTRACTTYPE, CARNO, STATUS, DEL_YN
+		              FROM TM_INPLAN
+		             WHERE <![CDATA[ SPLIT_DELIVERY_YN = 'N' ]]>
+		               AND <![CDATA[ DEL_YN = 'N' ]]>
+		
+		            UNION ALL
+		
+		            SELECT DCCODE, DELIVERYDT, SLIPDT, CUSTKEY, CONTRACTTYPE, CARNO, STATUS, DEL_YN
+		              FROM TM_INPLAN_SPLIT
+		             WHERE <![CDATA[ DEL_YN = 'N' ]]>
+		      ) I
+		     WHERE <![CDATA[ I.DELIVERYDT = #{deliveryDt} ]]>
+		       AND <![CDATA[ I.SLIPDT     = #{deliveryDt} ]]>
+		       AND <![CDATA[ I.DCCODE     = #{dcCode} ]]>
+		       AND <![CDATA[ I.STATUS     = '90' ]]>
+		       AND <![CDATA[ I.CARNO IS NOT NULL ]]>
+		       AND <![CDATA[ I.CONTRACTTYPE IS NOT NULL ]]>
+		     GROUP BY
+		           I.DCCODE
+		         , I.DELIVERYDT
+		         , I.CONTRACTTYPE
+		),
+		WORKLOG_DATA AS (
+		    SELECT
+		               I.DELIVERYDT                                                             AS DELIVERYDT            /* 배송일자 */
+		             , I.DCCODE                                                                 AS DCCODE                /* 물류센터 */
+		             , I.CONTRACTTYPE                                                           AS CONTRACTTYPE          /* 계약코드유형 */
+		             , COUNT(DISTINCT W.CUSTKEY)                                                AS REPORT_COUNT          /* 보고건수(전체) */
+		             , COUNT(DISTINCT CASE WHEN W.REG_TYPE IN ('M','W') THEN W.CUSTKEY END)     AS MANUAL_REPORT_COUNT   /* 보고(수동) */
+		             , COUNT(DISTINCT CASE WHEN W.REG_TYPE NOT IN ('M','W') OR W.REG_TYPE IS NULL THEN W.CUSTKEY END)
+		                                                                                       AS NORMAL_REPORT_COUNT   /* 보고(정상) */
+		      FROM TM_WORKLOG W
+		      INNER JOIN (
+		            SELECT DELIVERYDT, SLIPDT, DCCODE, CARNO, PRIORITY, CUSTKEY, CONTRACTTYPE, STATUS, DEL_YN
+		              FROM TM_INPLAN
+		             WHERE <![CDATA[ SPLIT_DELIVERY_YN = 'N' ]]>
+		               AND <![CDATA[ DEL_YN = 'N' ]]>
+		
+		            UNION ALL
+		
+		            SELECT DELIVERYDT, SLIPDT, DCCODE, CARNO, PRIORITY, CUSTKEY, CONTRACTTYPE, STATUS, DEL_YN
+		              FROM TM_INPLAN_SPLIT
+		             WHERE <![CDATA[ DEL_YN = 'N' ]]>
+		      ) I
+		        ON <![CDATA[ I.DELIVERYDT = W.DELIVERYDT ]]>
+		       AND <![CDATA[ I.CARNO      = W.CARNO ]]>
+		       AND <![CDATA[ I.PRIORITY   = W.PRIORITY ]]>
+		       AND <![CDATA[ I.CUSTKEY    = W.CUSTKEY ]]>
+		       AND <![CDATA[ I.STATUS     = '90' ]]>
+		       AND <![CDATA[ I.CARNO IS NOT NULL ]]>
+		     WHERE <![CDATA[ I.DELIVERYDT  = #{deliveryDt} ]]>
+		       AND <![CDATA[ I.SLIPDT      = #{deliveryDt} ]]>
+		       AND <![CDATA[ I.DCCODE      = #{dcCode} ]]>
+		       AND <![CDATA[ W.WORKLOGTYPE = 'DELIVERYSTART' ]]>
+		       AND <![CDATA[ W.DEL_YN      = 'N' ]]>
+		       AND <![CDATA[ I.CONTRACTTYPE IS NOT NULL ]]>
+		     GROUP BY
+		           I.DELIVERYDT
+		         , I.DCCODE
+		         , I.CONTRACTTYPE
+		)
+		SELECT /* [tmArrivalReportRateService.sqlx][getArrivalReportRateDaily][착지수,보고,보고율(일별)][ParkJinWoo][20260120] */
+		               BD.DELIVERYDT                                                           AS DELIVERYDT            /* 기준일자 */
+		             , BD.DCCODE                                                               AS DCCODE                /* 물류센터 */
+		             , BD.CONTRACTTYPE                                                         AS CONTRACTTYPE          /* 계약코드유형 */
+		             , NVL(CD.BASEDESCR, BD.CONTRACTTYPE)                                      AS CONTRACTTYPENAME      /* 계약코드유형명 */
+		             , NVL(BD.ARRIVAL_COUNT, 0)                                                AS ARRIVALCOUNT          /* 실착지수 */
+		             , NVL(WL.NORMAL_REPORT_COUNT, 0)                                          AS NORMALREPORTCOUNT     /* 보고(정상) */
+		             , CASE
+		                   WHEN <![CDATA[ NVL(BD.ARRIVAL_COUNT, 0) = 0 ]]> THEN 0
+		                   ELSE ROUND(NVL(WL.NORMAL_REPORT_COUNT, 0) / BD.ARRIVAL_COUNT * 100, 2)
+		               END                                                                     AS NORMALREPORTRATE      /* 보고율(정상) */
+		             , NVL(WL.MANUAL_REPORT_COUNT, 0)                                          AS MANUALREPORTCOUNT     /* 보고(수동) */
+		             , CASE
+		                   WHEN <![CDATA[ NVL(BD.ARRIVAL_COUNT, 0) = 0 ]]> THEN 0
+		                   ELSE ROUND(NVL(WL.MANUAL_REPORT_COUNT, 0) / BD.ARRIVAL_COUNT * 100, 2)
+		               END                                                                     AS MANUALREPORTRATE      /* 보고율(수동) */
+		           		               , ( NVL(WL.NORMAL_REPORT_COUNT, 0) + NVL(WL.MANUAL_REPORT_COUNT, 0) )      AS REPORTCOUNT
+		               , CASE
+					      WHEN NVL(BD.ARRIVAL_COUNT, 0) = 0 THEN 0
+					      ELSE ROUND(
+					           ( NVL(WL.NORMAL_REPORT_COUNT, 0) + NVL(WL.MANUAL_REPORT_COUNT, 0) )
+					           / BD.ARRIVAL_COUNT * 100
+					           , 2
+					      )
+  END    /* 보고(합계) *//* 보고율(수동) */    
+		  FROM BASE_DATA BD
+		  LEFT JOIN WORKLOG_DATA WL
+		         ON WL.DELIVERYDT   = BD.DELIVERYDT
+		        AND WL.DCCODE       = BD.DCCODE
+		        AND WL.CONTRACTTYPE = BD.CONTRACTTYPE
+		  LEFT JOIN CM_CODE_STORER CD
+		         ON CD.STORERKEY = 'FW00'
+		        AND CD.CODELIST  = 'CONTRACTTYPE'
+		        AND CD.BASECODE  = BD.CONTRACTTYPE
+		 ORDER BY
+		       BD.CONTRACTTYPE
+		</select> -->
+		<select id="getHeaderListByDay" resultType="TmDeliveryIndicatorResDto">
+		/* [tmDeliveryIndicatorService.sqlx][getHeaderListByDay][차량/거래처 기준 일별 지표][ParkJinWoo][20260120] */
+WITH INPLAN_ALL AS (
+    SELECT
+               I.DCCODE                                                               AS DCCODE                /* 물류센터 */
+             , I.DELIVERYDT                                                           AS DELIVERYDT            /* 배송일자 */
+             , I.SLIPDT                                                               AS SLIPDT                /* 전표일자 */
+             , I.CUSTKEY                                                              AS CUSTKEY               /* 거래처 */
+             , I.CONTRACTTYPE                                                         AS CONTRACTTYPE          /* 계약코드유형 */
+             , I.CARNO                                                                AS CARNO                 /* 차량번호 */
+             , I.PRIORITY                                                             AS PRIORITY              /* 우선순위 */
+             , I.CUSTARRIVALDT                                                        AS CUSTARRIVALDT         /* 도착시간(TM) */
+             , I.CUSTDEPARTUREDT                                                      AS CUSTDEPARTUREDT       /* 출발시간(TM) */
+             , I.STATUS                                                               AS STATUS                /* 상태 */
+			 , I.TM_DELIVERYTYPE                                                      AS TM_DELIVERYTYPE                            	
+             , I.TRUTHCUSTKEY             
+      FROM TM_INPLAN I
+     WHERE <![CDATA[ I.SPLIT_DELIVERY_YN = 'N' ]]>
+       AND <![CDATA[ I.DEL_YN = 'N' ]]>
+
+    UNION ALL
+ 
+    SELECT
+               S.DCCODE                                                               AS DCCODE                /* 물류센터 */
+             , S.DELIVERYDT                                                           AS DELIVERYDT            /* 배송일자 */
+             , S.SLIPDT                                                               AS SLIPDT                /* 전표일자 */
+             , S.CUSTKEY                                                              AS CUSTKEY               /* 거래처 */
+             , S.CONTRACTTYPE                                                         AS CONTRACTTYPE          /* 계약코드유형 */
+             , S.CARNO                                                                AS CARNO                 /* 차량번호 */
+             , S.PRIORITY                                                             AS PRIORITY              /* 우선순위 */
+             , S.CUSTARRIVALDT                                                        AS CUSTARRIVALDT         /* 도착시간(TM) */
+             , S.CUSTDEPARTUREDT                                                      AS CUSTDEPARTUREDT       /* 출발시간(TM) */
+             , S.STATUS     
+             , S.TM_DELIVERYTYPE    
+             , S.TRUTHCUSTKEY                                                          AS STATUS                /* 상태 */
+      FROM TM_INPLAN_SPLIT S
+     WHERE <![CDATA[ S.DEL_YN = 'N' ]]>
+),
+DAY_BASE AS (
+    /* 일 범위 대상 */
+    SELECT
+               I.DCCODE                                                               AS DCCODE                /* 물류센터 */
+             , I.DELIVERYDT                                                           AS DELIVERYDT            /* 배송일자 */
+             , I.SLIPDT                                                               AS SLIPDT                /* 전표일자 */
+             , I.CUSTKEY                                                              AS CUSTKEY               /* 거래처 */
+             , I.CONTRACTTYPE                                                         AS CONTRACTTYPE          /* 계약코드유형 */
+             , I.CARNO                                                                AS CARNO                 /* 차량번호 */
+             , I.PRIORITY                                                             AS PRIORITY              /* 우선순위 */
+             , I.CUSTARRIVALDT                                                        AS CUSTARRIVALDT         /* 도착시간(TM) */
+             , I.CUSTDEPARTUREDT                                                      AS CUSTDEPARTUREDT       /* 출발시간(TM) */
+			 , I.TRUTHCUSTKEY                                                       AS TRUTHCUSTKEY          /* 실거래처 */
+			 , I.CARNO || '-' || I.PRIORITY || '-' || I.TRUTHCUSTKEY                AS COUNT_KEY             /* 착지수KEY */
+      FROM INPLAN_ALL I
+     WHERE <![CDATA[ I.DCCODE = #{dcCode} ]]>
+       AND <![CDATA[ I.DELIVERYDT = #{deliveryDt} ]]>
+       AND <![CDATA[ I.SLIPDT     = #{deliveryDt} ]]>
+       AND <![CDATA[ I.STATUS = '90' ]]>
+       AND <![CDATA[ I.CARNO IS NOT NULL ]]>
+       AND <![CDATA[ I.CONTRACTTYPE IS NOT NULL ]]>
+       AND   I.TM_DELIVERYTYPE IN ('1','2')
+),
+/***********************************************************************
+* ✅ 1번과 동일한 REG_TYPE 결정(DELIVERYSTART + DELIVERYEND) + 보고 집계
+***********************************************************************/
+WORKLOG_JOIN AS (
+    SELECT
+          D.CONTRACTTYPE     AS CONTRACTTYPE      /* 계약코드유형 */
+        , D.COUNT_KEY        AS COUNT_KEY         /* 착지수KEY */
+        , FINAL.REG_TYPE     AS REG_TYPE          /* 보고구분(PM/W) */
+    FROM DAY_BASE D
+    LEFT JOIN TM_WORKLOG TM_WORKLOG_DE
+        ON  TM_WORKLOG_DE.CARNO          = D.CARNO
+        AND TM_WORKLOG_DE.PRIORITY       = D.PRIORITY
+        AND TM_WORKLOG_DE.WORKDATEDATA1  = D.CUSTARRIVALDT
+        AND TM_WORKLOG_DE.WORKLOGTYPE    = 'DELIVERYEND'
+        AND TM_WORKLOG_DE.DEL_YN         = 'N'
+    LEFT JOIN TM_WORKLOG TM_WORKLOG_DS
+        ON  TM_WORKLOG_DS.CARNO          = D.CARNO
+        AND TM_WORKLOG_DS.PRIORITY       = D.PRIORITY
+        AND TM_WORKLOG_DS.WORKDATEDATA1  = D.CUSTDEPARTUREDT
+        AND TM_WORKLOG_DS.WORKLOGTYPE    = 'DELIVERYSTART'
+        AND TM_WORKLOG_DS.DEL_YN         = 'N'
+    CROSS APPLY (
+        SELECT
+            CASE
+                WHEN PICK.REG_TYPE IN ('P','M') THEN 'PM'
+                WHEN PICK.REG_TYPE = 'W'        THEN 'W'
+                ELSE NULL
+            END AS REG_TYPE
+        FROM (
+            SELECT
+                CASE
+                    WHEN TM_WORKLOG_DE.REG_TYPE IN ('P','M')
+                     AND TM_WORKLOG_DS.REG_TYPE IN ('P','M')
+                    THEN 'P'
+                    WHEN TM_WORKLOG_DE.REG_TYPE = 'W'
+                     AND TM_WORKLOG_DS.REG_TYPE = 'W'
+                    THEN 'W'
+                    ELSE
+                        CASE
+                            WHEN TM_WORKLOG_DE.REG_TYPE IS NULL
+                             AND TM_WORKLOG_DS.REG_TYPE IS NULL
+                            THEN NULL
+                            WHEN TM_WORKLOG_DS.REG_TYPE IS NULL THEN TM_WORKLOG_DE.REG_TYPE
+                            WHEN TM_WORKLOG_DE.REG_TYPE IS NULL THEN TM_WORKLOG_DS.REG_TYPE
+                            ELSE
+                                CASE
+                                    WHEN TM_WORKLOG_DE.EDITDATE IS NULL
+                                     AND TM_WORKLOG_DS.EDITDATE IS NULL
+                                    THEN NULL
+                                    WHEN TM_WORKLOG_DS.EDITDATE IS NULL THEN TM_WORKLOG_DE.REG_TYPE
+                                    WHEN TM_WORKLOG_DE.EDITDATE IS NULL THEN TM_WORKLOG_DS.REG_TYPE
+                                    WHEN TM_WORKLOG_DE.EDITDATE <![CDATA[ <=]]> TM_WORKLOG_DS.EDITDATE THEN TM_WORKLOG_DE.REG_TYPE
+                                    ELSE TM_WORKLOG_DS.REG_TYPE
+                                END
+                        END
+                END AS REG_TYPE
+            FROM DUAL
+        ) PICK
+    ) FINAL
+),
+CUST_METRIC AS (
+    /* ✅ 1번 기준: ARRIVAL = COUNT_KEY, REPORT = REG_TYPE(PM/W) 기준 COUNT_KEY */
+    SELECT
+          D.CONTRACTTYPE                                                      AS CONTRACTTYPE   /* 계약코드유형 */
+        , COUNT(DISTINCT D.COUNT_KEY)                                         AS ARRIVALCOUNT   /* 착지수(1번 동일) */
+        , COUNT(DISTINCT CASE WHEN W.REG_TYPE IN ('PM','W') THEN D.COUNT_KEY END)
+                                                                              AS REPORTCOUNT    /* 보고(1번 동일) */
+        , CASE
+            WHEN COUNT(DISTINCT D.COUNT_KEY) = 0 THEN 0
+            ELSE ROUND(
+                    COUNT(DISTINCT CASE WHEN W.REG_TYPE IN ('PM','W') THEN D.COUNT_KEY END)
+                    / COUNT(DISTINCT D.COUNT_KEY) * 100
+                 , 2)
+          END                                                                 AS REPORTRATE     /* 보고율 */
+    FROM DAY_BASE D
+    LEFT JOIN WORKLOG_JOIN W
+        ON  W.CONTRACTTYPE = D.CONTRACTTYPE
+        AND W.COUNT_KEY    = D.COUNT_KEY
+    GROUP BY
+          D.CONTRACTTYPE
+),
+
+/***********************************************************************
+* 차량기준 : 총대수 / 00%미만차량 / 비율 (일별)  (기존 로직 유지)
+***********************************************************************/
+STOP_WORKLOG AS (
+    SELECT
+          W.DELIVERYDT                                                           AS DELIVERYDT     /* 배송일자 */
+        , W.CARNO                                                                AS CARNO          /* 차량번호 */
+        , W.PRIORITY                                                             AS PRIORITY       /* 우선순위 */
+        , W.CUSTKEY                                                              AS CUSTKEY        /* 거래처 */
+        , MIN(CASE WHEN W.WORKLOGTYPE = 'DELIVERYSTART' THEN W.WORKDATEDATA1 END) AS ARRIVE_TIME   /* 도착시간(로그) */
+        , MAX(CASE WHEN W.WORKLOGTYPE = 'DELIVERYEND'   THEN W.WORKDATEDATA1 END) AS DEPART_TIME   /* 출발시간(로그) */
+    FROM TM_WORKLOG W
+    WHERE W.WORKLOGTYPE IN ('DELIVERYSTART','DELIVERYEND')
+      AND W.DEL_YN = 'N'
+    GROUP BY
+          W.DELIVERYDT
+        , W.CARNO
+        , W.PRIORITY
+        , W.CUSTKEY
+),
+STOP_DATA AS (
+    SELECT
+          D.CONTRACTTYPE                                       AS CONTRACTTYPE     /* 계약코드유형 */
+        , D.CARNO                                              AS CARNO            /* 차량번호 */
+        , D.PRIORITY                                           AS PRIORITY         /* 우선순위 */
+        , D.CUSTKEY                                            AS CUSTKEY          /* 거래처 */
+        , COALESCE(D.CUSTARRIVALDT,   SW.ARRIVE_TIME)          AS ARRIVEDTIME      /* 도착시간(확정) */
+        , COALESCE(D.CUSTDEPARTUREDT, SW.DEPART_TIME)          AS DEPARTURETIME    /* 출발시간(확정) */
+    FROM DAY_BASE D
+    LEFT JOIN STOP_WORKLOG SW
+        ON  SW.DELIVERYDT = D.DELIVERYDT
+        AND SW.CARNO      = D.CARNO
+        AND SW.PRIORITY   = D.PRIORITY
+        AND SW.CUSTKEY    = D.CUSTKEY
+),
+CAR_RATE AS (
+    SELECT
+          SD.CONTRACTTYPE                                                     AS CONTRACTTYPE    /* 계약코드유형 */
+        , SD.CARNO                                                            AS CARNO           /* 차량번호 */
+        , COUNT(*)                                                            AS STOPCNT         /* 정지점수 */
+        , SUM(CASE WHEN SD.ARRIVEDTIME IS NOT NULL AND SD.DEPARTURETIME IS NOT NULL THEN 1 ELSE 0 END)
+                                                                            AS DONESTOPCNT      /* 입력완료정지점수 */
+        , CASE
+            WHEN COUNT(*) = 0 THEN 0
+            ELSE ROUND(
+                    SUM(CASE WHEN SD.ARRIVEDTIME IS NOT NULL AND SD.DEPARTURETIME IS NOT NULL THEN 1 ELSE 0 END)
+                    / COUNT(*) * 100
+                 , 2)
+          END                                                                AS INPUTRATE        /* 차량입력률 */
+    FROM STOP_DATA SD
+    GROUP BY
+          SD.CONTRACTTYPE
+        , SD.CARNO
+),
+CAR_METRIC AS (
+    SELECT
+          CR.CONTRACTTYPE                                                     AS CONTRACTTYPE    /* 계약코드유형 */
+        , COUNT(DISTINCT CR.CARNO)                                            AS TOTALCARCNT     /* 총대수 */
+        , COUNT(DISTINCT CASE WHEN <![CDATA[ CR.INPUTRATE < #{rateStd} ]]> THEN CR.CARNO END)    AS UNDERCARCNT     /* 00%미만차량 */
+        , CASE
+            WHEN COUNT(DISTINCT CR.CARNO) = 0 THEN 0
+            ELSE ROUND(
+                    COUNT(DISTINCT CASE WHEN <![CDATA[ CR.INPUTRATE < #{rateStd} ]]> THEN CR.CARNO END)
+                    / COUNT(DISTINCT CR.CARNO) * 100
+                 , 2)
+          END                                                                AS UNDERCARRATE     /* 비율 */
+    FROM CAR_RATE CR
+    GROUP BY
+          CR.CONTRACTTYPE
+),
+
+/***********************************************************************
+* 계약유형명 + 구분 매핑
+***********************************************************************/
+CT_NAME AS (
+    SELECT
+          X.CONTRACTTYPE                                   AS CONTRACTTYPE      /* 계약코드유형 */
+        , NVL(CS.BASEDESCR, X.CONTRACTTYPE)                AS CONTRACTTYPENAME  /* 계약코드유형명 */
+    FROM (SELECT DISTINCT CONTRACTTYPE FROM DAY_BASE) X
+    LEFT JOIN CM_CODE_STORER CS
+        ON CS.STORERKEY = 'FW00'
+       AND CS.CODELIST  = 'CONTRACTTYPE'
+       AND CS.BASECODE  = X.CONTRACTTYPE
+),
+CT_METRIC AS (
+    SELECT
+          CN.CONTRACTTYPENAME                               AS GUBUN            /* 구분 */
+        , NVL(CM.TOTALCARCNT, 0)                            AS TOTALCARCNT       /* 총대수 */
+        , NVL(CM.UNDERCARCNT, 0)                            AS UNDERCARCNT       /* 00%미만차량 */
+        , NVL(CM.UNDERCARRATE, 0)                           AS UNDERCARRATE      /* 비율 */
+        , NVL(CU.ARRIVALCOUNT, 0)                           AS ARRIVALCOUNT      /* 착지수(1번 동일 기준) */
+        , NVL(CU.REPORTCOUNT, 0)                            AS REPORTCOUNT       /* 보고(1번 동일 기준) */
+        , NVL(CU.REPORTRATE, 0)                             AS REPORTRATE        /* 보고율 */
+    FROM CT_NAME CN
+    LEFT JOIN CAR_METRIC CM
+        ON CM.CONTRACTTYPE = CN.CONTRACTTYPE
+    LEFT JOIN CUST_METRIC CU
+        ON CU.CONTRACTTYPE = CN.CONTRACTTYPE
+),
+GUBUN_LIST AS (
+    SELECT '전체'            AS GUBUN FROM DUAL UNION ALL
+    SELECT '대상(실비제외)'  AS GUBUN FROM DUAL UNION ALL
+    SELECT '지입차'          AS GUBUN FROM DUAL UNION ALL
+    SELECT '월대용차'        AS GUBUN FROM DUAL UNION ALL
+    SELECT '고정용차'        AS GUBUN FROM DUAL UNION ALL
+    SELECT '임시용차'        AS GUBUN FROM DUAL UNION ALL
+    SELECT '실비용차'        AS GUBUN FROM DUAL
+),
+FINAL_DATA AS (
+    /* 개별 구분 */
+    SELECT
+          M.GUBUN                                   AS GUBUN         /* 구분 */
+        , SUM(M.TOTALCARCNT)                        AS TOTALCARCNT    /* 총대수 */
+        , SUM(M.UNDERCARCNT)                        AS UNDERCARCNT    /* 00%미만차량 */
+        , CASE WHEN SUM(M.TOTALCARCNT) = 0 THEN 0
+               ELSE ROUND(SUM(M.UNDERCARCNT) / SUM(M.TOTALCARCNT) * 100, 2)
+          END                                       AS UNDERCARRATE   /* 비율 */
+        , SUM(M.ARRIVALCOUNT)                       AS ARRIVALCOUNT   /* 착지수 */
+        , SUM(M.REPORTCOUNT)                        AS REPORTCOUNT    /* 보고 */
+        , CASE WHEN SUM(M.ARRIVALCOUNT) = 0 THEN 0
+               ELSE ROUND(SUM(M.REPORTCOUNT) / SUM(M.ARRIVALCOUNT) * 100, 2)
+          END                                       AS REPORTRATE     /* 보고율 */
+    FROM CT_METRIC M
+    WHERE M.GUBUN IN ('지입차','월대용차','고정용차','임시용차','실비용차')
+    GROUP BY M.GUBUN
+
+    UNION ALL
+    /* 전체 */
+    SELECT
+          '전체'                                    AS GUBUN
+        , SUM(M.TOTALCARCNT)
+        , SUM(M.UNDERCARCNT)
+        , CASE WHEN SUM(M.TOTALCARCNT) = 0 THEN 0
+               ELSE ROUND(SUM(M.UNDERCARCNT) / SUM(M.TOTALCARCNT) * 100, 2)
+          END
+        , SUM(M.ARRIVALCOUNT)
+        , SUM(M.REPORTCOUNT)
+        , CASE WHEN SUM(M.ARRIVALCOUNT) = 0 THEN 0
+               ELSE ROUND(SUM(M.REPORTCOUNT) / SUM(M.ARRIVALCOUNT) * 100, 2)
+          END
+    FROM CT_METRIC M
+
+    UNION ALL
+    /* 대상(실비제외) */
+    SELECT
+          '대상(실비제외)'                          AS GUBUN
+        , SUM(M.TOTALCARCNT)
+        , SUM(M.UNDERCARCNT)
+        , CASE WHEN SUM(M.TOTALCARCNT) = 0 THEN 0
+               ELSE ROUND(SUM(M.UNDERCARCNT) / SUM(M.TOTALCARCNT) * 100, 2)
+          END
+        , SUM(M.ARRIVALCOUNT)
+        , SUM(M.REPORTCOUNT)
+        , CASE WHEN SUM(M.ARRIVALCOUNT) = 0 THEN 0
+               ELSE ROUND(SUM(M.REPORTCOUNT) / SUM(M.ARRIVALCOUNT) * 100, 2)
+          END
+    FROM CT_METRIC M
+    WHERE M.GUBUN  <![CDATA[<>]]> '실비용차'
+)
+SELECT
+      
+     GL.GUBUN                         AS GUBUN        /* 구분 */
+    , NVL(FD.TOTALCARCNT, 0)           AS TOTALCARCNT  /* 총대수 */
+    , NVL(FD.UNDERCARCNT, 0)           AS UNDERCARCNT  /* 00%미만차량 */
+    , NVL(FD.UNDERCARRATE, 0)          AS UNDERCARRATE /* 비율 */
+    , NVL(FD.ARRIVALCOUNT, 0)          AS ARRIVALCOUNT /* 착지수(1번 동일) */
+    , NVL(FD.REPORTCOUNT, 0)           AS REPORTCOUNT  /* 보고(1번 동일) */
+    , NVL(FD.REPORTRATE, 0)            AS REPORTRATE   /* 보고율 */
+FROM GUBUN_LIST GL
+LEFT JOIN FINAL_DATA FD
+    ON FD.GUBUN = GL.GUBUN
+ORDER BY
+    CASE GL.GUBUN
+        WHEN '전체'           THEN 1
+        WHEN '대상(실비제외)' THEN 2
+        WHEN '지입차'         THEN 3
+        WHEN '월대용차'       THEN 4
+        WHEN '고정용차'       THEN 5
+        WHEN '임시용차'       THEN 6
+        WHEN '실비용차'       THEN 7
+        ELSE 99
+    END
+		</select>
+		<!-- 월별: 착지수/보고/보고율 -->
+	<!-- <select id="getHeaderListByMonth" resultType="TmDeliveryIndicatorResDto">
+		WITH BASE_DATA AS (
+		    SELECT
+		               I.DCCODE                                                                 AS DCCODE                /* 물류센터 */
+		             , I.CONTRACTTYPE                                                           AS CONTRACTTYPE          /* 계약코드유형 */
+		             , COUNT(DISTINCT I.CUSTKEY)                                                AS ARRIVAL_COUNT         /* 실착지수(월) */
+		      FROM (
+		            SELECT DCCODE, DELIVERYDT, SLIPDT, CUSTKEY, CONTRACTTYPE, CARNO, STATUS, DEL_YN
+		              FROM TM_INPLAN
+		             WHERE <![CDATA[ SPLIT_DELIVERY_YN = 'N' ]]>
+		               AND <![CDATA[ DEL_YN = 'N' ]]>
+		
+		            UNION ALL
+		
+		            SELECT DCCODE, DELIVERYDT, SLIPDT, CUSTKEY, CONTRACTTYPE, CARNO, STATUS, DEL_YN
+		              FROM TM_INPLAN_SPLIT
+		             WHERE <![CDATA[ DEL_YN = 'N' ]]>
+		      ) I
+		     WHERE <![CDATA[ I.DCCODE = #{dcCode} ]]>
+		       AND <![CDATA[ I.DELIVERYDT >= TO_CHAR(TRUNC(TO_DATE(#{deliveryDt}, 'YYYYMMDD'), 'MM'), 'YYYYMMDD') ]]>
+		       AND <![CDATA[ I.DELIVERYDT <  TO_CHAR(ADD_MONTHS(TRUNC(TO_DATE(#{deliveryDt}, 'YYYYMMDD'), 'MM'), 1), 'YYYYMMDD') ]]>
+		       AND <![CDATA[ I.SLIPDT     >= TO_CHAR(TRUNC(TO_DATE(#{deliveryDt}, 'YYYYMMDD'), 'MM'), 'YYYYMMDD') ]]>
+		       AND <![CDATA[ I.SLIPDT     <  TO_CHAR(ADD_MONTHS(TRUNC(TO_DATE(#{deliveryDt}, 'YYYYMMDD'), 'MM'), 1), 'YYYYMMDD') ]]>
+		       AND <![CDATA[ I.STATUS = '90' ]]>
+		       AND <![CDATA[ I.CARNO IS NOT NULL ]]>
+		       AND <![CDATA[ I.CONTRACTTYPE IS NOT NULL ]]>
+		     GROUP BY
+		           I.DCCODE
+		         , I.CONTRACTTYPE
+		),
+		WORKLOG_DATA AS (
+		    SELECT
+		               I.DCCODE                                                                 AS DCCODE                /* 물류센터 */
+		             , I.CONTRACTTYPE                                                           AS CONTRACTTYPE          /* 계약코드유형 */
+		             , COUNT(DISTINCT W.CUSTKEY)                                                AS REPORT_COUNT          /* 보고건수(전체) */
+		             , COUNT(DISTINCT CASE WHEN W.REG_TYPE IN ('M','W') THEN W.CUSTKEY END)     AS MANUAL_REPORT_COUNT   /* 보고(수동) */
+		             , COUNT(DISTINCT CASE WHEN W.REG_TYPE NOT IN ('M','W') OR W.REG_TYPE IS NULL THEN W.CUSTKEY END)
+		                                                                                       AS NORMAL_REPORT_COUNT   /* 보고(정상) */
+		      FROM TM_WORKLOG W
+		      INNER JOIN (
+		            SELECT DELIVERYDT, SLIPDT, DCCODE, CARNO, PRIORITY, CUSTKEY, CONTRACTTYPE, STATUS, DEL_YN
+		              FROM TM_INPLAN
+		             WHERE <![CDATA[ SPLIT_DELIVERY_YN = 'N' ]]>
+		               AND <![CDATA[ DEL_YN = 'N' ]]>
+		
+		            UNION ALL
+		
+		            SELECT DELIVERYDT, SLIPDT, DCCODE, CARNO, PRIORITY, CUSTKEY, CONTRACTTYPE, STATUS, DEL_YN
+		              FROM TM_INPLAN_SPLIT
+		             WHERE <![CDATA[ DEL_YN = 'N' ]]>
+		      ) I
+		        ON <![CDATA[ I.DELIVERYDT = W.DELIVERYDT ]]>
+		       AND <![CDATA[ I.CARNO      = W.CARNO ]]>
+		       AND <![CDATA[ I.PRIORITY   = W.PRIORITY ]]>
+		       AND <![CDATA[ I.CUSTKEY    = W.CUSTKEY ]]>
+		       AND <![CDATA[ I.STATUS     = '90' ]]>
+		       AND <![CDATA[ I.CARNO IS NOT NULL ]]>
+		     WHERE <![CDATA[ I.DCCODE = #{dcCode} ]]>
+		       AND <![CDATA[ I.DELIVERYDT >= TO_CHAR(TRUNC(TO_DATE(#{deliveryDt}, 'YYYYMMDD'), 'MM'), 'YYYYMMDD') ]]>
+		       AND <![CDATA[ I.DELIVERYDT <  TO_CHAR(ADD_MONTHS(TRUNC(TO_DATE(#{deliveryDt}, 'YYYYMMDD'), 'MM'), 1), 'YYYYMMDD') ]]>
+		       AND <![CDATA[ I.SLIPDT     >= TO_CHAR(TRUNC(TO_DATE(#{deliveryDt}, 'YYYYMMDD'), 'MM'), 'YYYYMMDD') ]]>
+		       AND <![CDATA[ I.SLIPDT     <  TO_CHAR(ADD_MONTHS(TRUNC(TO_DATE(#{deliveryDt}, 'YYYYMMDD'), 'MM'), 1), 'YYYYMMDD') ]]>
+		       AND <![CDATA[ W.WORKLOGTYPE = 'DELIVERYSTART' ]]>
+		       AND <![CDATA[ W.DEL_YN = 'N' ]]>
+		       AND <![CDATA[ I.CONTRACTTYPE IS NOT NULL ]]>
+		     GROUP BY
+		           I.DCCODE
+		         , I.CONTRACTTYPE
+		)
+		SELECT /* [tmArrivalReportRateService.sqlx][getArrivalReportRateMonthly][착지수,보고,보고율(월별)][ParkJinWoo][20260120] */
+		               #{deliveryDt}                                                           AS DELIVERYDT            /* 기준일자 */
+		             , BD.DCCODE                                                               AS DCCODE                /* 물류센터 */
+		             , BD.CONTRACTTYPE                                                         AS CONTRACTTYPE          /* 계약코드유형 */
+		             , NVL(CD.BASEDESCR, BD.CONTRACTTYPE)                                      AS CONTRACTTYPENAME      /* 계약코드유형명 */
+		             , NVL(BD.ARRIVAL_COUNT, 0)                                                AS ARRIVALCOUNT          /* 실착지수(월) */
+		             , NVL(WL.NORMAL_REPORT_COUNT, 0)                                          AS NORMALREPORTCOUNT     /* 보고(정상) */
+		             , CASE
+		                   WHEN <![CDATA[ NVL(BD.ARRIVAL_COUNT, 0) = 0 ]]> THEN 0
+		                   ELSE ROUND(NVL(WL.NORMAL_REPORT_COUNT, 0) / BD.ARRIVAL_COUNT * 100, 2)
+		               END                                                                     AS NORMALREPORTRATE      /* 보고율(정상) */
+		             , NVL(WL.MANUAL_REPORT_COUNT, 0)                                          AS MANUALREPORTCOUNT     /* 보고(수동) */
+		             , CASE
+		                   WHEN <![CDATA[ NVL(BD.ARRIVAL_COUNT, 0) = 0 ]]> THEN 0
+		                   ELSE ROUND(NVL(WL.MANUAL_REPORT_COUNT, 0) / BD.ARRIVAL_COUNT * 100, 2)
+		               END                                                                     AS MANUALREPORTRATE      /* 보고율(수동) */
+		                 , ( NVL(WL.NORMAL_REPORT_COUNT, 0) + NVL(WL.MANUAL_REPORT_COUNT, 0) )      AS REPORTCOUNT
+		               , CASE
+					      WHEN NVL(BD.ARRIVAL_COUNT, 0) = 0 THEN 0
+					      ELSE ROUND(
+					           ( NVL(WL.NORMAL_REPORT_COUNT, 0) + NVL(WL.MANUAL_REPORT_COUNT, 0) )
+					           / BD.ARRIVAL_COUNT * 100
+					           , 2
+					      )
+		  FROM BASE_DATA BD
+		  LEFT JOIN WORKLOG_DATA WL
+		         ON WL.DCCODE       = BD.DCCODE
+		        AND WL.CONTRACTTYPE = BD.CONTRACTTYPE
+		  LEFT JOIN CM_CODE_STORER CD
+		         ON CD.STORERKEY = 'FW00'
+		        AND CD.CODELIST  = 'CONTRACTTYPE'
+		        AND CD.BASECODE  = BD.CONTRACTTYPE
+		 ORDER BY
+		       BD.CONTRACTTYPE
+		</select> -->
+	<select id="getHeaderListByMonth" resultType="TmDeliveryIndicatorResDto">
+WITH INPLAN_ALL AS (
+    SELECT
+           I.DCCODE                                                               AS DCCODE                /* 물류센터 */
+         , I.DELIVERYDT                                                           AS DELIVERYDT            /* 배송일자 */
+         , I.SLIPDT                                                               AS SLIPDT                /* 전표일자 */
+         , I.CUSTKEY                                                              AS CUSTKEY               /* 거래처 */
+         , I.TRUTHCUSTKEY                                                         AS TRUTHCUSTKEY          /* 실거래처 */
+         , I.CONTRACTTYPE                                                         AS CONTRACTTYPE          /* 계약코드유형 */
+         , I.CARNO                                                                AS CARNO                 /* 차량번호 */
+         , I.PRIORITY                                                             AS PRIORITY              /* 우선순위 */
+         , I.CUSTARRIVALDT                                                        AS CUSTARRIVALDT         /* 도착시간(TM) */
+         , I.CUSTDEPARTUREDT                                                      AS CUSTDEPARTUREDT       /* 출발시간(TM) */
+         , I.STATUS                                                               AS STATUS                /* 상태 */
+         , I.TM_DELIVERYTYPE                                                      AS TM_DELIVERYTYPE       /* 배송유형 */
+      FROM TM_INPLAN I
+     WHERE <![CDATA[ I.SPLIT_DELIVERY_YN = 'N' ]]>
+       AND <![CDATA[ I.DEL_YN = 'N' ]]>
+
+    UNION ALL
+
+    SELECT
+           S.DCCODE                                                               AS DCCODE                /* 물류센터 */
+         , S.DELIVERYDT                                                           AS DELIVERYDT            /* 배송일자 */
+         , S.SLIPDT                                                               AS SLIPDT                /* 전표일자 */
+         , S.CUSTKEY                                                              AS CUSTKEY               /* 거래처 */
+         , S.TRUTHCUSTKEY                                                         AS TRUTHCUSTKEY          /* 실거래처 */
+         , S.CONTRACTTYPE                                                         AS CONTRACTTYPE          /* 계약코드유형 */
+         , S.CARNO                                                                AS CARNO                 /* 차량번호 */
+         , S.PRIORITY                                                             AS PRIORITY              /* 우선순위 */
+         , S.CUSTARRIVALDT                                                        AS CUSTARRIVALDT         /* 도착시간(TM) */
+         , S.CUSTDEPARTUREDT                                                      AS CUSTDEPARTUREDT       /* 출발시간(TM) */
+         , S.STATUS                                                               AS STATUS                /* 상태 */
+         , S.TM_DELIVERYTYPE                                                      AS TM_DELIVERYTYPE       /* 배송유형 */
+      FROM TM_INPLAN_SPLIT S
+     WHERE <![CDATA[ S.DEL_YN = 'N' ]]>
+),
+MONTH_BASE AS (
+    /* 월 1일 ~ 지정일자 누계 대상 (1번 쿼리 기준 COUNT_KEY 생성) */
+    SELECT
+           I.DCCODE                                                               AS DCCODE                /* 물류센터 */
+         , I.DELIVERYDT                                                           AS DELIVERYDT            /* 배송일자 */
+         , I.SLIPDT                                                               AS SLIPDT                /* 전표일자 */
+         , I.CUSTKEY                                                              AS CUSTKEY               /* 거래처 */
+         , I.TRUTHCUSTKEY                                                         AS TRUTHCUSTKEY          /* 실거래처 */
+         , I.CONTRACTTYPE                                                         AS CONTRACTTYPE          /* 계약코드유형 */
+         , I.CARNO                                                                AS CARNO                 /* 차량번호 */
+         , I.PRIORITY                                                             AS PRIORITY              /* 우선순위 */
+         , I.CUSTARRIVALDT                                                        AS CUSTARRIVALDT         /* 도착시간(TM) */
+         , I.CUSTDEPARTUREDT                                                      AS CUSTDEPARTUREDT       /* 출발시간(TM) */
+         , I.CARNO || '-' || I.PRIORITY || '-' || I.TRUTHCUSTKEY                  AS COUNT_KEY             /* 착지수KEY(차량-우선-실거래처) */
+      FROM INPLAN_ALL I
+     WHERE <![CDATA[ I.DCCODE = #{dcCode} ]]>
+       AND <![CDATA[ I.DELIVERYDT >= TO_CHAR(TRUNC(TO_DATE(#{deliveryDt}, 'YYYYMMDD'), 'MM'), 'YYYYMMDD') ]]>
+       AND <![CDATA[ I.DELIVERYDT <= #{deliveryDt} ]]>
+       AND <![CDATA[ I.SLIPDT     >= TO_CHAR(TRUNC(TO_DATE(#{deliveryDt}, 'YYYYMMDD'), 'MM'), 'YYYYMMDD') ]]>
+       AND <![CDATA[ I.SLIPDT     <= #{deliveryDt} ]]>
+       AND <![CDATA[ I.STATUS = '90' ]]>
+       AND <![CDATA[ I.CARNO IS NOT NULL ]]>
+       AND <![CDATA[ I.CONTRACTTYPE IS NOT NULL ]]>
+       AND <![CDATA[ I.TM_DELIVERYTYPE IN ('1','2') ]]>
+),
+WORKLOG_JOIN AS (
+    /* 1번과 동일한 REG_TYPE 결정 */
+    SELECT
+           D.CONTRACTTYPE                                                         AS CONTRACTTYPE          /* 계약코드유형 */
+         , D.COUNT_KEY                                                            AS COUNT_KEY             /* 착지수KEY */
+         , FINAL.REG_TYPE                                                         AS REG_TYPE              /* 보고구분(PM/W) */
+      FROM MONTH_BASE D
+      LEFT JOIN TM_WORKLOG TM_WORKLOG_DE
+        ON  TM_WORKLOG_DE.CARNO          = D.CARNO
+       AND TM_WORKLOG_DE.PRIORITY       = D.PRIORITY
+       AND TM_WORKLOG_DE.WORKDATEDATA1  = D.CUSTARRIVALDT
+       AND TM_WORKLOG_DE.WORKLOGTYPE    = 'DELIVERYEND'
+       AND TM_WORKLOG_DE.DEL_YN         = 'N'
+      LEFT JOIN TM_WORKLOG TM_WORKLOG_DS
+        ON  TM_WORKLOG_DS.CARNO          = D.CARNO
+       AND TM_WORKLOG_DS.PRIORITY       = D.PRIORITY
+       AND TM_WORKLOG_DS.WORKDATEDATA1  = D.CUSTDEPARTUREDT
+       AND TM_WORKLOG_DS.WORKLOGTYPE    = 'DELIVERYSTART'
+       AND TM_WORKLOG_DS.DEL_YN         = 'N'
+      CROSS APPLY (
+        SELECT
+            CASE
+                WHEN PICK.REG_TYPE IN ('P','M') THEN 'PM'
+                WHEN PICK.REG_TYPE = 'W'        THEN 'W'
+                ELSE NULL
+            END AS REG_TYPE
+        FROM (
+            SELECT
+                CASE
+                    WHEN TM_WORKLOG_DE.REG_TYPE IN ('P','M')
+                     AND TM_WORKLOG_DS.REG_TYPE IN ('P','M')
+                    THEN 'P'
+                    WHEN TM_WORKLOG_DE.REG_TYPE = 'W'
+                     AND TM_WORKLOG_DS.REG_TYPE = 'W'
+                    THEN 'W'
+                    ELSE
+                        CASE
+                            WHEN TM_WORKLOG_DE.REG_TYPE IS NULL
+                             AND TM_WORKLOG_DS.REG_TYPE IS NULL
+                            THEN NULL
+                            WHEN TM_WORKLOG_DS.REG_TYPE IS NULL THEN TM_WORKLOG_DE.REG_TYPE
+                            WHEN TM_WORKLOG_DE.REG_TYPE IS NULL THEN TM_WORKLOG_DS.REG_TYPE
+                            ELSE
+                                CASE
+                                    WHEN TM_WORKLOG_DE.EDITDATE IS NULL
+                                     AND TM_WORKLOG_DS.EDITDATE IS NULL
+                                    THEN NULL
+                                    WHEN TM_WORKLOG_DS.EDITDATE IS NULL THEN TM_WORKLOG_DE.REG_TYPE
+                                    WHEN TM_WORKLOG_DE.EDITDATE IS NULL THEN TM_WORKLOG_DS.REG_TYPE
+                                    WHEN TM_WORKLOG_DE.EDITDATE <![CDATA[<=]]> TM_WORKLOG_DS.EDITDATE THEN TM_WORKLOG_DE.REG_TYPE
+                                    ELSE TM_WORKLOG_DS.REG_TYPE
+                                END
+                        END
+                END AS REG_TYPE
+            FROM DUAL
+        ) PICK
+      ) FINAL
+),
+CUST_METRIC AS (
+    /* ARRIVAL/REPORT/REPORTRATE : COUNT_KEY 기준 (월누계) */
+    SELECT
+           D.CONTRACTTYPE                                                         AS CONTRACTTYPE          /* 계약코드유형 */
+         , COUNT(DISTINCT D.COUNT_KEY)                                            AS ARRIVALCOUNT          /* 착지수(월누계) */
+         , COUNT(DISTINCT CASE WHEN W.REG_TYPE IN ('PM','W') THEN D.COUNT_KEY END) AS REPORTCOUNT           /* 보고(월누계) */
+         , CASE
+              WHEN COUNT(DISTINCT D.COUNT_KEY) = 0 THEN 0
+              ELSE ROUND(
+                     COUNT(DISTINCT CASE WHEN W.REG_TYPE IN ('PM','W') THEN D.COUNT_KEY END)
+                     / COUNT(DISTINCT D.COUNT_KEY) * 100
+                   , 2)
+           END                                                                    AS REPORTRATE            /* 보고율(월누계) */
+      FROM MONTH_BASE D
+      LEFT JOIN WORKLOG_JOIN W
+        ON  W.CONTRACTTYPE = D.CONTRACTTYPE
+       AND W.COUNT_KEY    = D.COUNT_KEY
+     GROUP BY
+           D.CONTRACTTYPE
+),
+STOP_WORKLOG AS (
+    SELECT
+           W.DELIVERYDT                                                           AS DELIVERYDT            /* 배송일자 */
+         , W.CARNO                                                                AS CARNO                 /* 차량번호 */
+         , W.PRIORITY                                                             AS PRIORITY              /* 우선순위 */
+         , W.CUSTKEY                                                              AS CUSTKEY               /* 거래처 */
+         , MIN(CASE WHEN W.WORKLOGTYPE = 'DELIVERYSTART' THEN W.WORKDATEDATA1 END) AS ARRIVE_TIME           /* 도착시간(로그) */
+         , MAX(CASE WHEN W.WORKLOGTYPE = 'DELIVERYEND'   THEN W.WORKDATEDATA1 END) AS DEPART_TIME           /* 출발시간(로그) */
+      FROM TM_WORKLOG W
+     WHERE W.WORKLOGTYPE IN ('DELIVERYSTART','DELIVERYEND')
+       AND W.DEL_YN = 'N'
+     GROUP BY
+           W.DELIVERYDT
+         , W.CARNO
+         , W.PRIORITY
+         , W.CUSTKEY
+),
+STOP_DATA AS (
+    SELECT
+           D.CONTRACTTYPE                                                         AS CONTRACTTYPE          /* 계약코드유형 */
+         , D.CARNO                                                                AS CARNO                 /* 차량번호 */
+         , D.PRIORITY                                                             AS PRIORITY              /* 우선순위 */
+         , D.CUSTKEY                                                              AS CUSTKEY               /* 거래처 */
+         , COALESCE(D.CUSTARRIVALDT,   SW.ARRIVE_TIME)                            AS ARRIVEDTIME           /* 도착시간(확정) */
+         , COALESCE(D.CUSTDEPARTUREDT, SW.DEPART_TIME)                            AS DEPARTURETIME         /* 출발시간(확정) */
+      FROM MONTH_BASE D
+      LEFT JOIN STOP_WORKLOG SW
+        ON  SW.DELIVERYDT = D.DELIVERYDT
+       AND SW.CARNO      = D.CARNO
+       AND SW.PRIORITY   = D.PRIORITY
+       AND SW.CUSTKEY    = D.CUSTKEY
+),
+CAR_RATE AS (
+    SELECT
+           SD.CONTRACTTYPE                                                        AS CONTRACTTYPE          /* 계약코드유형 */
+         , SD.CARNO                                                               AS CARNO                 /* 차량번호 */
+         , COUNT(*)                                                               AS STOPCNT               /* 정지점수 */
+         , SUM(CASE WHEN SD.ARRIVEDTIME IS NOT NULL AND SD.DEPARTURETIME IS NOT NULL THEN 1 ELSE 0 END)
+                                                                                AS DONESTOPCNT            /* 입력완료정지점수 */
+         , CASE
+              WHEN COUNT(*) = 0 THEN 0
+              ELSE ROUND(
+                     SUM(CASE WHEN SD.ARRIVEDTIME IS NOT NULL AND SD.DEPARTURETIME IS NOT NULL THEN 1 ELSE 0 END)
+                     / COUNT(*) * 100
+                   , 2)
+           END                                                                    AS INPUTRATE             /* 차량입력률 */
+      FROM STOP_DATA SD
+     GROUP BY
+           SD.CONTRACTTYPE
+         , SD.CARNO
+),
+CAR_METRIC AS (
+    SELECT
+           CR.CONTRACTTYPE                                                        AS CONTRACTTYPE          /* 계약코드유형 */
+         , COUNT(DISTINCT CR.CARNO)                                               AS TOTALCARCNT           /* 총대수(월누계) */
+         , COUNT(DISTINCT CASE WHEN <![CDATA[ CR.INPUTRATE < #{rateStd} ]]> THEN CR.CARNO END)
+                                                                                AS UNDERCARCNT            /* 기준미만차량(월누계) */
+         , CASE
+              WHEN COUNT(DISTINCT CR.CARNO) = 0 THEN 0
+              ELSE ROUND(
+                     COUNT(DISTINCT CASE WHEN <![CDATA[ CR.INPUTRATE < #{rateStd} ]]> THEN CR.CARNO END)
+                     / COUNT(DISTINCT CR.CARNO) * 100
+                   , 2)
+           END                                                                    AS UNDERCARRATE           /* 비율 */
+      FROM CAR_RATE CR
+     GROUP BY
+           CR.CONTRACTTYPE
+),
+CT_NAME AS (
+    SELECT
+           X.CONTRACTTYPE                                                         AS CONTRACTTYPE          /* 계약코드유형 */
+         , NVL(CS.BASEDESCR, X.CONTRACTTYPE)                                      AS CONTRACTTYPENAME      /* 계약코드유형명 */
+      FROM (SELECT DISTINCT CONTRACTTYPE FROM MONTH_BASE) X
+      LEFT JOIN CM_CODE_STORER CS
+        ON CS.STORERKEY = 'FW00'
+       AND CS.CODELIST  = 'CONTRACTTYPE'
+       AND CS.BASECODE  = X.CONTRACTTYPE
+),
+CT_METRIC AS (
+    SELECT
+           CN.CONTRACTTYPENAME                                                    AS GUBUN                /* 구분 */
+         , NVL(CM.TOTALCARCNT, 0)                                                 AS TOTALCARCNT          /* 총대수 */
+         , NVL(CM.UNDERCARCNT, 0)                                                 AS UNDERCARCNT          /* 00%미만차량 */
+         , NVL(CM.UNDERCARRATE, 0)                                                AS UNDERCARRATE         /* 비율 */
+         , NVL(CU.ARRIVALCOUNT, 0)                                                AS ARRIVALCOUNT         /* 착지수 */
+         , NVL(CU.REPORTCOUNT, 0)                                                 AS REPORTCOUNT          /* 보고 */
+         , NVL(CU.REPORTRATE, 0)                                                  AS REPORTRATE           /* 보고율 */
+      FROM CT_NAME CN
+      LEFT JOIN CAR_METRIC CM
+        ON CM.CONTRACTTYPE = CN.CONTRACTTYPE
+      LEFT JOIN CUST_METRIC CU
+        ON CU.CONTRACTTYPE = CN.CONTRACTTYPE
+),
+GUBUN_LIST AS (
+    SELECT '전체'            AS GUBUN FROM DUAL UNION ALL
+    SELECT '대상(실비제외)'  AS GUBUN FROM DUAL UNION ALL
+    SELECT '지입차'          AS GUBUN FROM DUAL UNION ALL
+    SELECT '월대용차'        AS GUBUN FROM DUAL UNION ALL
+    SELECT '고정용차'        AS GUBUN FROM DUAL UNION ALL
+    SELECT '임시용차'        AS GUBUN FROM DUAL UNION ALL
+    SELECT '실비용차'        AS GUBUN FROM DUAL
+),
+FINAL_DATA AS (
+    SELECT
+           M.GUBUN                                                               AS GUBUN                /* 구분 */
+         , SUM(M.TOTALCARCNT)                                                    AS TOTALCARCNT          /* 총대수 */
+         , SUM(M.UNDERCARCNT)                                                    AS UNDERCARCNT          /* 00%미만차량 */
+         , CASE WHEN SUM(M.TOTALCARCNT) = 0 THEN 0
+                ELSE ROUND(SUM(M.UNDERCARCNT) / SUM(M.TOTALCARCNT) * 100, 2)
+           END                                                                    AS UNDERCARRATE         /* 비율 */
+         , SUM(M.ARRIVALCOUNT)                                                   AS ARRIVALCOUNT         /* 착지수 */
+         , SUM(M.REPORTCOUNT)                                                    AS REPORTCOUNT          /* 보고 */
+         , CASE WHEN SUM(M.ARRIVALCOUNT) = 0 THEN 0
+                ELSE ROUND(SUM(M.REPORTCOUNT) / SUM(M.ARRIVALCOUNT) * 100, 2)
+           END                                                                    AS REPORTRATE           /* 보고율 */
+      FROM CT_METRIC M
+     WHERE M.GUBUN IN ('지입차','월대용차','고정용차','임시용차','실비용차')
+     GROUP BY M.GUBUN
+
+    UNION ALL
+
+    SELECT
+           '전체'                                                                AS GUBUN
+         , SUM(M.TOTALCARCNT)
+         , SUM(M.UNDERCARCNT)
+         , CASE WHEN SUM(M.TOTALCARCNT) = 0 THEN 0
+                ELSE ROUND(SUM(M.UNDERCARCNT) / SUM(M.TOTALCARCNT) * 100, 2)
+           END
+         , SUM(M.ARRIVALCOUNT)
+         , SUM(M.REPORTCOUNT)
+         , CASE WHEN SUM(M.ARRIVALCOUNT) = 0 THEN 0
+                ELSE ROUND(SUM(M.REPORTCOUNT) / SUM(M.ARRIVALCOUNT) * 100, 2)
+           END
+      FROM CT_METRIC M
+
+    UNION ALL
+
+    SELECT
+           '대상(실비제외)'                                                      AS GUBUN
+         , SUM(M.TOTALCARCNT)
+         , SUM(M.UNDERCARCNT)
+         , CASE WHEN SUM(M.TOTALCARCNT) = 0 THEN 0
+                ELSE ROUND(SUM(M.UNDERCARCNT) / SUM(M.TOTALCARCNT) * 100, 2)
+           END
+         , SUM(M.ARRIVALCOUNT)
+         , SUM(M.REPORTCOUNT)
+         , CASE WHEN SUM(M.ARRIVALCOUNT) = 0 THEN 0
+                ELSE ROUND(SUM(M.REPORTCOUNT) / SUM(M.ARRIVALCOUNT) * 100, 2)
+           END
+      FROM CT_METRIC M
+     WHERE M.GUBUN <![CDATA[<>]]> '실비용차'
+)
+SELECT
+       GL.GUBUN                                                                  AS GUBUN                /* 구분 */
+     , NVL(FD.TOTALCARCNT, 0)                                                    AS TOTALCARCNT          /* 총대수(월누계) */
+     , NVL(FD.UNDERCARCNT, 0)                                                    AS UNDERCARCNT          /* 00%미만차량(월누계) */
+     , NVL(FD.UNDERCARRATE, 0)                                                   AS UNDERCARRATE         /* 비율(월누계) */
+     , NVL(FD.ARRIVALCOUNT, 0)                                                   AS ARRIVALCOUNT         /* 착지수(월누계, COUNT_KEY) */
+     , NVL(FD.REPORTCOUNT, 0)                                                    AS REPORTCOUNT          /* 보고(월누계, COUNT_KEY) */
+     , NVL(FD.REPORTRATE, 0)                                                     AS REPORTRATE           /* 보고율(월누계) */
+  FROM GUBUN_LIST GL
+  LEFT JOIN FINAL_DATA FD
+    ON FD.GUBUN = GL.GUBUN
+ ORDER BY
+    CASE GL.GUBUN
+        WHEN '전체'           THEN 1
+        WHEN '대상(실비제외)' THEN 2
+        WHEN '지입차'         THEN 3
+        WHEN '월대용차'       THEN 4
+        WHEN '고정용차'       THEN 5
+        WHEN '임시용차'       THEN 6
+        WHEN '실비용차'       THEN 7
+        ELSE 99
+    END
+</select>
+				
+</mapper>

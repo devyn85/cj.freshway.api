@@ -1,0 +1,1082 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+ * Copyright 2025. CJ OliveNetworks Co. all rights reserved.
+ *
+ * @author      : KimDongHan (liop0123@cj.net)
+ * @date        : 2025.09.25
+ * @description : 정산 > 3PL 수수료 > 일배 물류대행 파트너사 수수료 정산 SQL
+ * @issues      :
+-->
+
+<mapper namespace="ibTirdPartyMastService">
+
+    <select id="getMasterT1List" resultType="cjfw.wms.ib.dto.IbTirdPartyMastResT1Dto">
+	    SELECT /* [IbTirdPartyMastService.sqlx][IbTirdPartyMastService.getMasterT1List][정산 > 3PL 수수료 > 일배 물류대행 파트너사 수수료 정산_단가마스터_탭 조회][KimDongHan][2025-09-25] */
+		       MS_3PLPRICE.DCCODE                                             AS DCCODE              /* 01. 물류센터 */
+		     , FN_GETDCNAME(MS_3PLPRICE.DCCODE)                               AS DCNAME              /* 01. 물류센터 */
+		     , MS_3PLPRICE.PRICETYPE                                          AS PRICETYPE           /* 02. 단가유형 */
+		     , MS_3PLPRICE.PICKPRICE                                          AS PICKPRICE           /* 03. 피킹대행단가(원) */
+		     , USER1.USER_NM                                                  AS ADDWHO              /* 04. 등록자 */
+		     , TO_CHAR(MS_3PLPRICE.ADDDATE,'YYYY-MM-DD HH24:MI:SS')           AS ADDDATE	         /* 05. 등록일시 */
+		     , USER2.USER_NM                                                  AS EDITWHO             /* 06. 수정자 */
+		     , TO_CHAR(MS_3PLPRICE.EDITDATE,'YYYY-MM-DD HH24:MI:SS')          AS EDITDATE            /* 07. 수정일시 */
+		     , USER1.USER_ID                                                  AS ADD_ID              /* 등록자ID */
+		     , USER2.USER_ID                                                  AS UPD_ID              /* 수정자ID */
+		  FROM MS_3PLPRICE 
+		  LEFT OUTER JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = MS_3PLPRICE.ADDWHO   /*등록자명*/
+		  LEFT OUTER JOIN FRAMEONE_USER USER2 ON USER2.USER_ID = MS_3PLPRICE.EDITWHO  /*수정자명*/
+		 WHERE 1=1
+		   AND MS_3PLPRICE.STORERKEY = #{gStorerkey}
+		<if test="dccode != null and dccode != ''">
+		   AND MS_3PLPRICE.DCCODE     = #{dccode} 
+		</if>
+         ORDER BY MS_3PLPRICE.PRICETYPE
+    </select>
+    
+    <select id="getMasterT2List" resultType="cjfw.wms.ib.dto.IbTirdPartyMastResT2Dto">
+	    SELECT /* [IbTirdPartyMastService.sqlx][IbTirdPartyMastService.getMasterT2List][정산 > 3PL 수수료 > 일배 물류대행 파트너사 수수료 정산_협력사관리_탭 조회][KimDongHan][2025-09-25] */
+		       MS_3PLCUST.DCCODE                                             AS DCCODE            /* 01. 물류센터 */
+		     , FN_GETDCNAME(MS_3PLCUST.DCCODE)                               AS DCNAME            /* 01. 물류센터 */
+		     , MS_3PLCUST.CUSTKEY                                            AS CUSTKEY           /* 02. 협력사코드 */
+		     , MS_CUST.DESCRIPTION                                           AS CUSTNAME          /* 03. 협력사명 */
+		     , NVL(MS_3PLCUST.LABEL_CL_YN,'0')                               AS LABEL_CL_YN       /* 04. 중분류*/		     
+		     , MS_3PLCUST.US_YN                                              AS US_YN             /* 05. 사용여부 */
+		     , USER1.USER_NM                                                 AS ADDWHO            /* 06. 등록자 */
+		     , TO_CHAR(MS_3PLCUST.ADDDATE,'YYYY-MM-DD HH24:MI:SS')           AS ADDDATE	          /* 07. 등록일시 */
+		     , USER2.USER_NM                                                 AS EDITWHO           /* 08. 수정자 */
+		     , TO_CHAR(MS_3PLCUST.EDITDATE,'YYYY-MM-DD HH24:MI:SS')          AS EDITDATE          /* 09. 수정일시 */
+		     , USER1.USER_ID                                                 AS ADD_ID            /* 등록자ID */
+		     , USER2.USER_ID                                                 AS UPD_ID            /* 수정자ID */		     
+		  FROM MS_3PLCUST 
+		  JOIN MS_CUST 
+		    ON MS_3PLCUST.STORERKEY = MS_CUST.STORERKEY
+		   AND MS_3PLCUST.CUSTKEY   = MS_CUST.CUSTKEY
+		   AND MS_CUST.CUSTTYPE     = 'P'
+		   AND MS_CUST.DEL_YN       = 'N'
+		  LEFT OUTER JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = MS_3PLCUST.ADDWHO   /*등록자명*/
+		  LEFT OUTER JOIN FRAMEONE_USER USER2 ON USER2.USER_ID = MS_3PLCUST.EDITWHO  /*수정자명*/
+		 WHERE 1=1
+		   AND MS_3PLCUST.STORERKEY = #{gStorerkey}
+		<if test="dccode != null and dccode != ''">
+		   AND MS_3PLCUST.DCCODE    = #{dccode} 
+		</if>
+		<!--
+		<if test="fromCustkey != null and fromCustkey != ''">
+		   AND MS_CUST.CUSTKEY IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+								     FROM (SELECT #{fromCustkey} AS VAL FROM DUAL) A
+		                           CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0) 
+		</if>
+		-->
+	    <!-- START.협력사-->
+	    <if test="fromCustkeyMulti != null and fromCustkeyMulti != '' ">
+			<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+				<foreach collection="fromCustkeyMulti" item="item">
+					OR MS_CUST.CUSTKEY IN
+					<foreach collection="item" item="code" open="(" close=")" separator=",">
+						#{code} 	 
+		      		</foreach>
+		    	</foreach>
+		  	</trim>			                                    
+	    </if>
+	    <!-- END.협력사 -->			
+         ORDER BY MS_3PLCUST.CUSTKEY
+    </select>
+    
+    <select id="getMasterT3List" resultType="cjfw.wms.ib.dto.IbTirdPartyMastResT3Dto">
+		SELECT /* [IbTirdPartyMastService.sqlx][IbTirdPartyMastService.getMasterT3List][정산 > 3PL 수수료 > 일배 물류대행 파트너사 수수료 정산_검수관리_탭 조회][KimDongHan][2025-09-25] */
+		       T.DELIVERYDATE                 /* 01. 일자 */
+		     , T.FROMCUSTKEY                  /* 02. 협력사코드 */
+		     , T.FROMCUSTNM                   /* 03. 협력사명 */
+		     , T.DELIVERYTYPE                 /* 04. 일배구분 */
+		     , T.BAR_CNT                      /* 05. 검수예정건수 */
+		     , T.SCAN_CNT                     /* 06. 검수완료건수 */
+		     , T.CFCNT                        /* 07. 확정건수 */
+		     , T.NCFCNT                       /* 08. 미완료건수 */
+		     , T.NDP_CNT                      /* 09. 미입고건수 */
+		     , T.RATE                         /* 10. 검수완료율(%) */
+		     , T.STATUS                       /* 11. 진행상태 */
+		     , T.STATUS_FLAG                  /* 11. 진행상태 */
+		     , T.DCCODE                       /* DCCODE */
+		  FROM (
+				SELECT TT.DELIVERYDATE                                                                                                                                                           AS DELIVERYDATE     /* 01. 일자 */
+				     , TT.FROMCUSTKEY                                                                                                                                                            AS FROMCUSTKEY      /* 02. 협력사코드 */
+				     , (SELECT MS.DESCRIPTION FROM MS_CUST MS WHERE MS.CUSTKEY = TT.FROMCUSTKEY AND MS.CUSTTYPE = 'P' AND MS.STORERKEY = #{gStorerkey})                                          AS FROMCUSTNM       /* 03. 협력사명 */
+				     <!--
+				     , CASE WHEN BB1 = 2 AND BB2 = 2 THEN '1'                                                                                                                                                        /* 일배 */
+				            WHEN BB1 = 3 AND BB2 = 3 THEN '2'                                                                                                                                                        /* 광역일배 */
+				            WHEN BB1 = 2 AND BB2 = 3 THEN '3'                                                                                                                                                        /* 일배/광역일배 */
+				            ELSE '2'                                                                                                                                                                                 /* 광역일배 */
+				            END                                                                                                                                                                  AS DELIVERYTYPE     /* 04. 일배구분 */
+				      -->      
+				     , CASE WHEN BB1 = 2 AND BB2 = 3 THEN '일배/광역일배'
+                            WHEN BB1 = 2 AND BB2 = 2 THEN '일배'
+                            WHEN BB1 = 3 AND BB2 = 3 THEN '광역일배'
+                            ELSE '광역일배' END                                                                                                                                                    AS DELIVERYTYPE			            
+				     , NVL(TT.BAR_CNT,0)                                                                                                                                                         AS BAR_CNT          /* 05. 검수예정건수 */
+				     , NVL(TT.SCAN_CNT,0)                                                                                                                                                        AS SCAN_CNT         /* 06. 검수완료건수 */
+				     , NVL((NVL(WDD.CF_CUST,0) + NVL(WDD.CF_3PL,0)),0)                                                                                                                           AS CFCNT            /* 07. 확정건수 */
+				     , NVL((TT.BAR_CNT - TT.SCAN_CNT - NVL(WDD.CF_CUST,0) - NVL(WDD.CF_3PL,0) - NVL(WDD.NDP_CNT,0)),0)                                                                           AS NCFCNT           /* 08. 미완료건수 */
+				     , NVL(WDD.NDP_CNT,0)                                                                                                                                                        AS NDP_CNT          /* 09. 미입고건수 */
+				     , CASE WHEN TT.BAR_CNT <![CDATA[<=]]> 0 THEN '0%'
+		                    ELSE TRUNC((NVL(TT.SCAN_CNT,0) + NVL(WDD.CF_CUST,0) + NVL(WDD.CF_3PL,0) + NVL(WDD.NDP_CNT,0)) / TT.BAR_CNT*100)||'%'
+		               END                                                                                                                                                                       AS RATE  
+		             , CASE WHEN TRUNC((NVL(TT.SCAN_CNT,0) + NVL(WDD.CF_CUST,0) + NVL(WDD.CF_3PL,0)+ NVL(WDD.NDP_CNT,0)) / TT.BAR_CNT*100) = 0 THEN '미완료'
+				            WHEN TRUNC((NVL(TT.SCAN_CNT,0) + NVL(WDD.CF_CUST,0) + NVL(WDD.CF_3PL,0)+ NVL(WDD.NDP_CNT,0)) / TT.BAR_CNT*100) <![CDATA[>=]]> 100 THEN '검수완료'  
+				            ELSE '부분완료'
+				            END                                                                                                                                                                  AS STATUS
+		             , CASE WHEN TRUNC((NVL(TT.SCAN_CNT,0) + NVL(WDD.CF_CUST,0) + NVL(WDD.CF_3PL,0)+ NVL(WDD.NDP_CNT,0)) / TT.BAR_CNT*100) = 0 THEN '1'
+				            WHEN TRUNC((NVL(TT.SCAN_CNT,0) + NVL(WDD.CF_CUST,0) + NVL(WDD.CF_3PL,0)+ NVL(WDD.NDP_CNT,0)) / TT.BAR_CNT*100) <![CDATA[>=]]> 100 THEN '3'  
+				            ELSE '2'
+				            END                                                                                                                                                                  AS STATUS_FLAG
+				     , #{dccode}                                                                                                                                                                 AS DCCODE           /* DCCODE */
+				  FROM ( SELECT DD.DELIVERYDATE   AS DELIVERYDATE
+						      , DD.FROMCUSTKEY    AS FROMCUSTKEY
+				              , SUM(DD.BAR_CNT)   AS BAR_CNT
+				              , SUM(WI.INVOICENO) AS SCAN_CNT
+				              , MIN(DD.CHANNEL)   AS BB1
+				              , MAX(DD.CHANNEL)   AS BB2
+				           FROM ( SELECT SF.DELIVERYDATE     AS DELIVERYDATE
+				                       , SF.FROM_CUSTKEY     AS FROMCUSTKEY
+				                       , SF.CHANNEL          AS CHANNEL
+				                       , SF.DCCODE           AS DCCODE
+				                       , SF.DOCNO            AS ORD_NO
+				                       , SF.DOCLINE          AS ORD_LNO
+				                       , COUNT(SF.INVOICENO) AS BAR_CNT
+				                    FROM IB_SRMFWLABEL SF
+				                   WHERE SF.DELIVERYDATE <![CDATA[>=]]> #{calDocdtFrom}
+				                     AND SF.DELIVERYDATE <![CDATA[<=]]> #{calDocdtTo}
+				                     AND SF.DCCODE        = #{dccode}
+				                     AND SF.CHANNEL       = '2' 
+				                     AND SF.DEL_YN        = 'N' 
+				                     AND SF.FROM_CUSTKEY IN ( SELECT CUSTKEY 
+				                                                FROM MS_3PLCUST 
+				                                               WHERE DCCODE = #{dccode} 
+				                                                 AND US_YN = '1' )
+								<!--                                                 
+								<if test="fromCustkey != null and fromCustkey != ''">
+				                     AND SF.FROM_CUSTKEY IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+										                       FROM (SELECT #{fromCustkey} AS VAL FROM DUAL) A
+				                                            CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0) 
+								</if>
+								-->	
+							    <!-- START.협력사-->
+							    <if test="fromCustkeyMulti != null and fromCustkeyMulti != '' ">
+									<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+										<foreach collection="fromCustkeyMulti" item="item">
+											OR SF.FROM_CUSTKEY IN
+											<foreach collection="item" item="code" open="(" close=")" separator=",">
+												#{code} 	 
+								      		</foreach>
+								    	</foreach>
+								  	</trim>			                                    
+							    </if>
+							    <!-- END.협력사 -->									
+				                   GROUP BY SF.DELIVERYDATE
+				                          , SF.FROM_CUSTKEY
+				                          , SF.CHANNEL
+				                          , SF.DCCODE
+				                          , SF.DOCNO
+				                          , SF.DOCLINE
+				                   UNION ALL
+				                  SELECT SF.DELIVERYDATE     AS DELIVERYDATE
+				                       , SF.FROM_CUSTKEY     AS FROMCUSTKEY
+				                       , SF.CHANNEL          AS CHANNEL
+				                       , SF.DCCODE           AS DCCODE
+				                       , SF.DOCNO            AS ORD_NO
+				                       , SF.DOCLINE          AS ORD_LNO
+				                       , COUNT(SF.INVOICENO) AS BAR_CNT
+				                    FROM IB_SRMFWLABEL SF
+				                    JOIN DM_DOCUMENT_D 
+				                      ON SF.DOCNO              = DM_DOCUMENT_D.DOCNO
+				                     AND SF.DOCLINE            = DM_DOCUMENT_D.DOCLINE
+				                     AND SF.DELIVERYDATE       = DM_DOCUMENT_D.DELIVERYDATE
+				                     AND DM_DOCUMENT_D.ROUTE   = #{dccode} 
+				                     AND DM_DOCUMENT_D.DCCODE != #{dccode}
+				                     AND DM_DOCUMENT_D.CHANNEL IN ('2', '3')
+				                   WHERE SF.DELIVERYDATE <![CDATA[>=]]> #{calDocdtFrom}                                                 
+				                     AND SF.DELIVERYDATE  <![CDATA[<=]]> #{calDocdtTo}
+				                     AND SF.DCCODE != #{dccode} 
+				                <!--     
+								<if test="fromCustkey != null and fromCustkey != ''">
+				                     AND SF.FROM_CUSTKEY IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+										                       FROM (SELECT #{fromCustkey} AS VAL FROM DUAL) A
+				                                            CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0) 
+								</if>
+								-->	
+							    <!-- START.협력사-->
+							    <if test="fromCustkeyMulti != null and fromCustkeyMulti != '' ">
+									<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+										<foreach collection="fromCustkeyMulti" item="item">
+											OR SF.FROM_CUSTKEY IN
+											<foreach collection="item" item="code" open="(" close=")" separator=",">
+												#{code} 	 
+								      		</foreach>
+								    	</foreach>
+								  	</trim>			                                    
+							    </if>
+							    <!-- END.협력사 -->									
+				                     AND SF.CHANNEL = '3'
+				                     AND SF.FROM_CUSTKEY IN ( SELECT CUSTKEY 
+				                                                FROM MS_3PLCUST 
+				                                               WHERE DCCODE = #{dccode} 
+				                                                 AND US_YN = '1' )
+				                   GROUP BY SF.DELIVERYDATE
+				                          , SF.FROM_CUSTKEY
+				                          , SF.CHANNEL
+				                          , SF.DCCODE
+				                          , SF.DOCNO
+				                          , SF.DOCLINE ) DD
+				          <!--                
+				           JOIN ( SELECT WI.DOCNO
+				                       , WI.DOCLINE
+				                       , WI.SLIPDT
+				                       , COUNT(DISTINCT WI.INVOICENO) AS INVOICENO
+				                    FROM WD_INVOICE WI
+				                   WHERE WI.DP_SLIPNO IS NOT NULL
+				                   GROUP BY WI.DOCNO
+				                          , WI.DOCLINE
+				                          , WI.SLIPDT) WI
+				             ON WI.DOCNO   = DD.ORD_NO
+				            AND WI.DOCLINE = DD.ORD_LNO
+				            AND WI.SLIPDT  = DD.DELIVERYDATE
+				          WHERE 1=1
+						<if test="ordertype != null and ordertype != ''">
+		                    AND DD.DELIVERYTYPE = #{ordertype}
+						</if>  				          
+				          GROUP BY DD.DELIVERYDATE
+				                 , DD.FROMCUSTKEY
+				          ORDER BY DD.FROMCUSTKEY ) TT -->
+					       LEFT OUTER JOIN (SELECT WI.DOCNO
+					                             , WI.DOCLINE
+					                             , WI.SLIPDT
+					                             , COUNT(DISTINCT WI.INVOICENO) AS INVOICENO
+	                                          FROM WD_INVOICE WI
+	                                         WHERE WI.DP_SLIPNO IS NOT NULL
+	                                         GROUP BY WI.DOCNO
+	                                                , WI.DOCLINE
+	                                                , WI.SLIPDT ) WI
+	                         ON WI.DOCNO = DD.ORD_NO
+	                        AND WI.DOCLINE = DD.ORD_LNO
+	                        AND WI.SLIPDT = DD.DELIVERYDATE
+                          WHERE 1=1
+						<if test="ordertype != null and ordertype != ''">
+		                    AND DD.CHANNEL = #{ordertype}
+						</if>  
+					      GROUP BY DD.DELIVERYDATE, DD.FROMCUSTKEY
+					     ORDER BY DD.FROMCUSTKEY) TT				          
+				  LEFT OUTER JOIN ( SELECT WD_3PLINSPECT.DELIVERYDATE    AS DELIVERYDATE
+				                         , WD_3PLINSPECT.FROMCUSTKEY     AS FROMCUSTKEY
+				                         , SUM(WD_3PLINSPECT.CF_3PL)     AS CF_3PL
+				                         , SUM(WD_3PLINSPECT.CF_CUST)    AS CF_CUST
+				                         , SUM(WD_3PLINSPECT.BAR_CNT)    AS BAR_CNT
+				                         , SUM(WD_3PLINSPECT.SCAN_CNT)   AS SCAN_CNT
+				                         , SUM(WD_3PLINSPECT.DP_NOT_CNT) AS NDP_CNT
+				                      FROM WD_3PLINSPECT
+				                     WHERE WD_3PLINSPECT.DELIVERYDATE <![CDATA[>=]]> #{calDocdtFrom}
+				                       AND WD_3PLINSPECT.DELIVERYDATE <![CDATA[<=]]> #{calDocdtTo}
+				                       AND WD_3PLINSPECT.STORERKEY = #{gStorerkey}
+				                     GROUP BY WD_3PLINSPECT.DELIVERYDATE
+				                            , WD_3PLINSPECT.FROMCUSTKEY) WDD
+				    ON WDD.DELIVERYDATE = TT.DELIVERYDATE
+				   AND WDD.FROMCUSTKEY  = TT.FROMCUSTKEY ) T
+		 WHERE 1=1
+		<if test="status != null and status != ''">
+		   AND T.STATUS_FLAG = #{status}
+		</if>  
+    </select>
+    
+    <select id="getMasterT3List_backup" resultType="cjfw.wms.ib.dto.IbTirdPartyMastResT3Dto">
+		SELECT /* [IbTirdPartyMastService.sqlx][IbTirdPartyMastService.getMasterT3List][정산 > 3PL 수수료 > 일배 물류대행 파트너사 수수료 정산_검수관리_탭 조회][KimDongHan][2025-09-25] */
+		       TT.DELIVERYDATE                                                                                                                                                           AS DELIVERYDATE     /* 01. 일자 */
+		     , TT.FROMCUSTKEY                                                                                                                                                            AS FROMCUSTKEY      /* 02. 협력사코드 */
+		     , (SELECT MS.DESCRIPTION FROM MS_CUST MS WHERE MS.CUSTKEY = TT.FROMCUSTKEY AND MS.CUSTTYPE = 'P' AND MS.STORERKEY = #{gStorerkey})                                          AS FROMCUSTNM       /* 03. 협력사명 */
+		     , CASE WHEN BB1 = 2 AND BB2 = 3 THEN '1'
+		            WHEN BB1 = 2 AND BB2 = 2 THEN '2'
+		            WHEN BB1 = 3 AND BB2 = 3 THEN '3'
+		            ELSE '4'
+		            END                                                                                                                                                                  AS DELIVERYTYPE     /* 04. 일배구분 */
+		     , TT.BAR_CNT                                                                                                                                                                AS BAR_CNT          /* 05. 검수예정건수 */
+		     , TT.SCAN_CNT                                                                                                                                                               AS SCAN_CNT         /* 06. 검수완료건수 */
+		     , NVL((NVL(WDD.CF_CUST,0) + NVL(WDD.CF_3PL,0)),0)                                                                                                                           AS CFCNT            /* 07. 확정건수 */
+		     , NVL((TT.BAR_CNT - TT.SCAN_CNT - NVL(WDD.CF_CUST,0) - NVL(WDD.CF_3PL,0) - NVL(WDD.NDP_CNT,0)),0)                                                                           AS NCFCNT           /* 08. 미완료건수 */
+		     , NVL(WDD.NDP_CNT,0)                                                                                                                                                        AS NDP_CNT          /* 09. 미입고건수 */
+		     , CASE WHEN TT.BAR_CNT <![CDATA[<=]]> 0 THEN '0%'  ELSE TRUNC((NVL(TT.SCAN_CNT,0) + NVL(WDD.CF_CUST,0) + NVL(WDD.CF_3PL,0) + NVL(WDD.NDP_CNT,0)) / TT.BAR_CNT*100)||'%' END AS RATE             /* 10. 검수완료율(%) */
+		     , CASE WHEN TRUNC((NVL(TT.SCAN_CNT,0) + NVL(WDD.CF_CUST,0) + NVL(WDD.CF_3PL,0)+ NVL(WDD.NDP_CNT,0)) / TT.BAR_CNT*100) = 0 THEN '1' 
+		            WHEN TRUNC((NVL(TT.SCAN_CNT,0) + NVL(WDD.CF_CUST,0) + NVL(WDD.CF_3PL,0)+ NVL(WDD.NDP_CNT,0)) / TT.BAR_CNT*100) <![CDATA[>=]]> 100 THEN '2'  
+		            ELSE '3' END                                                                                                                                                         AS STATUS           /* 11. 진행상태 */
+		     , #{dccode}                                                                                                                                                                 AS DCCODE           /* DCCODE */
+		  FROM ( SELECT DD.DELIVERYDATE   AS DELIVERYDATE
+				      , DD.FROMCUSTKEY    AS FROMCUSTKEY
+		              , SUM(DD.BAR_CNT)   AS BAR_CNT
+		              , SUM(WI.INVOICENO) AS SCAN_CNT
+		              , MIN(DD.CHANNEL)   AS BB1
+		              , MAX(DD.CHANNEL)   AS BB2
+		           FROM ( SELECT SF.DELIVERYDATE     AS DELIVERYDATE
+		                       , SF.FROM_CUSTKEY     AS FROMCUSTKEY
+		                       , SF.CHANNEL          AS CHANNEL
+		                       , SF.DCCODE           AS DCCODE
+		                       , SF.DOCNO            AS ORD_NO
+		                       , SF.DOCLINE          AS ORD_LNO
+		                       , COUNT(SF.INVOICENO) AS BAR_CNT
+		                    FROM IB_SRMFWLABEL SF
+		                   WHERE SF.DELIVERYDATE <![CDATA[>=]]> #{calDocdtFrom}
+		                     AND SF.DELIVERYDATE <![CDATA[<=]]> #{calDocdtTo}
+		                     AND SF.DCCODE        = #{dccode}
+		                     AND SF.CHANNEL       = '2' 
+		                     AND SF.DEL_YN        = 'N' 
+		                     AND SF.FROM_CUSTKEY IN ( SELECT CUSTKEY 
+		                                                FROM MS_3PLCUST 
+		                                               WHERE DCCODE = #{dccode} 
+		                                                 AND US_YN = '1' )
+						<if test="fromCustkey != null and fromCustkey != ''">
+		                     AND SF.FROM_CUSTKEY IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+								                       FROM (SELECT #{fromCustkey} AS VAL FROM DUAL) A
+		                                            CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0) 
+						</if>	
+		                   GROUP BY SF.DELIVERYDATE
+		                          , SF.FROM_CUSTKEY
+		                          , SF.CHANNEL
+		                          , SF.DCCODE
+		                          , SF.DOCNO
+		                          , SF.DOCLINE
+		                   UNION ALL
+		                  SELECT SF.DELIVERYDATE     AS DELIVERYDATE
+		                       , SF.FROM_CUSTKEY     AS FROMCUSTKEY
+		                       , SF.CHANNEL          AS CHANNEL
+		                       , SF.DCCODE           AS DCCODE
+		                       , SF.DOCNO            AS ORD_NO
+		                       , SF.DOCLINE          AS ORD_LNO
+		                       , COUNT(SF.INVOICENO) AS BAR_CNT
+		                    FROM IB_SRMFWLABEL SF
+		                    JOIN DM_DOCUMENT_D 
+		                      ON SF.DOCNO              = DM_DOCUMENT_D.DOCNO
+		                     AND SF.DOCLINE            = DM_DOCUMENT_D.DOCLINE
+		                     AND SF.DELIVERYDATE       = DM_DOCUMENT_D.DELIVERYDATE
+		                     AND DM_DOCUMENT_D.ROUTE   = #{dccode} 
+		                     AND DM_DOCUMENT_D.DCCODE != #{dccode}
+		                     AND DM_DOCUMENT_D.CHANNEL IN ('2', '3')
+		                   WHERE SF.DELIVERYDATE <![CDATA[>=]]> #{calDocdtFrom}                                                 
+		                     AND SF.DELIVERYDATE  <![CDATA[<=]]> #{calDocdtTo}
+		                     AND SF.DCCODE != #{dccode} 
+						<if test="fromCustkey != null and fromCustkey != ''">
+		                     AND SF.FROM_CUSTKEY IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+								                       FROM (SELECT #{fromCustkey} AS VAL FROM DUAL) A
+		                                            CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0) 
+						</if>	
+		                     AND SF.CHANNEL = '3'
+		                     AND SF.FROM_CUSTKEY IN ( SELECT CUSTKEY 
+		                                                FROM MS_3PLCUST 
+		                                               WHERE DCCODE = #{dccode} 
+		                                                 AND US_YN = '1' )
+		                   GROUP BY SF.DELIVERYDATE
+		                          , SF.FROM_CUSTKEY
+		                          , SF.CHANNEL
+		                          , SF.DCCODE
+		                          , SF.DOCNO
+		                          , SF.DOCLINE ) DD
+		           JOIN ( SELECT WI.DOCNO
+		                       , WI.DOCLINE
+		                       , WI.SLIPDT
+		                       , COUNT(DISTINCT WI.INVOICENO) AS INVOICENO
+		                    FROM WD_INVOICE WI
+		                   WHERE WI.DP_SLIPNO IS NOT NULL
+		                   GROUP BY WI.DOCNO
+		                          , WI.DOCLINE
+		                          , WI.SLIPDT) WI
+		             ON WI.DOCNO   = DD.ORD_NO
+		            AND WI.DOCLINE = DD.ORD_LNO
+		            AND WI.SLIPDT  = DD.DELIVERYDATE
+		          WHERE 1=1
+				<if test="ordertype != null and ordertype != ''">
+		            AND DD.DELIVERYTYPE LIKE '%'||#{ordertype}||'%'
+				</if>
+		          GROUP BY DD.DELIVERYDATE
+		                 , DD.FROMCUSTKEY
+		          ORDER BY DD.FROMCUSTKEY ) TT
+		  LEFT OUTER JOIN ( SELECT WD_3PLINSPECT.DELIVERYDATE    AS DELIVERYDATE
+		                         , WD_3PLINSPECT.FROMCUSTKEY     AS FROMCUSTKEY
+		                         , SUM(WD_3PLINSPECT.CF_3PL)     AS CF_3PL
+		                         , SUM(WD_3PLINSPECT.CF_CUST)    AS CF_CUST
+		                         , SUM(WD_3PLINSPECT.BAR_CNT)    AS BAR_CNT
+		                         , SUM(WD_3PLINSPECT.SCAN_CNT)   AS SCAN_CNT
+		                         , SUM(WD_3PLINSPECT.DP_NOT_CNT) AS NDP_CNT
+		                      FROM WD_3PLINSPECT
+		                     WHERE WD_3PLINSPECT.DELIVERYDATE <![CDATA[>=]]> #{calDocdtFrom}
+		                       AND WD_3PLINSPECT.DELIVERYDATE <![CDATA[<=]]> #{calDocdtTo}
+		                       AND WD_3PLINSPECT.STORERKEY = #{gStorerkey}
+		                     GROUP BY WD_3PLINSPECT.DELIVERYDATE
+		                            , WD_3PLINSPECT.FROMCUSTKEY) WDD
+		    ON WDD.DELIVERYDATE = TT.DELIVERYDATE
+		   AND WDD.FROMCUSTKEY  = TT.FROMCUSTKEY
+    </select>
+    
+    <select id="getDetailT3List" resultType="cjfw.wms.ib.dto.IbTirdPartyMastResT3DetailDto">
+		SELECT /* [IbTirdPartyMastService.sqlx][IbTirdPartyMastService.getMasterT3List][정산 > 3PL 수수료 > 일배 물류대행 파트너사 수수료 정산_검수관리_탭 상세 조회][KimDongHan][2025-09-25] */
+		       DD.RD_DATE                                                                                                                                        AS DELIVERYDATE       /* 01. 배송일자 */
+		     , DD.VD_CD                                                                                                                                          AS FROMCUSTKEY        /* 02. 협력사코드 */
+		     , B.DESCRIPTION                                                                                                                                     AS FROMCUSTNM         /* 03. 협력사명 */
+		     , (SELECT CONVDESCR FROM CM_CODE WHERE CM_CODE.CONVCODE = DD.TRANS_CLS AND CM_CODE.CODELIST = 'PUTAWAYTYPE3PL' AND STORERKEY = #{gStorerkey}) 		 AS CHANNEL   		   /* 04. 배송채널 */
+		     , DD.REAL_ORG_CD                                                                                                                                    AS DCCODE             /* 05. 물류센터 */
+		     , FN_GETDCNAME(DD.REAL_ORG_CD)                                                                                                                      AS DCNAME             /* 05. 물류센터명 */
+		     , DD.TO_CUSTKEY                                                                                                                                     AS TOCUSTKEY          /* 06. 거래처코드 */
+		     , TO_CUST.DESCRIPTION                                                                                                                               AS TOCUSTNM           /* 07. 거래처명 */
+		     , DD.BAR_CNT                                                                                                                                        AS BAR_CNT            /* 08. 라벨건수 */
+		     , DD.SCAN_CNT                                                                                                                                       AS SCAN_CNT           /* 09. 스캔완료 */
+		     , C.CF_3PL                                                                                                                                          AS CF_PL3             /* 10. 강제확정(3PL) */
+		     , C.REASONCODE2                                                                                                                                     AS REASONCODE2        /* 11. 강제확정사유(3PL) */
+		     , C.REASONWHO2                                                                                                                                      AS REASONWHO2         /* 12. 귀책 */
+		     , C.REASONTEXT2                                                                                                                                     AS REASONTEXT2        /* 13. 세부내역 */
+		     , C.CF_CUST                                                                                                                                         AS CF_CUST            /* 14. 강제확정(협력사) */
+		     , C.REASONCODE                                                                                                                                      AS REASONCODE         /* 15. 강제확정사유(협력사) */
+		     , C.REASONWHO                                                                                                                                       AS REASONWHO          /* 16. 귀책 */
+		     , C.REASONTEXT                                                                                                                                      AS REASONTEXT         /* 17. 세부내역 */
+		     , C.DP_NOT_CNT                                                                                                                                      AS NDP_CNT            /* 18. 미입고 */
+		     , C.REASONCODE3                                                                                                                                     AS REASONCODE3        /* 19. 강제확정사유(미입고) */
+		     , C.REASONWHO3                                                                                                                                      AS REASONWHO3         /* 20. 귀책 */
+		     , C.REASONTEXT3                                                                                                                                     AS REASONTEXT3        /* 21. 세부내역 */
+		     , NVL((NVL(DD.BAR_CNT,0) - NVL(DD.INSPECT_CNT,0) - NVL(C.CF_3PL,0) - NVL(C.CF_CUST,0) - NVL(C.DP_NOT_CNT,0)),0)                                     AS NCF                /* 22. 미완료 */
+		     , TO_CHAR(C.EDITDATE, 'YYYY-MM-DD HH24:MI:SS')                                                                                                      AS CFDATE             /* 23. 확정시간 */
+		     , DD.TRANS_CLS                                                                                                                                      AS DELIVERYTYPE_PL3   /* DELIVERYTYPE_3PL  */
+		     , DD.INSPECT_CNT                                                                                                                                    AS INSPECT_CNT        /* INSPECT_CNT */
+		  FROM ( SELECT MT.RD_DATE
+		              , MT.VD_CD
+		              , MT.TRANS_CLS
+		              , CASE WHEN MT.TRANS_CLS = '140' THEN '2' ELSE '3' END AS CHANNEL
+		              , MT.REAL_ORG_CD
+		              , DM_H.TO_CUSTKEY
+		              , SUM(MT.BAR_CNT)   AS BAR_CNT
+		              , SUM(WD.INVOICENO) AS INSPECT_CNT
+		              , SUM(SCAN_CNT)     AS SCAN_CNT
+		           FROM ( SELECT SF.RD_DATE     AS RD_DATE
+		                       , SF.VD_CD       AS VD_CD
+		                       , SF.TRANS_CLS   AS TRANS_CLS
+		                       , SF.REAL_ORG_CD AS REAL_ORG_CD
+		                       , SF.ORD_NO      AS ORD_NO
+		                       , SF.ORD_LNO     AS ORD_LNO   
+		                       , SF.BAR_CNT     AS BAR_CNT
+		                       , (SELECT COUNT(DISTINCT WD_INVOICE.INVOICENO)  
+		                            FROM WD_INVOICE 
+		                           WHERE WD_INVOICE.DOCNO    = SF.ORD_NO 
+		                             AND WD_INVOICE.DOCLINE  = SF.ORD_LNO
+		                             AND WD_INVOICE.DP_SLIPNO IS NOT NULL
+		                             AND WD_INVOICE.SLIPDT = SF.RD_DATE)        AS SCAN_CNT
+		                    FROM V_SRMFWLABEL SF
+		                   WHERE SF.RD_DATE     = #{deliverydate}
+		                     AND SF.VD_CD       = #{fromCustkey}
+		                     AND SF.TRANS_CLS   = '140'
+		                     AND SF.REAL_ORG_CD = #{dccode} 
+		                   UNION ALL   
+		                  SELECT SF.RD_DATE     AS RD_DATE
+		                       , SF.VD_CD       AS VD_CD
+		                       , SF.TRANS_CLS   AS TRANS_CLS
+		                       , SF.REAL_ORG_CD AS REAL_ORG_CD
+		                       , SF.ORD_NO      AS ORD_NO
+		                       , SF.ORD_LNO     AS ORD_LNO   
+		                       , SF.BAR_CNT     AS BAR_CNT
+		                       , (SELECT COUNT(DISTINCT WD_INVOICE.INVOICENO)  
+		                            FROM WD_INVOICE 
+		                           WHERE WD_INVOICE.DOCNO = SF.ORD_NO 
+		                             AND WD_INVOICE.DOCLINE = SF.ORD_LNO
+		                             AND WD_INVOICE.DP_SLIPNO IS NOT NULL
+		                             AND WD_INVOICE.SLIPDT = SF.RD_DATE)        AS SCAN_CNT
+		                    FROM V_SRMFWLABEL SF
+		                    JOIN DM_DOCUMENT_D 
+		                      ON SF.ORD_NO             = DM_DOCUMENT_D.DOCNO
+		                     AND SF.ORD_LNO            = DM_DOCUMENT_D.DOCLINE
+		                     AND DM_DOCUMENT_D.ROUTE   = #{dccode} 
+		                     AND DM_DOCUMENT_D.DCCODE != #{dccode}
+		                     AND DM_DOCUMENT_D.CHANNEL IN ('2', '3')
+		                   WHERE SF.RD_DATE            = #{deliverydate}
+		                     AND SF.VD_CD              = #{fromCustkey}
+		                     AND SF.TRANS_CLS          = '150'
+		                     AND SF.REAL_ORG_CD       != #{dccode} ) MT
+		           LEFT OUTER JOIN DM_DOCUMENT_H DM_H 
+		             ON MT.ORD_NO      = DM_H.DOCNO
+		            AND 'WD'           = DM_H.DOCTYPE
+		            AND MT.REAL_ORG_CD = DM_H.DCCODE
+		            AND MT.RD_DATE     = DM_H.DELIVERYDATE
+		           LEFT OUTER JOIN (SELECT DOCNO
+		                                 , DOCLINE
+		                                 , COUNT(DISTINCT WD_INVOICE.INVOICENO) AS INVOICENO
+		                              FROM WD_INVOICE
+		                             WHERE WD_INVOICE.SLIPDT     = #{deliverydate}
+		                               AND WD_INVOICE.DCCODE     = #{dccode}    
+		                               AND WD_INVOICE.DP_SLIPNO IS NOT NULL
+		                               AND EXISTS (SELECT 1
+		                                             FROM WD_INVOICE_TRACKING 
+		                                             JOIN FRAMEONE_USER 
+		                                               ON WD_INVOICE_TRACKING.ADDWHO      = FRAMEONE_USER.USER_ID
+		                                            WHERE WD_INVOICE_TRACKING.INVOICENO   = WD_INVOICE.INVOICENO
+		                                              AND WD_INVOICE_TRACKING.EVENTSTATUS = '60'
+		                                              AND  FRAMEONE_USER.DEPARTMENT       = #{dccode})
+		                             GROUP BY DOCNO
+		                                    , DOCLINE) WD  
+		             ON DM_H.DOCNO    = WD.DOCNO
+		            AND MT.ORD_LNO    = WD.DOCLINE
+		          WHERE 1 = 1
+		          GROUP BY MT.RD_DATE
+		                 , MT.VD_CD
+		                 , MT.TRANS_CLS
+		                 , MT.REAL_ORG_CD
+		                 , DM_H.TO_CUSTKEY ) DD
+		  LEFT OUTER JOIN WD_3PLINSPECT C 
+		    ON  DD.RD_DATE    = C.DELIVERYDATE
+		   AND DD.VD_CD       = C.FROMCUSTKEY
+		   AND DD.TO_CUSTKEY  = C.TOCUSTKEY
+		   AND DD.TRANS_CLS   = C.CHANNEL
+		   AND DD.REAL_ORG_CD = C.DCCODE
+		   AND #{gStorerkey}  = C.STORERKEY
+		  JOIN MS_CUST B 
+		    ON #{gStorerkey} = B.STORERKEY
+		   AND DD.VD_CD      = B.CUSTKEY
+		   AND 'P'           = B.CUSTTYPE
+		  LEFT OUTER JOIN MS_CUST TO_CUST 
+		    ON #{gStorerkey} = TO_CUST.STORERKEY
+		   AND DD.TO_CUSTKEY = TO_CUST.CUSTKEY
+		   AND 'C'           = TO_CUST.CUSTTYPE
+		 ORDER BY DELIVERYDATE
+		        , FROMCUSTKEY
+		        , DELIVERYTYPE_PL3
+		        , TOCUSTKEY    
+    </select>
+    
+    <select id="getMasterT4List" resultType="cjfw.wms.ib.dto.IbTirdPartyMastResT4Dto">
+    	/* [IbTirdPartyMastService.sqlx][IbTirdPartyMastService.getMasterT4List][정산 > 3PL 수수료 > 일배 물류대행 파트너사 수수료 정산_정산관리 조회][KimDongHan][2025-09-25] */
+		WITH WD_INV AS   ( SELECT DCCODE
+		                        , DOCNO
+		                        , DOCLINE
+		                        , SLIPDT
+		                        , COUNT(DISTINCT WD_INVOICE.INVOICENO) AS INVOICENO
+		                     FROM WD_INVOICE
+		                    WHERE WD_INVOICE.SLIPDT <![CDATA[>=]]> #{calSlipdtFrom}
+		                      AND WD_INVOICE.SLIPDT <![CDATA[<=]]> #{calSlipdtTo}
+		                      AND WD_INVOICE.DP_SLIPNO IS NOT NULL
+		                      AND EXISTS (SELECT 1
+		                                    FROM WD_INVOICE_TRACKING 
+		                                    JOIN FRAMEONE_USER 
+		                                      ON WD_INVOICE_TRACKING.ADDWHO      = FRAMEONE_USER.USER_ID
+		                                   WHERE WD_INVOICE_TRACKING.INVOICENO   = WD_INVOICE.INVOICENO
+		                                     AND WD_INVOICE_TRACKING.EVENTSTATUS = '60'
+		                                     AND FRAMEONE_USER.DEPARTMENT        = #{dccode} )
+		                    GROUP BY DCCODE
+		                           , DOCNO
+		                           , DOCLINE
+		                           , SLIPDT )
+		 , DM_D_ROUTE AS ( SELECT ROUTE
+		                        , DOCNO
+		                        , DOCLINE
+		                        , DELIVERYDATE
+		                     FROM DM_DOCUMENT_D
+		                    WHERE DM_DOCUMENT_D.DELIVERYDATE <![CDATA[>=]]>  #{calSlipdtFrom}
+		                      AND DM_DOCUMENT_D.DELIVERYDATE <![CDATA[<=]]> #{calSlipdtTo}
+		                      AND DM_DOCUMENT_D.DCCODE    !=  #{dccode}	
+		                      AND DM_DOCUMENT_D.CHANNEL       IN ('2','3') )
+		SELECT CASE WHEN (IB.IB_CFFW  IS NULL AND IB.IB_CF3PL IS NULL ) THEN 'icon_bbs01'                                                                                                    
+		            WHEN (IB.IB_CFFW  = '0'   AND IB.IB_CF3PL = '0'   ) THEN 'icon_bbs01'                                                                                                    
+		            WHEN (IB.IB_CFFW  = '1'   AND IB.IB_CF3PL = '1'   ) THEN 'icon_bbs03'                                                                                                    
+		            WHEN (IB.IB_CFFW  = '1'    OR IB.IB_CF3PL = '1'   ) THEN 'icon_bbs02'                                                                                                    
+		            ELSE ''                                              END 														                                 AS ALLOC_CAR_STATUS     /* 01. 마감현황 */
+		     , DD.RD_DATE												                                                                                             AS DELIVERYDATE         /* 02. 배송일자 */
+		     , DD.VD_CD													                                                                                             AS FROMCUSTKEY          /* 03. 협력사코드 */
+		     , DD.ORD_NO													                                                                                             AS ORD_NO
+		     , DM_DOCUMENT_H.TO_CUSTKEY													                                                                                             AS TO_CUSTKEY
+		     , DM_DOCUMENT_H.TO_CUSTNAME													                                                                                             AS TO_CUSTNAME
+		     , MS.DESCRIPTION											                                                                                             AS FROMCUSTNM           /* 04. 협력사명 */
+	         , (SELECT CONVDESCR FROM CM_CODE WHERE CM_CODE.CONVCODE = DD.TRANS_CLS AND  CM_CODE.CODELIST = 'PUTAWAYTYPE3PL' AND STORERKEY = #{gStorerkey}) 		 AS CHANNEL   		     /* 05. 일배구분 */ 
+		     , DD.REAL_ORG_CD											                                                                                             AS DCCODE               /* 06. 물류센터 */
+		     , FN_GETDCNAME(DD.REAL_ORG_CD)                                                                                                                          AS DCNAME               /* 06. 물류센터명 */
+		     , NVL(DD.BAR_CNT,0)                                   		                                                                                             AS BAR_CNT              /* 07. 라벨건수 	*/
+			 , NVL(DD.INSPECT_CNT,0)									                                                                                             AS SCAN_CNT             /* 08. 검수건수*/
+			 , NVL(WD.CF_3PL  ,0) 										                                                                                             AS CF_PL3               /* 09. 강제확정(3PL) */
+			 , NVL(WD.CF_CUST ,0) 										                                                                                             AS CF_CUST              /* 10. 강제확정(협력사) */
+			 , NVL(DD.BAR_CNT  ,0) - NVL(DD.INSPECT_CNT ,0) - NVL(WD.CF_3PL   ,0) - NVL(WD.CF_CUST  ,0) 									                         AS NCF                  /* 11. 미확정 */
+			 , NVL(WD.NDP_CNT,0)                                                                                                                                     AS NDP_CNT              /* 12. 미입고 */
+		     , CASE WHEN dd.TRANS_CLS ='150' THEN  0 ELSE NVL(DD.INSPECT_CNT,0)+NVL(WD.CF_CUST,0) END											                     AS OTHER01_CNT          /* 13. 검수 */
+		     , NVL(WD.CF_3PL  ,0) 										                                                                                             AS OTHER02_CNT          /* 14. 미검수 */
+		     , CASE WHEN dd.TRANS_CLS ='150' THEN  NVL(DD.INSPECT_CNT,0)+NVL(WD.CF_CUST,0) ELSE 0  END 											                     AS OTHER03_CNT          /* 15. 광역일배 */
+		     , CASE WHEN  IB.IB_CFFW = '1' THEN '1' ELSE '2' END 														                                             AS IBCFFW               /* 16. FW */
+		     , TO_CHAR(IB.IB_CFFWDATE,'YYYY-MM-DD HH24:MI:SS') 			                                                                                             AS IBCFFWDATE           
+		     , CASE WHEN IB.IB_CF3PL = '1' THEN '1' ELSE '2' END 														                                             AS IBCF3PL              /* 17. 3PL */
+		     , TO_CHAR(IB.IB_CF3PLDATE,'YYYY-MM-DD HH24:MI:SS') 		                                                                                             AS IBCF3PLDATE          
+		     , CASE WHEN IB.IB_LOGIPRICE IS NOT NULL AND IB.IB_CF3PL = '1' THEN IB.IB_LOGIPRICE                                                                                              
+		            WHEN DD.TRANS_CLS = '150'                                                                                                                                                
+		            THEN (NVL(DD.INSPECT_CNT,0)+NVL(WD.CF_CUST,0))*nvl((SELECT PICKPRICE FROM MS_3PLPRICE WHERE DCCODE =  #{dccode} AND PRICETYPE = '300'),0)                             
+		                + NVL(WD.CF_3PL,0)*nvl((SELECT PICKPRICE FROM MS_3PLPRICE WHERE DCCODE =  #{dccode} AND PRICETYPE = '200'),0)                                                     
+		            ELSE (NVL(DD.INSPECT_CNT,0)+NVL(WD.CF_CUST,0))*nvl((SELECT PICKPRICE FROM MS_3PLPRICE WHERE DCCODE =  #{dccode} AND PRICETYPE = '100'),0)                             
+		                + NVL(WD.CF_3PL,0)*nvl((SELECT PICKPRICE FROM MS_3PLPRICE WHERE DCCODE =  #{dccode} AND PRICETYPE = '200'),0)                                                     
+		             END         											                                                                                         AS LOGIPRICE            /* 18. 물류비 */
+		     , CASE WHEN IB.IB_CFFW = '1' AND IB.IB_CF3PL = '1' THEN '1' ELSE '2' END                                                                                AS IBCFYN               /* 19. 확정유무 */
+			 , TO_CHAR(IB.IB_CFFWDATE,'YYYY-MM-DD HH24:MI:SS') 			                                                                                             AS IFCFDATE             /* 20. 확정시간 */
+		     , DD.TRANS_CLS												                                                                                             AS DELIVERYTYPE_PL3     /* DELIVERYTYPE_PL3 */
+		     , (SELECT PICKPRICE FROM MS_3PLPRICE WHERE DCCODE =  #{dccode} AND PRICETYPE = '100')                                                                   AS OTHER01_PRICE        /* OTHER01_PRICE */
+		     , (SELECT PICKPRICE FROM MS_3PLPRICE WHERE DCCODE =  #{dccode} AND PRICETYPE = '200')                                                                   AS OTHER02_PRICE        /* OTHER02_PRICE */
+		     , (SELECT PICKPRICE FROM MS_3PLPRICE WHERE DCCODE =  #{dccode} AND PRICETYPE = '300')                                                                   AS OTHER03_PRICE        /* OTHER03_PRICE */
+	         , NVL(WD.LABEL_CL_YN,'0')                                                                                                                               AS LABEL_CL_YN          /* LABEL_CL_YN */
+		  FROM ( SELECT MT.RD_DATE                                                           AS RD_DATE
+		              , MT.VD_CD                                                             AS VD_CD
+		              , MT.TRANS_CLS                                                         AS TRANS_CLS
+		              , CASE WHEN MT.TRANS_CLS = '140' THEN '2' ELSE '3' END                 AS CHANNEL
+		              , MT.REAL_ORG_CD                                                       AS REAL_ORG_CD
+					  , MT.ORD_NO                                                            AS ORD_NO
+		              , SUM(MT.BAR_CNT)                                                      AS BAR_CNT
+		              , SUM(WD.INVOICENO)                                				 	 AS INSPECT_CNT
+		           FROM ( SELECT SF.RD_DATE     AS RD_DATE
+		                       , SF.VD_CD       AS VD_CD
+		                       , SF.TRANS_CLS   AS TRANS_CLS
+		                       , SF.REAL_ORG_CD AS REAL_ORG_CD
+		                       , SF.ORD_NO      AS ORD_NO
+		                       , SF.ORD_LNO     AS ORD_LNO
+		                       , SF.BAR_CNT     AS BAR_CNT
+		                    FROM V_SRMFWLABEL SF
+		                   WHERE SF.RD_DATE <![CDATA[>=]]>  #{calSlipdtFrom}
+		                     AND SF.RD_DATE <![CDATA[<=]]>  #{calSlipdtTo} 
+		                     AND SF.REAL_ORG_CD	     =  #{dccode}		
+		                     AND EXISTS ( SELECT  1   
+		                                    FROM MS_3PLCUST MSCUST 
+		                                   WHERE MSCUST.CUSTKEY = SF.VD_CD 
+		                                     AND MSCUST.DCCODE =  #{dccode}	
+		                                    AND MSCUST.US_YN = '1')
+		                <!--
+						<if test="fromCustkey != null and fromCustkey != ''">
+		                     AND SF.VD_CD IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+								                FROM (SELECT #{fromCustkey} AS VAL FROM DUAL) A
+		                                     CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0) 
+						</if>
+						-->
+					    <!-- START.협력사-->
+					    <if test="fromCustkeyMulti != null and fromCustkeyMulti != '' ">
+							<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+								<foreach collection="fromCustkeyMulti" item="item">
+									OR SF.VD_CD IN
+									<foreach collection="item" item="code" open="(" close=")" separator=",">
+										#{code} 	 
+						      		</foreach>
+						    	</foreach>
+						  	</trim>			                                    
+					    </if>
+					    <!-- END.협력사 -->								
+		                ) MT
+		           LEFT OUTER JOIN WD_INV WD   
+		             ON WD.DOCNO     = MT.ORD_NO
+		            AND WD.DOCLINE   = MT.ORD_LNO
+		            AND WD.SLIPDT    = MT.RD_DATE
+		            AND WD.DCCODE    = #{dccode}	
+		          GROUP BY MT.RD_DATE
+		                 , MT.VD_CD
+		                 , MT.TRANS_CLS
+		                 , MT.REAL_ORG_CD
+		                 , MT.ORD_NO
+		          UNION ALL
+		         SELECT MT.RD_DATE                                                           AS RD_DATE
+		              , MT.VD_CD                                                             AS VD_CD
+		              , MT.TRANS_CLS                                                         AS TRANS_CLS
+		              , CASE WHEN MT.TRANS_CLS = '140' THEN '2' ELSE '3' END                 AS CHANNEL
+		              , MT.REAL_ORG_CD                                                       AS REAL_ORG_CD
+					  , MT.ORD_NO
+		              , SUM(MT.BAR_CNT)                                                      AS BAR_CNT
+		              , SUM(WD.INVOICENO)  									                AS INSPECT_CNT
+		           FROM ( SELECT SF.RD_DATE     AS RD_DATE
+		                       , SF.VD_CD       AS VD_CD
+		                       , SF.TRANS_CLS   AS TRANS_CLS
+		                       , SF.REAL_ORG_CD AS REAL_ORG_CD
+		                       , SF.ORD_NO      AS ORD_NO
+		                       , SF.ORD_LNO     AS ORD_LNO
+		                       , SF.BAR_CNT     AS BAR_CNT
+		                    FROM V_SRMFWLABEL SF
+		                   WHERE SF.RD_DATE <![CDATA[>=]]>  #{calSlipdtFrom}
+		                     AND SF.RD_DATE <![CDATA[<=]]>  #{calSlipdtTo} 
+		                     AND SF.REAL_ORG_CD        != #{dccode}	
+		                     AND SF.TRANS_CLS           = '150'
+		                     AND EXISTS ( SELECT 1   
+		                                    FROM MS_3PLCUST MSCUST 
+		                                   WHERE MSCUST.CUSTKEY = SF.VD_CD 
+		                                     AND MSCUST.DCCODE  =  #{dccode}	
+		                                     AND MSCUST.US_YN   = '1')
+		                <!--                     
+						<if test="fromCustkey != null and fromCustkey != ''">
+		                    AND SF.VD_CD IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+								               FROM (SELECT #{fromCustkey} AS VAL FROM DUAL) A
+		                                    CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0) 
+						</if>
+						-->
+					    <!-- START.협력사-->
+					    <if test="fromCustkeyMulti != null and fromCustkeyMulti != '' ">
+							<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+								<foreach collection="fromCustkeyMulti" item="item">
+									OR SF.VD_CD IN
+									<foreach collection="item" item="code" open="(" close=")" separator=",">
+										#{code} 	 
+						      		</foreach>
+						    	</foreach>
+						  	</trim>			                                    
+					    </if>
+					    <!-- END.협력사 -->								
+		                ) MT
+		           LEFT OUTER JOIN WD_INV WD   
+		             ON  WD.DOCNO    = MT.ORD_NO
+		            AND WD.DOCLINE   = MT.ORD_LNO
+		            AND WD.SLIPDT    = MT.RD_DATE
+		            AND WD.DCCODE   != #{dccode}	
+		          WHERE 1 = 1
+		            AND EXISTS (SELECT 1
+		                          FROM DM_D_ROUTE
+		                         WHERE DM_D_ROUTE.DOCNO         =  MT.ORD_NO
+		                           AND DM_D_ROUTE.DOCLINE       =  MT.ORD_LNO
+		                           AND DM_D_ROUTE.DELIVERYDATE  =  MT.RD_DATE
+		                           AND DM_D_ROUTE.ROUTE         = #{dccode} )
+		          GROUP BY MT.RD_DATE
+		                 , MT.VD_CD
+		                 , MT.TRANS_CLS
+		                 , MT.REAL_ORG_CD
+						 , MT.ORD_NO) DD
+		  LEFT OUTER JOIN IB_3PLEXPENSE IB 
+		    ON IB.DELIVERYDATE = DD.RD_DATE
+		   AND IB.FROMCUSTKEY  = DD.VD_CD  
+		   AND IB.DCCODE       = DD.REAL_ORG_CD
+		   AND IB.CHANNEL      = DD.TRANS_CLS
+		   AND IB.STORERKEY    = #{gStorerkey}
+		  LEFT OUTER JOIN ( SELECT WD_3PLINSPECT.DELIVERYDATE    AS DELIVERYDATE
+		                         , WD_3PLINSPECT.FROMCUSTKEY     AS FROMCUSTKEY
+		                         , WD_3PLINSPECT.CHANNEL         AS CHANNEL
+		                         , WD_3PLINSPECT.DCCODE          AS DCCODE
+		                         , MS_3PLCUST.LABEL_CL_YN        AS LABEL_CL_YN
+		                         , SUM(WD_3PLINSPECT.CF_3PL)     AS CF_3PL
+		                         , SUM(WD_3PLINSPECT.CF_CUST)    AS CF_CUST
+		                         , SUM(WD_3PLINSPECT.BAR_CNT)    AS BAR_CNT
+		                         , SUM(WD_3PLINSPECT.SCAN_CNT)   AS SCAN_CNT
+		                         , SUM(WD_3PLINSPECT.DP_NOT_CNT) AS NDP_CNT
+		                      FROM WD_3PLINSPECT
+                              LEFT OUTER JOIN MS_3PLCUST		                      
+					            ON MS_3PLCUST.STORERKEY   =  WD_3PLINSPECT.STORERKEY 
+							   AND MS_3PLCUST.DCCODE      =  WD_3PLINSPECT.DCCODE
+							   AND MS_3PLCUST.CUSTKEY     =  WD_3PLINSPECT.FROMCUSTKEY
+							   AND MS_3PLCUST.US_YN       = '0'		                      
+		                     WHERE WD_3PLINSPECT.DELIVERYDATE <![CDATA[>=]]>  #{calSlipdtFrom}
+		                       AND WD_3PLINSPECT.DELIVERYDATE <![CDATA[<=]]>  #{calSlipdtTo}
+		                       AND WD_3PLINSPECT.STORERKEY     = #{gStorerkey}
+		                     GROUP BY WD_3PLINSPECT.DELIVERYDATE
+		                            , WD_3PLINSPECT.FROMCUSTKEY
+		                            , WD_3PLINSPECT.CHANNEL
+		                            , WD_3PLINSPECT.DCCODE 
+		                            , MS_3PLCUST.LABEL_CL_YN ) WD 
+		    ON WD.DELIVERYDATE = DD.RD_DATE
+		   AND WD.DCCODE       = DD.REAL_ORG_CD
+		   AND WD.FROMCUSTKEY  = DD.VD_CD
+		   AND WD.CHANNEL      = DD.TRANS_CLS
+		  LEFT OUTER JOIN MS_CUST MS 
+		    ON MS.CUSTKEY   = DD.VD_CD
+		   AND MS.CUSTTYPE  = 'P'
+		   AND MS.STORERKEY = #{gStorerkey}
+		  JOIN DM_DOCUMENT_H
+		    ON  DM_DOCUMENT_H.DOCNO = DD.ORD_NO
+		 WHERE 1=1
+		<if test="toCustkeyMulti != null and toCustkeyMulti != '' ">
+			<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+				<foreach collection="toCustkeyMulti" item="item">
+					OR DM_DOCUMENT_H.TO_CUSTKEY IN
+					<foreach collection="item" item="code" open="(" close=")" separator=",">
+						#{code}
+					</foreach>
+				</foreach>
+			</trim>
+		</if>
+		<if test="confirmyn == '1'.toString()"> 	
+		   AND IB.IB_CFFW  = '1' 
+		   AND IB.IB_CF3PL = '1'	
+		</if>
+		<if test="confirmyn == '2'.toString()"> 	
+		   AND NOT(IB.IB_CFFW = '1' AND IB.IB_CF3PL = '1')
+		</if>				
+		 ORDER BY DD.RD_DATE
+		        , DD.VD_CD
+		        , DD.TRANS_CLS    
+    </select>
+    
+	<select id="getT1DupCheck" resultType="int">
+		SELECT /* [IbTirdPartyMastService.sqlx][IbTirdPartyMastService.getT1DupCheck][정산 > 3PL 수수료 > 일배 물류대행 파트너사 수수료 정산_단가마스터_탭 중복 조회][KimDongHan][2025-09-25] */
+		       COUNT(*)
+		  FROM MS_3PLPRICE
+		 WHERE 1=1
+		   AND DCCODE    = #{dccode}  
+		   AND PRICETYPE = #{pricetype}
+		   AND STORERKEY = #{gStorerkey}
+    </select>
+    
+    <insert id="insertT1Master">
+		INSERT /* [IbTirdPartyMastService.sqlx][IbTirdPartyMastService.insertT1Master][정산 > 3PL 수수료 > 일배 물류대행 파트너사 수수료 정산_단가마스터_탭 저장(Insert)][KimDongHan][2025-09-25] */
+		  INTO MS_3PLPRICE
+		     ( SERIALKEY                      /* 01. SERIALKEY */  
+			 , STORERKEY                      /* 02. STORERKEY */ 
+			 , DCCODE                         /* 03. DCCODE */ 
+			 , PRICETYPE                      /* 04. PRICETYPE */ 
+			 , PICKPRICE                      /* 05. PICKPRICE */ 
+			 , ADDDATE                        /* 06. ADDDATE */ 
+			 , EDITDATE                       /* 07. EDITDATE */ 
+			 , ADDWHO                         /* 08. ADDWHO */ 
+			 , EDITWHO                        /* 09. EDITWHO */ 
+			 ) VALUES (
+		       SEQ_MS_3PLPRICE.NEXTVAL        /* 01. SERIALKEY */  
+			 , #{gStorerkey}                  /* 02. STORERKEY */ 
+			 , #{dccode}                      /* 03. DCCODE */ 
+			 , #{pricetype}                   /* 04. PRICETYPE */ 
+			 , #{pickprice}                   /* 05. PICKPRICE */ 
+			 , SYSDATE                        /* 06. ADDDATE */ 
+			 , SYSDATE                        /* 07. EDITDATE */ 
+			 , #{gUserId}                     /* 08. ADDWHO */ 
+			 , #{gUserId}                     /* 09. EDITWHO */ 	   
+	 )    
+    </insert>
+    
+	<update id="updateT1Master">
+		UPDATE /* [IbTirdPartyMastService.sqlx][IbTirdPartyMastService.updateT1Master][정산 > 3PL 수수료 > 일배 물류대행 파트너사 수수료 정산_단가마스터_탭 저장(Update)][KimDongHan][2025-09-25] */
+		       MS_3PLPRICE
+		   SET EDITDATE     = SYSDATE
+		     , EDITWHO      = #{gUserId}
+		     , PICKPRICE    = #{pickprice}
+		 WHERE 1=1
+		   AND DCCODE       = #{dccode}
+		   AND STORERKEY    = #{gStorerkey} 
+		   AND PRICETYPE    = #{pricetype}
+	</update> 
+	
+	<select id="getT2DupCheck" resultType="int">
+		SELECT /* [IbTirdPartyMastService.sqlx][IbTirdPartyMastService.getT2DupCheck][정산 > 3PL 수수료 > 일배 물류대행 파트너사 수수료 정산_협력사관리_탭 중복 조회][KimDongHan][2025-09-25] */
+		       COUNT(*)
+		  FROM MS_3PLCUST
+		 WHERE 1=1
+		   AND DCCODE    = #{dccode}  
+		   AND CUSTKEY   = #{custkey}
+		   AND STORERKEY = #{gStorerkey}
+    </select>
+    
+    <insert id="insertT2Master">
+		INSERT /* [IbTirdPartyMastService.sqlx][IbTirdPartyMastService.insertT2Master][정산 > 3PL 수수료 > 일배 물류대행 파트너사 수수료 정산_협력사관리_탭 저장(Insert)][KimDongHan][2025-09-25] */
+		  INTO MS_3PLCUST
+		     ( SERIALKEY                      /* 01. SERIALKEY */  
+			 , STORERKEY                      /* 02. STORERKEY */ 
+			 , CUSTKEY                        /* 03. CUSTKEY */ 
+			 , DCCODE                         /* 04. DCCODE */ 
+			 , US_YN                          /* 05. US_YN */
+			 , LABEL_CL_YN                    /* 06. LABEL_CL_YN */ 
+			 , ADDDATE                        /* 07. ADDDATE */ 
+			 , EDITDATE                       /* 08. EDITDATE */ 
+			 , ADDWHO                         /* 09. ADDWHO */ 
+			 , EDITWHO                        /* 10. EDITWHO */ 
+			 ) VALUES (
+		       SEQ_MS_3PLCUST.NEXTVAL         /* 01. SERIALKEY */  
+			 , #{gStorerkey}                  /* 02. STORERKEY */ 
+			 , #{custkey}                     /* 03. CUSTKEY */ 
+			 , #{dccode}                      /* 04. DCCODE */ 
+			 , #{usYn}                        /* 05. US_YN */
+			 , #{labelClYn}                   /* 06. LABEL_CL_YN */ 
+			 , SYSDATE                        /* 07. ADDDATE */ 
+			 , SYSDATE                        /* 08. EDITDATE */ 
+			 , #{gUserId}                     /* 09. ADDWHO */ 
+			 , #{gUserId}                     /* 10. EDITWHO */ 	   
+	 )    
+    </insert>    
+	
+	<update id="updateT2Master">
+		UPDATE /* [IbTirdPartyMastService.sqlx][IbTirdPartyMastService.updateT2Master][정산 > 3PL 수수료 > 일배 물류대행 파트너사 수수료 정산_협력사관리_탭 저장(Update)][KimDongHan][2025-09-25] */
+		       MS_3PLCUST
+		   SET EDITDATE     = SYSDATE
+		     , EDITWHO      = #{gUserId}
+		     , US_YN        = #{usYn}
+		     , LABEL_CL_YN  = #{labelClYn}
+		 WHERE 1=1
+		   AND DCCODE       = #{dccode}
+		   AND STORERKEY    = #{gStorerkey} 
+		   AND CUSTKEY      = #{custkey}
+	</update>
+	
+	<update id="mergeT3Master">
+		 MERGE /* [IbTirdPartyMastService.sqlx][IbTirdPartyMastService.mergeT3Master][정산 > 3PL 수수료 > 일배 물류대행 파트너사 수수료 정산_검수관리_탭 강제확정(Merge)][KimDongHan][2025-09-25] */
+		  INTO WD_3PLINSPECT
+		 USING DUAL 
+		    ON ( STORERKEY         = #{gStorerkey} 
+		   AND DELIVERYDATE        = #{deliverydate}
+		   AND FROMCUSTKEY         = #{fromcustkey}
+		   AND TOCUSTKEY           = #{tocustkey}
+		   AND CHANNEL             = #{deliverytypePl3}
+		   AND DCCODE              = #{dccode} )
+		  WHEN MATCHED THEN
+		UPDATE 
+		   SET CF_3PL              = #{cfPl3}
+		     , CF_CUST             = #{cfCust} 
+		     , DP_NOT_CNT          = #{ndpCnt}
+		     , REASONCODE          = #{reasoncode} 
+		     , REASONWHO           = #{reasonwho} 
+		     , REASONTEXT	       = #{reasontext} 
+		     , REASONCODE2         = #{reasoncode2} 
+		     , REASONWHO2          = #{reasonwho2} 
+		     , REASONTEXT2	       = #{reasontext2} 
+		     , REASONCODE3         = #{reasoncode3} 
+		     , REASONWHO3          = #{reasonwho3} 
+		     , REASONTEXT3	       = #{reasontext3} 
+		     , EDITDATE            = SYSDATE
+		     , EDITWHO             = #{gUserId}
+		  WHEN NOT MATCHED THEN
+		INSERT ( SERIALKEY                       /* 01. SERIALKEY */
+		       , STORERKEY                       /* 02. STORERKEY */  
+		       , DELIVERYDATE                    /* 03. DELIVERYDATE */  
+		       , FROMCUSTKEY                     /* 04. FROMCUSTKEY */
+		       , CHANNEL                         /* 05. CHANNEL */
+		       , DCCODE                          /* 06. DCCODE */
+		       , TOCUSTKEY                       /* 07. TOCUSTKEY */
+		       , BAR_CNT                         /* 08. BAR_CNT */
+		       , SCAN_CNT                        /* 09. SCAN_CNT */
+		       , CF_3PL                          /* 10. CF_3PL */
+		       , CF_CUST                         /* 11. CF_CUST */
+		       , DP_NOT_CNT                      /* 12. DP_NOT_CNT */
+		       , REASONCODE                      /* 13. REASONCODE */
+		       , REASONWHO                       /* 14. REASONWHO */
+		       , REASONTEXT	                     /* 15. REASONTEXT */
+		       , REASONCODE2                     /* 16. REASONCODE2 */
+		       , REASONWHO2                      /* 17. REASONWHO2 */
+		       , REASONTEXT2	                 /* 18. REASONTEXT2 */
+		       , REASONCODE3                     /* 19. REASONCODE3 */
+		       , REASONWHO3                      /* 20. REASONWHO3 */
+		       , REASONTEXT3                     /* 21. REASONTEXT3 */
+		       , ADDWHO                          /* 22. ADDWHO */
+		       , EDITWHO                         /* 23. EDITWHO */
+		       ) VALUES (
+		         SEQ_WD_3PLINSPECT.NEXTVAL       /* 01. SERIALKEY */
+		       , #{gStorerkey}                   /* 02. STORERKEY */  
+		       , #{deliverydate}                 /* 03. DELIVERYDATE */  
+		       , #{fromcustkey}                  /* 04. FROMCUSTKEY */
+		       , #{deliverytypePl3}              /* 05. CHANNEL */
+		       , #{dccode}                       /* 06. DCCODE */
+		       , #{tocustkey}                    /* 07. TOCUSTKEY */
+		       , #{barCnt}                       /* 08. BAR_CNT */
+		       , #{scanCnt}                      /* 09. SCAN_CNT */
+		       , #{cfPl3}                        /* 10. CF_3PL */
+		       , #{cfCust}                       /* 11. CF_CUST */
+		       , #{ndpCnt}                       /* 12. DP_NOT_CNT */
+		       , #{reasoncode}                   /* 13. REASONCODE */
+		       , #{reasonwho}                    /* 14. REASONWHO */
+		       , #{reasontext}                   /* 15. REASONTEXT */
+		       , #{reasoncode2}                  /* 16. REASONCODE2 */
+		       , #{reasonwho2}                   /* 17. REASONWHO2 */
+		       , #{reasontext2}	                 /* 18. REASONTEXT2 */
+		       , #{reasoncode3}                  /* 19. REASONCODE3 */
+		       , #{reasonwho3}                   /* 20. REASONWHO3 */
+		       , #{reasontext3}				     /* 21. REASONTEXT3 */
+		       , #{gUserId}                      /* 22. ADDWHO */
+		       , #{gUserId}                      /* 23. EDITWHO */
+		       )	
+	</update>
+	
+	<select id="getCheckFwYn" resultType="string">
+		SELECT /* [IbTirdPartyMastService.sqlx][IbTirdPartyMastService.getCheckFwYn][정산 > 3PL 수수료 > 일배 물류대행 파트너사 수수료 정산_정산관리_탭 EMPTYPE 조회][KimDongHan][2025-09-25] */
+		       EMPTYPE
+		  FROM CM_USER
+		 WHERE USERID = #{gUserId}
+    </select>
+    
+	<update id="updateT4Master">   
+		UPDATE /* [IbTirdPartyMastService.sqlx][IbTirdPartyMastService.updateT4Master][정산 > 3PL 수수료 > 일배 물류대행 파트너사 수수료 정산_정산관리_탭 저장(Update)][KimDongHan][2025-09-25] */
+		       IB_3PLEXPENSE 
+		   SET IB_CFFW        = '1'
+		     , IB_CFFWDATE    = SYSDATE
+		     , EDITDATE       = SYSDATE
+		     , EDITWHO        = #{gUserId}
+		 WHERE IB_CFFW        = '0'
+		   AND IB_CF3PL       = '1'
+		   AND STORERKEY      = #{gStorerkey} 
+		   AND DELIVERYDATE   = #{deliverydate}
+		   AND FROMCUSTKEY    = #{fromcustkey}
+		   AND CHANNEL        = #{deliverytypePl3}
+		   AND DCCODE         = #{dccode}	 
+	</update>	
+	
+	<update id="mergeT4Master">
+		 MERGE /* [IbTirdPartyMastService.sqlx][IbTirdPartyMastService.mergeT4Master][정산 > 3PL 수수료 > 일배 물류대행 파트너사 수수료 정산_정산관리_탭 저장(Merge)][KimDongHan][2025-09-25] */ 
+		  INTO IB_3PLEXPENSE
+		 USING DUAL 
+		    ON ( STORERKEY       = #{gStorerkey}
+		   AND DELIVERYDATE      = #{deliverydate}
+		   AND FROMCUSTKEY       = #{fromcustkey}
+		   AND CHANNEL           = #{deliverytype3pl}
+		   AND DCCODE            = #{dccode} )
+		  WHEN MATCHED THEN
+		UPDATE 
+		   SET BAR_CNT        = #{barCnt}
+		     , SCAN_CNT       = #{scanCnt}
+		     , IB_LOGIPRICE   = #{logiprice}
+		     , OTHER01_CNT    = #{other01Cnt}
+		     , OTHER02_CNT    = #{other02Cnt}
+		     , OTHER03_CNT    = #{other03Cnt}
+		     , OTHER01_PRICE  = #{other01Price}
+		     , OTHER02_PRICE  = #{other02Price}
+		     , OTHER03_PRICE  = #{other03Price}
+		     , IB_CF3PL       = '1'
+		     , IB_CF3PLDATE   = SYSDATE
+		     , EDITDATE       = SYSDATE
+		     , EDITWHO        = #{gUserId}
+		 WHERE IB_CFFW        = '0'
+		  WHEN NOT MATCHED THEN
+		INSERT ( SERIALKEY                    /* 01. SERIALKEY */
+		       , STORERKEY                    /* 02. STORERKEY */
+		       , DELIVERYDATE                 /* 03. DELIVERYDATE */
+		       , FROMCUSTKEY                  /* 04. FROMCUSTKEY */
+		       , CHANNEL                      /* 05. CHANNEL */
+		       , DCCODE                       /* 06. DCCODE */
+		       , BAR_CNT                      /* 07. BAR_CNT */
+		       , SCAN_CNT                     /* 08. SCAN_CNT */
+		       , IB_CFFW                      /* 09. IB_CFFW */
+		       , IB_CFFWDATE                  /* 10. IB_CFFWDATE */
+		       , IB_CF3PL                     /* 11. IB_CF3PL */
+		       , IB_CF3PLDATE                 /* 12. IB_CF3PLDATE */
+		       , IB_LOGIPRICE                 /* 13. IB_LOGIPRICE */
+		       , IB_CFNYN                     /* 14. IB_CFNYN */
+		       , OTHER01_CNT                  /* 15. OTHER01_CNT */
+		       , OTHER02_CNT                  /* 16. OTHER02_CNT */
+		       , OTHER03_CNT                  /* 17. OTHER03_CNT */
+		       , OTHER01_PRICE                /* 18. OTHER01_PRICE */
+		       , OTHER02_PRICE                /* 19. OTHER02_PRICE */
+		       , OTHER03_PRICE                /* 20. OTHER03_PRICE */
+		       , ADDWHO                       /* 21. ADDWHO */
+		       , EDITWHO                      /* 22. EDITWHO */
+		       ) VALUES (
+		         SEQ_IB_3PLEXPENSE.NEXTVAL    /* 01. SERIALKEY */
+		       , #{gStorerkey}                /* 02. STORERKEY */
+		       , #{deliverydate}              /* 03. DELIVERYDATE */
+		       , #{fromcustkey}               /* 04. FROMCUSTKEY */
+		       , #{deliverytype3pl}           /* 05. CHANNEL */
+		       , #{dccode}                    /* 06. DCCODE */
+		       , #{barCnt}                    /* 07. BAR_CNT */
+		       , #{scanCnt}                   /* 08. SCAN_CNT */
+		       , '0'                          /* 09. IB_CFFW */
+		       , ''                           /* 10. IB_CFFWDATE */
+		       , '1'                          /* 11. IB_CF3PL */
+		       , SYSDATE                      /* 12. IB_CF3PLDATE */
+		       , #{logiprice}                 /* 13. IB_LOGIPRICE */
+		       , '0'                          /* 14. IB_CFNYN */
+		       , #{other01Cnt}                /* 15. OTHER01_CNT */
+		       , #{other02Cnt}                /* 16. OTHER02_CNT */
+		       , #{other03Cnt}                /* 17. OTHER03_CNT */
+		       , #{other01Price}              /* 18. OTHER01_PRICE */
+		       , #{other02Price}              /* 19. OTHER02_PRICE */
+		       , #{other03Price}              /* 20. OTHER03_PRICE */
+		       , #{gUserId}                   /* 21. ADDWHO */
+		       , #{gUserId}                   /* 22. EDITWHO */
+		       )	
+	</update>
+	
+	<update id="updateT4Master2">   
+		UPDATE /* [IbTirdPartyMastService.sqlx][IbTirdPartyMastService.updateT4Master2][정산 > 3PL 수수료 > 일배 물류대행 파트너사 수수료 정산_정산관리_탭 수정(Update)][KimDongHan][2025-09-25] */
+		       IB_3PLEXPENSE 
+		   SET IB_CFFW        = '0'
+		     , IB_CFFWDATE    = NULL
+		     , IB_CF3PL       = '0'
+		     , IB_CF3PLDATE   = NULL
+		     , EDITDATE       = SYSDATE
+		     , EDITWHO        = #{gUserId}
+		 WHERE STORERKEY      = #{gStorerkey} 
+		   AND DELIVERYDATE   = #{deliverydate}
+		   AND FROMCUSTKEY    = #{fromcustkey}
+		   AND CHANNEL        = #{deliverytypePl3}
+		   AND DCCODE         = #{dccode}	 
+	</update>	
+</mapper>

@@ -1,0 +1,687 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="stDisuseRequestService">
+
+	<select id="getDisuseRequestList" resultType="StDisuseRequestResDto">
+        SELECT /* [StDisuseRequestService.sqlx][getDisuseRequestList][재고폐기 목록 조회][Kwonjungyun][2025.07.01] */
+	        ST_STOCK.DCCODE AS DCCODE,
+	        ST_STOCK.STORERKEY AS STORERKEY,
+	        ST_STOCK.ORGANIZE AS ORGANIZE,
+	        FN_DESCR_ORGANIZE(ST_STOCK.DCCODE, ST_STOCK.ORGANIZE) AS ORGANIZENAME,
+	        ST_STOCK.AREA AS AREA,
+	        FN_CODEDESCR(ST_STOCK.STORERKEY, 'STOCKTYPE', ST_STOCK.STOCKTYPE) AS STOCKTYPENM,
+	        ST_STOCK.STOCKTYPE AS STOCKTYPE,
+	        ST_STOCK.STOCKGRADE AS STOCKGRADE,
+	        FN_CODEDESCR(ST_STOCK.STORERKEY, 'STOCKGRADE', ST_STOCK.STOCKGRADE) AS STOCKGRADENAME,
+	        MS_LOCATION.ZONE AS ZONE,
+	        ST_STOCK.LOC AS LOC,
+	        ST_STOCK.SKU AS SKU,
+	        MS_SKU.DESCRIPTION AS SKUNAME,
+	        ST_STOCK.LOT AS LOT,
+	        ST_STOCK.UOM AS UOM,
+	        ST_STOCK.QTY AS QTY,
+	        ST_STOCK.OPENQTY AS OPENQTY,
+	        ST_STOCK.QTYALLOCATED AS QTYALLOCATED,
+	        ST_STOCK.QTYPICKED AS QTYPICKED,
+	        '' AS TRANQTY,
+	        '' AS REASONCODE,
+	        '' AS REASONMSG,
+	        '' AS DISUSETYPE,
+	        '' AS IMPUTETYPE,
+	        '' AS PROCESSMAIN,
+	        '' AS COSTCD,
+	        '' AS COSTCDNAME,
+	        '' AS CUSTKEY,
+	        '' AS CUSTNAME,
+	        NVL(TRIM(FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01, 'Y')),'N') AS NEARDURATIONYN, /** 유통기한임박여부 */
+	        CM_LOT.LOTTABLE01 AS LOTTABLE01,
+	        FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01, 'N') || '/' || MS_SKU.DURATION AS DURATIONTERM,
+	        ST_STOCK.STOCKID AS STOCKID,
+	        ST_SNINFO.SERIALNO AS SERIALNO,
+	        ST_SNINFO.CONVSERIALNO AS CONVSERIALNO,
+	        ST_SNINFO.SERIALLEVEL AS SERIALLEVEL,
+	        ST_SNINFO.SERIALTYPE AS SERIALTYPE,
+	        ST_SNINFO.FACTORYNAME AS FACTORYNAME,
+	        MS_SKU.COLORDESCR AS COLORDESCR,
+	        ST_SNINFO.PLACEOFORIGIN AS PLACEOFORIGIN,
+	        DECODE(ST_STOCK.STOCKTYPE,'GOOD','DDGA','BAD','DDBA',ST_STOCK.STOCKTYPE) AS ORDERTYPE,
+	        MS_SKU.DURATION AS DURATION,
+	        MS_SKU.DURATIONTYPE AS DURATIONTYPE,
+	        ST_SNINFO.BUTCHERYDT AS BUTCHERYDT,
+	        ST_SNINFO.CONTRACTCUSTKEY AS CONTRACTCOMPANY,
+	        (
+	            SELECT DESCRIPTION FROM MS_CUST
+	            WHERE MS_CUST.STORERKEY = ST_SNINFO.STORERKEY
+	              AND MS_CUST.CUSTKEY = ST_SNINFO.CONTRACTCUSTKEY
+	              AND ROWNUM = 1
+	        ) AS CONTRACTCOMPANYNAME,
+	        ST_SNINFO.FROMVALIDDT AS FROMVALIDDT,
+	        ST_SNINFO.TOVALIDDT AS TOVALIDDT,
+	        FN_CODEDESCR(ST_STOCK.STORERKEY,'CONTRACTTYPE_SN', ST_SNINFO.CONTRACTTYPE) AS CONTRACTTYPENAME,
+	        ST_SNINFO.CONTRACTTYPE AS CONTRACTTYPE,
+	        ST_SNINFO.STOCKID AS BARCODE,
+	        CASE
+	            WHEN TO_NUMBER(NVL(MS_SKU.LINE02,0)) <![CDATA[<>]]> 0 AND ST_STOCK.DCCODE = '2170' AND NVL(MS_SKU.LINE01,'N') = 'Y'
+	            THEN TO_NUMBER(NVL(MS_SKU.LINE02,0))
+	            ELSE 0
+	        END AS AVGWEIGHT,
+	        ROUND(CASE
+	            WHEN TO_NUMBER(NVL(MS_SKU.LINE02,0)) <![CDATA[<>]]> 0 AND ST_STOCK.DCCODE = '2170' AND NVL(MS_SKU.LINE01,'N') = 'Y'
+	            THEN (ST_STOCK.OPENQTY) / TO_NUMBER(NVL(MS_SKU.LINE02,0))
+	            ELSE 0
+	        END, 2) AS CALBOX,
+	        CASE
+	            WHEN ST_STOCK.DCCODE = '2170' AND NVL(MS_SKU.LINE01,'N') = 'Y'
+	            THEN NVL(ST_STOCK.BOXQTY,0)
+	            ELSE 0
+	        END AS REALORDERBOX,
+	        CASE
+	            WHEN ST_STOCK.DCCODE = '2170' AND NVL(MS_SKU.LINE01,'N') = 'Y'
+	            THEN NVL(ST_STOCK.BOXQTY,0)
+	            ELSE 0
+	        END AS REALCFMBOX,
+	        '0' AS TRANBOX,
+	        CASE
+	            WHEN ST_STOCK.DCCODE = '2170' AND NVL(MS_SKU.LINE01,'N') = 'Y'
+	            THEN 'Y'
+	            ELSE 'N'
+	        END AS BOXFLAG,
+	        MS_SKU.QTYPERBOX
+	    FROM ST_STOCK
+	    JOIN CM_USER_AUTHORITY ON CM_USER_AUTHORITY.USERID = #{gUserId}
+	    <if test="gDccode != null and gDccode != ''">
+	        AND CM_USER_AUTHORITY.DCCODE = #{fixDccode}
+	    </if>
+	    <if test="gStorerkey != null and gStorerkey != ''">
+	        AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey}
+	    </if>
+	    <if test="gArea != null and gArea != ''">
+	        AND CM_USER_AUTHORITY.AREA = #{gArea}
+	    </if>
+	      AND CM_USER_AUTHORITY.DCCODE = ST_STOCK.DCCODE
+		  AND CM_USER_AUTHORITY.STORERKEY = ST_STOCK.STORERKEY
+		  AND CM_USER_AUTHORITY.ORGANIZE = ST_STOCK.ORGANIZE
+		  AND CM_USER_AUTHORITY.AREA = ST_STOCK.AREA
+
+		  JOIN MS_SKU
+		    ON MS_SKU.STORERKEY = ST_STOCK.STORERKEY
+		   AND MS_SKU.SKU = ST_STOCK.SKU
+		   AND MS_SKU.DEL_YN = 'N'
+
+		  <if test="sku != null and sku != ''">
+		    AND MS_SKU.SKU IN (
+		      SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL))
+		      FROM (SELECT #{sku} AS VAL FROM DUAL)
+		      CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) > 0
+		    )
+		  </if>
+
+		  <if test="storagetype != null and storagetype != ''">
+		    AND MS_SKU.STORAGETYPE LIKE '%' || #{storagetype} || '%'
+		  </if>
+
+		  JOIN CM_LOT
+		    ON CM_LOT.STORERKEY = ST_STOCK.STORERKEY
+		   AND CM_LOT.LOT = ST_STOCK.LOT
+		   AND CM_LOT.DEL_YN = 'N'
+
+		  <if test="lottable01yn == 'Y'.toString()">
+		    AND <![CDATA[ CM_LOT.LOTTABLE01 <> 'STD' ]]>
+		  </if>
+		  <if test="lottable01yn == 'N'.toString()">
+		    AND CM_LOT.LOTTABLE01 = 'STD'
+		  </if>
+
+		  JOIN MS_LOCATION
+		    ON MS_LOCATION.DCCODE = ST_STOCK.DCCODE
+		   AND MS_LOCATION.LOC = ST_STOCK.LOC
+
+		  <if test="zone != null and zone != ''">
+		    AND MS_LOCATION.ZONE LIKE '%' || #{zone} || '%'
+		  </if>
+
+		  <if test='serialnoyn != null and serialnoyn=="Y"'>
+		    JOIN ST_SNINFO
+		      ON ST_STOCK.STORERKEY = ST_SNINFO.STORERKEY
+		     AND ST_STOCK.SKU = ST_SNINFO.SKU
+		     AND ST_STOCK.STOCKID = ST_SNINFO.STOCKID
+
+		    <if test="serialno != null and serialno != ''">
+		      AND ST_SNINFO.SERIALNO LIKE '%' || #{serialno} || '%'
+		    </if>
+
+		    <if test="blnoMulti != null and blnoMulti != ''">
+                   AND    ST_SNINFO.CONVSERIALNO      IN
+                 <foreach collection="blnoMulti" item="item" open="(" separator="," close=")">
+                     #{item}
+                 </foreach>
+			</if>
+
+		    <if test="contractcompany != null and contractcompany != ''">
+		      AND ST_SNINFO.CONTRACTCUSTKEY = #{contractcompany}
+		    </if>
+		  </if>
+
+		  <if test="serialnoyn != null or serialnoyn.equals('N')">
+		    LEFT OUTER JOIN ST_SNINFO
+		      ON ST_STOCK.STORERKEY = ST_SNINFO.STORERKEY
+		     AND ST_STOCK.SKU = ST_SNINFO.SKU
+		     AND ST_STOCK.STOCKID = ST_SNINFO.STOCKID
+
+		    <if test="serialno != null and serialno != ''">
+		      AND ST_SNINFO.SERIALNO LIKE '%' || #{serialno} || '%'
+		    </if>
+		    <if test="contractcompany != null and contractcompany != ''">
+		      AND ST_SNINFO.CONTRACTCUSTKEY = #{contractcompany}
+		    </if>
+		  </if>
+
+		  WHERE 1=1
+		  AND ST_STOCK.STOCKGRADE = 'S3'
+
+		  <if test="gStorerkey != null and gStorerkey != ''">
+		    AND ST_STOCK.STORERKEY = #{gStorerkey}
+		  </if>
+		  <if test="fixDccode != null and fixDccode != ''">
+		    AND ST_STOCK.DCCODE = #{fixDccode}
+		  </if>
+		  <if test="organize != null and organize != ''">
+  		    AND ST_STOCK.ORGANIZE IN (SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL))
+		      FROM (SELECT #{organize} AS VAL FROM DUAL)
+		      CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) > 0
+		    )
+  		  </if>
+		  <if test="stocktype != null and stocktype != ''">
+		    AND ST_STOCK.STOCKTYPE LIKE '%' || #{stocktype} || '%'
+		  </if>
+		  <if test="stockgrade != null and stockgrade != ''">
+		    AND ST_STOCK.STOCKGRADE LIKE '%' || #{stockgrade} || '%'
+		  </if>
+		  AND ST_STOCK.OPENQTY <![CDATA[>]]> 0
+		  ORDER BY ST_STOCK.DCCODE, ST_STOCK.ORGANIZE, ST_STOCK.LOC, ST_STOCK.SKU
+    	</select>
+
+    	<select id="getDataResultlist" resultType="StDisuseRequestResDto">
+        SELECT /* [StDisuseRequestService.sqlx][StDisuseRequestService.getDataResultlist][감모결과조회][Kwonjungyun][2025.07.07] */
+              SY_PROCESSTEMP_AJ.DCCODE                                                                                               AS DCCODE
+              ,SY_PROCESSTEMP_AJ.STORERKEY                                                                                            AS STORERKEY
+              ,SY_PROCESSTEMP_AJ.ORGANIZE                                                                                             AS ORGANIZE
+              ,FN_DESCR_ORGANIZE(SY_PROCESSTEMP_AJ.DCCODE, SY_PROCESSTEMP_AJ.ORGANIZE) AS ORGANIZENAME
+              ,SY_PROCESSTEMP_AJ.AREA																								  AS AREA
+              ,NVL(SY_PROCESSTEMP_AJ.STOCKTYPE, ST_STOCK.STOCKTYPE)                                                                   AS STOCKTYPE
+              ,FN_CODEDESCR(SY_PROCESSTEMP_AJ.STORERKEY, 'STOCKTYPE', NVL(SY_PROCESSTEMP_AJ.STOCKTYPE, ST_STOCK.STOCKTYPE))           AS STOCKTYPENM
+              ,SY_PROCESSTEMP_AJ.STOCKGRADE                                                                                           AS STOCKGRADE
+              ,FN_CODEDESCR(SY_PROCESSTEMP_AJ.STORERKEY, 'STOCKGRADE', SY_PROCESSTEMP_AJ.STOCKGRADE)                                  AS STOCKGRADENAME
+              ,SY_PROCESSTEMP_AJ.ZONE                                                                                                 AS ZONE
+              ,SY_PROCESSTEMP_AJ.LOC                                                                                                  AS LOC
+              ,SY_PROCESSTEMP_AJ.SKU                                                                                                  AS SKU
+              ,MS_SKU.DESCRIPTION                                                                                                     AS SKUNAME
+              ,NVL(SY_PROCESSTEMP_AJ.UOM, ST_STOCK.UOM)                                                                               AS UOM
+              ,SY_PROCESSTEMP_AJ.ORDERQTY                                                                                             AS QTY
+              ,SY_PROCESSTEMP_AJ.OPENQTY                                                                                              AS OPENQTY
+              ,SY_PROCESSTEMP_AJ.PROCESSQTY                                                                                           AS QTYALLOCATED
+              ,SY_PROCESSTEMP_AJ.WORKQTY                                                                                              AS QTYPICKED
+              ,SY_PROCESSTEMP_AJ.CONFIRMQTY                                                                                           AS TRANQTY
+              ,SY_PROCESSTEMP_AJ.DELIVERYGROUP   																				      AS DISUSETYPE
+              ,SY_PROCESSTEMP_AJ.TASKKEY 							      															  AS REASONCODE
+              ,SY_PROCESSTEMP_AJ.WAVEKEY                                                                                              AS IMPUTETYPE
+              ,SY_PROCESSTEMP_AJ.INVOICENO																							  AS PROCESSMAIN
+              ,SY_PROCESSTEMP_AJ.OTHER01 																						      AS COSTCD
+	          ,(SELECT DESCRIPTION FROM MS_COST
+	            WHERE  MS_COST.STORERKEY = SY_PROCESSTEMP_AJ.STORERKEY
+	            AND    MS_COST.COSTCODE   = SY_PROCESSTEMP_AJ.OTHER01
+	            AND    ROWNUM = 1 )                                                              									  AS COSTCDNAME
+              ,SY_PROCESSTEMP_AJ.CUSTKEY																							  AS CUSTKEY
+  	          ,(SELECT DESCRIPTION FROM MS_CUST
+	            WHERE  MS_CUST.STORERKEY = SY_PROCESSTEMP_AJ.STORERKEY
+	            AND    MS_CUST.CUSTKEY   = SY_PROCESSTEMP_AJ.CUSTKEY
+	            AND    ROWNUM = 1 )                                                              									  AS CUSTNAME
+              ,SY_PROCESSTEMP_AJ.MIXBOXKEY                                                                                            AS LOTTABLE01
+              ,SY_PROCESSTEMP_AJ.LOT                                                                                                  AS LOT
+              ,SY_PROCESSTEMP_AJ.STOCKID																							  AS STOCKID
+              ,SY_PROCESSTEMP_AJ.PROCESSFLAG                                                                                          AS PROCESSFLAG
+              ,SY_PROCESSTEMP_AJ.PROCESSMSG                                                                                           AS PROCESSMSG
+              ,ST_SNINFO.FACTORYNAME                                                         										  AS FACTORYNAME
+              ,ST_SNINFO.CONVSERIALNO       												  										  AS CONVSERIALNO
+              ,ST_SNINFO.BUTCHERYDT															  										  AS BUTCHERYDT
+              ,ST_SNINFO.CONTRACTCUSTKEY                                                           									  AS CONTRACTCOMPANY
+              ,(SELECT DESCRIPTION FROM MS_CUST
+                WHERE  MS_CUST.STORERKEY = ST_SNINFO.STORERKEY
+                AND    MS_CUST.CUSTKEY   = ST_SNINFO.CONTRACTCUSTKEY
+                AND    ROWNUM = 1 )                                                               									  AS CONTRACTCOMPANYNAME
+              ,ST_SNINFO.FROMVALIDDT														  										  AS FROMVALIDDT
+              ,ST_SNINFO.TOVALIDDT															  										  AS TOVALIDDT
+              ,ST_SNINFO.CONTRACTTYPE  								  																  AS CONTRACTTYPE
+              <!-- ,ST_SNINFO.DP_SLIPNO															  AS DP_DOCNO -->
+              ,ST_SNINFO.STOCKID															 										  AS BARCODE
+              ,CASE WHEN TO_NUMBER(NVL(MS_SKU.LINE02,0)) <![CDATA[<>]]> 0
+		             AND ST_STOCK.DCCODE       = '2170'
+			         AND NVL(MS_SKU.LINE01,'N') = 'Y'          THEN TO_NUMBER(NVL(MS_SKU.LINE02,0))
+			        ELSE 0
+			   END                                                                                                                           AS AVGWEIGHT       /* 평균중량    */
+			  ,ROUND(CASE WHEN TO_NUMBER(NVL(MS_SKU.LINE02,0)) <![CDATA[<>]]> 0
+			               AND ST_STOCK.DCCODE       = '2170'
+			               AND NVL(MS_SKU.LINE01,'N') = 'Y'    THEN (ST_STOCK.QTY - ST_STOCK.QTYALLOCATED - ST_STOCK.QTYPICKED) / TO_NUMBER(NVL(MS_SKU.LINE02,0))
+                          ELSE 0
+                     END ,2)                                                                                                                 AS CALBOX          /* 환산박스    */
+			  ,CASE WHEN ST_STOCK.DCCODE       = '2170'
+			         AND NVL(MS_SKU.LINE01,'N') = 'Y'          THEN NVL(ST_STOCK.BOXQTY,0)
+			        ELSE 0
+			   END                                                                                                                           AS REALORDERBOX    /* 실박스예정 */
+			  ,CASE WHEN ST_STOCK.DCCODE       = '2170'
+			         AND NVL(MS_SKU.LINE01,'N') = 'Y'          THEN NVL(ST_STOCK.BOXQTY,0)
+			        ELSE 0
+			   END                                                                                                                           AS REALCFMBOX      /* 실박스확정 */
+		 	  ,SY_PROCESSTEMP_AJ.ETCQTY1                                                                                                     AS TRANBOX         /* 작업박스    */
+
+        FROM   SY_PROCESSTEMP_AJ
+        JOIN   MS_SKU
+        ON     MS_SKU.STORERKEY         = SY_PROCESSTEMP_AJ.STORERKEY
+        AND    MS_SKU.SKU               = SY_PROCESSTEMP_AJ.SKU
+        AND    MS_SKU.DEL_YN            = 'N'
+        JOIN   MS_LOCATION
+        ON     MS_LOCATION.DCCODE          = SY_PROCESSTEMP_AJ.DCCODE
+        AND    MS_LOCATION.LOC             = SY_PROCESSTEMP_AJ.LOC
+        LEFT OUTER JOIN   ST_STOCK
+        ON     ST_STOCK.STORERKEY       = SY_PROCESSTEMP_AJ.STORERKEY
+        AND    ST_STOCK.DCCODE          = SY_PROCESSTEMP_AJ.DCCODE
+        AND    ST_STOCK.ORGANIZE        = SY_PROCESSTEMP_AJ.ORGANIZE
+        AND    ST_STOCK.AREA            = SY_PROCESSTEMP_AJ.AREA
+        AND    ST_STOCK.SKU             = SY_PROCESSTEMP_AJ.SKU
+        AND    ST_STOCK.LOC             = SY_PROCESSTEMP_AJ.LOC
+        AND    ST_STOCK.LOT             = SY_PROCESSTEMP_AJ.LOT
+        AND    ST_STOCK.STOCKID         = SY_PROCESSTEMP_AJ.STOCKID
+        AND    ST_STOCK.STOCKGRADE      = SY_PROCESSTEMP_AJ.STOCKGRADE
+        LEFT OUTER JOIN   CM_LOT
+        ON     CM_LOT.STORERKEY            = ST_STOCK.STORERKEY
+        AND    CM_LOT.LOT                  = ST_STOCK.LOT
+        AND    CM_LOT.DEL_YN               = 'N'
+        LEFT OUTER JOIN ST_SNINFO
+        ON     SY_PROCESSTEMP_AJ.STORERKEY  = ST_SNINFO.STORERKEY
+        AND    SY_PROCESSTEMP_AJ.SKU        = ST_SNINFO.SKU
+        AND    SY_PROCESSTEMP_AJ.STOCKID    = ST_SNINFO.STOCKID
+        <!-- LEFT OUTER JOIN MS_CUST
+        ON     ST_SNINFO.STORERKEY  = MS_CUST.STORERKEY
+        AND    ST_SNINFO.WD_CUSTKEY = MS_CUST.CUSTKEY -->
+        WHERE  SY_PROCESSTEMP_AJ.PROCESSTYPE = 'AJ_ADJUSTMENTREQ_DU'
+        AND    SY_PROCESSTEMP_AJ.PROCESSCREATOR = #{gUserId}
+        AND    SY_PROCESSTEMP_AJ.SPID	        = #{gSpid}
+        ORDER BY SY_PROCESSTEMP_AJ.DCCODE
+                ,SY_PROCESSTEMP_AJ.LOC
+                ,SY_PROCESSTEMP_AJ.STORERKEY
+                ,SY_PROCESSTEMP_AJ.SKU
+	</select>
+
+	<select id="getDisuseProcessList" resultType="StDisuseRequestProcessResDto">
+        SELECT /* [StDisuseRequestService.sqlx][getDisuseProcessList][재고폐기처리 목록 조회][Kwonjungyun][2025.07.01] */
+			AJ_APPRREQUEST.DCCODE AS DCCODE,
+		    AJ_APPRREQUEST.STORERKEY AS STORERKEY,
+		    AJ_APPRREQUEST.ORGANIZE AS ORGANIZE,
+		    FN_DESCR_ORGANIZE(AJ_APPRREQUEST.DCCODE, AJ_APPRREQUEST.ORGANIZE) AS ORGANIZENAME,
+		    AJ_INPLAN.AREA AS AREA,
+		    AJ_INPLAN.DOCTYPE AS DOCTYPE,
+		    AJ_INPLAN.DOCDT AS DOCDT,
+		    AJ_INPLAN.DOCNO AS DOCNO,
+		    AJ_INPLAN.DOCLINE AS DOCLINE,
+		    AJ_INPLAN.SLIPDT AS SLIPDT,
+		    AJ_INPLAN.SLIPNO AS SLIPNO,
+		    AJ_INPLAN.SLIPLINE AS SLIPLINE,
+		    AJ_INPLAN.ORDERTYPE AS ORDERTYPE,
+		    AJ_INPLAN.IOTYPE AS IOTYPE,
+		    AJ_INPLAN.SLIPTYPE AS SLIPTYPE,
+		    FN_CODEDESCR(AJ_APPRREQUEST.STORERKEY, 'STOCKTYPE', ST_STOCK.STOCKTYPE) AS STOCKTYPENM,
+		    ST_STOCK.STOCKTYPE AS STOCKTYPE,
+		    AJ_INPLAN.STOCKGRADE AS STOCKGRADE,
+		    FN_CODEDESCR(AJ_APPRREQUEST.STORERKEY, 'STOCKGRADE', AJ_INPLAN.STOCKGRADE) AS STOCKGRADENAME,
+		    MS_LOCATION.ZONE AS ZONE,
+		    AJ_INPLAN.LOC AS LOC,
+		    AJ_INPLAN.SKU AS SKU,
+		    MS_SKU.DESCRIPTION AS SKUNAME,
+		    AJ_INPLAN.LOT AS LOT,
+		    AJ_INPLAN.UOM AS UOM,
+		    AJ_INPLAN.ORDERQTY AS TRANQTY,
+		    AJ_INPLAN.OTHER02 AS DISUSETYPE,
+		    FN_CODEDESCR(AJ_INPLAN.STORERKEY, 'DISUSETYPE', AJ_INPLAN.OTHER02) AS DISUSETYPENAME,
+		    AJ_INPLAN.REASONCODE AS REASONCODE,
+		    FN_CODEDESCR(AJ_INPLAN.STORERKEY, 'REASONCODE_DISUSE', AJ_INPLAN.REASONCODE) AS REASONCODENAME,
+		    AJ_INPLAN.REASONMSG AS REASONMSG,
+		    AJ_INPLAN.OTHER01 AS IMPUTETYPE,
+		    FN_CODEDESCR(AJ_INPLAN.STORERKEY, 'OTHER01_DMD', AJ_INPLAN.OTHER01) AS IMPUTETYPENAME,
+		    AJ_INPLAN.OTHER05 AS PROCESSMAIN,
+		    AJ_INPLAN.OTHER04 AS COSTCD,
+		    MS_COST.DESCRIPTION AS COSTCDNAME,
+		    DM_DOCUMENT_D.VENDOR AS CUSTKEY,
+		    MS_CUST.DESCRIPTION AS CUSTNAME,
+		    NVL(TRIM(FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01, 'Y')),'N') AS NEARDURATIONYN, /** 유통기한임박여부 */
+		    CM_LOT.LOTTABLE01 AS LOTTABLE01,
+		    FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01, 'N') || '/' || MS_SKU.DURATION AS DURATION_TERM,
+		    AJ_INPLAN.STOCKID AS STOCKID,
+		    ST_SNINFO.SERIALNO AS SERIALNO,
+		    ST_SNINFO.CONVSERIALNO AS CONVSERIALNO,
+		    ST_SNINFO.SERIALLEVEL AS SERIALLEVEL,
+		    ST_SNINFO.SERIALTYPE AS SERIALTYPE,
+		    ST_SNINFO.FACTORYNAME AS FACTORYNAME,
+		    MS_SKU.COLORDESCR AS COLORDESCR,
+		    ST_SNINFO.PLACEOFORIGIN AS PLACEOFORIGIN,
+		    MS_SKU.DURATION AS DURATION,
+		    MS_SKU.DURATIONTYPE AS DURATIONTYPE,
+		    ST_SNINFO.BUTCHERYDT AS BUTCHERYDT,
+		    ST_SNINFO.CONTRACTCUSTKEY AS CONTRACTCOMPANY,
+		    (SELECT DESCRIPTION FROM MS_CUST WHERE MS_CUST.STORERKEY = ST_SNINFO.STORERKEY AND MS_CUST.CUSTKEY = ST_SNINFO.CONTRACTCUSTKEY AND ROWNUM = 1) AS CONTRACTCOMPANYNAME,
+		    ST_SNINFO.FROMVALIDDT AS FROMVALIDDT,
+		    ST_SNINFO.TOVALIDDT AS TOVALIDDT,
+		    FN_CODEDESCR(AJ_APPRREQUEST.STORERKEY,'CONTRACTTYPE_SN', ST_SNINFO.CONTRACTTYPE) 										  AS CONTRACTTYPENAME,
+            ST_SNINFO.CONTRACTTYPE  								  																  AS CONTRACTTYPE,
+		    ST_SNINFO.STOCKID AS BARCODE,
+		    AJ_APPRREQUEST.APPROVALSTATUS AS APPROVALSTATUS,
+		    FN_CODEDESCR(AJ_APPRREQUEST.STORERKEY,'APPROVALSTATUS', AJ_APPRREQUEST.APPROVALSTATUS) AS APPROVALSTATUSNAME,
+		    AJ_APPRREQUEST.APPROVALREQNO AS APPROVALREQNO,
+		    AJ_APPRREQUEST.APPROVALNO AS APPROVALNO,
+		    AJ_APPRREQUEST.EDITDATE AS APPROVALDATE,
+		    CASE WHEN AJ_APPRREQUEST.APPROVALSTATUS = '3' AND AJ_INPLAN.STATUS <![CDATA[<]]> '90' THEN 'S'
+		         WHEN AJ_APPRREQUEST.APPROVALSTATUS = '0' AND AJ_INPLAN.STATUS <![CDATA[<]]> '90' THEN 'S'
+		         ELSE 'E' END AS CHKFLAG,
+		    FN_CODEDESCR(AJ_INPLAN.STORERKEY, 'STATUS_AJ', AJ_INPLAN.STATUS) AS STATUSAJ,
+		    CASE WHEN TO_NUMBER(NVL(MS_SKU.LINE02, 0)) <![CDATA[<>]]> 0 AND AJ_INPLAN.DCCODE = '2170' AND NVL(MS_SKU.LINE01, 'N') = 'Y'
+		         THEN TO_NUMBER(NVL(MS_SKU.LINE02, 0))
+		         ELSE 0
+		     END AS AVGWEIGHT,
+		    ROUND(CASE WHEN TO_NUMBER(NVL(MS_SKU.LINE02, 0)) <![CDATA[<>]]> 0 AND AJ_INPLAN.DCCODE = '2170' AND NVL(MS_SKU.LINE01, 'N') = 'Y'
+		               THEN AJ_INPLAN.ORDERQTY / TO_NUMBER(NVL(MS_SKU.LINE02, 0)) ELSE 0 END, 2) AS CALBOX,
+		    CASE WHEN AJ_INPLAN.DCCODE = '2170' AND NVL(MS_SKU.LINE01, 'N') = 'Y' THEN NVL(AJ_INPLAN.ETCQTY1, 0) ELSE 0 END AS REALORDERBOX,
+		    CASE WHEN AJ_INPLAN.DCCODE = '2170' AND NVL(MS_SKU.LINE01, 'N') = 'Y' THEN NVL(AJ_INPLAN.ETCQTY2, 0) ELSE 0 END AS REALCFMBOX,
+		    CASE WHEN NVL(AJ_INPLAN.ETCQTY2, 0) = 0 THEN NVL(AJ_INPLAN.ETCQTY1, 0) ELSE 0 END AS TRANBOX,
+		    CASE WHEN AJ_INPLAN.DCCODE = '2170' AND NVL(MS_SKU.LINE01, 'N') = 'Y' THEN 'Y' ELSE 'N' END AS BOXFLAG,
+		    NVL(DM_DOCUMENT_D.REFERENCE08, 0) AS REFERENCE08,
+		    NVL(DM_DOCUMENT_D.REFERENCE09, 0) AS REFERENCE09,
+		    <!-- 운송비는 해당 화면에서 저장하지 않도록 처리 20251219
+		    NVL(DM_DOCUMENT_D.REFERENCE10, 0) AS REFERENCE10,
+		    -->
+		    (SELECT USERNAME FROM CM_USER WHERE USERID = AJ_INPLAN.ADDWHO AND ROWNUM = 1) AS ADDWHO
+		FROM AJ_APPRREQUEST
+		  JOIN CM_USER_AUTHORITY ON CM_USER_AUTHORITY.USERID = #{gUserId}
+		  <if test="fixDccode != null">
+		    AND CM_USER_AUTHORITY.DCCODE = #{fixDccode}
+		  </if>
+		  <if test="gStorerkey != null">
+		    AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey}
+		  </if>
+		  <if test="gArea != null and gArea != ''">
+		    AND CM_USER_AUTHORITY.AREA = #{gArea}
+		  </if>
+		  AND CM_USER_AUTHORITY.DCCODE = AJ_APPRREQUEST.DCCODE
+		  AND CM_USER_AUTHORITY.STORERKEY = AJ_APPRREQUEST.STORERKEY
+		  AND CM_USER_AUTHORITY.ORGANIZE = AJ_APPRREQUEST.ORGANIZE
+		  JOIN AJ_INPLAN ON AJ_APPRREQUEST.DCCODE    = AJ_INPLAN.DCCODE
+		                AND AJ_APPRREQUEST.STORERKEY = AJ_INPLAN.STORERKEY
+		                AND AJ_APPRREQUEST.ORGANIZE  = AJ_INPLAN.ORGANIZE
+		                AND AJ_APPRREQUEST.DOCTYPE   = AJ_INPLAN.DOCTYPE
+		                AND AJ_APPRREQUEST.DOCDT     = AJ_INPLAN.DOCDT
+		                AND AJ_APPRREQUEST.DOCNO     = AJ_INPLAN.DOCNO
+		                AND AJ_APPRREQUEST.SLIPDT    = AJ_INPLAN.SLIPDT
+		                AND AJ_APPRREQUEST.SLIPNO    = AJ_INPLAN.SLIPNO
+		                AND AJ_INPLAN.STOCKGRADE     = 'S3'
+		                AND AJ_INPLAN.ORDERTYPE     != 'SARAJ'
+		  JOIN DM_DOCUMENT_D ON AJ_INPLAN.DCCODE    = DM_DOCUMENT_D.DCCODE
+		                    AND AJ_INPLAN.STORERKEY = DM_DOCUMENT_D.STORERKEY
+		                    AND AJ_INPLAN.ORGANIZE  = DM_DOCUMENT_D.ORGANIZE
+		                    AND AJ_INPLAN.AREA      = DM_DOCUMENT_D.AREA
+		                    AND AJ_INPLAN.DOCTYPE   = DM_DOCUMENT_D.DOCTYPE
+		                    AND AJ_INPLAN.DOCDT     = DM_DOCUMENT_D.DOCDT
+		                    AND AJ_INPLAN.DOCNO     = DM_DOCUMENT_D.DOCNO
+		                    AND AJ_INPLAN.DOCLINE   = DM_DOCUMENT_D.DOCLINE
+		  JOIN DM_DOCUMENT_H ON DM_DOCUMENT_D.DCCODE    = DM_DOCUMENT_H.DCCODE
+		                    AND DM_DOCUMENT_D.STORERKEY = DM_DOCUMENT_H.STORERKEY
+		                    AND DM_DOCUMENT_D.ORGANIZE  = DM_DOCUMENT_H.ORGANIZE
+		                    AND DM_DOCUMENT_D.DOCTYPE   = DM_DOCUMENT_H.DOCTYPE
+		                    AND DM_DOCUMENT_D.DOCDT     = DM_DOCUMENT_H.DOCDT
+		                    AND DM_DOCUMENT_D.DOCNO     = DM_DOCUMENT_H.DOCNO
+		  JOIN MS_SKU ON MS_SKU.STORERKEY = AJ_INPLAN.STORERKEY
+		             AND MS_SKU.SKU       = AJ_INPLAN.SKU
+		             AND MS_SKU.DEL_YN    = 'N'
+		  <if test="sku != null and sku != ''">
+		    AND MS_SKU.SKU IN (
+		      SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL))
+		      FROM (SELECT #{sku} AS VAL FROM DUAL)
+		      CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) > 0
+		    )
+		  </if>
+		  <if test="storagetype != null and storagetype != ''">
+		    AND MS_SKU.STORAGETYPE LIKE '%' || #{storagetype} || '%'
+		  </if>
+		  JOIN CM_LOT ON CM_LOT.STORERKEY = AJ_INPLAN.STORERKEY
+		             AND CM_LOT.LOT = AJ_INPLAN.LOT
+		             AND CM_LOT.DEL_YN = 'N'
+		  <if test="lottable01yn == 'Y'.toString()">
+		    AND <![CDATA[ CM_LOT.LOTTABLE01 <> 'STD' ]]>
+		  </if>
+		  <if test="lottable01yn == 'N'.toString()">
+		    AND CM_LOT.LOTTABLE01 = 'STD'
+		  </if>
+		  JOIN MS_LOCATION ON MS_LOCATION.DCCODE = AJ_INPLAN.DCCODE
+		                  AND MS_LOCATION.LOC    = AJ_INPLAN.LOC
+		  <if test="zone != null and zone != ''">
+		    AND MS_LOCATION.ZONE LIKE '%' || #{zone} || '%'
+		  </if>
+		  LEFT OUTER JOIN ST_STOCK ON AJ_INPLAN.DCCODE     = ST_STOCK.DCCODE
+		                          AND AJ_INPLAN.STORERKEY  = ST_STOCK.STORERKEY
+		                          AND AJ_INPLAN.ORGANIZE   = ST_STOCK.ORGANIZE
+		                          AND AJ_INPLAN.AREA       = ST_STOCK.AREA
+		                          AND AJ_INPLAN.SKU        = ST_STOCK.SKU
+		                          AND AJ_INPLAN.LOC        = ST_STOCK.LOC
+		                          AND AJ_INPLAN.LOT        = ST_STOCK.LOT
+		                          AND AJ_INPLAN.STOCKID    = ST_STOCK.STOCKID
+		                          AND AJ_INPLAN.STOCKGRADE = ST_STOCK.STOCKGRADE
+
+		  <choose>
+			  <when test="serialnoyn != null and serialnoyn != ''">
+			    JOIN ST_SNINFO ON ST_STOCK.STORERKEY = ST_SNINFO.STORERKEY
+			                  AND ST_STOCK.SKU       = ST_SNINFO.SKU
+			                  AND ST_STOCK.STOCKID   = ST_SNINFO.STOCKID
+			    <if test="serialno != null and serialno != ''">
+			      AND ST_SNINFO.SERIALNO LIKE #{serialno}
+			    </if>
+				<if test="blnoMulti != null and blnoMulti != ''">
+                   AND    ST_SNINFO.CONVSERIALNO      IN
+                 <foreach collection="blnoMulti" item="item" open="(" separator="," close=")">
+                     #{item}
+                 </foreach>
+				</if>
+			    <if test="contractcompany != null and contractcompany != ''">
+			      AND ST_SNINFO.CONTRACTCUSTKEY = #{contractcompany}
+			    </if>
+			  </when>
+
+			  <otherwise>
+			    LEFT OUTER JOIN ST_SNINFO ON ST_STOCK.STORERKEY = ST_SNINFO.STORERKEY
+			                             AND ST_STOCK.SKU       = ST_SNINFO.SKU
+			                             AND ST_STOCK.STOCKID   = ST_SNINFO.STOCKID
+			    <if test="serialno != null and serialno != ''">
+			      AND ST_SNINFO.SERIALNO LIKE #{serialno}
+			    </if>
+
+			    <if test="contractcompany != null and contractcompany != ''">
+			      AND ST_SNINFO.CONTRACTCUSTKEY = #{contractcompany}
+			    </if>
+			  </otherwise>
+			</choose>
+		  LEFT OUTER JOIN MS_COST ON AJ_INPLAN.STORERKEY = MS_COST.STORERKEY
+		                         AND AJ_INPLAN.OTHER04   = MS_COST.COSTCODE
+		                         AND AJ_INPLAN.SLIPDT <![CDATA[>=]]> MS_COST.FROMDATE
+		                         AND AJ_INPLAN.SLIPDT <![CDATA[<=]]> MS_COST.TODATE
+		                         AND MS_COST.DEL_YN      = 'N'
+		  LEFT OUTER JOIN MS_CUST ON DM_DOCUMENT_D.STORERKEY = MS_CUST.STORERKEY
+		                         AND DM_DOCUMENT_D.VENDOR    = MS_CUST.CUSTKEY
+		                         AND MS_CUST.CUSTTYPE        = 'C'
+		                         AND MS_CUST.DEL_YN          = 'N'
+		  <if test="fixDccode == '2170'">
+		    LEFT OUTER JOIN WD_EXDCINSTRUCT ON AJ_INPLAN.DCCODE      = WD_EXDCINSTRUCT.DCCODE
+		                                   AND AJ_INPLAN.STORERKEY   = WD_EXDCINSTRUCT.STORERKEY
+		                                   AND AJ_INPLAN.ORGANIZE    = WD_EXDCINSTRUCT.ORGANIZE
+		                                   AND AJ_INPLAN.DOCNO       = WD_EXDCINSTRUCT.DOCNO
+		                                   AND AJ_INPLAN.DOCLINE     = WD_EXDCINSTRUCT.DOCLINE
+		                                   AND AJ_INPLAN.SKU         = WD_EXDCINSTRUCT.SKU
+		                                   AND AJ_INPLAN.SLIPDT      = WD_EXDCINSTRUCT.SLIPDT
+		                                   AND WD_EXDCINSTRUCT.DEL_YN = 'N'
+		  </if>
+		  WHERE 1=1
+		  <if test="gStorerkey != null and gStorerkey != ''">
+		    AND AJ_APPRREQUEST.STORERKEY = #{gStorerkey}
+		  </if>
+		  <if test="fixDccode != null and fixDccode != ''">
+		    AND AJ_APPRREQUEST.DCCODE = #{fixDccode}
+		  </if>
+		  <if test="organize != null and organize != ''">
+		    AND ST_STOCK.ORGANIZE IN (
+		      SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL))
+		      FROM (SELECT #{organize} AS VAL FROM DUAL)
+		      CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) > 0
+		    )
+		  </if>
+		  <if test="stocktype != null and stocktype != ''">
+		    AND ST_STOCK.STOCKTYPE LIKE '%' || #{stocktype} || '%'
+		  </if>
+		  <if test="stockgrade != null and stockgrade != ''">
+		    AND AJ_APPRREQUEST.STOCKGRADE LIKE '%' || #{stockgrade} || '%'
+		  </if>
+		  <if test="apprstatus != null and apprstatus != ''">
+		    AND AJ_APPRREQUEST.APPROVALSTATUS = #{apprstatus}
+		  </if>
+		  <if test="fromapprreqdt != null and fromapprreqdt != ''">
+		    AND AJ_APPRREQUEST.APPROVALREQDT <![CDATA[>=]]> #{fromapprreqdt}
+		  </if>
+		  <if test="toapprreqdt != null and toapprreqdt != ''">
+		    AND AJ_APPRREQUEST.APPROVALREQDT <![CDATA[<=]]> #{toapprreqdt}
+		  </if>
+		  <if test="fromslipdt != null and fromslipdt != ''">
+		    AND AJ_INPLAN.SLIPDT <![CDATA[>=]]> #{fromslipdt}
+		  </if>
+		  <if test="toslipdt != null and toslipdt != ''">
+		    AND AJ_INPLAN.SLIPDT <![CDATA[<=]]> #{toslipdt}
+		  </if>
+		  AND AJ_APPRREQUEST.APPROVALSTATUS <![CDATA[<>]]> '9'
+		  ORDER BY AJ_APPRREQUEST.STATUS
+		           , AJ_APPRREQUEST.DCCODE
+		           , AJ_APPRREQUEST.ORGANIZE
+		           , AJ_INPLAN.LOC
+		           , AJ_INPLAN.SKU
+	</select>
+	<select id="getDisuseApprovalList" resultType="StDisuseRequestApprovalResDto">
+      SELECT /* [StDisuseRequestService.sqlx][getDisuseProcessList][재고폐기결재 목록 조회][Kwonjungyun][2025.07.10] */
+	        AJ_INPLAN.DCCODE AS DCCODE
+	        ,AJ_INPLAN.STORERKEY AS STORERKEY
+	        ,AJ_INPLAN.ORGANIZE AS ORGANIZE
+	        ,FN_DESCR_ORGANIZE(AJ_INPLAN.DCCODE, AJ_INPLAN.ORGANIZE) AS ORGANIZENAME
+	        ,AJ_INPLAN.AREA AS AREA
+	        ,AJ_INPLAN.DOCDT AS DOCDT
+	        ,AJ_INPLAN.DOCNO AS DOCNO
+	        ,AJ_INPLAN.DOCLINE AS DOCLINE
+	        ,AJ_INPLAN.SLIPDT AS SLIPDT
+	        ,AJ_INPLAN.SLIPNO AS SLIPNO
+	        ,AJ_INPLAN.SLIPLINE AS SLIPLINE
+	        ,AJ_INPLAN.SLIPTYPE AS SLIPTYPE
+	        ,AJ_INPLAN.SKU AS SKU
+	        ,MS_SKU.DESCRIPTION AS SKUNAME
+	        ,AJ_INPLAN.UOM AS UOM
+	        ,AJ_INPLAN.ORDERQTY AS ORDERQTY
+	        ,AJ_INPLAN.OPENQTY AS OPENQTY
+	        ,AJ_INPLAN.ORDERQTY AS TRANQTY
+	        ,AJ_INPLAN.ORDERTYPE AS ORDERTYPE
+	        ,AJ_INPLAN.IOTYPE AS IOTYPE
+	        ,CASE WHEN AJ_INPLAN.ORDERTYPE = 'DDRAJ' THEN
+	              CASE WHEN AJ_INPLAN.IOTYPE = 'WD' THEN '감모' ELSE '역감모' END
+	              ELSE '폐기' END AS INQUIRYTYPENAME
+	        , NVL(TRIM(FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01, 'Y')),'N') AS NEARDURATIONYN /** 유통기한임박여부 */
+	        ,CM_LOT.LOTTABLE01 AS LOTTABLE01
+	        ,FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01, 'N') || '/' || MS_SKU.DURATION AS DURATION_TERM
+	        ,FN_CODEDESCR(MS_SKU.STORERKEY, 'STORAGETYPE', MS_SKU.STORAGETYPE) AS STORAGETYPE
+	        ,MS_SKU.DURATION AS DURATION
+	        ,MS_SKU.DURATIONTYPE AS DURATIONTYPE
+	        ,'0' AS STOCKAMT
+	        ,'0' AS PRICE
+	        ,FN_CONV_UOM(AJ_INPLAN.STORERKEY, AJ_INPLAN.SKU, AJ_INPLAN.UOM, 'KG', AJ_INPLAN.ORDERQTY) AS WEIGHT
+	        ,AJ_INPLAN.REASONCODE AS REASONCODE
+	        ,  FN_CODEDESCR(AJ_INPLAN.STORERKEY, 'REASONCODE_DISUSE', AJ_INPLAN.REASONCODE) AS REASONCODENAME
+	        ,AJ_INPLAN.OTHER04 AS OTHER04
+	        ,MS_COST.DESCRIPTION AS COSTCENTERNAME
+	        ,AJ_INPLAN.OTHER02 AS OTHER02
+	        ,CASE WHEN AJ_INPLAN.ORDERTYPE = 'DDRAJ' THEN FN_CODEDESCR(AJ_INPLAN.STORERKEY, 'DECREASETYPE', AJ_INPLAN.OTHER02)
+	              ELSE FN_CODEDESCR(AJ_INPLAN.STORERKEY, 'DISUSETYPE', AJ_INPLAN.OTHER02) END AS APPROVALREASONNAME
+	        ,DECODE(MS_SKU.SERIALTYPE,'3',NULL,ST_SNINFO.SERIALNO) AS SERIALNO
+	        ,ST_SNINFO.SERIALNO AS SERIALNO_ORG
+	        ,ST_SNINFO.CONVSERIALNO AS CONVSERIALNO
+	        ,(SELECT ST_STOCK_SERIALINFODETAIL.POLINE FROM ST_STOCK_SERIALINFODETAIL WHERE ST_STOCK_SERIALINFODETAIL.STOCKID = ST_STOCK.STOCKID AND ROWNUM = 1) AS POLINE
+	        ,ST_SNINFO.BUTCHERYDT AS BUTCHERYDT
+	        ,ST_SNINFO.CONTRACTCUSTKEY AS CONTRACTCOMPANY
+	        ,(SELECT DESCRIPTION FROM MS_CUST WHERE MS_CUST.STORERKEY = ST_SNINFO.STORERKEY AND MS_CUST.CUSTKEY = ST_SNINFO.CONTRACTCUSTKEY AND ROWNUM = 1) AS CONTRACTCOMPANYNAME
+	        ,ST_SNINFO.FACTORYNAME AS FACTORYNAME
+	        ,ST_SNINFO.FROMVALIDDT AS FROMVALIDDT
+	        ,ST_SNINFO.TOVALIDDT AS TOVALIDDT
+	        ,FN_CODEDESCR(AJ_INPLAN.STORERKEY, 'CONTRACTTYPE_SN', ST_SNINFO.CONTRACTTYPE) AS CONTRACTTYPENAME
+	        ,ST_SNINFO.CONTRACTTYPE AS CONTRACTTYPE
+	        ,ST_SNINFO.STOCKID AS BARCODE
+	        ,CASE WHEN ST_STOCK.DCCODE IN ('1000', '2170') THEN fn_dataparse(ST_STOCK.ORGANIZE,'-',2)
+	              ELSE CASE WHEN ST_STOCK.STOCKTYPE = 'GOOD' THEN '1000' ELSE '2000' END END AS STORAGELOC
+	        ,CASE WHEN AJ_INPLAN.ORDERTYPE = 'DDRAJ' THEN CASE WHEN AJ_INPLAN.IOTYPE = 'WD' THEN AJ_INPLAN.ORDERQTY * -1 ELSE AJ_INPLAN.ORDERQTY END ELSE AJ_INPLAN.ORDERQTY END AS QTY
+	        ,AJ_INPLAN.OTHER03 AS OTHER03
+	        ,AJ_INPLAN.LOC AS LOC
+	        ,AJ_INPLAN.LOT AS LOT
+	        ,AJ_INPLAN.STOCKGRADE AS STOCKGRADE
+	        ,AJ_INPLAN.STOCKID AS STOCKID
+	        ,'' AS STOCKAMTMSG
+	        ,CASE WHEN TO_NUMBER(NVL(MS_SKU.LINE02, 0)) <![CDATA[<>]]> 0 AND AJ_INPLAN.DCCODE = '2170' AND NVL(MS_SKU.LINE01,'N') = 'Y' THEN TO_NUMBER(NVL(MS_SKU.LINE02, 0)) ELSE 0 END AS AVGWEIGHT
+	        ,ROUND(CASE WHEN TO_NUMBER(NVL(MS_SKU.LINE02, 0)) <![CDATA[<>]]> 0 AND AJ_INPLAN.DCCODE = '2170' AND NVL(MS_SKU.LINE01,'N') = 'Y' THEN (AJ_INPLAN.ORDERQTY) / TO_NUMBER(NVL(MS_SKU.LINE02, 0)) ELSE 0 END, 2) AS CALBOX
+	        ,CASE WHEN AJ_INPLAN.DCCODE = '2170' AND NVL(MS_SKU.LINE01,'N') = 'Y' THEN NVL(AJ_INPLAN.ETCQTY1, 0) ELSE 0 END AS REALORDERBOX
+	        ,CASE WHEN AJ_INPLAN.DCCODE = '2170' AND NVL(MS_SKU.LINE01,'N') = 'Y' THEN NVL(AJ_INPLAN.ETCQTY2, 0) ELSE 0 END AS REALCFMBOX
+	        ,0 AS TRANBOX
+	        ,CASE WHEN AJ_INPLAN.DCCODE = '2170' AND NVL(MS_SKU.LINE01,'N') = 'Y' THEN 'Y' ELSE 'N' END AS BOXFLAG
+	        ,NVL(MS_SKU.SERIALTYPE, '3') AS SERIALTYPE
+	        ,(SELECT USERNAME FROM CM_USER WHERE USERID = AJ_INPLAN.ADDWHO AND ROWNUM = 1) AS ADDWHO
+	        ,TO_CHAR(AJ_INPLAN.ADDDATE, 'YYYY-MM-DD HH24:MI:SS') AS ADDDATE
+	  FROM AJ_INPLAN
+	  <if test="fixDccode != null and fixDccode != ''">
+	    JOIN CM_USER_AUTHORITY ON CM_USER_AUTHORITY.USERID = #{gUserId}
+	    AND CM_USER_AUTHORITY.DCCODE = AJ_INPLAN.DCCODE
+	    AND CM_USER_AUTHORITY.STORERKEY = AJ_INPLAN.STORERKEY
+	    AND CM_USER_AUTHORITY.ORGANIZE = AJ_INPLAN.ORGANIZE
+	    AND CM_USER_AUTHORITY.AREA = AJ_INPLAN.AREA
+	  </if>
+	  JOIN ST_STOCK ON ST_STOCK.DCCODE = AJ_INPLAN.DCCODE AND ST_STOCK.STORERKEY = AJ_INPLAN.STORERKEY AND ST_STOCK.ORGANIZE = AJ_INPLAN.ORGANIZE AND ST_STOCK.AREA = AJ_INPLAN.AREA AND ST_STOCK.SKU = AJ_INPLAN.SKU AND ST_STOCK.LOC = AJ_INPLAN.LOC AND ST_STOCK.LOT = AJ_INPLAN.LOT AND ST_STOCK.STOCKID = AJ_INPLAN.STOCKID AND ST_STOCK.STOCKGRADE = AJ_INPLAN.STOCKGRADE
+	  JOIN MS_SKU ON MS_SKU.STORERKEY = AJ_INPLAN.STORERKEY AND MS_SKU.SKU = AJ_INPLAN.SKU AND MS_SKU.DEL_YN = 'N'
+	  <if test="sku != null and sku != ''">
+	    AND MS_SKU.SKU IN (
+	      SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) FROM (SELECT #{sku} AS VAL FROM DUAL) CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) > 0
+	    )
+	  </if>
+	  JOIN CM_LOT ON CM_LOT.STORERKEY = AJ_INPLAN.STORERKEY AND CM_LOT.LOT = AJ_INPLAN.LOT AND CM_LOT.DEL_YN = 'N'
+	  LEFT OUTER JOIN ST_SNINFO ON AJ_INPLAN.STORERKEY = ST_SNINFO.STORERKEY AND AJ_INPLAN.SKU = ST_SNINFO.SKU AND AJ_INPLAN.STOCKID = ST_SNINFO.STOCKID
+	  LEFT OUTER JOIN MS_UOM ON AJ_INPLAN.STORERKEY = MS_UOM.STORERKEY AND AJ_INPLAN.SKU = MS_UOM.SKU AND AJ_INPLAN.UOM = MS_UOM.BASEUOM AND MS_UOM.UOM = 'KG'
+	  LEFT OUTER JOIN MS_COST ON AJ_INPLAN.STORERKEY = MS_COST.STORERKEY AND AJ_INPLAN.OTHER04 = MS_COST.COSTCODE AND AJ_INPLAN.SLIPDT <![CDATA[>=]]> MS_COST.FROMDATE AND AJ_INPLAN.SLIPDT <![CDATA[<=]]> MS_COST.TODATE AND MS_COST.DEL_YN = 'N'
+	  WHERE 1=1
+	  AND AJ_INPLAN.STATUS <![CDATA[<]]> '90'
+  	  <if test="gMultiDccode != null and gMultiDccode != ''">
+	  	AND AJ_INPLAN.DCCODE LIKE '%' || #{fixDccode} || '%'
+	  </if>
+	  <if test="organize != null and organize != ''">
+	    AND AJ_INPLAN.ORGANIZE IN (
+	      SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) FROM (SELECT #{organize} AS VAL FROM DUAL) CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) > 0
+	    )
+	  </if>
+	  <if test="frombasedt != null and frombasedt != ''">
+	    AND AJ_INPLAN.DOCDT <![CDATA[>=]]> #{frombasedt}
+	  </if>
+	  <if test="tobasedt != null and tobasedt != ''">
+	    AND AJ_INPLAN.DOCDT <![CDATA[<=]]> #{tobasedt}
+	  </if>
+	  <if test="approvaltype != null and approvaltype != ''">
+	    AND AJ_INPLAN.ORDERTYPE = #{approvaltype}
+	  </if>
+	  AND NOT EXISTS (
+	    SELECT 1 FROM AJ_APPRREQUEST WHERE AJ_APPRREQUEST.DCCODE = AJ_INPLAN.DCCODE AND AJ_APPRREQUEST.STORERKEY = AJ_INPLAN.STORERKEY AND AJ_APPRREQUEST.ORGANIZE = AJ_INPLAN.ORGANIZE AND AJ_APPRREQUEST.DOCDT = AJ_INPLAN.DOCDT AND AJ_APPRREQUEST.DOCNO = AJ_INPLAN.DOCNO AND AJ_APPRREQUEST.SLIPDT = AJ_INPLAN.SLIPDT AND AJ_APPRREQUEST.SLIPNO = AJ_INPLAN.SLIPNO AND AJ_APPRREQUEST.APPROVALSTATUS <![CDATA[<>]]> '9'
+	  )
+	  ORDER BY AJ_INPLAN.DCCODE, AJ_INPLAN.STORERKEY, AJ_INPLAN.SKU
+	</select>
+
+
+
+</mapper>

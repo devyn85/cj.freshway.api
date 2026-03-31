@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+  PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+  "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="omAutoOrderMonitoringService">
+
+    <select id="getMasterList" resultType="OmAutoOrderMonitoringResDto">
+        WITH TARGET_TB AS (
+            SELECT TO_CHAR((TO_DATE(#{taskDtRt},'YYYYMMDD')+LEVEL)+FN_GETDAYCOUNT(TO_CHAR(TO_DATE(#{taskDtRt},'YYYYMMDD'),'YYYYMMDD'),TO_CHAR(TO_DATE(#{taskDtRt},'YYYYMMDD')+LEVEL),'1'),'YYYYMMDD') AS TARGET_DATE
+              FROM DUAL
+            CONNECT BY LEVEL IN (1,2,3,5)
+        )
+        , DOCS AS (
+            SELECT D.DOCNO, D.DOCTYPE, D.DCCODE, D.ORGANIZE, D.DELIVERYDATE, D.WORKPROCESSCODE, D.DEL_YN, D.STORERKEY, D.SKU,
+                   H.ADDDATE, H.ADDWHO, H.DEL_YN AS H_DEL_YN, H.DOCDT
+              FROM DM_DOCUMENT_D D
+              JOIN DM_DOCUMENT_H H
+                ON D.DOCDT 		= H.DOCDT
+               AND D.DOCTYPE      = H.DOCTYPE 		
+               AND D.DOCNO        = H.DOCNO 			
+               AND D.DELIVERYDATE = H.DELIVERYDATE 	
+			   AND D.DCCODE       = H.DCCODE 		
+			   AND D.STORERKEY 		= H.STORERKEY
+             WHERE D.WORKPROCESSCODE = 'STO'
+               AND D.DEL_YN = 'N'
+               AND H.ADDWHO = 'SYSTEMJOB'
+               AND TRUNC(TO_DATE(#{taskDtRt},'YYYYMMDD')) <![CDATA[<=]]> H.ADDDATE
+               AND TRUNC(TO_DATE(#{taskDtRt},'YYYYMMDD')+1) <![CDATA[>]]> H.ADDDATE
+               AND H.DEL_YN = 'N'
+        )
+        , MST AS (
+            SELECT DCCODE, STORERKEY, SKU, PURCHASETYPE||'_'||REFERENCE05 AS REF_CD
+              FROM MS_PURCHASEMST
+             WHERE PURCHASETYPE IN ('SP-PO','SP-STO','SP-STO_ST')
+        )
+        SELECT SUBSTR(MAX(M.REF_CD), 1, INSTR(MAX(M.REF_CD),'_')-1) AS PURCHASETYPE
+             , FN_CODEDESCR(#{gStorerkey},'PURCHASETYPE_PO',SUBSTR(MAX(M.REF_CD), 1, INSTR(MAX(M.REF_CD),'_')-1)) AS PURCHASETYPE_NM
+             , SUBSTR(MAX(M.REF_CD),INSTR(MAX(M.REF_CD),'_')+1) AS PURCHASE_AUTOTIME
+             , FN_CODEDESCR(#{gStorerkey},'PURCHASE_AUTOTIME',SUBSTR(MAX(M.REF_CD),INSTR(MAX(M.REF_CD),'_')+1)) AS PURCHASE_AUTOTIME_NM
+             , T.TARGET_DATE
+             , D.DOCNO
+             , MAX(CASE WHEN D.DOCTYPE='WD' THEN D.DCCODE END) AS FR_DCCODE
+             , MAX(CASE WHEN D.DOCTYPE='WD' THEN D.ORGANIZE END) AS FR_ORGANIZE
+             , MAX(CASE WHEN D.DOCTYPE='DP' THEN D.DCCODE END) AS TO_DCCODE
+             , MAX(CASE WHEN D.DOCTYPE='DP' THEN D.ORGANIZE END) AS TO_ORGANIZE
+             , TO_CHAR(MIN(D.ADDDATE),'YYYY-MM-DD HH24:MI:SS') AS ADDDATE
+             , MIN(D.ADDWHO) AS ADDWHO
+        FROM TARGET_TB T
+        JOIN DOCS D
+          ON T.TARGET_DATE = D.DELIVERYDATE
+        LEFT JOIN MST M
+          ON D.DCCODE = M.DCCODE AND D.STORERKEY = M.STORERKEY AND D.SKU = M.SKU
+        GROUP BY T.TARGET_DATE, D.DOCNO
+    </select>
+
+</mapper>

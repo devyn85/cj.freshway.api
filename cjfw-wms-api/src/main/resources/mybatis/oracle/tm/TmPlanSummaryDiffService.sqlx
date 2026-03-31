@@ -1,0 +1,297 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="tmPlanSummaryDiffService">
+    <select id="getMasterList" resultType="TmPlanSummaryDiffResDto">
+        WITH /* [tmPlanSummaryDiffService.sqlx][getMasterList][배차결과비교 조회] */
+            MASTER AS (
+            SELECT
+                  TM_INPLAN.DCCODE
+                , TM_INPLAN.DOCTYPE
+                , TM_INPLAN.DELIVERYDT
+                , TM_INPLAN.SLIPDT
+                , TM_INPLAN.CONTRACTTYPE
+                , TM_INPLAN.PRE_TM_CONTRACTTYPE
+                , TM_INPLAN.CARNO
+                , TM_INPLAN.PRECARNO
+                , TM_INPLAN.WEIGHT
+                , TM_INPLAN.CUBE
+                , TM_INPLAN.TRUTHCUSTKEY
+                , TM_INPLAN.TM_DELIVERYTYPE
+                , TM_INPLAN.SPLIT_DELIVERY_YN
+                , TM_INPLAN.DEL_YN
+                , TM_INPLAN.STATUS
+            FROM TM_INPLAN TM_INPLAN
+            UNION ALL
+            SELECT
+                  TM_INPLAN_SPLIT.DCCODE
+                , TM_INPLAN_SPLIT.DOCTYPE
+                , TM_INPLAN_SPLIT.DELIVERYDT
+                , TM_INPLAN_SPLIT.SLIPDT
+                , TM_INPLAN_SPLIT.CONTRACTTYPE
+                , TM_INPLAN_SPLIT.PRE_TM_CONTRACTTYPE
+                , TM_INPLAN_SPLIT.CARNO
+                , TM_INPLAN_SPLIT.PRECARNO
+                , TM_INPLAN_SPLIT.WEIGHT
+                , TM_INPLAN_SPLIT.CUBE
+                , TM_INPLAN_SPLIT.TRUTHCUSTKEY
+                , TM_INPLAN_SPLIT.TM_DELIVERYTYPE
+                , 'N' AS SPLIT_DELIVERY_YN
+                , TM_INPLAN_SPLIT.DEL_YN
+                , TM_INPLAN_SPLIT.STATUS
+            FROM TM_INPLAN_SPLIT TM_INPLAN_SPLIT
+        ),
+        FILTERED AS (
+            SELECT MASTER.DCCODE, MASTER.DELIVERYDT
+                , NVL(MASTER.PRE_TM_CONTRACTTYPE, '미설정') AS PRE_TM_CONTRACTTYPE
+                , NVL(MASTER.CONTRACTTYPE, '미설정') AS CONTRACTTYPE
+                , MASTER.PRECARNO
+                , MASTER.CARNO
+                , MASTER.TRUTHCUSTKEY
+                , CASE WHEN MASTER.DOCTYPE = 'RT' THEN 0 ELSE MASTER.WEIGHT END WEIGHT
+                , CASE WHEN MASTER.DOCTYPE = 'RT' THEN 0 ELSE MASTER.CUBE   END CUBE
+            FROM MASTER MASTER
+            WHERE MASTER.DCCODE = #{dccode}
+              AND MASTER.DOCTYPE IN ('WD', 'RT')
+              AND MASTER.DELIVERYDT = #{deliveryDate}
+              AND MASTER.SLIPDT BETWEEN TO_CHAR(TRUNC(ADD_MONTHS(TO_DATE(#{deliveryDate},'YYYYMMDD'), -1), 'MM'), 'YYYYMMDD') AND #{deliveryDate}
+              AND MASTER.TM_DELIVERYTYPE IN ('1', '2')
+              AND MASTER.DEL_YN = 'N'
+              AND MASTER.STATUS = '90'
+              AND MASTER.SPLIT_DELIVERY_YN = 'N'
+        ),
+        BASE AS (
+            SELECT
+                  DCCODE
+                , DELIVERYDT
+                , CONTRACTTYPE
+                , '90' AS TM_STATUS
+                , CARNO
+                , WEIGHT
+                , CUBE
+                , TRUTHCUSTKEY
+            FROM FILTERED
+            UNION ALL
+            SELECT
+                  DCCODE
+                , DELIVERYDT
+                , PRE_TM_CONTRACTTYPE AS CONTRACTTYPE
+                , '50' AS TM_STATUS
+                , PRECARNO AS CARNO
+                , WEIGHT
+                , CUBE
+                , TRUTHCUSTKEY
+            FROM FILTERED
+        ),
+        AGGREGATED AS (
+            SELECT
+                  NVL(BASE.CONTRACTTYPE, 'ALL') AS CONTRACTTYPE
+                , CASE WHEN BASE.CONTRACTTYPE IS NULL THEN '전체'
+                       ELSE FN_CODEDESCR('FW00','CONTRACTTYPE', BASE.CONTRACTTYPE)
+                  END AS CONTRACTNM
+                , MIN(CM_CODE.SEQNO) AS SEQNO
+                , COUNT(DISTINCT CASE WHEN BASE.TM_STATUS = '50' THEN BASE.CARNO END) AS CAR_CNT_50
+                , COUNT(DISTINCT CASE WHEN BASE.TM_STATUS = '90' THEN BASE.CARNO END) AS CAR_CNT_90
+                , TRUNC(SUM(CASE WHEN BASE.TM_STATUS = '50' THEN BASE.WEIGHT ELSE 0 END), 3) AS WEIGHT_50
+                , TRUNC(SUM(CASE WHEN BASE.TM_STATUS = '90' THEN BASE.WEIGHT ELSE 0 END), 3) AS WEIGHT_90
+                , TRUNC(SUM(CASE WHEN BASE.TM_STATUS = '50' THEN BASE.CUBE ELSE 0 END), 3) AS CUBE_50
+                , TRUNC(SUM(CASE WHEN BASE.TM_STATUS = '90' THEN BASE.CUBE ELSE 0 END), 3) AS CUBE_90
+                , COUNT(DISTINCT CASE WHEN BASE.TM_STATUS = '50' THEN BASE.TRUTHCUSTKEY END) AS TRUTH_50
+                , COUNT(DISTINCT CASE WHEN BASE.TM_STATUS = '90' THEN BASE.TRUTHCUSTKEY END) AS TRUTH_90
+            FROM BASE BASE
+            LEFT JOIN CM_CODE
+              ON CM_CODE.BASECODE = BASE.CONTRACTTYPE
+             AND CM_CODE.CODELIST = 'CONTRACTTYPE'
+             AND CM_CODE.STORERKEY = 'FW00'
+            GROUP BY GROUPING SETS ((BASE.CONTRACTTYPE), ())
+        )
+        SELECT
+        	  CONTRACTTYPE
+            , CONTRACTNM
+            , ITEM
+            , TEMP_DISPATCH
+            , CONFIRMED
+            , GAP
+        FROM (
+            SELECT CONTRACTTYPE, CONTRACTNM, SEQNO, 1 AS ITEM_ORD,
+                   '차량대수' AS ITEM,
+                   TO_CHAR(NVL(CAR_CNT_50, 0), 'FM999G999G999G990') AS TEMP_DISPATCH, -- FM999G999G999G990 / 천단위 포맷
+                   TO_CHAR(NVL(CAR_CNT_90, 0), 'FM999G999G999G990') AS CONFIRMED,
+                   TO_CHAR(NVL(CAR_CNT_90, 0) - NVL(CAR_CNT_50, 0), 'FM999G999G999G990') AS GAP
+            FROM AGGREGATED
+            UNION ALL
+            SELECT CONTRACTTYPE, CONTRACTNM, SEQNO, 2 AS ITEM_ORD,
+                   '중량' AS ITEM,
+                   TO_CHAR(TRUNC(NVL(WEIGHT_50, 0), 2), 'FM999G999G999G990D00') AS TEMP_DISPATCH, -- FM999G999G999G990D00 / 천단위, 소수점2자리 포맷
+                   TO_CHAR(TRUNC(NVL(WEIGHT_90, 0), 2), 'FM999G999G999G990D00') AS CONFIRMED,
+                   TO_CHAR(TRUNC(NVL(WEIGHT_90, 0) - NVL(WEIGHT_50, 0), 2), 'FM999G999G999G990D00') AS GAP
+            FROM AGGREGATED
+            UNION ALL
+            SELECT CONTRACTTYPE, CONTRACTNM, SEQNO, 3 AS ITEM_ORD,
+                   '체적' AS ITEM,
+                   TO_CHAR(TRUNC(NVL(CUBE_50, 0), 2), 'FM999G999G999G990D00') AS TEMP_DISPATCH, -- FM999G999G999G990D00 / 천단위, 소수점2자리 포맷
+                   TO_CHAR(TRUNC(NVL(CUBE_90, 0), 2), 'FM999G999G999G990D00') AS CONFIRMED,
+                   TO_CHAR(TRUNC(NVL(CUBE_90, 0) - NVL(CUBE_50, 0), 2), 'FM999G999G999G990D00') AS GAP
+            FROM AGGREGATED
+            UNION ALL
+            SELECT CONTRACTTYPE, CONTRACTNM, SEQNO, 4 AS ITEM_ORD,
+                   '착지' AS ITEM,
+                   TO_CHAR(NVL(TRUTH_50, 0), 'FM999G999G999G990') AS TEMP_DISPATCH, -- FM999G999G999G990 / 천단위 포맷
+                   TO_CHAR(NVL(TRUTH_90, 0), 'FM999G999G999G990') AS CONFIRMED,
+                   TO_CHAR(NVL(TRUTH_90, 0) - NVL(TRUTH_50, 0), 'FM999G999G999G990') AS GAP
+            FROM AGGREGATED
+        )
+        ORDER BY CASE WHEN CONTRACTNM = '전체' THEN 0 ELSE 1 END, SEQNO NULLS LAST, ITEM_ORD
+    </select>
+    
+    <select id="getMasterCarSummaryList" resultType="TmPlanSummaryDiffResDto">
+		WITH /* [tmPlanSummaryDiffService.sqlx][getMasterCarSummaryList][차량번호 조회] */
+		    MASTER AS (
+            SELECT
+                  TM_INPLAN.DCCODE
+                , TM_INPLAN.DELIVERYDT
+                , TM_INPLAN.DOCTYPE
+                , TM_INPLAN.CONTRACTTYPE
+                , TM_INPLAN.PRE_TM_CONTRACTTYPE
+                , TM_INPLAN.CARNO
+                , TM_INPLAN.PRECARNO
+                , TM_INPLAN.WEIGHT
+                , TM_INPLAN.CUBE
+                , TM_INPLAN.TRUTHCUSTKEY
+                , TM_INPLAN.TM_DELIVERYTYPE
+                , TM_INPLAN.SPLIT_DELIVERY_YN
+                , TM_INPLAN.DEL_YN
+                , TM_INPLAN.STATUS
+            FROM TM_INPLAN TM_INPLAN
+            UNION ALL
+            SELECT
+                  TM_INPLAN_SPLIT.DCCODE
+                , TM_INPLAN_SPLIT.DELIVERYDT
+                , TM_INPLAN_SPLIT.DOCTYPE
+                , TM_INPLAN_SPLIT.CONTRACTTYPE
+                , TM_INPLAN_SPLIT.PRE_TM_CONTRACTTYPE
+                , TM_INPLAN_SPLIT.CARNO
+                , TM_INPLAN_SPLIT.PRECARNO
+                , TM_INPLAN_SPLIT.WEIGHT
+                , TM_INPLAN_SPLIT.CUBE
+                , TM_INPLAN_SPLIT.TRUTHCUSTKEY
+                , TM_INPLAN_SPLIT.TM_DELIVERYTYPE
+                , 'N' AS SPLIT_DELIVERY_YN
+                , TM_INPLAN_SPLIT.DEL_YN
+                , TM_INPLAN_SPLIT.STATUS
+            FROM TM_INPLAN_SPLIT TM_INPLAN_SPLIT
+        ),
+        FILTERED AS (
+            SELECT MASTER.DCCODE, MASTER.DELIVERYDT, MASTER.PRE_TM_CONTRACTTYPE, MASTER.CONTRACTTYPE, MASTER.PRECARNO, MASTER.CARNO, MASTER.WEIGHT, MASTER.CUBE, MASTER.TRUTHCUSTKEY
+            FROM MASTER MASTER
+            WHERE MASTER.DCCODE = #{dccode}
+              AND MASTER.DOCTYPE IN ('WD', 'RT')
+              AND MASTER.DELIVERYDT = #{deliveryDate}
+              AND MASTER.TM_DELIVERYTYPE IN ('1', '2')
+              AND MASTER.DEL_YN = 'N'
+              AND MASTER.STATUS = '90'
+              AND (MASTER.SPLIT_DELIVERY_YN = 'N' OR MASTER.SPLIT_DELIVERY_YN IS NULL)
+              AND (MASTER.CARNO = #{carno} OR MASTER.PRECARNO = #{carno})
+        ),
+        BASE AS (
+            SELECT
+                  '90' AS TM_STATUS
+                , NVL(CARNO, 'NA') AS CARNO
+                , WEIGHT
+                , CUBE
+                , TRUTHCUSTKEY
+            FROM FILTERED
+            WHERE CARNO = #{carno}
+            UNION ALL
+            SELECT
+                  '50' AS TM_STATUS
+                , NVL(PRECARNO, 'NA') AS CARNO
+                , WEIGHT
+                , CUBE
+                , TRUTHCUSTKEY
+            FROM FILTERED
+            WHERE PRECARNO = #{carno}
+        ),
+        AGGREGATED AS (
+            SELECT
+                  TRUNC(SUM(CASE WHEN TM_STATUS = '50' THEN WEIGHT ELSE 0 END), 3) AS WEIGHT_50
+                , TRUNC(SUM(CASE WHEN TM_STATUS = '90' THEN WEIGHT ELSE 0 END), 3) AS WEIGHT_90
+                , TRUNC(SUM(CASE WHEN TM_STATUS = '50' THEN CUBE ELSE 0 END), 3) AS CUBE_50
+                , TRUNC(SUM(CASE WHEN TM_STATUS = '90' THEN CUBE ELSE 0 END), 3) AS CUBE_90
+                , COUNT(DISTINCT CASE WHEN TM_STATUS = '50' THEN TRUTHCUSTKEY END) AS TRUTH_50
+                , COUNT(DISTINCT CASE WHEN TM_STATUS = '90' THEN TRUTHCUSTKEY END) AS TRUTH_90
+            FROM BASE
+        )
+        SELECT
+              ITEM
+            , TEMP_DISPATCH
+            , CONFIRMED
+            , GAP
+        FROM (
+            SELECT 1 AS ITEM_ORD,
+                   '중량' AS ITEM,
+                   TO_CHAR(TRUNC(NVL(WEIGHT_50, 0), 2), 'FM999G999G999G990D00') AS TEMP_DISPATCH, -- FM999G999G999G990D00 / 천단위, 소수점2자리 포맷
+                   TO_CHAR(TRUNC(NVL(WEIGHT_90, 0), 2), 'FM999G999G999G990D00') AS CONFIRMED,
+                   TO_CHAR(TRUNC(NVL(WEIGHT_90, 0) - NVL(WEIGHT_50, 0), 2), 'FM999G999G999G990D00') AS GAP
+            FROM AGGREGATED
+            UNION ALL
+            SELECT 2 AS ITEM_ORD,
+                   '체적' AS ITEM,
+                   TO_CHAR(TRUNC(NVL(CUBE_50, 0), 2), 'FM999G999G999G990D00') AS TEMP_DISPATCH, -- FM999G999G999G990D00 / 천단위, 소수점2자리 포맷
+                   TO_CHAR(TRUNC(NVL(CUBE_90, 0), 2), 'FM999G999G999G990D00') AS CONFIRMED,
+                   TO_CHAR(TRUNC(NVL(CUBE_90, 0) - NVL(CUBE_50, 0), 2), 'FM999G999G999G990D00') AS GAP
+            FROM AGGREGATED
+            UNION ALL
+            SELECT 3 AS ITEM_ORD,
+                   '착지' AS ITEM,
+                   TO_CHAR(NVL(TRUTH_50, 0), 'FM999G999G999G990') AS TEMP_DISPATCH, -- FM999G999G999G990 / 천단위 포맷
+                   TO_CHAR(NVL(TRUTH_90, 0), 'FM999G999G999G990') AS CONFIRMED,
+                   TO_CHAR(NVL(TRUTH_90, 0) - NVL(TRUTH_50, 0), 'FM999G999G999G990') AS GAP
+            FROM AGGREGATED
+        )
+        ORDER BY ITEM_ORD
+    </select>
+    
+    <select id="getMasterCustList" resultType="TmPlanSummaryDiffCustResDto">
+		WITH /* [tmPlanSummaryDiffService.sqlx][getMasterCustList][착지리스트 조회] */
+		    CUST_LIST AS (
+		    SELECT 
+		          TRUTHCUSTKEY
+		        , CUSTTYPE
+		        , STORERKEY
+		        , CASE WHEN PRECARNO = #{carno} THEN 'Y' ELSE 'N' END AS PRE_DISPATCH_YN
+		        , CASE WHEN CARNO    = #{carno} THEN 'Y' ELSE 'N' END AS DISPATCH_YN
+		    FROM TM_INPLAN
+		    WHERE DCCODE = #{dccode}
+		      AND DOCTYPE IN ('WD', 'RT')
+		      AND DELIVERYDT = #{deliveryDate}
+		      AND TM_DELIVERYTYPE = #{tmDeliveryType}
+		      AND SPLIT_DELIVERY_YN = 'N'
+		      AND DEL_YN = 'N'
+		      AND (CARNO = #{carno} OR PRECARNO = #{carno})
+		    UNION ALL
+		    SELECT 
+		          TRUTHCUSTKEY
+		        , CUSTTYPE
+		        , STORERKEY
+		        , CASE WHEN PRECARNO = #{carno} THEN 'Y' ELSE 'N' END
+		        , CASE WHEN CARNO    = #{carno} THEN 'Y' ELSE 'N' END
+		    FROM TM_INPLAN_SPLIT
+		    WHERE DCCODE = #{dccode}
+		      AND DOCTYPE IN ('WD', 'RT')
+		      AND DELIVERYDT = #{deliveryDate}
+		      AND TM_DELIVERYTYPE = #{tmDeliveryType}
+		      AND DEL_YN = 'N'
+		      AND (CARNO = #{carno} OR PRECARNO = #{carno})
+		)
+		SELECT DISTINCT
+		      CUST_LIST.TRUTHCUSTKEY
+		    , MS_CUST.DESCRIPTION AS CUSTNAME
+		    , CUST_LIST.PRE_DISPATCH_YN
+		    , CUST_LIST.DISPATCH_YN
+		FROM CUST_LIST
+		LEFT OUTER JOIN MS_CUST
+            ON  MS_CUST.CUSTKEY   = CUST_LIST.TRUTHCUSTKEY
+            AND MS_CUST.CUSTTYPE  = CUST_LIST.CUSTTYPE
+            AND MS_CUST.STORERKEY = CUST_LIST.STORERKEY
+    </select>
+</mapper>

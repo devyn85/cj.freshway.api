@@ -1,0 +1,95 @@
+package cjfw.wms.wd.controller;
+
+import java.util.List;
+
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import cjfw.core.model.ApiResult;
+import cjfw.wms.wd.dto.WdInvoicePrintResDto;
+import cjfw.wms.wd.dto.WdInvoiceReqDto;
+import cjfw.wms.wd.dto.WdInvoiceResDto;
+import cjfw.wms.wd.service.WdInvoiceService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+
+/**
+ * Copyright 2025. CJ OliveNetworks Co. all rights reserved.
+ * @author : KimDongHyeon (tirran123@cj.net) 생성
+ * @date : 2025.11.03
+ * @description : 납품서출력 Controller
+ * @issues :<pre>
+ * -----------------------------------------------------------
+ * DATE       AUTHOR                MAJOR_ISSUE
+ * -----------------------------------------------------------
+ * 2025.11.03 KimDongHyeon (tirran123@cj.net) 생성 </pre>
+ */
+@Tag(name = "WdInvoice", description = "납품서출력")
+@RestController
+@Slf4j
+@RequiredArgsConstructor
+@RequestMapping({"api/wd/wdInvoice", "ltx/wd/wdInvoice"})
+public class WdInvoiceController {
+
+	private final WdInvoiceService wdInvoiceService;
+
+	/**
+	 * @description : 차량 목록 조회
+	 * @issues :<pre>
+	 * -----------------------------------------------------------
+	 * DATE       AUTHOR                MAJOR_ISSUE
+	 * -----------------------------------------------------------
+	 * 2025.05.12 KimDongHyeon (tirran123@cj.net) 생성 </pre>
+	 */
+	@Operation(summary = "납품서출력 목록 조회", description = "납품서출력 목록 조회")
+	@PostMapping(value = "/v1.0/getMasterList")
+	public ApiResult<List<WdInvoiceResDto>> getMasterList(@RequestBody WdInvoiceReqDto dto) {
+		return ApiResult.createResult(wdInvoiceService.getMasterList(dto));
+	}
+
+	/**
+	 * @description : 납품서출력 상세목록 조회
+	 * @issues :<pre>
+	 * -----------------------------------------------------------
+	 * DATE       AUTHOR                MAJOR_ISSUE
+	 * -----------------------------------------------------------
+	 * 2025.05.12 KimDongHyeon (tirran123@cj.net) 생성 </pre>
+	 */
+	@Operation(summary = "납품서출력 상세목록 조회", description = "납품서출력 상세목록 조회")
+	@PostMapping(value = "/v1.0/getDetailList")
+	public ApiResult<List<WdInvoiceResDto>> getDetailList(@RequestBody WdInvoiceReqDto dto) {
+		return ApiResult.createResult(wdInvoiceService.getDetailList(dto));
+	}
+	
+	/**
+	 * @description : 납품서출력 목록 출력
+	 * @issues :<pre>
+	 * -----------------------------------------------------------
+	 * DATE       AUTHOR                MAJOR_ISSUE
+	 * -----------------------------------------------------------
+	 * 2025.05.12 KimDongHyeon (tirran123@cj.net) 생성 </pre>
+	 */
+	@Operation(summary = "납품서출력 출력 데이터 생성", description = "납품서출력 출력 데이터 생성")
+	@PostMapping(value = "/v1.0/printMasterList")
+	public ApiResult<WdInvoicePrintResDto> printMasterList(@RequestBody WdInvoiceReqDto dto) throws Exception {
+		return ApiResult.createResult(wdInvoiceService.printMasterList(dto));
+	}	
+	
+	/**
+	 * @description : 납품서출력 목록 출력
+	 * @issues :<pre>
+	 * -----------------------------------------------------------
+	 * DATE       AUTHOR                MAJOR_ISSUE
+	 * -----------------------------------------------------------
+	 * 2025.05.12 KimDongHyeon (tirran123@cj.net) 생성 </pre>
+	 */
+	@Operation(summary = "납품서출력 출력 데이터 생성-거래처별", description = "납품서출력 출력 데이터 생성-거래처별")
+	@PostMapping(value = "/v1.0/printDetailList")
+	public ApiResult<WdInvoicePrintResDto> printDetailList(@RequestBody WdInvoiceReqDto dto) throws Exception {
+		return ApiResult.createResult(wdInvoiceService.printDetailList(dto));
+	}	
+}

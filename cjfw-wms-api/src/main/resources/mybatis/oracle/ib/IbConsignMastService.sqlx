@@ -1,0 +1,547 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+ * Copyright 2025. CJ OliveNetworks Co. all rights reserved.
+ *
+ * @author      : 고혜미 (laksjd0606@cj.net)
+ * @date        : 2025.09.25
+ * @description : 정산 > 3PL물류대행수수료정산 > 위탁 물류 처리 - 수수료 정산 SQL
+ * @issues      :
+-->
+<mapper namespace="ibConsignMastService">
+
+    <select id="getTab1MasterList" resultType="cjfw.wms.ib.dto.IbConsignMastResT1Dto">
+    	SELECT /* [ibConsignMastService.sqlx][ibConsignMastService.getTab1MasterList][정산 > 3PL물류대행수수료정산 > 위탁 물류 처리 - 수수료 정산[품목별정산료TAB] 조회][고혜미][2025-11-12] */
+               T1.DCCODE                                                 AS DCCODE           /*센터코드*/
+             , T1.STTL_YM                                                AS STOCKMONTH       /*재고월*/
+             , T1.SKU                                                    AS SKU              /*상품코드*/
+             , T2.DESCRIPTION                                            AS SKUNM            /*상품명*/
+             , T1.CUSTKEY                                                AS CUSTKEY          /*협력사코드*/
+             , T2.BASEUOM                                                AS BASEUOM          /*단위*/
+             , FN_CODEDESCR(T2.STORERKEY, 'STORAGETYPE', T2.STORAGETYPE) AS STORAGETYPE      /*저장조건 */
+             , T2.QTYPERBOX                                              AS QTYPERBOX        /*박스입수*/
+             , NVL(T1.QTY,0)                                             AS STOCK            /*현재고수량*/
+             , NVL(T1.BOXQTY,0)                                          AS STOCK_BOX        /*현재고 BOX수량*/
+             , NVL(T1.EAQTY,0)                                           AS STOCK_EA         /*현재고 EA수량*/
+             , NVL(T1.DPQTY,0)                                           AS GR_CONFIRMQTY    /*총입고수량*/
+             , NVL(T1.WDQTY,0)                                           AS GI_CONFIRMQTY    /*총출고수량*/
+             , NVL(T1.GR_AMOUNT,0)                                       AS GR_TOTAL         /*입고료*/
+             , NVL(T1.GI_AMOUNT,0)                                       AS GI_TOTAL         /*출고료*/
+             , NVL(T1.STOCK_AMOUNT,0)                                    AS ST_TOTAL         /*창고료*/
+             , NVL(T1.WGH_AMOUNT,0)                                      AS WGH_TOTAL        /*계근료*/
+             , NVL(T1.WORK_AMOUNT,0)                                     AS WORK_TOTAL       /*작업료*/
+             , NVL(T1.GR_AMOUNT+T1.GI_AMOUNT+T1.STOCK_AMOUNT+
+                   T1.WGH_AMOUNT+T1.WORK_AMOUNT,0)                       AS TOTAL            /*보관료합계*/
+		  FROM IB_3PL_STTL T1 /*위탁물류정산*/                                                    
+        JOIN   MS_SKU      T2 /*상품마스터*/
+            ON T2.STORERKEY = T1.STORERKEY
+           AND T2.SKU       = T1.SKU
+           AND T2.DEL_YN    = 'N'
+	     WHERE T1.STORERKEY = #{gStorerkey}
+	       AND T1.STTL_YM   = #{month}
+	    <if test='multiDcCode != null and multiDcCode.length > 0'>
+		   AND T1.DCCODE IN
+	        <foreach collection="multiDcCode" item="dccodeItem" open="(" separator="," close=")">
+	            #{dccodeItem}
+	        </foreach>
+		</if>
+		<if test="custkey != null and custkey != ''">
+		    AND T1.CUSTKEY = #{custkey}
+		</if>
+		ORDER BY DCCODE
+		       , CUSTKEY
+		       , SKU
+		       , BASEUOM
+    </select>
+    
+    <select id="getTab1CreatDataList" resultType="cjfw.wms.ib.dto.IbConsignMastResT1Dto">
+    -- 입고 일자별 SUM
+    WITH GR_DAILY AS (
+        SELECT 
+            GR.SKU
+          , GR.DCCODE
+          , GR.CUSTKEY
+          , GR.GR_DATE
+          , GR.CONFIRMQTY
+          , 0 AS PAL
+          , TRUNC(FN_CONV_UOM(GR.STORERKEY, GR.SKU, GR.UOM, 'BOX', GR.CONFIRMQTY)) AS BOX
+          , MOD(
+                FN_CONV_UOM(GR.STORERKEY, GR.SKU, GR.UOM, 'EA', GR.CONFIRMQTY),
+                FN_CONV_UOM(GR.STORERKEY, GR.SKU, 'BOX', 'EA', 1)
+            ) AS EA
+        FROM (
+            SELECT 
+                D.SKU
+              , D.DCCODE
+              , D.STORERKEY
+              , F.CUSTKEY
+              , D.UOM
+              , D.DELIVERYDATE AS GR_DATE
+              , SUM(D.CONFIRMQTY) AS CONFIRMQTY
+            FROM DM_DOCUMENT_D D
+            RIGHT JOIN MS_3PL_FEE_STD F
+              ON D.SKU       = F.SKU
+             AND D.DCCODE    = F.DCCODE
+             AND D.STORERKEY = F.STORERKEY
+            WHERE 1=1
+              AND D.DELIVERYDATE LIKE #{month} || '%'
+              AND F.CUSTKEY = #{custkey}
+              AND D.DOCTYPE = 'DP'   /* 입고 */
+            GROUP BY 
+                D.SKU
+              , D.DCCODE
+              , D.STORERKEY
+              , F.CUSTKEY
+              , D.UOM
+              , D.DELIVERYDATE
+        ) GR
+        JOIN MS_SKU SKU
+          ON GR.SKU = SKU.SKU
+    ),
+
+    -- 출고 일자별 SUM
+    GI_DAILY AS (
+        SELECT 
+            GI.SKU
+          , GI.DCCODE
+          , GI.CUSTKEY
+          , GI.GI_DATE
+          , GI.CONFIRMQTY
+          , 0 AS PAL
+          , TRUNC(FN_CONV_UOM(GI.STORERKEY, GI.SKU, GI.UOM, 'BOX', GI.CONFIRMQTY)) AS BOX
+          , MOD(
+                FN_CONV_UOM(GI.STORERKEY, GI.SKU, GI.UOM, 'EA', GI.CONFIRMQTY),
+                FN_CONV_UOM(GI.STORERKEY, GI.SKU, 'BOX', 'EA', 1)
+            ) AS EA
+        FROM (
+            SELECT 
+                D.SKU
+              , D.DCCODE
+              , D.STORERKEY
+              , F.CUSTKEY
+              , D.UOM
+              , D.DELIVERYDATE AS GI_DATE
+              , SUM(D.CONFIRMQTY) AS CONFIRMQTY
+            FROM DM_DOCUMENT_D D
+            RIGHT JOIN MS_3PL_FEE_STD F
+              ON D.SKU       = F.SKU
+             AND D.DCCODE    = F.DCCODE
+             AND D.STORERKEY = F.STORERKEY
+            WHERE 1=1
+              AND D.DELIVERYDATE LIKE #{month} || '%'
+              AND F.CUSTKEY = #{custkey}
+              AND D.DOCTYPE = 'WD'   /* 출고 */
+            GROUP BY 
+                D.SKU
+              , D.DCCODE
+              , D.STORERKEY
+              , F.CUSTKEY
+              , D.UOM
+              , D.DELIVERYDATE
+        ) GI
+        JOIN MS_SKU SKU
+          ON GI.SKU = SKU.SKU
+    ),
+    
+    -- 창고료 일자별 SUM
+    STOCK_AMOUNT_DAILY AS (
+        SELECT 
+            STOCK_AMOUNT.SKU
+          , STOCK_AMOUNT.DCCODE
+          , STOCK_AMOUNT.CUSTKEY
+          , STOCK_AMOUNT.STOCKDATE
+          , STOCK_AMOUNT.QTY
+          , 0 AS PAL
+          , TRUNC(FN_CONV_UOM(STOCK_AMOUNT.STORERKEY, STOCK_AMOUNT.SKU, STOCK_AMOUNT.UOM, 'BOX', STOCK_AMOUNT.QTY)) AS BOX
+          , MOD(
+                FN_CONV_UOM(STOCK_AMOUNT.STORERKEY, STOCK_AMOUNT.SKU, STOCK_AMOUNT.UOM, 'EA', STOCK_AMOUNT.QTY),
+                FN_CONV_UOM(STOCK_AMOUNT.STORERKEY, STOCK_AMOUNT.SKU, 'BOX', 'EA', 1)
+            ) AS EA
+        FROM (
+            SELECT 
+                S.SKU
+              , S.DCCODE
+              , S.STORERKEY
+              , F.CUSTKEY
+              , S.UOM
+              , S.STOCKDATE AS STOCKDATE
+              , SUM(S.QTY)  AS QTY
+            FROM ST_DAILY_STOCK       S
+            RIGHT JOIN MS_3PL_FEE_STD F
+              ON S.SKU       = F.SKU
+             AND S.DCCODE    = F.DCCODE
+             AND S.STORERKEY = F.STORERKEY
+            WHERE 1=1
+              AND S.STOCKDATE LIKE #{month} || '%'
+              AND F.CUSTKEY = #{custkey}
+            GROUP BY 
+                S.SKU
+              , S.DCCODE
+              , S.STORERKEY
+              , F.CUSTKEY
+              , S.UOM
+              , S.STOCKDATE
+        ) STOCK_AMOUNT
+        JOIN MS_SKU SKU
+          ON STOCK_AMOUNT.SKU = SKU.SKU
+    ),
+
+    -- 월 단위 합계 (일자별 합계를 기반으로 SUM)
+    GR_MONTHLY AS (
+        SELECT
+            DCCODE
+          , SKU
+          , CUSTKEY
+          , SUBSTR(GR_DATE, 1, 6) AS GR_MONTH
+          , SUM(CONFIRMQTY)       AS CONFIRMQTY
+          , SUM(PAL)              AS PAL
+          , SUM(BOX)              AS BOX
+          , SUM(EA)               AS EA
+        FROM GR_DAILY
+        GROUP BY 
+            DCCODE
+          , SKU
+          , CUSTKEY
+          , SUBSTR(GR_DATE, 1, 6)
+    ),
+
+    GI_MONTHLY AS (
+        SELECT
+            DCCODE
+          , SKU
+          , CUSTKEY
+          , SUBSTR(GI_DATE, 1, 6) AS GI_MONTH
+          , SUM(CONFIRMQTY)       AS CONFIRMQTY
+          , SUM(PAL)              AS PAL
+          , SUM(BOX)              AS BOX
+          , SUM(EA)               AS EA
+        FROM GI_DAILY
+        GROUP BY 
+            DCCODE
+          , SKU
+          , CUSTKEY
+          , SUBSTR(GI_DATE, 1, 6)
+    ),
+    
+    STOCK_AMOUNT_MONTHLY AS (
+        SELECT
+            DCCODE
+          , SKU
+          , CUSTKEY
+          , SUBSTR(STOCKDATE, 1, 6) AS STOCKMONTH
+          , SUM(QTY)                AS QTY
+          , SUM(PAL)                AS PAL
+          , SUM(BOX)                AS BOX
+          , SUM(EA)                 AS EA
+        FROM STOCK_AMOUNT_DAILY
+        GROUP BY 
+            DCCODE
+          , SKU
+          , CUSTKEY
+          , SUBSTR(STOCKDATE, 1, 6)
+    ),
+    
+    STOCK_MONTHLY AS (
+        SELECT
+            DCCODE
+          , STORERKEY
+          , SKU
+          , QTY
+          , TRUNC(FN_CONV_UOM(A.STORERKEY, A.SKU, A.UOM, 'BOX', A.QTY)) AS BOX
+          , MOD(FN_CONV_UOM(A.STORERKEY, A.SKU, A.UOM, 'EA', A.QTY),
+                FN_CONV_UOM(A.STORERKEY, A.SKU, 'BOX', 'EA', 1)
+                ) AS EA
+        FROM (SELECT 
+	              STORERKEY
+                , DCCODE
+                , SKU
+                , UOM
+                , SUM(QTY)  AS QTY
+              FROM ST_DAILY_STOCK 
+            WHERE STOCKDATE BETWEEN #{month}||'01' AND TO_CHAR(LAST_DAY(TO_DATE(#{month},'YYYYMM')),'YYYYMMDD')
+            GROUP BY STORERKEY
+                   , DCCODE
+                   , SKU
+                   , UOM
+             )A
+        )
+
+    SELECT DISTINCT
+        T1.DCCODE                                                   AS DCCODE         /* 물류센터 */
+      , GR.CUSTKEY                                                  AS CUSTKEY        /* 협력사 */
+      , SUBSTR(GR.GR_MONTH,0,4) ||'-'|| SUBSTR(GR.GR_MONTH,5,2)     AS STOCKMONTH     /* 재고월 */
+      , GR.GR_MONTH                                                 AS MONTH          /* 재고월 */
+      , T1.SKU                                                      AS SKU            /* 상품코드 */ 
+      , SKU.DESCRIPTION                                             AS SKUNM          /* 상품명 */
+      , SKU.BASEUOM                                                 AS BASEUOM        /* 단위 */
+      , FN_CODEDESCR(SKU.STORERKEY, 'STORAGETYPE', SKU.STORAGETYPE) AS STORAGETYPE    /* 저장조건 */
+      , SKU.QTYPERBOX                                               AS QTYPERBOX      /* 박스입수 */
+      , NVL(STOCK.QTY,0)                                            AS STOCK          /* 현재고수량 */
+      , NVL(STOCK.BOX,0)                                            AS STOCK_BOX      /* 현재고 BOX수량*/
+      , NVL(STOCK.EA,0)                                             AS STOCK_EA       /* 현재고 EA수량*/
+      , NVL(GR.CONFIRMQTY, 0)                                       AS GR_CONFIRMQTY  /* 총입고수량 */
+      , NVL(GI.CONFIRMQTY, 0)                                       AS GI_CONFIRMQTY  /* 총출고수량 */
+      , NVL(GR.PAL, 0)                                              AS GR_PAL
+      , NVL(GR.BOX, 0)                                              AS GR_BOX
+      , NVL(GR.EA, 0)                                               AS GR_EA
+      , NVL(GI.PAL, 0)                                              AS GI_PAL
+      , NVL(GI.BOX, 0)                                              AS GI_BOX
+      , NVL(GI.EA, 0)                                               AS GI_EA
+      , NVL(ST.PAL, 0)                                              AS ST_PAL
+      , NVL(ST.BOX, 0)                                              AS ST_BOX
+      , NVL(ST.EA, 0)                                               AS ST_EA
+        -- 금액 계산
+      , ( NVL(GR.PAL, 0) * NVL(PPAL.GR_AMOUNT, 0)
+        + NVL(GR.BOX, 0) * NVL(PBOX.GR_AMOUNT, 0)
+        + NVL(GR.EA, 0)  * NVL(PEA.GR_AMOUNT, 0) )                  AS GR_TOTAL       /*입고료*/       
+      , ( NVL(GI.PAL, 0) * NVL(PPAL.GI_AMOUNT, 0)
+        + NVL(GI.BOX, 0) * NVL(PBOX.GI_AMOUNT, 0)
+        + NVL(GI.EA, 0)  * NVL(PEA.GI_AMOUNT, 0) )                  AS GI_TOTAL       /*출고료*/              
+      , ( NVL(ST.PAL, 0) * NVL(PPAL.STOCK_AMOUNT, 0)
+        + NVL(ST.BOX, 0) * NVL(PBOX.STOCK_AMOUNT, 0)
+        + NVL(ST.EA, 0)  * NVL(PEA.STOCK_AMOUNT, 0) )               AS ST_TOTAL       /*창고료*/       
+      , 0                                                           AS WGH_TOTAL      /*계근료*/
+      , 0                                                           AS WORK_TOTAL     /*작업료*/
+      , ( ( NVL(GR.PAL, 0) * NVL(PPAL.GR_AMOUNT, 0)
+          + NVL(GR.BOX, 0) * NVL(PBOX.GR_AMOUNT, 0)
+          + NVL(GR.EA, 0)  * NVL(PEA.GR_AMOUNT, 0) )
+        + ( NVL(GI.PAL, 0) * NVL(PPAL.GI_AMOUNT, 0)
+          + NVL(GI.BOX, 0) * NVL(PBOX.GI_AMOUNT, 0)
+          + NVL(GI.EA, 0)  * NVL(PEA.GI_AMOUNT, 0))
+        + ( NVL(ST.PAL, 0) * NVL(PPAL.STOCK_AMOUNT, 0)
+          + NVL(ST.BOX, 0) * NVL(PBOX.STOCK_AMOUNT, 0)
+          + NVL(ST.EA, 0)  * NVL(PEA.STOCK_AMOUNT, 0)))             AS TOTAL          /*보관료합계*/          
+    FROM MS_3PL_FEE_STD T1
+    LEFT JOIN MS_SKU SKU
+      ON T1.SKU = SKU.SKU
+    LEFT JOIN GR_MONTHLY GR
+      ON T1.SKU = GR.SKU 
+     AND T1.DCCODE = GR.DCCODE
+    LEFT JOIN GI_MONTHLY GI
+      ON T1.SKU = GI.SKU
+     AND T1.DCCODE = GI.DCCODE
+    LEFT JOIN MS_3PL_FEE_STD PPAL
+      ON T1.SKU = PPAL.SKU 
+     AND T1.DCCODE = PPAL.DCCODE
+     AND PPAL.UOM  = 'PAL'   
+    LEFT JOIN MS_3PL_FEE_STD PBOX
+      ON T1.SKU = PBOX.SKU
+     AND T1.DCCODE = PBOX.DCCODE
+     AND PBOX.UOM  = 'BOX'
+    LEFT JOIN MS_3PL_FEE_STD PEA
+      ON T1.SKU = PEA.SKU 
+     AND T1.DCCODE = PEA.DCCODE
+     AND PEA.UOM   = 'EA'
+    LEFT JOIN STOCK_MONTHLY STOCK
+      ON T1.SKU       = STOCK.SKU
+     AND T1.DCCODE    = STOCK.DCCODE 
+     AND T1.STORERKEY = STOCK.STORERKEY
+    LEFT JOIN STOCK_AMOUNT_MONTHLY ST
+      ON T1.SKU    = ST.SKU
+     AND T1.DCCODE = ST.DCCODE
+     <![CDATA[
+    WHERE ( (NVL(GR.PAL, 0) > 0 OR NVL(GI.PAL, 0) > 0)
+         OR (NVL(GR.BOX, 0) > 0 OR NVL(GI.BOX, 0) > 0)
+         OR (NVL(GR.EA, 0)  > 0 OR NVL(GI.EA, 0)  > 0)
+    )
+    ]]>
+    ORDER BY 
+        T1.SKU,
+        GR.GR_MONTH
+    </select>
+    
+    <!-- 위탁물류정산 내역 삭제 -->
+    <update id="deleteTab1MasterList">
+        /* [ibConsignMastService.sqlx][ibConsignMastService.deleteTab1MasterList][위탁물류정산 내역 삭제] */
+        DELETE FROM IB_3PL_STTL /*위탁물류정산*/
+        WHERE  STTL_YM    = REPLACE(#{stockmonth},'-','')
+        AND    DCCODE     = #{dccode}
+        AND    STORERKEY  = #{gStorerkey}
+        AND    CUSTKEY    = #{custkey}
+        AND    SKU        = #{sku}
+    </update>
+    
+    <!-- 위탁물류정산 등록 -->
+    <insert id="saveTab1MasterList">
+	/* [ibConsignMastService.sqlx][ibConsignMastService.saveTab1MasterList][위탁물류정산 등록] */
+       INSERT INTO IB_3PL_STTL 
+               ( STTL_YM       /*1 .정산월*/                 
+               , DCCODE        /*2 .물류센터*/
+               , STORERKEY     /*3 .고객사코드*/
+               , CUSTKEY       /*4 .협력사코드*/
+               , SKU           /*5 .상품코드*/
+               , QTY           /*6 .현재고수량*/
+               , BOXQTY        /*7 .BOX수량*/
+               , EAQTY         /*8 .EA수량*/
+               , DPQTY         /*9 .입고수량*/
+               , WDQTY         /*10.출고수량*/
+               , GR_AMOUNT     /*11.입고료*/
+               , GI_AMOUNT     /*12.출고료*/
+               , STOCK_AMOUNT  /*13.창고료*/
+               , WGH_AMOUNT    /*14.계근료*/
+               , WORK_AMOUNT   /*15.작업료*/
+               , RMK           /*16.비고*/
+               , ADDWHO        /*17.등록자*/
+               , ADDDATE       /*18.등록일시*/
+               , EDITWHO       /*19.수정자*/
+               , EDITDATE      /*20.수정일시*/
+               )
+        VALUES (                                         
+                 REPLACE(#{stockmonth},'-','')   /*1 .정산월*/
+               , #{dccode}                       /*2 .물류센터*/
+               , #{gStorerkey}                   /*3 .고객사코드*/
+               , #{custkey}                      /*4 .협력사코드*/
+               , #{sku}                          /*5 .상품코드*/
+               , #{stock}                        /*6 .현재고수량*/
+               , #{stockBox}                     /*7 .BOX수량*/
+               , #{stockEa}                      /*8 .EA수량*/
+               , #{grConfirmqty}                 /*9 .입고수량*/
+               , #{giConfirmqty}                 /*10.출고수량*/
+               , #{grTotal}                      /*11.입고료*/
+               , #{giTotal}                      /*12.출고료*/
+               , #{stTotal}                      /*13.창고료*/                                          
+               , #{wghTotal}                     /*14.계근료*/                                         
+               , #{workTotal}                    /*15.작업료*/                                     
+               , #{rmk}                          /*16.비고*/                                                                         
+               , #{gUserNo}                      /*17.등록자*/
+               , SYSDATE                         /*18.등록일시*/                             
+               , #{gUserNo}                      /*19.수정자*/
+               , SYSDATE                         /*20.수정일시*/                             
+             )
+	</insert> 
+	  
+    <select id="getTab2MasterList" resultType="cjfw.wms.ib.dto.IbConsignMastResT2Dto">
+    	SELECT /* [ibConsignMastService.sqlx][ibConsignMastService.getTab2MasterList][정산 > 3PL물류대행수수료정산 > 위탁 물류 처리 - 수수료 정산[기준정보TAB] 조회][고혜미][2025-09-25] */
+               MS_3PL_FEE_STD.DCCODE                     AS DCCODE           /*센터코드*/
+             , MS_3PL_FEE_STD.CUSTKEY                    AS CUSTKEY          /*협력사코드*/
+             , MS_CUST.DESCRIPTION                       AS CUST_NAME        /*협력사코드명*/
+             , MS_3PL_FEE_STD.SKU                        AS SKU              /*상품코드*/
+             , MS_3PL_FEE_STD.UOM                        AS UOM              /*단위*/
+             , MS_3PL_FEE_STD.SALES_UNIT_TYPE            AS SALES_UNIT_TYPE  /*매출단위유형*/
+             , NULLIF(MS_3PL_FEE_STD.GR_AMOUNT,0)        AS GR_AMOUNT        /*입고료(금액)*/
+             , NULLIF(MS_3PL_FEE_STD.GI_AMOUNT,0)        AS GI_AMOUNT        /*출고료(금액)*/
+             , NULLIF(MS_3PL_FEE_STD.STOCK_AMOUNT,0)     AS STOCK_AMOUNT     /*창고료(금액)*/
+             , NULLIF(MS_3PL_FEE_STD.WGH_AMOUNT,0)       AS WGH_AMOUNT       /*계근료(금액)*/
+             , NULLIF(MS_3PL_FEE_STD.WORK_AMOUNT,0)      AS WORK_AMOUNT      /*작업료(금액)*/
+             , NULLIF(MS_3PL_FEE_STD.COURIER_AMOUNT,0)   AS COURIER_AMOUNT   /*운송료(금액)*/
+             , NULLIF(MS_3PL_FEE_STD.GR_FEE_RT,0)        AS GR_FEE_RT        /*입고수수료(율)*/
+             , NULLIF(MS_3PL_FEE_STD.GI_FEE_RT,0)        AS GI_FEE_RT        /*출고수수료(율)*/
+             , NULLIF(MS_3PL_FEE_STD.STOCK_FEE_RT,0)     AS STOCK_FEE_RT     /*창고수수료(율)*/
+             , NULLIF(MS_3PL_FEE_STD.WGH_FEE_RT,0)       AS WGH_FEE_RT       /*계근수수료(율)*/
+             , NULLIF(MS_3PL_FEE_STD.WORK_FEE_RT,0)      AS WORK_FEE_RT      /*작업수수료(율)*/
+             , NULLIF(MS_3PL_FEE_STD.COURIER_FEE_RT,0)   AS COURIER_FEE_RT   /*운송수수료(율)*/
+             , USER1.USER_NM                             AS ADDWHO_NM        /*등록자명*/
+			 , USER2.USER_NM                             AS EDITWHO_NM       /*수정자명*/
+			 , MS_3PL_FEE_STD.ADDDATE                    AS ADDDATE          /*등록일시*/
+	         , MS_3PL_FEE_STD.ADDWHO                     AS ADDWHO           /*등록자*/
+	         , MS_3PL_FEE_STD.EDITDATE                   AS EDITDATE         /*수정일시*/
+	         , MS_3PL_FEE_STD.EDITWHO                    AS EDITWHO          /*수정자*/
+	         , MS_SKU.DESCRIPTION                        AS SKUNM            /*상품명*/
+		  FROM MS_3PL_FEE_STD /*위탁물류처리수수료기준*/                                                    
+        JOIN   MS_SKU
+            ON MS_SKU.STORERKEY = MS_3PL_FEE_STD.STORERKEY
+           AND MS_SKU.SKU       = MS_3PL_FEE_STD.SKU
+           AND MS_SKU.DEL_YN    = 'N'
+        JOIN   MS_CUST
+            ON MS_CUST.STORERKEY  = MS_3PL_FEE_STD.STORERKEY
+           AND MS_CUST.CUSTKEY    = MS_3PL_FEE_STD.CUSTKEY
+           AND MS_CUST.CUSTTYPE   = 'P'
+      LEFT JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = MS_3PL_FEE_STD.ADDWHO   /*등록자명*/
+      LEFT JOIN FRAMEONE_USER USER2 ON USER2.USER_ID = MS_3PL_FEE_STD.EDITWHO  /*수정자명*/
+	     WHERE MS_3PL_FEE_STD.STORERKEY = #{gStorerkey}
+	    <if test='multiDcCode != null and multiDcCode.length > 0'>
+		   AND MS_3PL_FEE_STD.DCCODE IN
+	        <foreach collection="multiDcCode" item="dccodeItem" open="(" separator="," close=")">
+	            #{dccodeItem}
+	        </foreach>
+		</if>
+		<if test="custkey != null and custkey != ''">
+		    AND MS_3PL_FEE_STD.CUSTKEY = #{custkey}
+		</if>
+		ORDER BY DCCODE
+		       , CUSTKEY
+		       , SKU, SALES_UNIT_TYPE
+		       , UOM
+    </select>
+    
+    <!-- 위탁물류처리수수료기준정보 저장 -->
+    <insert id="saveTab2MasterList" >        
+        MERGE /* [ibConsignMastService.sqlx][ibConsignMastService.saveTab2MasterList][위탁물류처리수수료기준정보 저장][고혜미][20250925] */ 
+        INTO MS_3PL_FEE_STD
+             USING DUAL
+                ON (STORERKEY       = #{gStorerkey}     /*고객사코드*/
+                AND DCCODE          = #{dccode}         /*센터코드*/
+                AND CUSTKEY         = #{custkey}        /*협력사코드*/
+                AND SKU             = #{sku}            /*상품코드*/
+                AND SALES_UNIT_TYPE = #{salesUnitType}  /*금액/율*/
+                AND UOM             = #{uom}            /*단위*/
+                )
+        WHEN MATCHED THEN
+             UPDATE SET
+                    GR_AMOUNT       = NVL(#{grAmount},0)        /*입고료*/
+                  , GI_AMOUNT       = NVL(#{giAmount},0)        /*출고료*/
+                  , STOCK_AMOUNT    = NVL(#{stockAmount},0)     /*창고료*/
+                  , WGH_AMOUNT      = NVL(#{wghAmount},0)       /*계근료*/
+                  , WORK_AMOUNT     = NVL(#{workAmount},0)      /*작업료*/
+                  , COURIER_AMOUNT  = NVL(#{courierAmount},0)   /*운송료*/
+                  , GR_FEE_RT       = NVL(#{grFeeRt},0)         /*입고정산율*/
+                  , GI_FEE_RT       = NVL(#{giFeeRt},0)         /*출고정산율*/
+                  , STOCK_FEE_RT    = NVL(#{stockFeeRt},0)      /*창고정산율*/
+                  , WGH_FEE_RT      = NVL(#{wghFeeRt},0)        /*계근정산율*/
+                  , WORK_FEE_RT     = NVL(#{workFeeRt},0)       /*작업정산율*/
+                  , COURIER_FEE_RT  = NVL(#{courierFeeRt},0)    /*운송정산율*/
+                  , RMK             = #{rmk}                    /*비고*/
+                  , EDITDATE        = SYSDATE
+                  , EDITWHO         = #{gUserId}
+        WHEN NOT MATCHED THEN
+             INSERT (DCCODE           /*1 .센터코드*/
+                   , STORERKEY        /*2 .고객사코드*/
+                   , CUSTKEY          /*3 .협력사코드*/
+                   , SKU              /*4 .상품코드*/
+                   , UOM              /*5 .단위*/
+                   , SALES_UNIT_TYPE  /*6 .매출단위유형*/
+                   , GR_AMOUNT        /*7 .입고료(금액)*/
+                   , GI_AMOUNT        /*8 .출고료(금액)*/
+                   , STOCK_AMOUNT     /*9 .창고료(금액)*/
+                   , WGH_AMOUNT       /*10.계근료(금액)*/
+                   , WORK_AMOUNT      /*11.작업료(금액)*/
+                   , COURIER_AMOUNT   /*12.운송료(금액)*/
+                   , GR_FEE_RT        /*13.입고정산료(율)*/
+                   , GI_FEE_RT        /*14.출고정산료(율)*/
+                   , STOCK_FEE_RT     /*15.창고정산료(율)*/
+                   , WGH_FEE_RT       /*16.계근정산료(율)*/
+                   , WORK_FEE_RT      /*17.작업정산료(율)*/
+                   , COURIER_FEE_RT   /*18.운송정산료(율)*/
+                   , RMK              /*19.비고*/
+                   , ADDDATE          /*20.최초등록시간*/
+                   , EDITDATE         /*21.최종변경시간*/
+                   , ADDWHO           /*22.최초등록자*/ 
+                   , EDITWHO          /*23.최종변경자*/
+                 )
+            VALUES  (#{dccode}               /*1 .센터코드*/
+                    ,#{gStorerkey}           /*2 .고객사코드*/
+                    ,#{custkey}              /*3 .협력사코드*/
+                    ,#{sku}                  /*4 .상품코드*/
+                    ,#{uom}                  /*5 .단위*/
+                    ,#{salesUnitType}        /*6 .매출단위유형*/                
+                    ,NVL(#{grAmount},0)      /*7 .입고료(금액)*/
+                    ,NVL(#{giAmount},0)      /*8 .출고료(금액)*/
+                    ,NVL(#{stockAmount},0)   /*9 .창고료(금액)*/
+                    ,NVL(#{wghAmount},0)     /*10 .계근료(금액)*/
+                    ,NVL(#{workAmount},0)    /*11.작업료(금액)*/
+                    ,NVL(#{courierAmount},0) /*12.운송료(금액)*/
+                    ,NVL(#{grFeeRt},0)       /*13.입고정산료(율)*/
+                    ,NVL(#{giFeeRt},0)       /*14.출고정산료(율)*/
+                    ,NVL(#{stockFeeRt},0)    /*15.창고정산료(율)*/
+                    ,NVL(#{wghFeeRt},0)      /*16.계근정산료(율)*/
+                    ,NVL(#{workFeeRt},0)     /*17.작업정산료(율)*/ 
+                    ,NVL(#{courierFeeRt},0)  /*18.운송정산료(율)*/
+                    ,#{rmk}                  /*19.비고*/
+                    ,SYSDATE                 /*20.최초등록시간*/
+                    ,SYSDATE                 /*21.최종변경시간*/
+                    ,#{gUserId}              /*22.최초등록자*/ 
+                    ,#{gUserId}              /*23.최종변경자*/
+                 )
+    </insert>    
+    
+</mapper>

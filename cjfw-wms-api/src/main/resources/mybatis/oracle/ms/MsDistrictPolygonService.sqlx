@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="msDistrictPolygonService">
+	<!-- 권역 폴리곤 정보 조회(목록) -->
+    <select id="getMasterList" resultType="MsDistrictPolygonResDto" fetchSize="20" resultSetType="FORWARD_ONLY">
+    	 WITH  /* [msDistrictPolygonSerivce.sqlx][getMasterList][권역 유형별 폴리곤 조회(목록)] */
+    	      HJDONG_LIST AS (
+		      SELECT 
+		            MS_HJDONG_POLYGON.HJDONG_CD
+		          , MS_HJDONG_POLYGON.CTP_KOR_NM
+                  , CASE WHEN #{districtType} = 'CTP' THEN NULL
+                         ELSE NVL(MS_HJDONG_POLYGON.SIG_KOR_NM, MS_HJDONG_POLYGON.CTP_KOR_NM)
+                         END AS SIG_KOR_NM
+		          , MS_HJDONG_POLYGON.HJDONG_NM
+		          <if test="pg == 1">
+		          , SDO_UTIL.TO_GEOJSON(MS_HJDONG_POLYGON.SPATIAL_GEOM) AS GEOJSON
+		          </if>
+		          <if test="pg == 0">
+		          , NULL AS GEOJSON
+		          </if>
+		          , MS_HJDONG_POLYGON.FROMDATE
+		          , MS_HJDONG_POLYGON.TODATE
+		          , ROW_NUMBER() OVER (PARTITION BY MS_HJDONG_POLYGON.HJDONG_CD ORDER BY MS_HJDONG_POLYGON.FROMDATE DESC) AS RN
+                  , CM_HJDONG.MVMN_RES_CD
+		      FROM MS_HJDONG_POLYGON
+              LEFT JOIN CM_HJDONG ON CM_HJDONG.HJDONG_CD = MS_HJDONG_POLYGON.HJDONG_CD
+		      WHERE ( #{searchDate} BETWEEN MS_HJDONG_POLYGON.FROMDATE AND MS_HJDONG_POLYGON.TODATE
+		           OR MS_HJDONG_POLYGON.TODATE > #{searchDate}
+		        )
+		        AND NOT EXISTS (
+		        	SELECT 1
+		        	FROM CM_HJDONG CH
+		        	WHERE CH.HJDONG_CD = MS_HJDONG_POLYGON.HJDONG_CD AND (CH.MVMN_RES_CD IS NOT NULL AND CH.MVMN_RES_CD = '63')
+		        )
+                AND 1 = CASE WHEN #{districtType} = 'CTP'    AND MS_HJDONG_POLYGON.HJDONG_NM IS     NULL AND  MS_HJDONG_POLYGON.SIG_KOR_NM IS NULL                                                          THEN 1
+                             WHEN #{districtType} = 'SIG'    AND MS_HJDONG_POLYGON.HJDONG_NM IS     NULL AND (MS_HJDONG_POLYGON.SIG_KOR_NM IS NOT NULL OR SUBSTR(MS_HJDONG_POLYGON.HJDONG_CD, 1, 2) = '36') THEN 1
+                             WHEN #{districtType} = 'HJDONG' AND MS_HJDONG_POLYGON.HJDONG_NM IS NOT NULL                                                                                                    THEN 1
+                             ELSE 0 END
+                <if test="pg == 1 and searchHjdongCd != null and searchHjdongCd.size() > 0">
+                AND MS_HJDONG_POLYGON.HJDONG_CD IN
+                    <foreach collection="searchHjdongCd" item="hjdongCd" open="(" separator="," close=")">
+                        #{hjdongCd}
+                    </foreach>
+                </if>
+		  )
+        <![CDATA[
+		  SELECT 
+		        H.HJDONG_CD
+		      , H.CTP_KOR_NM
+		      , H.SIG_KOR_NM
+		      , H.HJDONG_NM
+		      , H.GEOJSON
+		      , H.FROMDATE AS FROM_DATE
+		      , H.TODATE   AS TO_DATE
+		      , H.MVMN_RES_CD
+		  FROM HJDONG_LIST H
+		  WHERE RN = 1
+		]]>
+    </select>
+
+    <select id="getHjdongPolygonList" resultType="MsDistrictPolygonResDto" fetchSize="20" resultSetType="FORWARD_ONLY">
+        WITH  /* [msDistrictPolygonSerivce.sqlx][getHjdongPolygonList][권역 유형별 폴리곤 조회(목록)] */
+            HJDONG_LIST AS (
+            SELECT
+                MS_HJDONG_POLYGON.HJDONG_CD
+              , MS_HJDONG_POLYGON.CTP_KOR_NM
+              , CASE WHEN #{districtType} = 'CTP' THEN NULL
+                     ELSE NVL(MS_HJDONG_POLYGON.SIG_KOR_NM, MS_HJDONG_POLYGON.CTP_KOR_NM)
+                     END AS SIG_KOR_NM
+              , MS_HJDONG_POLYGON.HJDONG_NM
+              , SDO_UTIL.TO_GEOJSON(MS_HJDONG_POLYGON.SPATIAL_GEOM) AS GEOJSON
+              , MS_HJDONG_POLYGON.FROMDATE
+              , MS_HJDONG_POLYGON.TODATE
+              , ROW_NUMBER() OVER (PARTITION BY MS_HJDONG_POLYGON.HJDONG_CD ORDER BY MS_HJDONG_POLYGON.FROMDATE DESC) AS RN
+              , CM_HJDONG.MVMN_RES_CD
+            FROM MS_HJDONG_POLYGON
+            LEFT JOIN CM_HJDONG ON CM_HJDONG.HJDONG_CD = MS_HJDONG_POLYGON.HJDONG_CD
+            WHERE ( TO_CHAR(SYSDATE, 'YYYYMMDD') BETWEEN MS_HJDONG_POLYGON.FROMDATE AND MS_HJDONG_POLYGON.TODATE
+               OR MS_HJDONG_POLYGON.TODATE > TO_CHAR(SYSDATE, 'YYYYMMDD')
+            )
+            AND NOT EXISTS (
+                SELECT 1
+                FROM CM_HJDONG CH
+                WHERE CH.HJDONG_CD = MS_HJDONG_POLYGON.HJDONG_CD AND (CH.MVMN_RES_CD IS NOT NULL AND CH.MVMN_RES_CD = '63')
+            )
+            AND 1 = CASE WHEN #{districtType} = 'CTP'    AND MS_HJDONG_POLYGON.HJDONG_NM IS     NULL AND  MS_HJDONG_POLYGON.SIG_KOR_NM IS NULL                                                          THEN 1
+                         WHEN #{districtType} = 'SIG'    AND MS_HJDONG_POLYGON.HJDONG_NM IS     NULL AND (MS_HJDONG_POLYGON.SIG_KOR_NM IS NOT NULL OR SUBSTR(MS_HJDONG_POLYGON.HJDONG_CD, 1, 2) = '36') THEN 1
+                         WHEN #{districtType} = 'HJDONG' AND MS_HJDONG_POLYGON.HJDONG_NM IS NOT NULL                                                                                                    THEN 1
+                         ELSE 0 END
+        )
+        SELECT
+            HJDONG_CD
+          , CTP_KOR_NM
+          , SIG_KOR_NM
+          , HJDONG_NM
+          , GEOJSON
+          , FROMDATE AS FROM_DATE
+          , TODATE   AS TO_DATE
+        FROM HJDONG_LIST
+        WHERE RN = 1
+    </select>
+</mapper>

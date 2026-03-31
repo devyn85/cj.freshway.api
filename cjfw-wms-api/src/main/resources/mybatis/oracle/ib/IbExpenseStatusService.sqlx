@@ -1,0 +1,385 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ibExpenseStatusService">
+
+    <!-- 원가관리 리포트 Header 조회 -->
+    <select id="getMasterlist" resultType="IbExpenseStatusResDto">
+        SELECT  /* [ibExpenseStatusService.sqlx][getMasterlist][원가관리 리포트 Header 조회][sunho.kim][2025.09.02] */
+                CODE                    /*제비용구분코드*/
+              , NAME                    /*제비용구분명*/
+              , BASE_DATE               /*기준일자 */
+              , QUANTITY                /*QUANTITY*/    
+              , QUANTITY_UNIT           /*QUANTITY_UNIT*/
+              , AMOUNT                  /*AMOUNT*/  
+              , AMOUNT_UNIT             /*AMOUNT_UNIT*/ 
+        FROM   (
+                SELECT  4                                    AS SEQ
+                      , 'EXPENSE_WMS'                        AS CODE
+                      , '제반비용(보관료)'                        AS NAME
+                      , TO_CHAR(MAX(BASE_DATE),'YYYYMMDD')   AS BASE_DATE
+                      , SUM(CASE WHEN ROW_NUM = 1 THEN QUANTITY
+                                 ELSE 0
+                            END)                             AS QUANTITY
+                      , MAX(QUANTITY_UNIT)                   AS QUANTITY_UNIT
+                      , SUM(AMOUNT)                          AS AMOUNT
+                      , MAX(AMOUNT_UNIT)                     AS AMOUNT_UNIT
+                FROM   (SELECT  ROW_NUMBER()  OVER (PARTITION BY ST_EXDCSTORAGE.SERIALKEY ORDER BY IB_EXPENSE_DISTRIBUTION.SERIALKEY) AS ROW_NUM
+                              , IB_EXPENSE.POSTING_DATE          AS BASE_DATE
+                              , ST_EXDCSTORAGE.QUANTITY          AS QUANTITY                              
+                              , ST_EXDCSTORAGE.UOM               AS QUANTITY_UNIT
+                              , IB_EXPENSE_DISTRIBUTION.AMOUNT   AS AMOUNT
+                              , IB_EXPENSE.AMOUNT_UNIT           AS AMOUNT_UNIT
+                              , ST_EXDCSTORAGE.POKEY             AS POKEY
+                        FROM    ST_EXDCSTORAGE              
+                        JOIN    IB_EXPENSE_DISTRIBUTION 
+                        ON      IB_EXPENSE_DISTRIBUTION.DOCUMENT_SN         = ST_EXDCSTORAGE.SERIALKEY
+                        JOIN    IB_EXPENSE
+                        ON      IB_EXPENSE.SERIALKEY                        = IB_EXPENSE_DISTRIBUTION.EXPENSE_SN
+                        AND     IB_EXPENSE.STATUS                           = 'SCO'
+                        AND     IB_EXPENSE.POSTING_DATE            <![CDATA[<]]> TO_DATE(#{postingdate},'YYYYMMDD') + 1
+                        WHERE   1=1
+                        AND     ST_EXDCSTORAGE.SKU                          = #{itemcode}
+                        AND     ST_EXDCSTORAGE.CUSTKEY                      = #{customercode}
+                        AND     ST_EXDCSTORAGE.POKEY                        = #{erppono} 
+                        AND     ST_EXDCSTORAGE.POLINE                       = LPAD(#{polineno},5,'0')
+                        AND     ST_EXDCSTORAGE.CONVSERIALNO                 = #{houseblno}
+                       )
+                GROUP BY
+                        POKEY
+                UNION ALL
+                SELECT  1                   AS SEQ
+                      , 'BL'                AS CODE
+                      , '물대'                AS NAME
+                      , NULL                AS BASE_DATE
+                      , 0                   AS QUANTITY
+                      , NULL                AS QUANTITY_UNIT
+                      , 0                   AS AMOUNT
+                      , NULL                AS AMOUNT_UNIT
+                FROM    DUAL
+                UNION ALL
+                SELECT  2                   AS SEQ
+                      , 'CL'                AS CODE
+                      , '관세'                AS NAME
+                      , NULL                AS BASE_DATE
+                      , 0                   AS QUANTITY
+                      , NULL                AS QUANTITY_UNIT
+                      , 0                   AS AMOUNT
+                      , NULL                AS AMOUNT_UNIT
+                FROM    DUAL
+                UNION ALL
+                SELECT  3                   AS SEQ
+                      , 'EXPENSE'           AS CODE
+                      , '제반비용'             AS NAME
+                      , NULL                AS BASE_DATE
+                      , 0                   AS QUANTITY
+                      , NULL                AS QUANTITY_UNIT
+                      , 0                   AS AMOUNT
+                      , NULL                AS AMOUNT_UNIT
+                FROM    DUAL
+               )
+        ORDER BY SEQ
+    </select>
+    
+    <!-- 원가관리 리포트 Detail 조회 -->
+    <select id="getDetailList" resultType="IbExpenseStatusResDto">
+        SELECT  /* [ibExpenseStatusService.sqlx][getDetailList][원가관리 리포트 Detail 조회][sunho.kim][2025.09.02] */
+                IB_EXPENSE_DISTRIBUTION.DOCUMENT_TYPE_CODE   AS DOCUMENT_TYPE_CODE      /*DOCUMENT TYPE CODE*/
+              , IB_EXPENSE_DISTRIBUTION.DOCUMENT_NUMBER      AS DOCUMENT_NUMBER         /*DOCUMENT No*/
+              , ST_EXDCSTORAGE.TCSPOKEY                      AS PO_NO                   /*P/O No*/
+              , IB_EXPENSE_DISTRIBUTION.ACCOUNT_DETAIL_CODE  AS ACCOUNT_DETAIL_CODE     /*Cost Code*/
+              , IB_EXPENSE_DISTRIBUTION.ACCOUNT_DETAIL_NAME  AS ACCOUNT_DETAIL_NAME     /*Cost Name*/
+              , ST_EXDCSTORAGE.QUANTITY                      AS QUANTITY                /*Quantity*/
+              , ST_EXDCSTORAGE.UOM                           AS QUANTITY_UNIT           /*Unit*/
+              , IB_EXPENSE_DISTRIBUTION.AMOUNT               AS AMOUNT                  /*Amount*/
+              , IB_EXPENSE.AMOUNT_UNIT                       AS AMOUNT_UNIT             /*Curr.*/
+              , TO_CHAR(IB_EXPENSE.POSTING_DATE,'YYYYMMDD')  AS BASE_DATE               /*Posting Date*/
+        FROM    ST_EXDCSTORAGE              
+        JOIN    IB_EXPENSE_DISTRIBUTION 
+        ON      IB_EXPENSE_DISTRIBUTION.DOCUMENT_SN         = ST_EXDCSTORAGE.SERIALKEY
+        JOIN    IB_EXPENSE
+        ON      IB_EXPENSE.SERIALKEY                        = IB_EXPENSE_DISTRIBUTION.EXPENSE_SN
+        AND     IB_EXPENSE.STATUS                           = 'SCO'
+        AND     IB_EXPENSE.POSTING_DATE            <![CDATA[<]]> TO_DATE(#{postingdate},'YYYYMMDD') + 1
+        WHERE   1=1
+        AND     ST_EXDCSTORAGE.SKU                          = #{itemcode}
+        AND     ST_EXDCSTORAGE.CUSTKEY                      = #{customercode}
+        AND     ST_EXDCSTORAGE.POKEY                        = #{erppono} 
+        AND     ST_EXDCSTORAGE.POLINE                       = LPAD(#{polineno},5,'0')
+        AND     ST_EXDCSTORAGE.CONVSERIALNO                 = #{houseblno}
+        UNION ALL
+        SELECT  NULL                                         AS DOCUMENT_TYPE_CODE 
+              , NULL                                         AS DOCUMENT_NUMBER    
+              , NULL                                         AS PO_NO              
+              , NULL                                         AS ACCOUNT_DETAIL_CODE
+              , NULL                                         AS ACCOUNT_DETAIL_NAME
+              , NULL                                         AS QUANTITY           
+              , NULL                                         AS QUANTITY_UNIT      
+              , NULL                                         AS AMOUNT             
+              , NULL                                         AS AMOUNT_UNIT        
+              , NULL                                         AS BASE_DATE          
+        FROM DUAL
+    </select>
+    
+    <select id="getPopupErpPoNoInfo" resultType="IbExpenseStatusPopupResDto">
+        SELECT  /* [ibExpenseStatusService.sqlx][getPopupErpPoNoInfo][원가관리 리포트 Popup조회(ErpPoNo)][sunho.kim][2025.09.02] */
+               SN                                         AS SN                         /*SN*/
+             , STATUS                                     AS STATUS                     /*Status*/
+             , DECODE(INVOICE_FLAG, 'Y', 'Full'
+                                  , 'P', 'Partial'
+                                  , 'None')               AS INVOICE_FLAG               /*Shipment*/
+             ,(SELECT SUBSTR(XMLAGG(XMLELEMENT(COL ,',', HOUSE_BL_NO) ORDER BY HOUSE_BL_NO).EXTRACT('//text()').GETSTRINGVAL(), 2)
+               FROM  (SELECT DISTINCT III.PO_SN, II.HOUSE_BL_NO
+                      FROM   MPRO.IMPORT_INVOICE@DL_MDM II
+                      JOIN   MPRO.IMPORT_INVOICE_ITEM@DL_MDM III
+                      ON     III.II_SN = II.SN) AA
+               WHERE  AA.PO_SN = PURCHASE_ORDER.SN)       AS HBL_NO                     /*B/L No*/
+             ,(SELECT ATTRIBUTES5
+                   FROM   MPRO.PURCHASE_ORDER_ITEM@DL_MDM
+                   WHERE  PO_SN = PURCHASE_ORDER.SN 
+               AND ATTRIBUTES5 IS NOT NULL 
+               AND ROWNUM = 1
+              )                                           AS DEPT                      /*Dept*/
+             , KEY_NO                                     AS KEY_NO                    /*P/O No*/
+             , ' '                                        AS LOV_ITEM                  /*Item*/
+             , BUSINESS_TYPE_NAME                         AS BUSINESS_TYPE_NAME        /*Business Type**/
+             , REVISION_NO                                AS REVISION_NO               /*Rev No*/   
+             , ISSUE_DATE                                 AS ISSUE_DATE                /*Approval Date*/   
+             , DECODE(TRANSPORT_KIND, 'S', 'Ocean'
+                                    , 'A', 'Air'
+                                    , 'AS', 'AirOcean')   AS TRANSPORT                  /*Shipping Type*/
+             , ATTRIBUTES4                                AS ATTRIBUTES4                /*ATTRIBUTES4*/       
+             , SUPPLIER_NAME                              AS SUPPLIER_NAME              /*Supplier*/    
+             , PRICE_TERMS_CODE                           AS PRICE_TERMS_CODE           /*Delivery Type*/ 
+             , PRICE_TERMS_NAME                           AS PRICE_TERMS_NAME           /*Deliever Type Name*/ 
+             , PAYMENT_TYPE_CODE                          AS PAYMENT_TYPE_CODE          /*Payment Type*/ 
+             , PAYMENT_NAME                               AS PAYMENT_NAME               /*Payment Name*/     
+             , TOTAL_AMOUNT_UNIT                          AS TOTAL_AMOUNT_UNIT          /*Curr*/ 
+             , TOTAL_AMOUNT                               AS TOTAL_AMOUNT               /*Amount*/   
+             , NVL((SELECT USER_NM 
+                    FROM   FRAMEONE_USER 
+                    WHERE  USER_ID = PURCHASE_ORDER.REG_ID
+                   ),'시스템관리자')                          AS REG_ID                     /*Reg Name*/
+             , REG_DATE                                   AS REG_DATE                   /*Reg Date*/
+             , NVL((SELECT USER_NM 
+                    FROM   FRAMEONE_USER 
+                    WHERE  USER_ID = PURCHASE_ORDER.MOD_ID
+                   ),'시스템관리자')                          AS MOD_ID                     /*Mod Name*/
+             , MOD_DATE                                   AS MOD_DATE                   /*Mod Date*/
+             , ERP_PO_ID                                  AS ERP_PO_ID                  /*ERP P/O No*/
+        FROM   MPRO.PURCHASE_ORDER@DL_MDM
+        WHERE  MEMBER_ID = 0
+        AND    BUSINESS_TYPE_CODE = 'IM'
+
+        <if test="issuedateFrom != null and issuedateFrom != ''">              
+        AND    ISSUE_DATE     <![CDATA[>=]]> TO_DATE(#{issuedateFrom}      , 'yyyyMMdd')            
+        </if>              
+        <if test="issuedateTo != null and issuedateTo != ''">                
+        AND    ISSUE_DATE     <![CDATA[<]]> TO_DATE(#{issuedateTo}        , 'yyyyMMdd')+1          
+        </if>
+        <if test="shippingdateFrom != null and shippingdateFrom != ''">           
+        AND    SHIPPING_DATE  <![CDATA[>=]]> TO_DATE(#{shippingdateFrom}   , 'yyyyMMdd')            
+        </if>              
+        <if test="shippingdateTo != null and shippingdateTo != ''">             
+        AND    SHIPPING_DATE  <![CDATA[<]]> TO_DATE(#{shippingdateTo}     , 'yyyyMMdd')+1          
+        </if>
+        <if test="expirydateFrom != null and expirydateFrom != ''">             
+        AND    EXPIRY_DATE    <![CDATA[>=]]> TO_DATE(#{expirydateFrom}   , 'yyyyMMdd')            
+        </if>              
+        <if test="expirydateTo != null and expirydateTo != ''">               
+        AND    EXPIRY_DATE    <![CDATA[<]]>  TO_DATE(#{expirydateTo}     , 'yyyyMMdd')+1          
+        </if>
+        <if test="arrivaldateFrom != null and arrivaldateFrom != ''">            
+        AND    ARRIVAL_DATE   <![CDATA[>=]]> TO_DATE(#{arrivaldateFrom}    , 'yyyyMMdd')            
+        </if>              
+        <if test="arrivaldateTo != null and arrivaldateTo != ''">              
+        AND    ARRIVAL_DATE   <![CDATA[<]]>  TO_DATE(#{arrivaldateTo}      , 'yyyyMMdd')+1          
+        </if>
+        <if test="regdateFrom != null and regdateFrom != ''">                
+        AND    REG_DATE       <![CDATA[>=]]> TO_DATE(#{regdateFrom}        , 'yyyyMMdd')            
+        </if>              
+        <if test="regdateTo != null and regdateTo != ''">                  
+        AND    REG_DATE       <![CDATA[<]]>  TO_DATE(#{regdateTo}          , 'yyyyMMdd')+1          
+        </if>
+        <if test="moddateFrom != null and moddateFrom != ''">                
+        AND    MOD_DATE       <![CDATA[>=]]> TO_DATE(#{moddateFrom}        , 'yyyyMMdd')            
+        </if>              
+        <if test="moddateTo != null and moddateTo != ''">                  
+        AND    MOD_DATE       <![CDATA[<]]>  TO_DATE(#{moddateTo}          , 'yyyyMMdd')+1          
+        </if>
+
+        <if test="keyno != null and keyno != ''">                       
+        AND    KEY_NO                     LIKE  '%'||#{keyno}            ||'%'                          
+        </if>              
+        <if test="suppliername != null and suppliername != ''">                
+        AND    SUPPLIER_NAME              LIKE  '%'||#{suppliername}     ||'%'                          
+        </if>              
+        <if test="businesstypename != null and businesstypename != ''">           
+        AND    BUSINESS_TYPE_NAME         LIKE  '%'||#{businesstypename}||'%'                          
+        </if>              
+        <if test="erppoid != null and erppoid != ''">                    
+        AND    ERP_PO_ID                  LIKE  '%'||#{erppoid}         ||'%'                          
+        </if>              
+        <if test="hblno != null and hblno != ''">                       
+        AND    EXISTS (SELECT 1 
+                       FROM   MPRO.IMPORT_INVOICE@DL_MDM II
+                       JOIN   MPRO.IMPORT_INVOICE_ITEM@DL_MDM III
+                       ON     III.II_SN      = II.SN
+                       WHERE  PO_SN          = PURCHASE_ORDER.SN
+                       AND    HOUSE_BL_NO LIKE  '%'||#{hblno}||'%')                                     
+        </if>             
+    </select>
+    
+    <select id="getPopupItemCodeInfo" resultType="IbExpenseStatusPopupResDto">
+        SELECT  /* [ibExpenseStatusService.sqlx][getPopupItemCodeInfo][원가관리 리포트 Popup조회(ItemCode)][sunho.kim][2025.09.02] */
+                PO.STATUS                              AS STATUS                /*Status*/
+              , PO.INVOICE_FLAG                        AS INVOICE_FLAG          /*Invoice Flag*/
+              , PO.KEY_NO                              AS KEY_NO                /*Key NO*/
+              , PO.ISSUE_DATE                          AS ISSUE_DATE            /*Issue Date*/
+              , PO.SUPPLIER_NAME                       AS SUPPLIER_NAME         /*Supplier*/
+              , POI.SN                                 AS SN                    /*sn*/
+              , POI.PO_SN                              AS PO_SN                 /*Po sn*/
+              , POI.LINE_NO                            AS LINE_NO               /*Line No"*/
+              , POI.ITEM_CODE                          AS ITEM_CODE             /*Item Code*/
+              , POI.ITEM_DESCRIPTION                   AS ITEM_DESCRIPTION      /*Item Desc*/
+              , POI.HS_CODE                            AS HS_CODE               /*HS Code*/
+              , POI.QUANTITY                           AS QUANTITY              /*Quantity*/
+              , POI.QUANTITY_UNIT                      AS QUANTITY_UNIT         /*Unit*/
+              , POI.UNIT_PRICE                         AS UNIT_PRICE            /*Unit Price*/
+              , POI.AMOUNT                             AS AMOUNT                /*Amount*/
+              , POI.AMOUNT_UNIT                        AS AMOUNT_UNIT           /*Curr.*/
+              , POI.NET_WEIGHT                         AS NET_WEIGHT            /*Net Wt.*/
+              , POI.NET_WEIGHT_UNIT                    AS NET_WEIGHT_UNIT       /*Unit*/
+              , POI.GROSS_WEIGHT                       AS GROSS_WEIGHT          /*Gross Wt.*/
+              , POI.GROSS_WEIGHT_UNIT                  AS GROSS_WEIGHT_UNIT     /*Unit*/
+              , POI.VOLUME                             AS VOLUME                /*Volumne*/
+              , PO.ERP_PO_ID                           AS ERP_PO_ID             /*Erp PO ID*/
+              , POI.SALE_CUSTOMER_CODE                 AS SALE_CUSTOMER_CODE    /*Sales Customer Code*/
+              , POI.SALE_CUSTOMER_NAME                 AS SALE_CUSTOMER_NAME    /*Sales Customer Name*/
+              ,(SELECT MAX(II.HOUSE_BL_NO) 
+                FROM   MPRO.IMPORT_INVOICE@DL_MDM II
+                JOIN   MPRO.IMPORT_INVOICE_ITEM@DL_MDM III 
+                ON     III.II_SN  = II.SN
+                WHERE  III.PO_SN  = POI.PO_SN 
+                AND    III.POI_SN = POI.SN)            AS HOUSE_BL_NO           /*House B/L No.*/
+        FROM    MPRO.PURCHASE_ORDER@DL_MDM PO
+        JOIN    MPRO.PURCHASE_ORDER_ITEM@DL_MDM POI
+        ON      POI.PO_SN         = PO.SN
+        AND     POI.STATUS        = 'Y'
+        <if test="itemcode != null and itemcode != ''">                    
+        AND    POI.ITEM_CODE            LIKE '%'||#{itemcode}       ||'%'                               
+        </if>       
+        <if test="itemdescription != null and itemdescription != ''">             
+        AND    POI.ITEM_DESCRIPTION     LIKE '%'||#{itemdescription}||'%'                               
+        </if>       
+        WHERE   1=1
+        <if test="erppono != null and erppono != ''">                      
+        AND    PO.ERP_PO_ID                = #{erppono}                                                  
+        </if>       
+        <if test="issuedateFrom != null and issuedateFrom != ''">              
+        AND    PO.ISSUE_DATE     <![CDATA[>=]]> TO_DATE(#{issuedateFrom}      , 'yyyyMMdd')            
+        </if>              
+        <if test="issuedateTo != null and issuedateTo != ''">                
+        AND    PO.ISSUE_DATE      <![CDATA[<]]> TO_DATE(#{issuedateTo}        , 'yyyyMMdd')+1          
+        </if>
+        <if test="erppoid != null and erppoid != ''">                    
+        AND    PO.ERP_PO_ID             LIKE '%'||#{erppoid}       ||'%'                               
+        </if>       
+        ORDER BY 
+                PO.ERP_PO_ID ASC
+              , POI.LINE_NO ASC
+    </select>
+    
+    <select id="getPopupHouseBLNoInfo" resultType="IbExpenseStatusPopupResDto">
+        SELECT  /* [ibExpenseStatusService.sqlx][getPopupHouseBLNoInfo][원가관리 리포트 Popup조회(HouseBLNo)][sunho.kim][2025.09.02] */
+               DECODE(II.STATUS, 'CFM', 'Confirm'
+                               , 'ENT', 'Entered'
+                               , II.STATUS )                       AS STATUS                    /*Status*/
+             , DECODE(II.LG_FLAG, 'Y', 'Yes', 'No')                AS LG_FLAG                   /*LG Flag*/
+             , DECODE(II.LG_FLAG, 'N', 'APPROVAL', II.ATTRIBUTES1) AS ATTRIBUTES1               /*ATTRIBUTES1*/
+             , II.PLACE_OF_RECEIPT_CODE                            AS PLACE_OF_RECEIPT_CODE     /*Place of Receipt Code*/
+             , II.KEY_NO                                           AS KEY_NO                    /*Doc No*/ 
+             , II.HOUSE_BL_NO                                      AS HOUSE_BL_NO               /*B/L No*/
+             , II.MASTER_BL_NO                                     AS MASTER_BL_NO              /*Master B/LNO*/
+             ,(SELECT PURCHASE_ORDER.KEY_NO
+               FROM   MPRO.IMPORT_INVOICE_ITEM@DL_MDM
+               JOIN   MPRO.PURCHASE_ORDER@DL_MDM
+               ON     PURCHASE_ORDER.SN = IMPORT_INVOICE_ITEM.PO_SN
+               WHERE  IMPORT_INVOICE_ITEM.II_SN = II.SN
+               AND    IMPORT_INVOICE_ITEM.PO_SN IS NOT NULL
+               AND    ROWNUM = 1)                                  AS PO_NO                      /*P/O No*/
+             ,(SELECT SUBSTR(XMLAGG(XMLELEMENT(COL, ',', PURCHASE_PERSON) ORDER BY PURCHASE_PERSON).EXTRACT('//text()').GETSTRINGVAL(),2)
+               FROM  (SELECT DISTINCT IMPORT_INVOICE_ITEM.II_SN
+                                    , PURCHASE_ORDER.PURCHASE_PERSON
+                      FROM   MPRO.PURCHASE_ORDER@DL_MDM
+                      JOIN   MPRO.IMPORT_INVOICE_ITEM@DL_MDM
+                      ON     IMPORT_INVOICE_ITEM.PO_SN = PURCHASE_ORDER.SN) AA                   /*AA*/
+               WHERE  AA.II_SN = II.SN)                            AS PUR_PERSON                 /*Pur.Person*/
+             , II.PAYMENT_TYPE                                     AS PAYMENT_TYPE               /*Payment Type*/     
+             , II.SHIPPER_CODE                                     AS SHIPPER_CODE               /*Vendor Code*/     
+             , II.SHIPPER_NAME                                     AS SHIPPER_NAME               /*Vendor Name*/     
+             , II.TOTAL_AMOUNT                                     AS TOTAL_AMOUNT               /*Amount*/     
+             , II.TOTAL_AMOUNT_UNIT                                AS TOTAL_AMOUNT_UNIT          /*Curr.*/
+             , II.ONBOARD_DATE                                     AS ONBOARD_DATE               /*B/L Date*/    
+             , II.ARRIVAL_DATE                                     AS ARRIVAL_DATE               /*ETA*/     
+             , II.ISSUE_DATE                                       AS ISSUE_DATE                 /*B/L Date*/       
+             , DECODE(NVL(II.CUSTOMS_FLAG, 'N'),'Y','Full'
+                                               ,'P','Partial'
+                                               ,'None')            AS CUSTOMS_FLAG               /*C/L Rest*/
+             , II.CARRIER_NAME                                     AS CARRIER_NAME               /*Carrier*/      
+             , II.SHIPPING_PORT_NAME                               AS SHIPPING_PORT_NAME         /*Shipping port Name*/
+             , II.ARRIVAL_PORT_NAME                                AS ARRIVAL_PORT_NAME          /*Arrival port Name*/ 
+             , II.PRICE_TERMS_CODE                                 AS PRICE_TERMS_CODE           /*Delivey Type*/ 
+             , II.PRICE_TERMS_NAME                                 AS PRICE_TERMS_NAME           /*Delivey Type Name*/ 
+             , DECODE(II.TRANSPORT_KIND, 'A'  , 'Air'
+                                       , 'O'  , 'Ocean'
+                                       , 'ANO', 'AirOcean')        AS TRANSPORT_KIND             /*TransPort Kind*/
+             , II.TOTAL_PACKING                                    AS TOTAL_PACKING              /*TOTAL Packing*/        
+             , II.TOTAL_GROSS_WEIGHT                               AS TOTAL_GROSS_WEIGHT         /*TOTAL Gross WT.*/  
+             , II.MEASUREMENT                                      AS MEASUREMENT                /*Mmeasurement*/          
+             , II.RECEIPT_DATE                                     AS RECEIPT_DATE               /*Receipt Date*/         
+             , II.PLACE_OF_RECEIPT_NAME                            AS PLACE_OF_RECEIPT_NAME      /*Place of Receipt Name*/
+             , II.REG_ID                                           AS REG_ID                     /*REg Id*/              
+             , II.REG_DATE                                         AS REG_DATE                   /*Reg Date*/             
+             , II.MOD_ID                                           AS MOD_ID                     /*Mod Id*/               
+             , II.MOD_DATE                                         AS MOD_DATE                   /*Mod Date*/             
+             , II.SN                                               AS SN                         /*sn*/                  
+             , II.TOTAL_QUANTITY                                   AS TOTAL_QUANTITY             /*Quantity*/       
+             , II.TOTAL_QUANTITY_UNIT                              AS TOTAL_QUANTITY_UNIT        /*Unit.*/ 
+             ,(SELECT PURCHASE_ORDER.ERP_PO_ID
+               FROM   MPRO.IMPORT_INVOICE_ITEM@DL_MDM
+               JOIN   MPRO.PURCHASE_ORDER@DL_MDM
+               ON     PURCHASE_ORDER.SN = IMPORT_INVOICE_ITEM.PO_SN
+               WHERE  IMPORT_INVOICE_ITEM.II_SN = II.SN
+               AND    PO_SN IS NOT NULL
+               AND    ROWNUM = 1)                                  AS ERP_PO_ID                 /**/
+        FROM   MPRO.IMPORT_INVOICE@DL_MDM II
+        WHERE  II.HOUSE_BL_NO IS NOT NULL
+        AND    II.MEMBER_ID = 0
+        AND    EXISTS (SELECT 1
+                       FROM   MPRO.IMPORT_INVOICE_ITEM@DL_MDM
+                       JOIN   MPRO.PURCHASE_ORDER@DL_MDM
+                       ON     PURCHASE_ORDER.SN = IMPORT_INVOICE_ITEM.PO_SN
+                       WHERE  IMPORT_INVOICE_ITEM.II_SN = II.SN
+                       AND    IMPORT_INVOICE_ITEM.PO_SN IS NOT NULL
+                       AND    PURCHASE_ORDER.KEY_NO IS NOT NULL
+                       AND    ROWNUM = 1)
+        AND    II.BUSINESS_TYPE_CODE IN ('IM')
+        
+        <if test="issuedateFrom != null and issuedateFrom != ''">              
+        AND    II.ISSUE_DATE    <![CDATA[>=]]> TO_DATE(#{issuedateFrom}      , 'yyyyMMdd')            
+        </if>              
+        <if test="issuedateTo != null and issuedateTo != ''">                
+        AND    II.ISSUE_DATE     <![CDATA[<]]> TO_DATE(#{issuedateTo}        , 'yyyyMMdd')+1          
+        </if>
+        <if test="regdateFrom != null and regdateFrom != ''">                
+        AND    II.REG_DATE      <![CDATA[>=]]> TO_DATE(#{regdateFrom}        , 'yyyyMMdd')            
+        </if>              
+        <if test="regdateTo != null and regdateTo != ''">                  
+        AND    II.REG_DATE        <![CDATA[<]]> TO_DATE(#{regdateTo}          , 'yyyyMMdd')+1          
+        </if>
+        <if test="houseblno != null and houseblno != ''">                  
+        AND    II.HOUSE_BL_NO LIKE  '%'||#{houseblno}||'%'                                             
+        </if>
+    </select>
+
+</mapper>

@@ -1,0 +1,1918 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="msCustDeliveryInfoService">
+
+	<update id="deleteGpsTempTable">
+        DELETE /* [msCustDeliveryInfoService.sqlx][deleteGpsTempTable][엑셀데이터임시 Tabele 삭제][JangGwangSeok][2025.06.19] */ SY_PROCESSTEMP_TM
+		WHERE 1 = 1
+			AND PROCESSCREATOR	= #{gUserId}
+			AND PROCESSTYPE		= #{processtype}
+			AND SPID			= #{gSpid}
+    </update>
+    
+    <insert id="insertGpsTempTable">
+    	<foreach item="item" collection="list" open="INSERT ALL" close="SELECT * FROM DUAL">
+			INTO /* [msCustDeliveryInfoService.sqlx][insertGpsTempTable][엑셀데이터임시 Tabele 등록][JangGwangSeok][2025.06.19] */	SY_PROCESSTEMP_TM 
+					(	 PROCESSTYPE 
+						,PROCESSCREATOR 
+						,SPID 
+						,ADDWHO 
+						,EDITWHO 
+						,CUSTTYPE 
+						,CUSTKEY 
+						,OTHER01 
+						,OTHER02
+						,OTHER03
+						,OTHER04
+						,DELIVERYDT 
+						,SLIPDT 
+						,SLIPNO 
+						,SLIPTYPE 
+						,STORERKEY ) 
+				VALUES
+					( 		 
+						 #{item.processtype} 
+						,#{item.gUserId}
+						,#{item.gSpid}
+						,#{item.gUserId}
+						,#{item.gUserId} 
+						,NVL((SELECT CUSTTYPE FROM MS_CUST WHERE CUSTKEY = #{item.custkey} AND ROWNUM = 1) ,'C')  
+						,#{item.custkey} 
+						,#{item.latitude} 
+						,#{item.longitude}
+						,#{item.address} 
+						,#{item.address2} 
+						,'9999'  
+						,'9999' 
+						,'9999'  
+						,'9999'  
+						,#{item.gStorerkey}	)
+		</foreach>
+    </insert>
+    
+	<select id="getDataPopExcelUploadGpsResult" resultType="MsCustDeliveryInfoResDto">
+		SELECT /* [msCustDeliveryInfoService.sqlx][getDataPopExcelUploadGpsResult][POP GPS 좌표 일괄등록 결과 조회(목록)][JangGwangSeok][2025.06.19] */
+			 SY_PROCESSTEMP_TM.CUSTKEY
+			,SY_PROCESSTEMP_TM.CUSTTYPE
+    		,SY_PROCESSTEMP_TM.OTHER01      AS LATITUDE
+		    ,SY_PROCESSTEMP_TM.OTHER02      AS LONGITUDE 
+		    ,SY_PROCESSTEMP_TM.PROCESSFLAG  AS PROCESS_YN
+		    ,SY_PROCESSTEMP_TM.ERRMSG       AS PROCESS_MSG
+        FROM SY_PROCESSTEMP_TM
+        WHERE 1 = 1
+        	AND SY_PROCESSTEMP_TM.PROCESSCREATOR	= #{gUserId}
+			AND SY_PROCESSTEMP_TM.PROCESSTYPE    	= #{processtype}
+			AND SY_PROCESSTEMP_TM.SPID           	= #{gSpid}
+        ORDER BY SY_PROCESSTEMP_TM.SERIALKEY
+	</select>
+	
+	<!-- gps좌표등록 -->
+	<select id="getGpsMasterList" resultType="MsCustDeliveryInfoResDto">
+		SELECT /* [msCustDeliveryInfoService.sqlx][getGpsMasterList][gps좌표등록 조회 (목록)][JeongHyeongCheol][2025.08.20] */
+			  MS_CUST.DLV_DCCODE							 AS DLV_DCCODE              /* 센터코드*/
+			, MS_CUSTDLVINFO.TRUTHADDRESS1 || ' ' ||MS_CUSTDLVINFO.TRUTHADDRESS2  AS ADDRESS                	/* 기본주소*/
+			, MS_CUSTDLVINFO.LATITUDE                            AS LATITUDE              	/* 위도*/
+			, MS_CUSTDLVINFO.LONGITUDE                           AS LONGITUDE             	/* 경도*/
+			, CUST1.DESCRIPTION									 AS FROM_CUSTNAME
+			, MS_CUSTDLVINFO.CUSTKEY                             AS FROM_CUSTKEY            /* 거래처코드*/       
+			, NVL(CD1.BASEDESCR, CD1.BASECODE)                   AS CUSTTYPE_NM             /* 거래처 유형*/
+			, MS_CUSTDLVINFO.ADDWHO								 AS ADDWHO                	/* 최초등록자*/
+		    , MS_CUSTDLVINFO.ADDDATE							 AS ADDDATE               	/* 최초등록시간*/
+		    , MS_CUSTDLVINFO.EDITWHO							 AS EDITWHO               	/* 최종변경자*/
+		    , MS_CUSTDLVINFO.EDITDATE							 AS EDITDATE              	/* 최종변경시간*/	
+			, USER1.USER_NM 									 AS REG_NM				 	/* 등록자명 */
+			, USER2.USER_NM 									 AS UPD_NM				 	/* 수정자명 */	
+		FROM   MS_CUST
+		JOIN   CM_USER_AUTHORITY_DCXSTORER  
+        ON     CM_USER_AUTHORITY_DCXSTORER.USERID     = #{gUserId}
+        AND    CM_USER_AUTHORITY_DCXSTORER.DCCODE     = #{gDccode}
+        
+        <if test='gStorerkey != null and gStorerkey != "" and gStorerkey != "%"'>
+		    AND CM_USER_AUTHORITY_DCXSTORER.STORERKEY = #{gStorerkey}
+		</if>
+		
+        AND    CM_USER_AUTHORITY_DCXSTORER.STORERKEY     = MS_CUST.STORERKEY
+        JOIN MS_CUSTDLVINFO
+        ON 	  MS_CUST.STORERKEY	= MS_CUSTDLVINFO.STORERKEY
+        AND   MS_CUST.CUSTKEY	= MS_CUSTDLVINFO.DLVCUSTKEY 
+        AND   MS_CUST.CUSTTYPE	= MS_CUSTDLVINFO.CUSTTYPE
+        <if test='yn != null and yn == "Y"'>
+            AND (MS_CUSTDLVINFO.LATITUDE IS NOT NULL AND MS_CUSTDLVINFO.LONGITUDE IS NOT NULL)
+        </if>
+        <if test='yn != null and yn == "N"'>
+            AND (MS_CUSTDLVINFO.LATITUDE IS NULL OR MS_CUSTDLVINFO.LONGITUDE IS NULL)
+        </if>
+        LEFT JOIN MS_CUST CUST1		ON CUST1.STORERKEY  = MS_CUSTDLVINFO.STORERKEY        						  
+        						   AND CUST1.CUSTKEY    = MS_CUSTDLVINFO.CUSTKEY
+        						   AND CUST1.CUSTTYPE   = MS_CUSTDLVINFO.CUSTTYPE
+        LEFT JOIN CM_CODE_STORER CD1  ON CD1.STORERKEY  = 'STD' 
+ 							  		 AND CD1.CODELIST	= 'CUSTTYPE'
+ 							  		 AND CD1.BASECODE   = MS_CUSTDLVINFO.CUSTTYPE
+ 		
+ 		LEFT JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = MS_CUSTDLVINFO.ADDWHO  		/*등록자명*/
+		LEFT JOIN FRAMEONE_USER USER2 ON USER2.USER_ID = MS_CUSTDLVINFO.EDITWHO  		/*수정자명*/
+        
+        WHERE  1=1
+        	AND MS_CUST.DEL_YN    = 'N'
+        	AND (MS_CUSTDLVINFO.CUSTTYPE = 'C'
+        		OR (MS_CUSTDLVINFO.CUSTTYPE = 'P' 
+        			AND MS_CUSTDLVINFO.PROC_LOGI_YN = 'Y'))
+           AND MS_CUST.CUSTGROUP NOT IN ('C01','C13') 
+        <if test='dlvDccodeMulti != null and dlvDccodeMulti != ""'>
+            AND MS_CUST.DLV_DCCODE IN 
+            <foreach collection="dlvDccodeMulti" item="item" open="(" separator="," close=")">
+                #{item}
+            </foreach>            
+        </if>
+    	<!-- 고객 다중선택 -->
+		<if test='custkeyMulti != null and custkeyMulti != ""'>			
+            <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                <foreach collection="custkeyMulti" item="item">
+                    OR MS_CUST.CUSTKEY IN
+                    <foreach collection="item" item="code" open="(" close=")" separator=",">
+                        #{code}
+                    </foreach>
+                </foreach>
+            </trim>			
+    	</if>    	
+        <if test='address1 != null and address1 != ""'>
+            AND MS_CUSTDLVINFO.ADDRESS1 LIKE '%' || #{address1} || '%'
+        </if>
+        <if test='editwho != null and editwho != ""'>
+            AND MS_CUSTDLVINFO.EDITWHO = #{editwho}
+        </if> 
+	    <if test='adddateFrom != null and adddateFrom != ""'>
+            AND MS_CUSTDLVINFO.EDITDATE <![CDATA[>=]]> TO_DATE(#{adddateFrom}, 'YYYYMMDDHH24MI')
+        </if>        
+	</select>
+	
+	
+	<!-- 거래처 기준정보 조회(목록) -->
+	<select id="getMasterList" resultType="MsCustDeliveryInfoResDto">
+		SELECT /* [msCustDeliveryInfoService.sqlx][getMasterList][거래처 배송정보 조회 (목록)][JeongHyeongCheol][2025.08.20] */
+			 DISTINCT
+			 '0' AS CHECKYN
+			, i.STORERKEY 											AS STORERKEY            /*고객사코드*/
+			, d.CUSTGROUP 											AS CUSTGROUP			/*거래처 그룹 분류유형(본점(C01), 판매처(C02), 관리처(C03,C04,C11))*/
+			, d.DLV_DCCODE 											AS DLV_DCCODE			/*주출고처*/
+			, i.CUSTTYPE 											AS CUSTTYPE				/*거래처 유형*/
+			, i.CUSTKEY 											AS CUSTKEY				/*거래처코드*/
+			, CUST1.DESCRIPTION										AS CUSTNAME				/*거래처 명*/						
+			, i.DLVCUSTKEY 											AS DLVCUSTKEY			/*배송처코드*/
+			, CUST2.DESCRIPTION								 		AS DLVCUSTNAME			/*배송처명*/
+			, i.REQDLVTIME1_FROM 									AS REQDLVTIME1_FROM		/*배송요청시간 시작 OTD(From)*/
+			, i.REQDLVTIME1_TO 										AS REQDLVTIME1_TO		/*배송요청시간 종료 OTD(To)*/
+			, i.INSPECTTYPE 										AS INSPECTTYPE          /*검수유형*/
+			, d.DISTRICTCODE 										AS DISTRICTCODE         /*권역*/
+			, i.DISTANCETYPE 										AS DISTANCETYPE         /*원거리유형*/
+			, CASE 
+			    /* 1. 배송 정보가 존재하면서 확정일자가 없거나 */
+			    /* 2. 발행번호가 존재하면서 상태가 'Y'가 아닌 경우 */
+			    WHEN (DLVHIS.CUSTKEY IS NOT NULL AND DLVHIS.CONFIRMDATE IS NULL)
+                        /*OR (CCF.ISSUENO    IS NOT NULL AND CCF.STATUS != 'Y')*/
+                  OR (CCF.ISSUENO    IS NOT NULL AND MIN(CCF.STATUS) OVER(PARTITION BY CCF.ISSUENO)  != 'Y')
+			    THEN 'Y'
+			    
+			    /* 위 조건에 해당하지 않는 모든 경우는 정상(N) */
+			    ELSE 'N'
+			  END													AS DLV_INFO_APPLY_YN	/*배송정보적용요청여부*/
+			, i.QCTYPE 												AS QCTYPE               /*RED zone 여부*/
+			, i.OTHER02 											AS OTHER02              /*강성 거래처*/
+			, i.KEYTYPE 											AS KEYTYPE              /*거래처 열쇠 여부*/
+			, i.OTHER01 											AS OTHER01              /*기타1*/
+			, i.DLVSTRATEGY1 										AS DLVSTRATEGY1         /*배송전략1*/
+			, i.ENTRYCONDITION1 									AS ENTRYCONDITION1      /*진입조건1*/
+			, i.UNLOADCONDITION1 									AS UNLOADCONDITION1     /*하차조건1*/
+			, i.UNLOADCONDITION2 									AS UNLOADCONDITION2     /*하차조건2*/
+			, i.LOADPLACE 											AS LOADPLACE            /*회수위치*/
+		    
+		    , i.HDO_ID												AS HQ_CUSTKEY			/* 본점 */
+		    , CUST3.DESCRIPTION										AS HQ_CUSTNAME			/* 본점명 */
+		    , i.SALES_CUSTKEY										AS SALE_CUSTKEY			/* 판매처 */
+		    , CUST4.DESCRIPTION										AS SALE_CUSTNAME		/* 판매처명 */
+		    , i.MGMT_CUSTKEY										AS MNG_CUSTKEY			/* 관리처 */
+		    , CUST5.DESCRIPTION										AS MNG_CUSTNAME			/* 관리처 명*/
+		    
+		    , i.TRUTHCUSTKEY 										AS TRUTHCUSTKEY			/*실착지 */
+			, i.FLOOR 												AS FLOOR                 /*층수*/
+			, i.TONNAGE 											AS TONNAGE               /*차량진입 제한(톤수)*/
+			,(SELECT MAX(MS_CUSTXPOP.POPNO) KEEP(DENSE_RANK LAST ORDER BY MS_CUSTXPOP.FROMDATE) 
+					FROM MS_CUSTXPOP      
+					WHERE MS_CUSTXPOP.STORERKEY = 'FW00'               
+					AND MS_CUSTXPOP.CUSTKEY   = i.CUSTKEY                 
+					AND MS_CUSTXPOP.CUSTTYPE  = 'C'  
+					AND MS_CUSTXPOP.DCCODE     = #{gDccode}
+					AND MS_CUSTXPOP.FROMDATE <![CDATA[<=]]> TO_CHAR(SYSDATE,'YYYYMMDD'))		AS POP                   /*POP*/
+			, i.WEEKDAYDELIVERY 									AS WEEKDAYDELIVERY       /*평일배차*/
+			, i.WEEKENDDELIVERY 									AS WEEKENDDELIVERY       /*주말배차*/
+			, i.UNLOADDT 											AS UNLOADDT              /*하차작업 시간(분)*/
+			, i.DCCHECKCUST 										AS DCCHECKCUST           /*센터 강성 거래처*/
+			, i.REQDLVTIME2_FROM 									AS REQDLVTIME2_FROM      /*배송요청시간 시작*/
+			, i.REQDLVTIME2_TO 										AS REQDLVTIME2_TO        /*배송요청시간 종료*/
+			, i.FACEINSPECT 										AS FACEINSPECT           /*WMS 대면검수여부*/
+			, i.KEYKIND 											AS KEYKIND               /*배송/키즈자차/수송*/
+			, i.UNLOADPLACE2 										AS UNLOADPLACE2          /*WMS납품위치*/
+			, i.LOADPLACE2 											AS LOADPLACE2            /*WMS회수위치*/
+			, i.FREEZEPLACE 										AS FREEZEPLACE           /*적재위치(냉동)*/
+			, i.COLDPLACE 											AS COLDPLACE             /*적재위치(냉장/상온)*/
+			, i.HTEMPERATURE 										AS HTEMPERATURE
+			, i.TRUTHEMPNAME 										AS TRUTHEMPNAME          /*담당자명*/
+			, i.TRUTHPHONE 											AS TRUTHPHONE            /*담당자연락처*/
+			, d.EMPNAME1 											AS EMPNAME1              /*MA*/
+			, i.ADDDATE 											AS ADDDATE               /*최초등록시간*/
+			, i.ADDWHO 												AS ADDWHO                /*최초등록자명*/
+			, USER1.USER_NM										 	AS REG_NM				 /*등록자명 */
+			, i.DEL_YN 												AS DEL_YN                /*삭제유무*/
+			, i.EDITDATE 											AS EDITDATE              /*최종변경시간*/
+			, i.EDITWHO 											AS EDITWHO               /*최종등록자명*/
+			, USER2.USER_NM											AS UPD_NM				 /*수정자명 */
+			, i.CARDMEMO 											AS CARDMEMO              /*요청사항(거래처카드)*/
+
+			, i.TRUTHADDRESS1     					 				AS TRUTHADDRESS1			/* 실착지 거래처주소*/
+			, i.TRUTHADDRESS2     			 		 				AS TRUTHADDRESS2			/* 실착지 상세주소*/
+			, i.TRUTHZIPCODE     				 	 				AS TRUTHZIPCODE				/* 실착지 우편번호*/
+			, i.INSPECTORPRINTYN                   					AS INSPECTORPRINTYN			/* 검수자용 납품서 출력 여부*/
+			, DAMO.DEC(i.INSPECTIONWORKERPHONE)        				AS INSPECTIONWORKERPHONE	/* 검수 실무자 전화번호*/
+			, i.TEMPTARGET                          				AS TEMPTARGET				/* 온도기록지 제출 대상 여부*/
+			, i.PARKINGHEIGHT                       				AS PARKINGHEIGHT            /* 건물 주차장 진입 가능 높이*/
+			, i.DELIVERYAVAILABLETIME               				AS DELIVERYAVAILABLETIME	/* 고객사 납품 가능 시간*/
+			, i.BUILDINGOPENTIME                    				AS BUILDINGOPENTIME			/* 고객사 건물 개방 시간*/
+			, i.ACCESSWAY							 				AS ACCESSWAY				/* 업장 출입 방법*/
+			, i.INITDELIVERYDESC                    				AS INITDELIVERYDESC			/* 초도배송시 전달사항*/
+			, i.ARMY_YN												AS ARMY_YN					/* 군납조건 */
+			, i.KEYDETAIL                           				AS KEYDETAIL				/* 고객사 출입 KEY 세부정보*/
+			, i.KEYTYPE2							 				AS KEYTYPE2			  		/* (WMS) 거래처 열쇠여부*/
+		    , FN_CODEDESCR(d.STORERKEY, 'T005S', d.DISTRICTCODE )  	AS DISTRICTNAME           	/* 권역 명*/
+		    
+		    , i.INITREQUESTDT                    					AS INITREQUESTDT			/* 초도배송 요청일자*/
+		    , i.INITREQUESTTIMESTART                    			AS INITREQUESTTIMESTART			/* 초도배송 요청시간 시작	*/
+		    , i.INITREQUESTTIMEEND                    				AS INITREQUESTTIMEEND			/* 초도배송 요청시간 종료	*/
+		    , i.INITFTFINSPECTIONYN                    				AS INITFTFINSPECTIONYN			/* 초도배송 대면검수 여부	*/
+		    , DAMO.DEC(i.INITDELIVERYCONTACT)          				AS INITDELIVERYCONTACT			/* 초도배송 담당자 연락처	*/
+		    
+		    , CASE
+		    	WHEN TRUTH.SALES_CUSTKEY IS NOT NULL THEN 'Y'
+		    	ELSE 'N'
+		      END			    									AS REC_TRUTHCUSTKEY			/* 추천실착지코드*/
+            , d.LATITUDE                                            AS LATITUDE              /* 위도 grid 에서 수정 후 저장 할때 조회된 값이 없어서 null 처리 되서 추가 함. */
+            , d.LONGITUDE                                           AS LONGITUDE             /* 경도 grid 에서 수정 후 저장 할때 조회된 값이 없어서 null 처리 되서 추가 함. */
+		FROM MS_CUST d   
+		
+		JOIN MS_CUSTDLVINFO i
+		       ON d.STORERKEY = i.STORERKEY
+		      AND d.CUSTKEY   = i.CUSTKEY
+		LEFT JOIN (
+			    SELECT 
+			        DLVHIS_SUB.*,
+			        ROW_NUMBER() OVER(PARTITION BY STORERKEY, CUSTKEY ORDER BY EDITDATE DESC) AS RN
+			    FROM CRM_CUSTDLVINFO_HIS DLVHIS_SUB
+			    WHERE DLVHIS_SUB.CUSTTYPE = 'C'
+			) DLVHIS 
+			   ON DLVHIS.STORERKEY = i.STORERKEY 
+        	  AND DLVHIS.CUSTTYPE  = 'C'
+        	  AND DLVHIS.CUSTKEY   = i.CUSTKEY
+        	  AND DLVHIS.RN = 1
+        	  
+        LEFT JOIN CRM_CUSTDLVINFO_FILE CCF
+        	   ON CCF.ISSUENO = i.CUSTKEY
+        	  AND CCF.DEL_YN  = 'N'
+        	  
+        <!-- 추천실착지코드 컬럼 관련 추가내역 시작 -->
+        <!--
+        LEFT JOIN (
+			    SELECT 
+				       L1.STORERKEY AS STORERKEY,
+				       L1.CUSTKEY 	AS CUSTKEY,
+				       L1.CUSTTYPE	AS CUSTTYPE,
+			           L2.CUSTKEY 	AS SALES_CUSTKEY,          
+				       NULL       	AS MGMT_CUSTKEY
+				  FROM MS_CUST L1
+				  JOIN MS_CUST L2
+				    ON L2.PARENTCUSTKEY = L1.CUSTKEY
+				   AND L2.CUSTGROUP = 'C02'
+				 WHERE L1.STORERKEY = 'FW00'
+				   AND L1.CUSTTYPE  = 'C'
+				   AND L1.CUSTGROUP = 'C01'
+				   AND L1.OTCO_GRP_ID IS NOT NULL
+				   AND L2.OTCO_GRP_ID IS NOT NULL
+				   AND NOT EXISTS (
+				        SELECT 1
+				          FROM MS_CUST L3
+				         WHERE L3.BILLTOCUSTKEY = L2.CUSTKEY
+				           AND L3.CUSTGROUP <![CDATA[<>]]> 'C02'
+				           AND L3.OTCO_GRP_ID IS NOT NULL
+				       )
+			) TRUTH 
+			   ON TRUTH.STORERKEY 		= i.STORERKEY        	  
+        	  AND TRUTH.SALES_CUSTKEY   = i.CUSTKEY
+        	  -->
+        LEFT JOIN (
+                    SELECT
+                        L2.STORERKEY AS STORERKEY,
+                        L2.CUSTKEY   AS CUSTKEY,
+                        L2.CUSTTYPE  AS CUSTTYPE,
+                        L2.CUSTKEY   AS SALES_CUSTKEY,
+                        NULL         AS MGMT_CUSTKEY
+                    FROM MS_CUST L2
+                    WHERE L2.STORERKEY = 'FW00'
+                    AND L2.CUSTTYPE  = 'C'
+                    AND L2.CUSTGROUP = 'C02'
+                    AND L2.OTCO_GRP_ID IS NOT NULL
+                    AND NOT EXISTS (
+                                    SELECT 1
+                                    FROM MS_CUST L3
+                                    WHERE L3.BILLTOCUSTKEY = L2.CUSTKEY
+                                    AND L3.CUSTGROUP  <![CDATA[<>]]>  'C02'
+                                    AND L3.OTCO_GRP_ID IS NOT NULL
+                                    )
+                ) TRUTH
+               ON TRUTH.STORERKEY 		= i.STORERKEY        	  
+        	  AND TRUTH.SALES_CUSTKEY   = i.CUSTKEY
+        <!-- 추천실착지코드 컬럼 관련 추가내역 끝 -->
+			  
+		
+		LEFT JOIN MS_CUST CUST1		ON CUST1.STORERKEY = i.STORERKEY 
+        						   AND CUST1.CUSTTYPE  = 'C'
+        						   AND CUST1.CUSTKEY   = i.CUSTKEY
+	    LEFT JOIN MS_CUST CUST2		ON CUST2.STORERKEY = i.STORERKEY 
+        						   AND CUST2.CUSTTYPE  = 'C'
+        						   AND CUST2.CUSTKEY   = i.DLVCUSTKEY
+        LEFT JOIN MS_CUST CUST3		ON CUST3.STORERKEY = i.STORERKEY 
+        						   AND CUST3.CUSTTYPE  = 'C'
+        						   AND CUST3.CUSTKEY   = i.HDO_ID
+        LEFT JOIN MS_CUST CUST4		ON CUST4.STORERKEY = i.STORERKEY 
+        						   AND CUST4.CUSTTYPE  = 'C'
+        						   AND CUST4.CUSTKEY   = i.SALES_CUSTKEY
+	    LEFT JOIN MS_CUST CUST5		ON CUST5.STORERKEY = i.STORERKEY 
+        						   AND CUST5.CUSTTYPE  = 'C'
+        						   AND CUST5.CUSTKEY   = i.MGMT_CUSTKEY
+	    LEFT JOIN 	   FRAMEONE_USER USER1 ON USER1.USER_ID = i.ADDWHO  		/*등록자명*/
+		LEFT JOIN	   FRAMEONE_USER USER2 ON USER2.USER_ID = i.EDITWHO  		/*수정자명*/
+		WHERE 1=1
+		  AND d.CUSTKEY   = i.DLVCUSTKEY
+		  AND d.CUSTTYPE  = i.CUSTTYPE
+		  AND d.DEL_YN    = 'N'
+		  AND d.CUSTTYPE  = 'C'
+		  AND d.STORERKEY = 'FW00'
+		  <if test='redzoneYn != null and redzoneYn != ""'>
+		  AND NVL(i.REDZONE_YN, 'N') = #{redzoneYn}
+		  </if>
+		  <if test='deliverynotiyn != null and deliverynotiyn != ""'>
+		  AND NVL(i.DELIVERYNOTIYN, 'N') = #{deliverynotiyn}
+		  </if>
+		  <if test='custkeyMulti != null and custkeyMulti != ""'>
+            <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                <foreach collection="custkeyMulti" item="item">
+                    OR i.CUSTKEY IN
+                    <foreach collection="item" item="code" open="(" close=")" separator=",">
+                        #{code}
+                    </foreach>
+                </foreach>
+            </trim>            
+		  </if>
+          <if test='dlvDccodeMulti != null and dlvDccodeMulti != ""'>
+            AND d.DLV_DCCODE IN 
+            <foreach collection="dlvDccodeMulti" item="item" open="(" separator="," close=")">
+                #{item}
+            </foreach>            
+          </if>          
+          <if test='otdYn == "Y"'>
+            AND (i.REQDLVTIME2_FROM IS NOT NULL
+				OR i.REQDLVTIME2_TO IS NOT NULL)
+          </if>
+          <if test='otdYn == "N"'>
+            AND i.REQDLVTIME2_FROM IS NULL
+			AND i.REQDLVTIME2_TO IS NULL
+          </if>
+          <if test='inspecttype != null and inspecttype != ""'>
+            AND i.FACEINSPECT = #{inspecttype}
+          </if>        
+          <if test='truthcustkeyMulti != null and truthcustkeyMulti != ""'>
+            <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                <foreach collection="truthcustkeyMulti" item="item">
+                    OR i.TRUTHCUSTKEY IN
+                    <foreach collection="item" item="code" open="(" close=")" separator=",">
+                        #{code}
+                    </foreach>
+                </foreach>
+            </trim>            
+          </if>
+          <if test='dlvInfoApplyYn == "Y"'>
+          	 AND ((DLVHIS.CUSTKEY IS NOT NULL AND DLVHIS.CONFIRMDATE IS NULL) 
+          	 		OR 
+			 	 (CCF.ISSUENO IS NOT NULL AND CCF.STATUS != 'Y'))
+		  </if>
+		  <if test='dlvInfoApplyYn == "N"'>		  
+			 AND ((DLVHIS.CUSTKEY IS NULL OR DLVHIS.CONFIRMDATE IS NOT NULL)
+			 		AND 
+			 	 (CCF.ISSUENO IS NULL OR CCF.STATUS = 'Y'))
+		  </if>
+          <if test='fromDate != null and fromDate != "" and toDate != null and toDate != ""'>
+			 AND i.ADDDATE <![CDATA[<=]]> TO_DATE(#{toDate} || '235959', 'YYYYMMDDHH24MISS')
+			 AND i.ADDDATE <![CDATA[>=]]> TO_DATE(#{fromDate}, 'YYYYMMDD')
+          </if>
+          <!-- 실착지유무 조건 추가 -->
+          <if test='truthcustkeyYn == "Y"'>		  
+			 AND i.TRUTHCUSTKEY IS NULL
+		  </if>
+		  <if test='truthcustkeyYn == "N"'>		  
+			 AND i.TRUTHCUSTKEY IS NOT NULL
+		  </if>
+	</select>
+	
+	<!-- 거래처 기준정보 조회(단건) -->
+    <select id="getMaster" resultType="MsCustDeliveryInfoMasterResDto">
+	    SELECT	/* [msCustDeliveryInfoService.sqlx][msCustDeliveryInfoService.getMaster][고객배송조건 조회(단건)][JeongHyeongCheol][2025.08.20]*/ 
+	    	  	  MS_CUSTDLVINFO.SERIALKEY                           AS SERIALKEY				/* 데이터번호*/
+				, MS_CUSTDLVINFO.STORERKEY                           AS STORERKEY				/* 고객사코드*/
+				, MS_CUSTDLVINFO.CUSTKEY                             AS CUSTKEY					/* 거래처코드*/
+				, FN_DESCR_CUST(MS_CUSTDLVINFO.STORERKEY, MS_CUSTDLVINFO.CUSTKEY)  AS CUSTNAME	/* 거래처 명*/
+				, MS_CUSTDLVINFO.CUSTTYPE                            AS CUSTTYPE				/* 거래처 유형*/
+				, MS_CUSTDLVINFO.ADDRESSMATCHYN                      AS ADDRESSMATCHYN			/* 실착지 주소 일치 여부*/
+				, MS_CUSTDLVINFO.TRUTHADDRESS1     					 AS TRUTHADDRESS1			/* 실착지 거래처주소*/
+				, MS_CUSTDLVINFO.TRUTHADDRESS2     			 		 AS TRUTHADDRESS2			/* 실착지 상세주소*/
+				, MS_CUSTDLVINFO.TRUTHZIPCODE     				 	 AS TRUTHZIPCODE			/* 실착지 우편번호*/
+				, MS_CUSTDLVINFO.TRUTHCUSTKEY						 AS TRUTHCUSTKEY			/* 실착지 거래처코드*/
+				, FN_DESCR_CUST(MS_CUSTDLVINFO.STORERKEY, MS_CUSTDLVINFO.TRUTHCUSTKEY) AS TRUTHCUSTNAME /* 실착지 거래처명*/
+				, MS_CUSTDLVINFO.FACEINSPECT						 AS FACEINSPECT				/* WMS 대면검수여부*/
+				, DAMO.DEC(MS_CUSTDLVINFO.INSPECTIONWORKERPHONE)     AS INSPECTIONWORKERPHONE	/* 검수 실무자 전화번호*/
+				, MS_CUSTDLVINFO.INSPECTORPRINTYN                    AS INSPECTORPRINTYN		/* 검수자용 납품서 출력 여부*/
+				, MS_CUSTDLVINFO.PARKINGHEIGHT                       AS PARKINGHEIGHT           /* 건물 주차장 진입 가능 높이*/
+				, MS_CUSTDLVINFO.ACCESSWAY							 AS ACCESSWAY				/* 업장 출입 방법*/
+				, MS_CUSTDLVINFO.KEYTYPE                       		 AS KEYTYPE					/* 고객사 출입 KEY정보*/
+				, MS_CUSTDLVINFO.KEYDETAIL                           AS KEYDETAIL				/* 고객사 출입 KEY 세부정보*/
+				, MS_CUSTDLVINFO.REQDLVTIME2_FROM                    AS REQDLVTIME2_FROM		/* 배송요구시간2차 시작*/
+				, MS_CUSTDLVINFO.REQDLVTIME2_TO                      AS REQDLVTIME2_TO			/* 배송요구시간2차 종료*/
+				, MS_CUSTDLVINFO.DELIVERYAVAILABLETIME               AS DELIVERYAVAILABLETIME	/* 고객사 납품 가능 시간*/
+				, MS_CUSTDLVINFO.BUILDINGOPENTIME                    AS BUILDINGOPENTIME		/* 고객사 건물 개방 시간*/
+				, MS_CUSTDLVINFO.FREEZEPLACE						 AS FREEZEPLACE				/* 적재위치(냉동)*/
+				, MS_CUSTDLVINFO.COLDPLACE							 AS COLDPLACE				/* 적재위치(냉장/상온)*/
+			    , MS_CUSTDLVINFO.HTEMPERATURE						 AS HTEMPERATURE			/* 적재위치(상온)*/
+				, MS_CUSTDLVINFO.LOADPLACE2                          AS LOADPLACE2				/* WMS회수위치*/
+				, MS_CUSTDLVINFO.INITREQUESTDT                       AS INITREQUESTDT			/* 초도배송 요청일자*/
+				, MS_CUSTDLVINFO.INITREQUESTTIMESTART                AS INITREQUESTTIMESTART	/* 초도배송 요청시간 시작*/
+				, MS_CUSTDLVINFO.INITREQUESTTIMEEND                  AS INITREQUESTTIMEEND		/* 초도배송 요청시간 종료*/
+				, MS_CUSTDLVINFO.INITFTFINSPECTIONYN                 AS INITFTFINSPECTIONYN		/* 초도배송 대면검수 여부*/
+				, DAMO.DEC(MS_CUSTDLVINFO.INITDELIVERYCONTACT)       AS INITDELIVERYCONTACT		/* 초도배송 담당자 연락처*/
+				, MS_CUSTDLVINFO.INITDELIVERYDESC                    AS INITDELIVERYDESC		/* 초도배송시 전달사항*/
+				, MS_CUSTDLVINFO.DELIVERYTYPE                        AS DELIVERYTYPE			/* 배송유형*/
+				, MS_CUSTDLVINFO.TEMPTARGET                          AS TEMPTARGET				/* 온도기록지 제출 대상 여부*/
+				, MS_CUSTDLVINFO.LABELPRINTTYPE                      AS LABELPRINTTYPE			/* 라벨 출력 유형*/
+				, MS_CUSTDLVINFO.DELIVERYNOTIYN                      AS DELIVERYNOTIYN			/* 배송도착 알림 수신 여부*/
+				, DAMO.DEC(MS_CUSTDLVINFO.DELIVERYNOTIPHONE)                   AS DELIVERYNOTIPHONE		/* 배송도착 알림 수신 휴대폰 번호*/
+				, MS_CUSTDLVINFO.DELIVERYNOTITIMESTART               AS DELIVERYNOTITIMESTART	/* 배송도착 알림 수신 시간 시작*/
+				, MS_CUSTDLVINFO.DELIVERYNOTITIMEEND                 AS DELIVERYNOTITIMEEND		/* 배송도착 알림 수신 시간 종료*/
+				, MS_CUSTDLVINFO.EMPLOEENUMBER                       AS EMPLOEENUMBER			/* 사원번호*/
+				, MS_CUSTDLVINFO.CREATEDBYEMAIL                      AS CREATEDBYEMAIL			/* 작성자 이메일*/
+				, MS_CUSTDLVINFO.CREATEDBYNAME                       AS CREATEDBYNAME			/* 작성자명*/
+				, MS_CUSTDLVINFO.CREATEDDATE                         AS CREATEDDATE				/* 작성시간*/
+				, MS_CUSTDLVINFO.STORETYPE                           AS STORETYPE				/* 업장유형*/
+				, MS_CUSTDLVINFO.EDMSFILEID                          AS EDMSFILEID				/* EDMS FILEID*/
+				, MS_CUSTDLVINFO.DLVCUSTKEY                          AS DLVCUSTKEY				/* 배송처코드*/
+				, FN_DESCR_CUST(MS_CUSTDLVINFO.STORERKEY, MS_CUSTDLVINFO.DLVCUSTKEY) AS DLVCUSTNAME /* 배송처명*/
+				, MS_CUSTDLVINFO.DROPCUSTKEY                         AS DROPCUSTKEY				/* 인도처코드*/
+				, MS_CUSTDLVINFO.PRIORITY                            AS PRIORITY				/* 우선순위*/
+				, MS_CUSTDLVINFO.DISTRICTGROUP                       AS DISTRICTGROUP			/* 지정배송그룹*/
+				, MS_CUST.DISTRICTCODE								 AS DISTRICTCODE            /* 권역*/
+				, FN_CODEDESCR(MS_CUST.STORERKEY, 'T005S', MS_CUST.DISTRICTCODE )  AS DISTRICTNAME           /* 권역 명*/
+				, MS_CUSTDLVINFO.CARNO                               AS CARNO					/* 지정배송차량*/
+				, MS_CUSTDLVINFO.DISTANCETYPE                        AS DISTANCETYPE			/* 원거리유형*/
+				, MS_CUSTDLVINFO.REDZONE_YN                        	 AS REDZONE_YN				/* 레드존 여부(배송유형정보)*/
+				, MS_CUSTDLVINFO.ROUTE                               AS ROUTE					/* 경유지*/
+				, MS_CUSTDLVINFO.COURIER                             AS COURIER					/* 기본배송택배사*/
+				, MS_CUSTDLVINFO.INVOICETYPE                         AS INVOICETYPE				/* 기본운송장유형*/
+				, MS_CUSTDLVINFO.DLV_DCCODE                          AS DLV_DCCODE				/* 주출고처*/ 
+				,'['||MS_CUSTDLVINFO.DLV_DCCODE||']' || CD1.DCNAME 	 AS DLV_DCNAME  /* 주출고처명*/   
+				, MS_CUST.ZIPCODE                             		 AS ZIPCODE               /* 우편번호*/
+				, MS_CUST.ADDRESS1                            	     AS ADDRESS1              /* 기본주소*/
+				, MS_CUST.ADDRESS2                            		 AS ADDRESS2              /* 상세주소*/
+				, MS_CUST.ADDRESS3                            		 AS ADDRESS3              /* 확장주소3*/
+				, MS_CUST.ADDRESS4                            		 AS ADDRESS4              /* 확장주소4*/
+				, DAMO.DEC(MS_CUST.PHONE1)                    		 AS PHONE1                /* 전화번호1*/
+				, DAMO.DEC(MS_CUST.PHONE2)                           AS PHONE2                /* 전화번호2*/
+				, MS_CUST.FAX                                 		 AS FAX                   /* 팩스번호*/
+				, MS_CUSTDLVINFO.EMAIL                               AS EMAIL                 /* 이메일*/
+				, MS_CUST.EMPNAME1                           		 AS EMPNAME1              /* 관리 사원명1(ma)*/
+				, MS_CUST.EMPNAME2                           		 AS EMPNAME2              /* 관리 사원명2*/
+				, MS_CUST.EMPNAME3                           		 AS EMPNAME3              /* 관리 사원명3*/
+				, MS_CUST.EMPNAME4                           		 AS EMPNAME4              /* 관리 사원명4*/
+				, MS_CUST.EMPNAME5                           		 AS EMPNAME5              /* 관리 사원명5*/
+				, DAMO.DEC(MS_CUST.EMPPHONE1)                        AS EMPPHONE1             /* 관리 사원 전화번호1*/
+				, DAMO.DEC(MS_CUST.EMPPHONE2)            		     AS EMPPHONE2             /* 관리 사원 전화번호2*/
+				, DAMO.DEC(MS_CUST.EMPPHONE3)                        AS EMPPHONE3             /* 관리 사원 전화번호3*/
+				, DAMO.DEC(MS_CUST.EMPPHONE4)                        AS EMPPHONE4             /* 관리 사원 전화번호4*/
+				, DAMO.DEC(MS_CUST.EMPPHONE5)                        AS EMPPHONE5             /* 관리 사원 전화번호5*/
+				, MS_CUSTDLVINFO.STARTDATE                           AS STARTDATE             /* 거래 시작 일자*/
+				, MS_CUSTDLVINFO.ENDDATE                             AS ENDDATE               /* 거래 종료 일자*/
+				, MS_CUSTDLVINFO.REQDLVWEEK                          AS REQDLVWEEK            /* 배송요청요일*/
+				, MS_CUSTDLVINFO.REQDLVDATE                          AS REQDLVDATE            /* 배송요청일*/
+				, MS_CUSTDLVINFO.REQDLVTIME1_FROM                    AS REQDLVTIME1_FROM      /* 배송요청시간*/
+				, MS_CUSTDLVINFO.REQDLVTIME1_TO                      AS REQDLVTIME1_TO        /* 배송요구시간1차 종료*/
+				, MS_CUSTDLVINFO.KEYPLACE                            AS KEYPLACE              /* 열쇠보관및수령장소*/
+				, MS_CUSTDLVINFO.KEYNO                               AS KEYNO                 /* 열쇠번호*/
+				, MS_CUSTDLVINFO.ENTRYPLACE                          AS ENTRYPLACE            /* 진입위치*/
+				, MS_CUSTDLVINFO.ENTRYFLOOR                          AS ENTRYFLOOR            /* 진입층*/
+				, (SELECT CM_CODE.BASEDESCR
+                     FROM CM_CODE
+                    WHERE 1=1
+                      AND CM_CODE.CODELIST = 'CUSTOMER-ENTERCOND1'
+                      AND CM_CODE.BASECODE = MS_CUSTDLVINFO.ENTRYCONDITION1 ) AS ENTRYCONDITION1 /* 진입조건1*/
+				, MS_CUSTDLVINFO.ENTRYCONDITION2                     AS ENTRYCONDITION2       /* 진입조건2*/
+				, MS_CUSTDLVINFO.ENTRYCONDITION3                     AS ENTRYCONDITION3       /* 진입조건3*/
+				, MS_CUSTDLVINFO.PARKINGTYPE                         AS PARKINGTYPE           /* 주차유형*/
+				, MS_CUSTDLVINFO.PARKINGPLACE                        AS PARKINGPLACE          /* 주차위치*/
+				, MS_CUSTDLVINFO.PARKINGFLOOR                        AS PARKINGFLOOR          /* 주차층*/
+				, MS_CUSTDLVINFO.LOADPLACE                           AS LOADPLACE             /* 회수위치*/
+				, MS_CUSTDLVINFO.LOADFLOOR                           AS LOADFLOOR             /* 상차층*/
+				, MS_CUSTDLVINFO.LOADCONDITION1                      AS LOADCONDITION1        /* 상차조건1*/
+				, MS_CUSTDLVINFO.LOADCONDITION2                      AS LOADCONDITION2        /* 상차조건2*/
+				, MS_CUSTDLVINFO.LOADCONDITION3                      AS LOADCONDITION3        /* 상차조건3*/
+				, MS_CUSTDLVINFO.UNLOADPLACE                         AS UNLOADPLACE			  /* 하차위치*/
+				, MS_CUSTDLVINFO.UNLOADFLOOR                         AS UNLOADFLOOR           /* 하차층*/
+				  , (SELECT CM_CODE.BASEDESCR
+                                                     FROM CM_CODE
+                                                    WHERE 1=1
+                                                      AND CM_CODE.CODELIST = 'CUSTOMER-UNLOADCOND1'
+                                                      AND CM_CODE.BASECODE = MS_CUSTDLVINFO.UNLOADCONDITION1
+                                                  ) UNLOADCONDITION1      /* 하차조건1*/
+				  , (SELECT CM_CODE.BASEDESCR
+                                                     FROM CM_CODE
+                                                    WHERE 1=1
+                                                      AND CM_CODE.CODELIST = 'CUSTOMER-UNLOADCOND2'
+                                                      AND CM_CODE.BASECODE = MS_CUSTDLVINFO.UNLOADCONDITION2
+                                                  ) UNLOADCONDITION2      /* 하차조건2*/
+				, MS_CUSTDLVINFO.UNLOADCONDITION3                    AS UNLOADCONDITION3      /* 하차조건3*/
+				, MS_CUSTDLVINFO.LIMITCAR                            AS LIMITCAR              /* 진입제한차량*/
+				, MS_CUSTDLVINFO.LOADBOXPERMIN                       AS LOADBOXPERMIN         /* 상차가능한분당박스수*/
+				, MS_CUSTDLVINFO.LOADTOOLTYPE                        AS LOADTOOLTYPE          /* 상차도구유형*/
+				, MS_CUSTDLVINFO.UNLOADBOXPERMIN                     AS UNLOADBOXPERMIN       /* 하차가능한분당박스수*/
+				, MS_CUSTDLVINFO.UNLOADTOOLTYPE                      AS UNLOADTOOLTYPE        /* 하차도구유형*/
+				, MS_CUSTDLVINFO.LATITUDE                            AS LATITUDE              /* 위도*/
+				, MS_CUSTDLVINFO.LONGITUDE                           AS LONGITUDE             /* 경도*/
+				, MS_CUSTDLVINFO.INSTRATEGY                          AS INSTRATEGY            /* 입고전략*/
+				, MS_CUSTDLVINFO.OUTSTRATEGY                         AS OUTSTRATEGY           /* 출고전략*/
+				, MS_CUSTDLVINFO.QCTYPE                              AS QCTYPE                /* 레드존 여부(거래처기본정보)*/
+				, MS_CUSTDLVINFO.INSPECTTYPE                         AS INSPECTTYPE           /* 검수유형*/
+				, MS_CUSTDLVINFO.DLVSTRATEGY1                        AS DLVSTRATEGY1          /* 배송전략1*/
+				, MS_CUSTDLVINFO.DLVSTRATEGY2                        AS DLVSTRATEGY2          /* 배송전략2*/
+				, MS_CUSTDLVINFO.DLVSTRATEGY3                        AS DLVSTRATEGY3          /* 배송전략3*/
+				, MS_CUSTDLVINFO.DLVSTRATEGY4                        AS DLVSTRATEGY4          /* 배송전략4*/
+				, MS_CUSTDLVINFO.DLVSTRATEGY5                        AS DLVSTRATEGY5          /* 배송전략5*/
+				, MS_CUSTDLVINFO.OTHER01                             AS OTHER01               /* 기타1*/
+				, MS_CUSTDLVINFO.OTHER02                             AS OTHER02               /* 기타2*/
+				, MS_CUSTDLVINFO.OTHER03                             AS OTHER03               /* 기타3*/
+				, MS_CUSTDLVINFO.OTHER04                             AS OTHER04               /* 기타4*/
+				, MS_CUSTDLVINFO.OTHER05                             AS OTHER05               /* 기타5*/
+				, MS_CUSTDLVINFO.MEMO                                AS MEMO                  /* 기타사항*/
+				, MS_CUSTDLVINFO.IFFILENAME                          AS IFFILENAME            /* 인터페이스파일명*/
+				, MS_CUSTDLVINFO.KEYKIND							 AS KEYKIND				  /* 배송/키즈자차/수송*/
+				, MS_CUSTDLVINFO.CARDMEMO          					 AS CARDMEMO			  /* 요청사항(거래처카드)*/
+				, MS_CUSTDLVINFO.SUPPLYMEMO							 AS SUPPLYMEMO			  /* 메모(납품서반영)*/
+				, MS_CUSTDLVINFO.TRUTHEMPNAME						 AS TRUTHEMPNAME		  /* 담당자명*/
+				, DAMO.DEC(MS_CUSTDLVINFO.TRUTHPHONE)				 AS TRUTHPHONE			  /* 담당자연락처*/
+				, MS_CUSTDLVINFO.FLOOR								 AS FLOOR				  /* 층수*/
+				, MS_CUSTDLVINFO.TONNAGE							 AS TONNAGE				  /* 차량진입 제한(톤수)*/
+				, MS_CUSTDLVINFO.UNLOADDT							 AS UNLOADDT			  /* 하차작업 시간(분)*/
+				, MS_CUSTDLVINFO.VOLUMECUST							 AS VOLUMECUST			  /* 부피짐 거래처*/
+				, MS_CUSTDLVINFO.PASSWORD							 AS PASSWORD			  /* 비밀번호*/
+				, MS_CUSTDLVINFO.KEYCUSTTYPE						 AS KEYCUSTTYPE			  /* 거래처 열쇠 종류*/
+			    , MS_CUSTDLVINFO.DCCHECKCUST						 AS DCCHECKCUST			  /* (WMS)센터 강성 거래처*/
+				, MS_CUSTDLVINFO.KEYTYPE2							 AS KEYTYPE2			  /* (WMS) 거래처 열쇠여부*/
+				, MS_CUSTDLVINFO.KEYPOINT							 AS KEYPOINT			  /* (WMS)거래처 열쇠 수령장소*/
+				, MS_CUSTDLVINFO.UNLOADPLACE2                        AS UNLOADPLACE2	      /* WMS납품위치*/
+			    , MS_CUSTDLVINFO.WORKDIV							 AS WORKDIV				  /* 작업구분*/
+			    , MS_CUSTDLVINFO.TEMPERTYPE							 AS TEMPERTYPE			  /* 온도기록지제출대상여부*/
+			    , MS_CUSTDLVINFO.DLVTYPE							 AS DLVTYPE				  /* 배송구분자(배송,위탁,자차,직송)*/
+			    , MS_CUSTDLVINFO.DLVTYPE2							 AS DLVTYPE2			  /* (WMS)배송유형 확인여부*/
+				, MS_CUSTDLVINFO.RADIUS                              AS RADIUS                /* 반경*/
+				, MS_CUSTDLVINFO.STYTIME                             AS STYTIME				  /* 체류시간(초)*/
+				, MS_CUSTDLVINFO.DISTANT_YN                          AS DISTANT_YN            /* 격오지여부*/
+				, MS_CUSTDLVINFO.DLV_WAIT_YN                         AS DLV_WAIT_YN           /* 납품대기여부*/
+				, MS_CUSTDLVINFO.KIDS_CL_YN                          AS KIDS_CL_YN            /* 키즈분류여부*/
+				, MS_CUSTDLVINFO.LNG_DISTANT_YN                      AS LNG_DISTANT_YN        /* 장거리여부*/
+				, MS_CUSTDLVINFO.PROC_LOGI_END_DT                    AS PROC_LOGI_END_DT      /* 조달물류종료일자*/
+				, MS_CUSTDLVINFO.PROC_LOGI_START_DT                  AS PROC_LOGI_START_DT    /* 조달물류시작일자*/
+				, MS_CUSTDLVINFO.PROC_LOGI_TYPE_CD                   AS PROC_LOGI_TYPE_CD     /* 조달물류방법코드*/
+				, MS_CUSTDLVINFO.PROC_LOGI_YN                        AS PROC_LOGI_YN          /* 조달물류여부*/
+				, MS_CUSTDLVINFO.UNLOAD_LVL_CD                       AS UNLOAD_LVL_CD         /* 하차난이도코드*/				
+				, MS_CUSTDLVINFO.PROC_SAMEDAY_CARNO                  AS PROC_SAMEDAY_CARNO    /* 조달일배차량번호*/
+				, MS_CUSTDLVINFO.PROC_STORAGE_CARNO                   AS PROC_STORAGE_CARNO	  /* 조달저장차량번호*/				
+				, MS_CUSTDLVINFO.STATUS                              AS STATUS                /* 상태*/
+				, FN_CODEDESCR(MS_CUST.STORERKEY, 'CUST_DEL_YN', MS_CUST.DEL_YN)   AS DEL_YN      /* 삭제여부 */
+				, MS_CUSTDLVINFO.ADDDATE							 AS ADDDATE				  /* 최초등록시간*/
+				, MS_CUSTDLVINFO.EDITDATE							 AS EDITDATE			  /* 최종변경시간*/
+	            , MS_CUSTDLVINFO.ADDWHO								 AS ADDWHO				  /* 최초등록자명 */
+	            , MS_CUSTDLVINFO.EDITWHO							 AS EDITWHO				  /* 최종등록자명 */
+                , USER1.USER_NM										 AS REG_NM				  /* 등록자명 */
+				, USER2.USER_NM										 AS UPD_NM				  /* 수정자명 */	
+                
+                , FN_CODEDESCR(MS_CUST.STORERKEY, 'CUSTORDERCLOSETYPE', MS_CUST.CUSTSTRATEGY4)   AS CUSTORDERCLOSETYPE      /* 거래처 마감유형 */
+                , REPLACE(MS_CUSTDLVINFO.REQDLVTIME1_FROM,'~') ||'~'||REPLACE(MS_CUSTDLVINFO.REQDLVTIME1_TO,'~') AS REQDLVTIME1
+				, MS_CUST.LABELSTRATEGY	           					AS LABELSTRATEGY  			/* 2차점 라벨출력 옵션 */
+			    , MS_CUST.CUSTSTRATEGY5            					AS CUSTSTRATEGY5  			/* 거래처전략5*/
+			    , MS_CUSTDLVINFO.ARMY_YN							AS ARMY_YN					/* 군납조건 */
+	            , MS_CUSTDLVINFO.AVG_WORK_TIME						AS AVG_WORK_TIME			/* 평균작업시간 */
+	            
+	            , MS_CUSTDLVINFO.FACEINSPECT_EXP_PAY_YN	               AS FACEINSPECT_EXP_PAY_YN	/* 대면검수비용지급여부*/
+	            
+	            ,(SELECT MAX(MS_CUSTXPOP.POPNO) KEEP(DENSE_RANK LAST ORDER BY MS_CUSTXPOP.FROMDATE) 
+		            FROM MS_CUSTXPOP      
+		           WHERE MS_CUSTXPOP.STORERKEY = MS_CUST.STORERKEY                
+		             AND MS_CUSTXPOP.CUSTKEY   = MS_CUST.CUSTKEY                
+		             AND MS_CUSTXPOP.CUSTTYPE  = MS_CUST.CUSTTYPE 
+		             AND MS_CUSTXPOP.DCCODE     = #{gDccode}
+		             AND MS_CUSTXPOP.FROMDATE <![CDATA[<=]]> TO_CHAR(SYSDATE,'YYYYMMDD')) AS POP		
+	             ,( SELECT CASE 
+	               WHEN trunc(AVG((to_char(TM_WORKLOG.Workdatedata1,
+	                            'hh24')*60+to_char(TM_WORKLOG.Workdatedata1,
+	                             'mm')))) IS NOT NULL THEN lpad(trunc(trunc(AVG((to_char(TM_WORKLOG.Workdatedata1,
+	                            'hh24')*60+to_char(TM_WORKLOG.Workdatedata1,
+	                             'mm'))))/60),
+	                    2,
+	                   '0')||':'||lpad(mod(trunc(AVG((to_char(TM_WORKLOG.Workdatedata1,
+	                            'hh24')*60+to_char(TM_WORKLOG.Workdatedata1,
+	                             'mm')))),
+	                   60),
+	                   2,
+	                   '0') 
+	               END                    
+	                   FROM TM_WORKLOG                    
+	                  WHERE TM_WORKLOG.DELIVERYDT <![CDATA[>=]]> to_char(SYSDATE-5,'yyyymmdd')      
+	                    AND TM_WORKLOG.WORKLOGTYPE IN ('DELIVERYSTART','FORCEDELIVERYSTART')                   
+	                    AND TM_WORKLOG.CUSTKEY     = MS_CUST.CUSTKEY  
+	                    )  AS AVG_ARRIVEDTIME
+				              
+         FROM      MS_CUSTDLVINFO
+         JOIN      MS_CUST  
+           ON      MS_CUST.STORERKEY   = MS_CUSTDLVINFO.STORERKEY
+		  AND      MS_CUST.CUSTKEY     = MS_CUSTDLVINFO.CUSTKEY
+		  AND	   MS_CUST.CUSTTYPE    = MS_CUSTDLVINFO.CUSTTYPE
+	LEFT JOIN 	   CM_DC CD1 
+		   ON 	   CD1.DCCODE = MS_CUSTDLVINFO.DLV_DCCODE 
+	LEFT JOIN 	   FRAMEONE_USER USER1 ON USER1.USER_ID = MS_CUSTDLVINFO.ADDWHO  		/*등록자명*/
+	LEFT JOIN	   FRAMEONE_USER USER2 ON USER2.USER_ID = MS_CUSTDLVINFO.EDITWHO  		/*수정자명*/
+        WHERE 1=1 
+			AND    MS_CUSTDLVINFO.STORERKEY    = #{gStorerkey}
+			AND    MS_CUSTDLVINFO.CUSTKEY      = #{custkey}
+			AND    MS_CUSTDLVINFO.CUSTTYPE     = 'C'
+			AND    MS_CUSTDLVINFO.DLVCUSTKEY   = #{dlvcustkey}
+    </select>
+    
+    <!-- 거래처 인쇄정보 조회 -->
+    <select id="getMasterPrintList" resultType="MsCustDeliveryInfoResDto">
+	    /* [msCustDeliveryInfoService.sqlx][msCustDeliveryInfoService.getMasterPrintList][고객배송조건 조회(단건)][JeongHyeongCheol][2025.08.20]*/ 
+	    WITH FILES AS
+					(SELECT   ISSUENO,
+			                       UPLOAD_HASH_ID,
+			                       UPLOAD_RES_DOC_ID,
+			                       ROW_NUMBER() OVER (PARTITION BY ISSUENO, UPLOAD_HASH_ID ORDER BY SERIALKEY) AS RN 
+			         FROM     CRM_CUSTDLVINFO_FILE 
+			         WHERE    DOC_NAME = 'CRMDLVINFO_FILE'
+					 
+			         <if test='custkeyMulti != null and custkeyMulti != ""'>
+			            <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+			                <foreach collection="custkeyMulti" item="item">
+			                    OR ISSUENO IN
+			                    <foreach collection="item" item="code" open="(" close=")" separator=",">
+			                        #{code}
+			                    </foreach>
+			                </foreach>
+			            </trim>            
+					 </if>
+			         AND      UPLOAD_HASH_ID IN ('12', '13', '14', '15', '16')  
+			         AND      STATUS = 'Y'
+			         AND	  DEL_YN = 'N'
+			         )
+		SELECT ISSUENO,
+		      MAX( CASE
+			          WHEN UPLOAD_HASH_ID = '12'
+			          AND    RN = 1 THEN UPLOAD_RES_DOC_ID
+			       END) AS STORE_ACCESS_ROUTE_1
+		    , MAX( CASE
+		              WHEN UPLOAD_HASH_ID = '12'
+		              AND    RN = 2 THEN UPLOAD_RES_DOC_ID
+		       	   END) AS STORE_ACCESS_ROUTE_2
+		    , MAX( CASE
+			          WHEN UPLOAD_HASH_ID = '12'
+			          AND    RN = 3 THEN UPLOAD_RES_DOC_ID
+			       END) AS STORE_ACCESS_ROUTE_3
+		    , MAX( CASE
+		              WHEN UPLOAD_HASH_ID = '12'
+		              AND    RN = 4 THEN UPLOAD_RES_DOC_ID
+		       	   END) AS STORE_ACCESS_ROUTE_4
+		    , MAX( CASE
+		              WHEN UPLOAD_HASH_ID = '13'
+		              AND    RN = 1 THEN UPLOAD_RES_DOC_ID
+		       	   END) AS GOODSLOCATIONFROZEN_1
+		    , MAX( CASE
+		              WHEN UPLOAD_HASH_ID = '13'
+		              AND    RN = 2 THEN UPLOAD_RES_DOC_ID
+		       	   END) AS GOODSLOCATIONFROZEN_2
+		    , MAX( CASE
+		              WHEN UPLOAD_HASH_ID = '14'
+		              AND    RN = 1 THEN UPLOAD_RES_DOC_ID
+		       	   END) AS GOODSLOCATIONREFRIG_1
+		    , MAX( CASE
+		              WHEN UPLOAD_HASH_ID = '14'
+		              AND    RN = 2 THEN UPLOAD_RES_DOC_ID
+		       	   END) AS GOODSLOCATIONREFRIG_2
+		    , MAX( CASE
+		              WHEN UPLOAD_HASH_ID = '15'
+		              AND    RN = 1 THEN UPLOAD_RES_DOC_ID
+		       	   END) AS GOODSLOCATIONROOM_1
+		    , MAX( CASE
+		              WHEN UPLOAD_HASH_ID = '15'
+		              AND    RN = 2 THEN UPLOAD_RES_DOC_ID
+		       	   END) AS GOODSLOCATIONROOM_2
+		    , MAX( CASE
+		              WHEN UPLOAD_HASH_ID = '16'
+		              AND    RN = 1 THEN UPLOAD_RES_DOC_ID
+		       	   END) AS RETURNLOCATION_1
+		    , MAX( CASE
+		              WHEN UPLOAD_HASH_ID = '16'
+		              AND    RN = 2 THEN UPLOAD_RES_DOC_ID
+		       	   END) AS RETURNLOCATION_2
+        FROM FILES 
+        GROUP BY ISSUENO
+    </select>
+                        
+	<!--  UPDATE(list) -->
+    <select id="updateMasterList" statementType="CALLABLE" resultType="MsCustDeliveryInfoEntity">
+
+        <![CDATA[
+        {
+            CALL  /* [MsCustDeliveryInfoService.sqlx][MsCustDeliveryInfoService.updateMasterList][거래처 배송정보 저장(목록조회 화면)][JeongHyeongCheol][2025.08.20] */
+            DECLARE
+                V_AFTER     MS_CUSTDLVINFO%rowtype;
+                O_SUCCESS   NUMBER         :=  1;      /* 성공여부(1이면 성공) */
+                O_ERRCODE   NUMBER         :=  0;      /* 오류 코드 */
+                O_ERRMSG    VARCHAR2(4000) := '';      /* 오류 메세지 */
+                SQL_ERROR   EXCEPTION;
+                
+            BEGIN
+                BEGIN
+                     SELECT *
+                       INTO V_AFTER
+                       FROM MS_CUSTDLVINFO
+                      WHERE STORERKEY   = #{gStorerkey}
+                        AND CUSTTYPE    = 'C'
+                        AND DLVCUSTKEY  = #{dlvcustkey}
+                        AND CUSTKEY     = #{custkey};
+                        
+                     V_AFTER.TRUTHCUSTKEY           := #{truthcustkey};
+                     V_AFTER.FLOOR                  := #{floor};            /* 층 */
+                     V_AFTER.FACEINSPECT            := #{faceinspect};      /* 대면검수여부 */
+                     V_AFTER.LOADPLACE2             := #{loadplace2};       /* 회수위치 */
+                     V_AFTER.FREEZEPLACE            := #{freezeplace};      /* 적재위치(냉동) */
+                     V_AFTER.COLDPLACE              := #{coldplace};        /* 적재위치(냉장) */
+                     V_AFTER.HTEMPERATURE           := #{htemperature};     /* 적재위치(상온) */
+                     V_AFTER.ARMY_YN                := #{armyYn};           /* 군납여부 */
+                     V_AFTER.CARDMEMO               := #{cardmemo};         /* 요청사항(거래처카드) */
+                     
+                     V_AFTER.REQDLVTIME2_FROM       := #{reqdlvtime2From};  /* OTD(From) */
+                     V_AFTER.REQDLVTIME2_TO         := #{reqdlvtime2To};    /* OTD(To) */
+                     V_AFTER.KEYTYPE2               := #{keytype2};         /* 출입KEY정보 */
+                     
+                     V_AFTER.EDITDATE               := SYSDATE;
+                     V_AFTER.EDITWHO                := #{gUserId};
+                     
+                     V_AFTER.TRUTHADDRESS1          := #{truthaddress1};    /* 실착지 주소 */
+                     V_AFTER.TRUTHADDRESS2          := #{truthaddress2};    /* 실작치 상세 주소 */
+                     V_AFTER.LATITUDE               := #{latitude};         /* 위도 */
+                     V_AFTER.LONGITUDE              := #{longitude};         /* 경도 */
+                     
+                     V_AFTER.DISTANCETYPE           := #{distancetype}; /* 파킹여부 */
+                     V_AFTER.KEYDETAIL              := #{keydetail};    /* 출입KEY 세부정보 */
+                     
+                     V_AFTER.BUILDINGOPENTIME       := #{buildingopentime};
+                     V_AFTER.DELIVERYAVAILABLETIME  := #{deliveryavailabletime};
+                     V_AFTER.PARKINGHEIGHT          := #{parkingheight};
+                     V_AFTER.ACCESSWAY              := #{accessway};
+
+                     IF #{truthcustkey} IS NULL THEN
+                         V_AFTER.TRUTHADDRESS1      := null;
+                         V_AFTER.TRUTHADDRESS2      := null;
+                         V_AFTER.LATITUDE           := null;
+                         V_AFTER.LONGITUDE          := null;
+                     END IF;
+                    
+                     TRMS_CUSTDLVINFO.TR_UPDATE(
+                              V_AFTER
+                          ,   O_SUCCESS
+                          ,   O_ERRCODE
+                          ,   O_ERRMSG
+                     );
+                     
+                     IF O_ERRCODE = -20001 THEN
+                         RAISE_APPLICATION_ERROR (-20001, NVL(O_ERRMSG, SQLERRM));
+                     ELSIF O_ERRCODE != 0 THEN
+                         RAISE SQL_ERROR;
+                     END IF;
+                     
+                     EXCEPTION WHEN OTHERS THEN
+                         O_ERRCODE := SQLCODE;
+                         O_ERRMSG := NVL(O_ERRMSG, SQLERRM);
+
+                END;
+                
+                #{success, mode=OUT, jdbcType=INTEGER, javaType=int}    :=  O_SUCCESS;
+                #{errCode, mode=OUT, jdbcType=INTEGER, javaType=int}    :=  O_ERRCODE;
+                #{errMsg, mode=OUT, jdbcType=VARCHAR, javaType=String}  :=  O_ERRMSG;
+                
+            END
+        }
+        ]]>   
+        
+    </select>  
+    
+    <!--  UPDATE( 상세 ) -->
+    <select id="updateMaster" statementType="CALLABLE" >
+    				
+	     <![CDATA[
+        {
+        	CALL  /* [MsCustDeliveryInfoService.sqlx][MsCustDeliveryInfoService.updateMaster][거래처 배송정보 저장(목록조회 화면)][JeongHyeongCheol][2025.08.20] */
+        	DECLARE
+        		V_AFTER     MS_CUSTDLVINFO%rowtype;
+                O_SUCCESS   NUMBER         :=  1;      /* 성공여부(1이면 성공) */
+                O_ERRCODE   NUMBER         :=  0;      /* 오류 코드 */
+                O_ERRMSG    VARCHAR2(4000) := '';      /* 오류 메세지 */
+                SQL_ERROR 	EXCEPTION;
+                
+            BEGIN
+            	BEGIN
+	        		SELECT  *
+	                INTO    V_AFTER
+	                FROM    MS_CUSTDLVINFO
+	                WHERE   STORERKEY 	= #{gStorerkey}
+				    AND 	CUSTTYPE    = 'C'
+				    AND   	DLVCUSTKEY  = #{dlvcustkey}
+				    AND 	CUSTKEY     = #{custkey};
+	    
+	    			V_AFTER.TRUTHCUSTKEY 			:= #{truthcustkey};
+	    			V_AFTER.TRUTHADDRESS1 			:= #{truthaddress1};
+					V_AFTER.TRUTHADDRESS2 			:= #{truthaddress2};
+					V_AFTER.FLOOR 					:= #{floor};
+					V_AFTER.ADDRESSMATCHYN 			:= #{addressmatchyn};				
+					V_AFTER.LATITUDE 				:= #{latitude};
+					V_AFTER.LONGITUDE 				:= #{longitude};
+					V_AFTER.RADIUS 					:= #{radius};
+					V_AFTER.STYTIME 				:= #{stytime};
+					V_AFTER.KEYTYPE2 				:= #{keytype2};
+					V_AFTER.KEYDETAIL 				:= #{keydetail};
+					V_AFTER.BUILDINGOPENTIME 		:= #{buildingopentime};
+					V_AFTER.DELIVERYAVAILABLETIME 	:= #{deliveryavailabletime};
+					V_AFTER.TONNAGE 				:= #{tonnage};
+					V_AFTER.PARKINGHEIGHT 			:= #{parkingheight};
+					V_AFTER.ACCESSWAY 				:= #{accessway};
+					V_AFTER.FREEZEPLACE 			:= #{freezeplace};
+					V_AFTER.COLDPLACE 				:= #{coldplace};
+					V_AFTER.HTEMPERATURE 			:= #{htemperature};
+					V_AFTER.LOADPLACE2 				:= #{loadplace2};
+					V_AFTER.KIDS_CL_YN 				:= #{kidsClYn};
+					V_AFTER.DLV_WAIT_YN 			:= #{dlvWaitYn};
+					V_AFTER.DISTANT_YN 				:= #{distantYn};
+					V_AFTER.LNG_DISTANT_YN 			:= #{lngDistantYn};
+					V_AFTER.UNLOAD_LVL_CD 			:= #{unloadLvlCd};
+					V_AFTER.REQDLVTIME2_FROM 		:= #{reqdlvtime2From};
+					V_AFTER.REQDLVTIME2_TO 			:= #{reqdlvtime2To};
+					V_AFTER.FACEINSPECT 			:= #{faceinspect};
+					V_AFTER.INSPECTORPRINTYN 		:= #{inspectorprintyn};
+					V_AFTER.INSPECTIONWORKERPHONE 	:= DAMO.ENC(FN_FORMAT_TELNO(#{inspectionworkerphone}));
+					V_AFTER.AVG_WORK_TIME 			:= #{avgWorkTime};
+					V_AFTER.DELIVERYNOTIYN 			:= #{deliverynotiyn};
+					V_AFTER.DELIVERYNOTITIMESTART 	:= #{deliverynotitimestart};
+					V_AFTER.DELIVERYNOTIPHONE 		:= #{deliverynotiphone};
+					V_AFTER.CARDMEMO		 		:= #{cardmemo};
+					V_AFTER.MEMO 					:= #{memo};
+					V_AFTER.SUPPLYMEMO 				:= #{supplymemo};
+					V_AFTER.DELIVERYTYPE 			:= #{deliverytype};
+					V_AFTER.LABELPRINTTYPE 			:= #{labelprinttype};
+					V_AFTER.DISTANCETYPE 			:= #{distancetype};
+					V_AFTER.REDZONE_YN 				:= #{redzoneYn};										
+					V_AFTER.EDITDATE 				:= SYSDATE;
+					V_AFTER.EDITWHO 				:= #{gUserId};
+					
+					V_AFTER.ARMY_YN		 			:= #{armyYn};
+					
+					V_AFTER.FACEINSPECT_EXP_PAY_YN	:= #{faceinspectExpPayYn};			
+	
+	                TRMS_CUSTDLVINFO.TR_UPDATE(
+	                         V_AFTER
+	                     ,   O_SUCCESS
+	                     ,   O_ERRCODE
+	                     ,   O_ERRMSG
+	                );
+                	
+                	IF O_ERRCODE = -20001 THEN
+	                	RAISE_APPLICATION_ERROR (-20001, NVL(O_ERRMSG, SQLERRM));
+	                ELSIF O_ERRCODE != 0 THEN
+					    RAISE SQL_ERROR;
+		            END IF;
+			        
+			        EXCEPTION WHEN OTHERS THEN
+			        	O_ERRCODE := SQLCODE;
+						O_ERRMSG := NVL(O_ERRMSG, SQLERRM);
+
+                END;
+                
+				#{success, mode=OUT, jdbcType=INTEGER, javaType=int}    :=  O_SUCCESS;
+				#{errCode, mode=OUT, jdbcType=INTEGER, javaType=int}        :=  O_ERRCODE;
+				#{errMsg, mode=OUT, jdbcType=VARCHAR, javaType=String}  :=  O_ERRMSG;
+                
+        	END
+        }
+        ]]>   
+	    
+    </select>
+    
+    
+	<!-- 엑셀업로드 유효성체크-->
+	<select id="getValidateExcelList" resultType="MsCustDeliveryInfoResDto">
+		WITH  /* [MsCustDeliveryInfoService.sqlx][MsCustDeliveryInfoService.getValidateExcelList][엑셀 업로드 유효성 체크][JeongHyeongCheol][20250805] */
+		    V AS (
+		        <foreach collection="list" item="item" separator="UNION ALL">
+			        SELECT
+			             #{item.custkey} 			AS CUSTKEY
+			            ,#{item.dlvcustkey} 		AS DLVCUSTKEY
+			            ,#{item.truthcustkey} 		AS TRUTHCUSTKEY
+			            
+			            ,#{item.armyYn} 			AS ARMY_YN
+			            ,#{item.faceinspect} 		AS FACEINSPECT
+			            ,#{item.reqdlvtime2From} 	AS REQDLVTIME2_FROM
+			            ,#{item.reqdlvtime2To} 		AS REQDLVTIME2_TO
+			            
+			            ,#{item.buildingopentime}      AS BUILDINGOPENTIME
+			            ,#{item.deliveryavailabletime} AS DELIVERYAVAILABLETIME
+			            ,#{item.parkingheight}         AS PARKINGHEIGHT
+			            ,#{item.accessway}             AS ACCESSWAY
+			            ,ROW_NUMBER() OVER(ORDER BY 1) AS RN 
+			        FROM DUAL
+		        </foreach>
+		    )
+		    
+		    SELECT 
+		         V.CUSTKEY 						AS CUSTKEY
+		        ,V.TRUTHCUSTKEY					AS TRUTHCUSTKEY
+		        ,V.ARMY_YN						AS ARMY_YN
+		        ,V.FACEINSPECT					AS FACEINSPECT
+		        ,V.REQDLVTIME2_FROM				AS REQDLVTIME2_FROM
+		        ,V.REQDLVTIME2_TO				AS REQDLVTIME2_TO
+		        ,CASE 
+		        	WHEN T1.DLVCUSTKEY IS NOT NULL 
+		        	THEN 'Y' ELSE 'N' 
+		         END 								AS ALREADY_CHK
+		        ,CASE 
+		        	WHEN T2.CUSTKEY IS NOT NULL 
+		        	THEN 'Y' ELSE 'N' 
+		         END 								AS CUSTKEY_CHK
+		        ,CASE 
+		        	WHEN T3.CUSTKEY IS NOT NULL 
+		        	THEN 'Y' ELSE 'N' 
+		         END 								AS TRUTHCUSTKEY_CHK
+		         ,CASE 
+		        	WHEN T4.BASECODE IS NOT NULL 
+		        	THEN 'Y' ELSE 'N' 
+		         END 								AS buildingopentimeChk
+		         ,CASE 
+		        	WHEN T5.BASECODE IS NOT NULL 
+		        	THEN 'Y' ELSE 'N' 
+		         END 								AS deliveryavailabletimeChk
+		         ,CASE 
+		        	WHEN T6.BASECODE IS NOT NULL 
+		        	THEN 'Y' ELSE 'N' 
+		         END 								AS parkingheightChk
+		         ,CASE 
+                    WHEN V.ACCESSWAY IS NULL OR <![CDATA[ LENGTHB(V.ACCESSWAY) <= 1000 ]]>
+                    THEN 'Y' ELSE 'N' 
+                 END                                 AS accesswayChk
+		    FROM V
+		    
+		    LEFT JOIN MS_CUSTDLVINFO T1 
+		    	   ON T1.STORERKEY 	= 'FW00'
+		          AND T1.CUSTTYPE 	= 'C'
+		          AND T1.DLVCUSTKEY = V.DLVCUSTKEY
+		          AND T1.CUSTKEY 	= V.CUSTKEY
+		        
+		    LEFT JOIN MS_CUST T2 
+		    	   ON T2.STORERKEY 	= 'FW00'
+		          AND T2.CUSTKEY 	= V.CUSTKEY
+		        
+		    LEFT JOIN MS_CUST T3 
+		    	   ON T3.STORERKEY 	= 'FW00'
+		          AND T3.CUSTKEY 	= V.TRUTHCUSTKEY
+		    LEFT JOIN CM_CODE T4
+                   ON T4.STORERKEY  = 'STD'
+                  AND T4.CODELIST   = 'CRM_DLV_BUILDINGOPENTIME'
+                  AND T4.DEL_YN     = 'N'
+                  AND T4.BASECODE   = V.BUILDINGOPENTIME
+		    LEFT JOIN CM_CODE T5
+                   ON T5.STORERKEY  = 'STD'
+                  AND T5.CODELIST   = 'CRM_DLV_DELIVERYAVLTIME'
+                  AND T5.DEL_YN     = 'N'
+                  AND T5.BASECODE   = V.DELIVERYAVAILABLETIME
+		    LEFT JOIN CM_CODE T6
+                   ON T6.STORERKEY  = 'STD'
+                  AND T6.CODELIST   = 'CRM_DLV_PARKINGHEIGHT'
+                  AND T6.DEL_YN     = 'N'
+                  AND T6.BASECODE   = V.PARKINGHEIGHT
+		    ORDER BY V.RN 
+    </select>
+     
+    <!-- 거래처 배송정보 저장(상세) -->
+    <select id="updateMasterCust" statementType="CALLABLE" >
+    				
+	     <![CDATA[
+        {
+        	CALL  /* [MsCustDeliveryInfoService.sqlx][MsCustDeliveryInfoService.updateMasterCust][거래처 배송정보 저장(고객배송조건(MS_CUST))][JeongHyeongCheol][2025.08.20] */
+        	DECLARE
+        		V_AFTER     MS_CUST%rowtype;
+                O_SUCCESS   NUMBER         :=  1;      /* 성공여부(1이면 성공) */
+                O_ERRCODE   NUMBER         :=  0;      /* 오류 코드 */
+                O_ERRMSG    VARCHAR2(4000) := '';      /* 오류 메세지 */
+                SQL_ERROR 	EXCEPTION;
+                
+            BEGIN
+	            BEGIN
+	        		SELECT  *
+	                INTO    V_AFTER
+	                FROM    MS_CUST
+	                WHERE   STORERKEY 	= #{gStorerkey}
+				    AND 	CUSTTYPE    = 'C'
+				    AND 	CUSTKEY     = #{custkey};
+	    
+	    			V_AFTER.LABELSTRATEGY   := #{labelprinttype};
+					V_AFTER.CUSTSTRATEGY5   := #{custstrategy5};				
+					V_AFTER.EDITDATE        := SYSDATE;
+					V_AFTER.EDITWHO         := #{gUserId};				
+	
+	                TRMS_CUST.TR_UPDATE(
+	                         V_AFTER
+	                     ,   O_SUCCESS
+	                     ,   O_ERRCODE
+	                     ,   O_ERRMSG
+	                );
+	                
+	                IF O_ERRCODE = -20001 THEN
+	                	RAISE_APPLICATION_ERROR (-20001, NVL(O_ERRMSG, SQLERRM));
+	                ELSIF O_ERRCODE != 0 THEN
+					    RAISE SQL_ERROR;
+		            END IF;
+			        
+			        EXCEPTION WHEN OTHERS THEN
+			        	O_ERRCODE := SQLCODE;
+						O_ERRMSG := NVL(O_ERRMSG, SQLERRM);
+
+                END;
+                
+				#{success, mode=OUT, jdbcType=INTEGER, javaType=int}    :=  O_SUCCESS;
+				#{errCode, mode=OUT, jdbcType=INTEGER, javaType=int}        :=  O_ERRCODE;
+				#{errMsg, mode=OUT, jdbcType=VARCHAR, javaType=String}  :=  O_ERRMSG;
+                
+        	END
+        }
+        ]]>   
+	    
+    </select>
+    
+	<!-- 배송정보 insert (상세)-->
+    <insert id="insertMaster">
+        INSERT /* [MsCustDeliveryInfoService.sqlx][MsCustDeliveryInfoService.insertMaster][거래처 배송정보 저장)][JeongHyeongCheol][2025.08.20] */
+        	INTO MS_CUSTDLVINFO
+            (SERIALKEY
+            , STORERKEY
+            , CUSTKEY
+            , CUSTTYPE
+            , DLV_DCCODE
+			, DLVCUSTKEY
+			, REQDLVTIME1_FROM
+			, REQDLVTIME1_TO			
+			, INSPECTTYPE
+			, ADDRESS1
+			, DISTRICTCODE
+			, OTHER02
+			, ADDRESS2
+			, ZIPCODE
+			, QCTYPE
+			, ADDRESS3
+			, PHONE1
+			, KEYTYPE
+			, ADDRESS4
+			, FAX
+			, OTHER01
+			, DLVSTRATEGY1
+			, ENTRYCONDITION1
+			, UNLOADCONDITION1
+			, UNLOADCONDITION2
+			, UNLOADPLACE
+			, LOADPLACE
+			, DLVTYPE
+			, TEMPERTYPE
+			, TRUTHCUSTKEY
+			, TRUTHADDRESS1
+			, TRUTHADDRESS2
+			, FLOOR
+			, ADDRESSMATCHYN
+			, LATITUDE
+			, LONGITUDE
+			, EMPNAME1
+			, EMPPHONE1
+			, RADIUS
+			, STYTIME
+			, KEYTYPE
+			, KEYDETAIL
+			, BUILDINGOPENTIME
+			, DELIVERYAVAILABLETIME
+			, TONNAGE
+			, PARKINGHEIGHT
+			, ACCESSWAY
+			, FREEZEPLACE
+			, COLDPLACE
+			, HTEMPERATURE
+			, LOADPLACE2
+			, KIDS_CL_YN
+			, DLV_WAIT_YN
+			, DISTANT_YN
+			, LNG_DISTANT_YN
+			, UNLOAD_LVL_CD
+			, REQDLVTIME2_FROM
+			, REQDLVTIME2_TO
+			, FACEINSPECT
+			, INSPECTORPRINTYN
+			, INSPECTIONWORKERPHONE
+			, AVG_WORK_TIME
+			, DELIVERYNOTIYN
+			, DELIVERYNOTITIMESTART
+			, DELIVERYNOTIPHONE
+			, CARDMEMO
+			, MEMO
+			, SUPPLYMEMO
+			, DELIVERYTYPE
+			, LABELPRINTTYPE
+			, DISTANCETYPE
+			, TEMPTARGET
+			, REDZONE_YN
+			, INITDELIVERYCONTACT
+			, INITDELIVERYDESC
+			, INITREQUESTTIMESTART
+			, INITREQUESTTIMEEND
+			, INITFTFINSPECTIONYN
+			, DEL_YN
+			, CREATEDBYNAME
+			, CREATEDDATE
+			, EDMSFILEID
+			, STATUS
+            , ADDWHO
+            , ADDDATE
+            , EDITWHO
+            , EDITDATE)
+        VALUES
+            (SEQ_MS_CUSTDLVINFO.NEXTVAL
+            , #{gStorerkey}
+            , #{custkey}
+            , #{custtype}
+            , #{dlvDccode}
+            , #{dlvcustkey}
+            , #{reqdlvtime1From}
+            , #{reqdlvtime1To}
+            , #{inspecttype}			
+			, #{address1}
+            , #{districtcode}
+            , #{other02}
+            , #{address2}
+            , #{zipcode}
+            , #{qctype}
+            , #{address3}
+            , #{phone1}
+            , #{keytype}
+            , #{address4}
+            , #{fax}
+            , #{other01}
+            , #{dlvstrategy1}
+			, #{entrycondition1}
+			, #{unloadcondition1}
+			, #{unloadcondition2}
+			, #{unloadplace}
+			, #{loadplace}
+			, #{dlvtype}
+			, #{tempertype}
+			, #{truthcustkey}
+			, #{truthaddress1}
+			, #{truthaddress2}
+			, #{floor}
+			, #{addressmatchyn}
+			, #{latitude}
+			, #{longitude}
+			, #{empname1}
+			, #{empphone1}
+			, #{radius}
+			, #{stytime}
+			, #{keytype}
+			, #{keydetail}
+			, #{buildingopentime}
+			, #{deliveryavailabletime}
+			, #{tonnage}
+			, #{parkingheight}
+			, #{accessway}
+			, #{freezeplace}
+			, #{coldplace}
+			, #{htemperature}
+			, #{loadplace2}
+			, #{kidsClYn}
+			, #{dlvWaitYn}
+			, #{distantYn}
+			, #{lngDistantYn}
+			, #{unloadLvlCd}
+			, #{reqdlvtime2From}
+			, #{reqdlvtime2To}
+			, #{faceinspect}
+			, #{inspectorprintyn}
+			, DAMO.ENC(FN_FORMAT_TELNO(#{inspectionworkerphone}))
+			, #{avgWorkTime}
+			, #{deliverynotiyn}
+			, #{deliverynotitimestart}
+			, DAMO.ENC(FN_FORMAT_TELNO(#{deliverynotiphone}))
+			, #{cardmemo}
+			, #{memo}
+			, #{supplymemo}
+			, #{deliverytype}
+			, #{labelprinttype}
+			, #{distancetype}
+			, #{temptarget}
+			, #{redzoneYn}
+			, #{initdeliverycontact}
+			, #{initdeliverydesc}
+			, #{initrequesttimestart}
+			, #{initrequesttimeend}
+			, #{initftfinspectionyn}
+			, #{delYn}
+			, #{gUserId}
+            , SYSDATE
+			, #{edmsfileid}
+			, '03'
+            , #{gUserId}
+            , SYSDATE
+            , #{gUserId}
+            , SYSDATE);
+    </insert>
+
+
+    
+    <!-- 신규: 고객배송조건 첨부 임시저장 (STATUS='N') -->
+    <insert id="insertCustDlvInfoFile">
+        INSERT /* [msCustDeliveryInfoService.sqlx][msCustDeliveryInfoService.insertCustDlvInfoFile][고객배송조건 첨부 임시저장] */
+               INTO CRM_CUSTDLVINFO_FILE
+               (
+                 SERIALKEY
+               , ISSUENO
+               , DOC_TYPE
+               , DOC_NAME
+               , FILE_NAME
+               , FILE_EXTENSION
+               , FILE_LOCATION
+               , FILE_SIZE_BYTES
+               , TRANS_FILE_NAME
+               , UPLOAD_HASH_ID
+               , UPLOAD_RES_DOC_ID
+               , UPLOAD_FILE_NAME
+               , UPLOAD_WORKPLACE_ID
+               , UPLOAD_LOCATION
+               , DOWNLOAD_COUNT
+               , FILE_CONTENT
+               , FILE_TYPE
+               , STATUS
+               , DEL_YN
+               , ADDWHO
+               , ADDDATE
+               , EDITWHO
+               , EDITDATE
+               )
+        VALUES
+               (
+                 SEQ_CRM_CUSTDLVINFO_FILE.NEXTVAL
+               , #{issueno}
+               , #{docType}
+               , 'CRMDLVINFO_FILE'
+               , #{fileName}
+               , #{fileExtension}
+               , #{fileLocation}
+               , to_number(#{fileSizeBytes})
+               , #{transFileName}
+               , #{code}
+               , ''
+               , ''
+               , ''
+               , #{uploadLocation}
+               , '0'
+               , ''
+               , 'HTTP'
+               , 'N'
+               , 'N'
+               , #{gUserId}
+               , SYSDATE
+               , #{gUserId}
+               , SYSDATE
+               )
+    </insert>
+
+    <!-- 신규: 확정된 첨부 개수 조회(최대 2개 제한 체크용) -->
+    <select id="selectCustDlvInfoConfirmedCnt" resultType="int">
+        SELECT /* [msCustDeliveryInfoService.sqlx][msCustDeliveryInfoService.selectCustDlvInfoConfirmedCnt] */
+               COUNT(*)
+          FROM CRM_CUSTDLVINFO_FILE
+         WHERE ISSUENO        = #{issueno}
+           AND DOC_NAME       = 'CRMDLVINFO_FILE'
+           AND UPLOAD_HASH_ID = #{code}
+           AND UPLOAD_RES_DOC_ID IS NOT NULL
+           AND STATUS         = 'Y'
+           AND DEL_YN         = 'N'
+    </select>
+
+    <!-- 신규: 임시저장 파일 조회(확정 대상) -->
+    <select id="selectCustDlvInfoTempFilesBySerialkeys" resultType="Hmap">
+        SELECT SERIALKEY, ISSUENO, FILE_LOCATION, TRANS_FILE_NAME, FILE_NAME
+          FROM CRM_CUSTDLVINFO_FILE
+         WHERE ISSUENO = #{issueno}
+           AND STATUS = 'N'
+           AND DEL_YN = 'N'
+           AND SERIALKEY IN
+           <foreach collection="serialkeys" item="k" open="(" separator="," close=")">
+             #{k}
+           </foreach>
+    </select>
+
+    <!-- 신규: 확정(EDMS) 업데이트 -->
+    <update id="updateCustDlvInfoFileConfirm">
+        UPDATE CRM_CUSTDLVINFO_FILE
+           SET UPLOAD_RES_DOC_ID   = #{uploadResDocId}
+             , UPLOAD_FILE_NAME    = #{uploadFileName}
+             , UPLOAD_WORKPLACE_ID = #{uploadWorkplaceId}
+             , FILE_LOCATION       = #{fileLocation}
+             , STATUS              = 'Y'
+             , EDITWHO             = #{gUserId}
+             , EDITDATE            = SYSDATE
+         WHERE ISSUENO    = #{issueno}
+           AND SERIALKEY  = #{serialkey}
+           AND STATUS     = 'N'
+           AND DEL_YN     = 'N'
+    </update>
+
+    <!-- 신규: 확정 파일 소프트 삭제(선택 행) -->
+    <update id="updateCustDlvInfoSoftDeleteConfirmedBySerialkeys">
+        UPDATE CRM_CUSTDLVINFO_FILE
+           SET DEL_YN   = 'Y'
+             , EDITWHO  = #{gUserId}
+             , EDITDATE = SYSDATE
+         WHERE ISSUENO = #{issueno}
+           AND DOC_NAME = 'CRMDLVINFO_FILE'
+           AND UPLOAD_HASH_ID = #{code}
+           AND DEL_YN   = 'N'
+           AND SERIALKEY IN
+           <foreach collection="serialkeys" item="k" open="(" separator="," close=")">
+             #{k}
+           </foreach>
+    </update>
+
+    <!-- 임시/확정 공통: 파일행 조회(삭제/검증용) -->
+    <select id="selectCustDlvInfoFilesBySerialkeys" resultType="Hmap">
+        SELECT SERIALKEY, ISSUENO, STATUS, DEL_YN, FILE_LOCATION
+          FROM CRM_CUSTDLVINFO_FILE
+         WHERE ISSUENO = #{issueno}
+           AND DOC_NAME = 'CRMDLVINFO_FILE'
+           AND UPLOAD_HASH_ID = #{code}
+           AND DEL_YN = 'N'
+           AND SERIALKEY IN
+           <foreach collection="serialkeys" item="k" open="(" separator="," close=")">
+             #{k}
+           </foreach>
+    </select>
+    
+    <update id="updateCrmDlvInfoHis">
+        MERGE 
+            INTO LOGISONE.CRM_CUSTDLVINFO_HIS
+           USING DUAL  ON (SERIALKEY = #{serialkeyHis})
+    WHEN MATCHED THEN
+          UPDATE 
+             SET STATUS = '03'
+               , CONFIRMDATE    = SYSDATE
+               , EDITWHO        = #{gUserId}
+               , EDITDATE       = SYSDATE
+WHEN NOT MATCHED THEN
+          INSERT (
+                 SERIALKEY
+               , STORERKEY
+               , CUSTKEY
+               , CUSTTYPE
+               , ADDRESSMATCHYN
+               , ARRIVALADDRESS
+               , ARRIVALDETAILADDRESS
+               , ARRIVALPOSTALCODE
+               , FTFINSPECTIONYN
+               , INSPECTIONWORKERPHONE
+               , INSPECTORPRINTYN
+               , PARKINGHEIGHT
+               , KEYTYPE
+               , KEYDETAIL
+               , DELIVERYREQUESTTIMESTART
+               , DELIVERYREQUESTTIMEEND
+               , DELIVERYAVAILABLETIME
+               , BUILDINGOPENTIME
+               , MOVEMENTENTRY
+               , GOODSLOCATIONFROZEN
+               , GOODSLOCATIONREFRIG
+               , GOODSLOCATIONROOM
+               , RETURNLOCATION
+               , INITREQUESTDT
+               , INITREQUESTTIMESTART
+               , INITREQUESTTIMEEND
+               , INITFTFINSPECTIONYN
+               , INITDELIVERYCONTACT
+               , INITDELIVERYDESC
+               , DELIVERYTYPE
+               , TEMPTARGET
+               , LABELPRINTTYPE
+               , DELIVERYNOTIYN
+               , DELIVERYNOTIPHONE
+               , DELIVERYNOTITIMESTART
+               , DELIVERYNOTITIMEEND
+                 
+               , EMPLOEENUMBER
+               , CREATEDBYEMAIL
+               , CREATEDBYNAME
+               , CREATEDDATE
+               , EDMSFILEID
+               , SOURCE_SYSTEM
+               , STATUS
+               , CONFIRMDATE
+                 
+               , ADDWHO
+               , ADDDATE
+               , EDITWHO
+               , EDITDATE
+            )
+            VALUES (
+                 SEQ_MS_CUSTDLVINFO.NEXTVAL
+               , #{gStorerkey}
+               , #{custkey}
+               , #{custtype}
+               , #{addressmatchyn}
+               , #{truthaddress1}
+               , #{truthaddress2}
+               , #{truthzipcode}
+               , #{faceinspect}
+               , DAMO.ENC(FN_FORMAT_TELNO(#{inspectionworkerphone}))
+               , #{inspectorprintyn}
+               , #{parkingheight}
+               , #{keytype}
+               , #{keydetail}
+               , #{reqdlvtime2From}
+               , #{reqdlvtime2To}
+               , #{deliveryavailabletime}
+               , #{buildingopentime}
+               , #{accessway}
+               , #{freezeplace}
+               , #{coldplace}
+               , #{htemperature}
+               , #{loadplace2}
+               , #{initrequestdt}
+               , #{initrequesttimestart}
+               , #{initrequesttimeend}
+               , #{initftfinspectionyn}
+               , #{initdeliverycontact}
+               , #{initdeliverydesc}
+               , #{deliverytype}
+               , #{temptarget}
+               , #{labelprinttype}
+               , #{deliverynotiyn}
+               , DAMO.ENC(FN_FORMAT_TELNO(#{deliverynotiphone}))
+               , #{deliverynotitimestart}
+               , #{deliverynotitimeend}
+                 
+                 
+               , #{gEmpNo}
+               , #{gEmailAddr}
+               , #{gUserNm}
+               , SYSDATE
+               , #{edmsfileid}
+               , 'WMS'
+               , '03'
+               , SYSDATE
+               , #{gUserId}
+               , SYSDATE
+               , #{gUserId}
+               , SYSDATE
+            )
+    </update>
+    
+
+    <select id="getCrmCustdlvinfo_API" resultType="HMap">
+        SELECT /*  [msCustDeliveryInfoService.sqlx][msCustDeliveryInfoService.getCrmCustdlvinfo_API] */
+               MS_CUSTDLVINFO.CUSTKEY                               AS CUSTKEY
+             , MS_CUSTDLVINFO.CUSTTYPE                              AS CUSTTYPE
+             , MS_CUSTDLVINFO.ADDRESSMATCHYN                        AS ADDRESSMATCHYN
+             , MS_CUSTDLVINFO.TRUTHADDRESS1                         AS ARRIVALADDRESS
+             , MS_CUSTDLVINFO.TRUTHADDRESS2                         AS ARRIVALDETAILADDRESS
+             , MS_CUSTDLVINFO.TRUTHZIPCODE                          AS ARRIVALPOSTALCODE
+             , MS_CUSTDLVINFO.FACEINSPECT                           AS FTFINSPECTIONYN
+             , DAMO.DEC(MS_CUSTDLVINFO.INSPECTIONWORKERPHONE)       AS INSPECTIONWORKERPHONE
+             , MS_CUSTDLVINFO.INSPECTORPRINTYN                      AS INSPECTORPRINTYN
+             , MS_CUSTDLVINFO.PARKINGHEIGHT                         AS PARKINGHEIGHT
+             , MS_CUSTDLVINFO.KEYTYPE2                               AS KEYTYPE
+             , MS_CUSTDLVINFO.KEYDETAIL                             AS KEYDETAIL
+             , MS_CUSTDLVINFO.REQDLVTIME2_FROM                      AS DELIVERYREQUESTTIMESTART
+             , MS_CUSTDLVINFO.REQDLVTIME2_TO                        AS DELIVERYREQUESTTIMEEND
+             , MS_CUSTDLVINFO.DELIVERYAVAILABLETIME                 AS DELIVERYAVAILABLETIME
+             , MS_CUSTDLVINFO.BUILDINGOPENTIME                      AS BUILDINGOPENTIME
+             , MS_CUSTDLVINFO.ACCESSWAY                             AS MOVEMENTENTRY
+             , MS_CUSTDLVINFO.FREEZEPLACE                           AS GOODSLOCATIONFROZEN
+             , MS_CUSTDLVINFO.COLDPLACE                             AS GOODSLOCATIONREFRIG
+             , MS_CUSTDLVINFO.HTEMPERATURE                          AS GOODSLOCATIONROOM
+             , MS_CUSTDLVINFO.LOADPLACE2                            AS RETURNLOCATION
+             , TO_CHAR(TO_DATE(MS_CUSTDLVINFO.INITREQUESTDT, 'YYYY-MM-DD'),'YYYY-MM-DD')               AS INITREQUESTDT
+             , MS_CUSTDLVINFO.INITREQUESTTIMESTART                  AS INITREQUESTTIMESTART
+             , MS_CUSTDLVINFO.INITREQUESTTIMEEND                    AS INITREQUESTTIMEEND
+             , MS_CUSTDLVINFO.INITFTFINSPECTIONYN                   AS INITFTFINSPECTIONYN
+             , MS_CUSTDLVINFO.INITDELIVERYCONTACT                   AS INITDELIVERYCONTACT
+             , MS_CUSTDLVINFO.INITDELIVERYDESC                      AS INITDELIVERYDESC
+             , MS_CUSTDLVINFO.DELIVERYTYPE                          AS DELIVERYTYPE
+             , MS_CUSTDLVINFO.TEMPTARGET                            AS TEMPTARGET
+             , MS_CUSTDLVINFO.LABELPRINTTYPE                        AS LABELPRINTTYPE
+             , MS_CUSTDLVINFO.DELIVERYNOTIYN                        AS DELIVERYNOTIYN
+             , DAMO.DEC(MS_CUSTDLVINFO.DELIVERYNOTIPHONE)           AS DELIVERYNOTIPHONE
+             , MS_CUSTDLVINFO.DELIVERYNOTITIMESTART                 AS DELIVERYNOTITIMESTART
+             , MS_CUSTDLVINFO.DELIVERYNOTITIMEEND                   AS DELIVERYNOTITIMEEND
+             , MS_CUSTDLVINFO.EMPLOEENUMBER                         AS EMPLOEENUMBER
+             , MS_CUSTDLVINFO.CREATEDBYEMAIL                        AS CREATEDBYEMAIL
+             , (SELECT REPLACE(FN_GETUSERNAME(MS_CUSTDLVINFO.CREATEDBYNAME),'NOT FOUND',MS_CUSTDLVINFO.CREATEDBYNAME) from DUAL) AS CREATEDBYNAME
+             , TO_CHAR(MS_CUSTDLVINFO.CREATEDDATE, 'yyyy-mm-dd hh24:mi:ss')                 AS CREATEDDATE
+             , MS_CUSTDLVINFO.STORETYPE                             AS STORETYPE
+             , MS_CUSTDLVINFO.EDMSFILEID                            AS EDMSFILEID
+             , MS_CUSTDLVINFO.STATUS                                AS STATUS
+             , TO_CHAR(MS_CUSTDLVINFO.ADDDATE, 'yyyy-mm-dd hh24:mi:ss')       AS ADDDATE
+             , TO_CHAR(MS_CUSTDLVINFO.EDITDATE, 'yyyy-mm-dd hh24:mi:ss')      AS EDITDATE
+             , (SELECT REPLACE(FN_GETUSERNAME(MS_CUSTDLVINFO.ADDWHO),'NOT FOUND',MS_CUSTDLVINFO.ADDWHO) from DUAL)      AS ADDWHO
+             , (SELECT REPLACE(FN_GETUSERNAME(MS_CUSTDLVINFO.EDITWHO),'NOT FOUND',MS_CUSTDLVINFO.EDITWHO) from DUAL)    AS EDITWHO
+         FROM MS_CUSTDLVINFO
+        WHERE 1=1
+          AND MS_CUSTDLVINFO.CUSTKEY   = #{custkey}
+          AND ROWNUM = 1
+    </select>
+    
+    <select id="getFileData_API" resultType="HMap">
+        SELECT /* [msCustDeliveryInfoNewService.sqlx][msCustDeliveryInfoNewService.getFileData_API] */
+               UPLOAD_HASH_ID                   AS TYPE
+             ,  ''                              AS ID
+             , FILE_NAME                        AS FILENAME
+             , DECODE(STATUS, 'Y', 'N', 'D')    AS FILESTATUS
+             , UPLOAD_RES_DOC_ID                AS EDMSFILEID
+        FROM
+            CRM_CUSTDLVINFO_FILE
+        WHERE 1 = 1
+            AND DOC_NAME = 'CRMDLVINFO_FILE'
+            AND SEND_YN = 'N'
+            AND ISSUENO = #{custkey}
+    </select>
+    
+    <!-- 파일  전송유무 변경-->
+    <update id="updateFileSendYn">
+        UPDATE /* [msCustDeliveryInfoNewService.sqlx][msCustDeliveryInfoNewService.updateFileSendYn][파일 전송유무 변경][JeongHyeongCheol][20251010] */
+               CRM_CUSTDLVINFO_FILE
+           SET SEND_YN      = 'Y'
+             , EDITDATE     = SYSDATE
+             , EDITWHO      = #{gUserId}
+         WHERE DOC_NAME     = 'CRMDLVINFO_FILE'
+           AND ISSUENO      = #{custkey}
+           AND SEND_YN      = 'N'
+    </update>
+    
+    
+    <!-- 파일 정보 불러오기 -->
+	<select id="getUploadFileList" resultType="MsCustDeliveryInfoUploadFileResDto">
+	    SELECT /* [msCustDeliveryInfoNewService.sqlx][msCustDeliveryInfoNewService.getPopupUploadFileList][고객배송조건 Upload File List][JeongHyeongCheol][20251010] */
+	            '0'                  AS CHECKYN
+	           ,SERIALKEY            AS SERIALKEY
+	           ,ISSUENO              AS ISSUENO
+	           ,DOC_TYPE             AS DOC_TYPE
+	           ,DOC_NAME             AS DOC_NAME
+	           ,FILE_NAME            AS FILE_NAME
+	           ,FILE_EXTENSION       AS FILE_EXTENSION
+	           ,FILE_LOCATION        AS FILE_LOCATION
+	           ,FILE_SIZE_BYTES      AS FILE_SIZE_BYTES
+	           ,TRANS_FILE_NAME      AS TRANS_FILE_NAME
+	           ,UPLOAD_HASH_ID       AS UPLOAD_HASH_ID
+	           ,UPLOAD_RES_DOC_ID    AS UPLOAD_RES_DOC_ID
+	           ,UPLOAD_FILE_NAME     AS UPLOAD_FILE_NAME
+	           ,UPLOAD_WORKPLACE_ID  AS UPLOAD_WORKPLACE_ID
+	           ,UPLOAD_LOCATION      AS UPLOAD_LOCATION
+	           ,DOWNLOAD_COUNT       AS DOWNLOAD_COUNT
+	           ,FILE_TYPE            AS FILE_TYPE
+	           ,STATUS               AS STATUS
+	           ,ADDWHO               AS ADDWHO
+	           ,ADDDATE              AS ADDDATE
+	           ,EDITWHO              AS EDITWHO
+	           ,EDITDATE             AS EDITDATE
+	    FROM    CRM_CUSTDLVINFO_FILE
+	    WHERE   DOC_NAME = 'CRMDLVINFO_FILE'
+	    AND     ISSUENO  = #{issueno}
+	    AND     UPLOAD_HASH_ID = #{code}
+    AND     DEL_YN   = 'N'
+	</select>
+	
+	<!-- 이미지 저장 -->
+    <insert id="insertFileInfo">
+		/* [msCustDeliveryInfoNewService.sqlx][msCustDeliveryInfoNewService.insertFileInfo][crm 요청관리 첨부파일 Insert] */
+		INSERT
+		  INTO CRM_CUSTDLVINFO_FILE
+		       (
+		         SERIALKEY
+		       , ISSUENO
+		       , DOC_TYPE
+		       , DOC_NAME
+		       , FILE_NAME
+		       , FILE_EXTENSION
+		       , FILE_LOCATION
+		       , FILE_SIZE_BYTES
+		       , TRANS_FILE_NAME
+		       , UPLOAD_HASH_ID
+		       , UPLOAD_RES_DOC_ID
+		       , UPLOAD_FILE_NAME
+		       , UPLOAD_WORKPLACE_ID
+		       , UPLOAD_LOCATION
+		       , DOWNLOAD_COUNT
+		       , FILE_CONTENT
+		       , FILE_TYPE
+		       , STATUS
+ 		       , DEL_YN
+		       , ADDWHO
+		       , ADDDATE
+		       , EDITWHO
+		       , EDITDATE
+		       )
+		VALUES
+		       (
+		         SEQ_CRM_CUSTDLVINFO_FILE.NEXTVAL
+		       , #{issueno}
+		       , #{docType}
+		       , 'CRMDLVINFO_FILE'
+		       , #{fileName}
+		       , #{fileExtension}
+		       , #{fileLocation}
+		       , #{fileSizeBytes}
+		       , #{transFileName}
+		       , #{code}
+		       , #{uploadResDocId}
+		       , #{uploadFileName}
+		       , #{uploadWorkplaceId}
+		       , ''
+		       , '0'
+		       , ''
+		       , 'HTTP'
+		       , 'Y'
+ 		       , 'N'
+		       , #{gUserId}
+		       , SYSDATE
+		       , #{gUserId}
+		       , SYSDATE
+		       )
+	</insert>
+	
+	
+	<select id="getSrmCustdlvinfo_API" resultType="MsCustDeliveryInfoResDto">
+	    SELECT /* [msCustDeliveryInfoNewService.sqlx][msCustDeliveryInfoNewService.getSrmCustdlvinfo_API] */
+			 MS_CUSTDLVINFO.CUSTKEY						 	 AS CUSTKEY
+			,CASE WHEN NVL(MS_CUSTDLVINFO.LABELPRINTTYPE, 'STD') = 'CHD' AND #{labelprinttype} = 'STD' THEN 'Y'
+			      ELSE 'N'
+			 END                                         AS DEL_YN
+			,CASE WHEN NVL(MS_CUSTDLVINFO.LABELPRINTTYPE, 'STD') <![CDATA[<>]]> #{labelprinttype} THEN 'Y'
+			      ELSE 'N'
+			 END									     AS SRM_SEND_FLAG
+        FROM MS_CUSTDLVINFO                     
+       WHERE 1=1
+         AND MS_CUSTDLVINFO.STORERKEY = 'FW00'
+		 AND MS_CUSTDLVINFO.CUSTKEY   = #{custkey} 	
+	</select>
+	
+	<!-- 추천실착지코드 팝업 목록 조회 -->
+	<select id="getTruthcustkeyList" resultType="MsCustDeliveryInfoPopResDto">
+   SELECT /* [msCustDeliveryInfoNewService.sqlx][msCustDeliveryInfoNewService.getTruthcustkeyList] */
+        A.CUSTKEY       AS CUSTKEY        -- 고객코드
+      , C.DESCRIPTION   AS CUSTNAME       -- 고객명  
+      , A.ADDRESS1      AS ADDRESS1       --주소 
+      , A.ADDRESS2      AS ADDRESS2       -- 상세주소
+      , A.TRUTHCUSTKEY  AS TRUTHCUSTKEY   -- 추천실착지코드
+      , D.DESCRIPTION   AS TRUTHCUSTNAME  -- 추천실착지명
+      , A.TRUTHADDRESS1 AS TRUTHADDRESS1  -- 추천주소
+      , A.TRUTHADDRESS2 AS TRUTHADDRESS2  -- 추천상세주소
+      , A.SIMILARITY    AS SIMILARITY     -- 유사도 (%)
+  FROM (
+        SELECT 
+              A.CUSTKEY		 AS CUSTKEY         -- 고객코드
+            , A.CUSTTYPE     AS CUSTTYPE        -- 고객유형
+            , A.STORERKEY    AS STORERKEY       -- 고객사코드
+            , A.ADDRESS1	 AS ADDRESS1        -- 주소
+            , A.ADDRESS2	 AS ADDRESS2        -- 상세주소
+            , B.CUSTKEY		 AS TRUTHCUSTKEY    -- 추천실착지코드
+            , B.ADDRESS1	 AS TRUTHADDRESS1  -- 추천주소
+            , B.ADDRESS2	 AS TRUTHADDRESS2  -- 추천상세주소
+            , UTL_MATCH.JARO_WINKLER_SIMILARITY(TRIM(A.ADDRESS1 || A.ADDRESS2), TRIM(B.ADDRESS1 || B.ADDRESS2)) AS SIMILARITY -- 유사도 (%)
+            ,ROW_NUMBER() OVER (PARTITION BY A.CUSTKEY
+                                ORDER BY UTL_MATCH.JARO_WINKLER_SIMILARITY(TRIM(A.ADDRESS1 || A.ADDRESS2), TRIM(B.ADDRESS1 || B.ADDRESS2)) DESC) AS ROW_NM
+            FROM MS_CUSTDLVINFO A
+            LEFT JOIN MS_CUSTDLVINFO B
+            ON A.STORERKEY 	= B.STORERKEY
+            AND A.CUSTTYPE 	= B.CUSTTYPE
+            WHERE A.STORERKEY    ='FW00'
+            AND A.CUSTTYPE     ='C'
+            AND A.CUSTKEY     != B.CUSTKEY
+            AND B.TRUTHADDRESS1 IS NOT NULL
+            AND A.STORERKEY    = B.STORERKEY
+            AND A.CUSTKEY      = #{name}  -- 입력파라미터 ‘고객 코드’
+        --    AND D.OTCO_GRP_ID   IS NOT NULL   -- 온라인 고객 여부   --제거 3/27
+            AND UTL_MATCH.JARO_WINKLER_SIMILARITY(TRIM( A.ADDRESS1 || A.ADDRESS2), TRIM(B.ADDRESS1 || B.ADDRESS2))  <![CDATA[>]]>  90
+            AND UTL_MATCH.EDIT_DISTANCE(A.ADDRESS2, B.ADDRESS2)   <![CDATA[<]]>  10   
+     ) A
+    LEFT JOIN MS_CUST C
+    ON  C.STORERKEY = A.STORERKEY
+    AND C.CUSTTYPE  = A.CUSTTYPE
+    AND C.CUSTKEY   = A.CUSTKEY
+    LEFT JOIN MS_CUST D
+    ON  D.STORERKEY = A.STORERKEY
+    AND D.CUSTTYPE  = A.CUSTTYPE
+    AND D.CUSTKEY   = A.TRUTHCUSTKEY
+WHERE 1=1
+   AND ROW_NM <![CDATA[<=]]>20
+   
+   
+	</select>
+    <update id="updateConfirm"> 
+        UPDATE    /* [msCustDeliveryInfoService.sqlx][msCustDeliveryInfoService.updateConfirm][고객정보수신내역테이블 수정][박요셉][20260213] */
+               CRM_CUSTDLVINFO_HIS
+           SET STATUS       = #{status} 
+             , CONFIRMDATE  = SYSDATE
+             , EDITDATE     = SYSDATE
+             , EDITWHO      = #{gUserId}
+         WHERE SERIALKEY    = #{serialkeyHis}
+
+    </update>
+    
+    <update id="mergeCrmDlvInfo">
+        BEGIN
+            MERGE 
+             INTO LOGISONE.MS_CUSTDLVINFO
+            USING DUAL
+               ON (CUSTKEY = #{custkey} AND CUSTTYPE = #{custtype})
+             WHEN MATCHED THEN
+           UPDATE
+              SET ADDRESSMATCHYN            = #{addressmatchyn}
+                , TRUTHADDRESS1             = #{truthaddress1}
+                , TRUTHADDRESS2             = #{truthaddress2}
+                , TRUTHZIPCODE              = #{truthzipcode}
+                , FACEINSPECT               = #{faceinspect}
+                , INSPECTIONWORKERPHONE     = DAMO.ENC(FN_FORMAT_TELNO(#{inspectionworkerphone}))
+                , INSPECTORPRINTYN          = #{inspectorprintyn}
+                , PARKINGHEIGHT             = #{parkingheight}
+                , KEYTYPE                   = #{keytype}
+                , KEYDETAIL                 = #{keydetail}
+                , REQDLVTIME2_FROM          = #{reqdlvtime2From}
+                , REQDLVTIME2_TO            = #{reqdlvtime2To}
+                , DELIVERYAVAILABLETIME     = #{deliveryavailabletime}
+                , BUILDINGOPENTIME          = #{buildingopentime}
+                , ACCESSWAY                 = #{accessway}
+                , FREEZEPLACE               = #{freezeplace}
+                , COLDPLACE                 = #{coldplace}
+                , HTEMPERATURE              = #{htemperature}
+                , LOADPLACE2                = #{loadplace2}
+                , INITREQUESTDT             = #{initrequestdt}
+                , INITREQUESTTIMESTART      = #{initrequesttimestart}
+                , INITREQUESTTIMEEND        = #{initrequesttimeend}
+                , INITFTFINSPECTIONYN       = #{initftfinspectionyn}
+                , INITDELIVERYCONTACT       = #{initdeliverycontact}
+                , INITDELIVERYDESC          = #{initdeliverydesc}
+                , DELIVERYTYPE              = #{deliverytype}
+                , TEMPTARGET                = #{temptarget}
+                , LABELPRINTTYPE            = #{labelprinttype}
+                , DELIVERYNOTIYN            = #{deliverynotiyn}
+                , DELIVERYNOTIPHONE         = DAMO.ENC(FN_FORMAT_TELNO(#{deliverynotiphone}))
+                , DELIVERYNOTITIMESTART     = #{deliverynotitimestart}
+                , DELIVERYNOTITIMEEND       = #{deliverynotitimeend}
+                , EMPLOEENUMBER             = #{emploeenumber}
+                , STORETYPE                 = #{storetype}
+                , EDITDATE                  = SYSDATE
+                , EDITWHO                   = #{gUserId}
+            WHEN NOT MATCHED THEN
+          INSERT
+                (
+                SERIALKEY
+                , STORERKEY
+                , CUSTKEY
+                , CUSTTYPE
+                , ADDRESSMATCHYN
+                , TRUTHADDRESS1     /* ARRIVALADDRESS */
+                , TRUTHADDRESS2     /* ARRIVALDETAILADDRESS */
+                , TRUTHZIPCODE      /* ARRIVALPOSTALCODE */
+                , FACEINSPECT       /* FTFINSPECTIONYN */
+                , INSPECTIONWORKERPHONE
+                , INSPECTORPRINTYN
+                , PARKINGHEIGHT
+                , KEYTYPE
+                , KEYDETAIL
+                , REQDLVTIME2_FROM
+                , REQDLVTIME2_TO
+                
+                , DELIVERYAVAILABLETIME
+                , BUILDINGOPENTIME
+                , ACCESSWAY         /* MOVEMENTENTRY */
+                , FREEZEPLACE       /* GOODSLOCATIONFROZEN */
+                , COLDPLACE         /* GOODSLOCATIONREFRIG */
+                , HTEMPERATURE      /* GOODSLOCATIONROOM */
+                , LOADPLACE2        /* RETURNLOCATION */
+                
+                , INITREQUESTDT
+                , INITREQUESTTIMESTART
+                , INITREQUESTTIMEEND
+                , INITFTFINSPECTIONYN
+                , INITDELIVERYCONTACT
+                , INITDELIVERYDESC
+                , DELIVERYTYPE
+                , TEMPTARGET
+                , LABELPRINTTYPE
+                , DELIVERYNOTIYN
+                , DELIVERYNOTIPHONE
+                , DELIVERYNOTITIMESTART
+                , DELIVERYNOTITIMEEND
+                , EMPLOEENUMBER
+                , CREATEDBYEMAIL
+                , CREATEDBYNAME
+                , CREATEDDATE
+                , STORETYPE
+                , EDMSFILEID
+                , STATUS
+                , ADDWHO
+                , ADDDATE
+                , EDITWHO
+                , EDITDATE
+                
+               ) VALUES (
+               
+                  SEQ_MS_CUSTDLVINFO.NEXTVAL
+                , #{gStorerkey}
+                , #{custkey}
+                , #{custtype}
+                , #{addressmatchyn}
+                , #{truthaddress1}  /* ARRIVALADDRESS */
+                , #{truthaddress2}  /* ARRIVALDETAILADDRESS */
+                , #{truthzipcode}   /* ARRIVALPOSTALCODE */
+                , #{faceinspect}    /* FTFINSPECTIONYN */
+                , DAMO.ENC(FN_FORMAT_TELNO(#{inspectionworkerphone}))
+                , #{inspectorprintyn}
+                , #{parkingheight}
+                , #{keytype}
+                , #{keydetail}
+                , #{reqdlvtime2From}    /* deliveryRequestTimeStart */
+                , #{reqdlvtime2To}      /* deliveryRequestTimeEnd */
+                
+                , #{deliveryavailabletime}
+                , #{buildingopentime}
+                , #{accessway}          /* movementEntry */
+                , #{freezeplace}        /* goodsLocationFrozen */
+                , #{coldplace}          /* goodsLocationRefrig */
+                , #{htemperature}       /* GOODSLOCATIONROOM */
+                , #{loadplace2}         /* RETURNLOCATION */
+                
+                , #{initrequestdt}
+                , #{initrequesttimestart}
+                , #{initrequesttimeend}
+                , #{initftfinspectionyn}
+                , #{initdeliverycontact}
+                , #{initdeliverydesc}
+                , #{deliverytype}
+                , #{temptarget}
+                , #{labelprinttype}
+                , #{deliverynotiyn}
+                , DAMO.ENC(FN_FORMAT_TELNO(#{deliverynotiphone}))
+                , #{deliverynotitimestart}
+                , #{deliverynotitimeend}
+                , #{emploeenumber}
+                , #{createdbyemail}
+                , #{gUserId}
+                , SYSDATE
+                , #{storetype}
+                , #{edmsfileid}
+                , '03'
+                , #{gUserId}
+                , SYSDATE
+                , #{gUserId}
+                , SYSDATE);
+        END;
+    </update>
+    <select id="getAddressList" resultType="MsCustDeliveryInfoMasterResDto">
+    SELECT /* [msCustDeliveryInfoService.sqlx][getAddressList][][][] */
+	       MS_CUST.CUSTKEY   AS CODE                  
+	     , MS_CUST.DESCRIPTION  AS NAME                  
+	     , MS_CUST.ADDRESS1  AS ADDRESS1                  
+	     , MS_CUST.ADDRESS2  AS ADDRESS2                  
+      FROM MS_CUST         
+     WHERE MS_CUST.STORERKEY   =  'FW00'
+       AND MS_CUST.CUSTKEY         	= #{name}
+       AND MS_CUST.CUSTTYPE = 'C'
+    </select>
+</mapper>

@@ -1,0 +1,206 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ibKxStoragefeeExpenseMMService">
+    <select id="getMasterList" resultType="ibKxStoragefeeExpenseMMResDto">
+            SELECT /* [ibKxStoragefeeExpenseMMService.sqlx][ibKxStoragefeeExpenseMMService.getMasterList][비용기표(1000센터) 조회][ParkYoSep][20251229] */
+                   KX_STORAGEFEE_EXPENSE.SERIALKEY                AS SERIALKEY
+                 , KX_STORAGEFEE_EXPENSE.CLOSE_YN                AS CLOSEYN
+                 , KX_STORAGEFEE_EXPENSE.ZMONTH                AS ZMONTH
+                 , KX_STORAGEFEE_EXPENSE.DCCODE                AS DCCODE
+                 , KX_STORAGEFEE_EXPENSE.DCNAME                AS DCNAME
+                 , KX_STORAGEFEE_EXPENSE.ZCAT                AS ZCAT
+                 , LOGISONESVC.FN_CODEDESCR('FW00', 'KX_STORAGEFEE_EXPENSE_ZCAT', KX_STORAGEFEE_EXPENSE.ZCAT)    AS ZCAT2
+                 , KX_STORAGEFEE_EXPENSE.ZWRBTR_OUT            AS ZWRBTR_OUT
+                 , KX_STORAGEFEE_EXPENSE.ZWRBTR_IN                AS ZWRBTR_IN
+                 , KX_STORAGEFEE_EXPENSE.UOM                    AS UOM
+                 , KX_STORAGEFEE_EXPENSE.QTY                    AS QTY
+                 , KX_STORAGEFEE_EXPENSE.ZINVOICE                AS ZINVOICE
+                 , KX_STORAGEFEE_EXPENSE.ZBILLNO                AS ISSUE_ID
+                 , KX_STORAGEFEE_EXPENSE.WMWST1                AS WMWST1
+                 , KX_STORAGEFEE_EXPENSE.BTEXT                AS BTEXT
+                 , KX_STORAGEFEE_EXPENSE.STATUS                AS STATUS
+                 , LOGISONESVC.FN_CODEDESCR('FW00', 'STATUS_EXPENSE_KX', KX_STORAGEFEE_EXPENSE.STATUS)    AS STATUS2
+                 , (SELECT FN_CODEDESCR('FW00','STATUS_EXPENSE_IF',IF_STATUS) FROM DUAL) AS IF_STATUS
+                 , KX_STORAGEFEE_EXPENSE.ADDDATE                AS ADDDATE
+                 , KX_STORAGEFEE_EXPENSE.ADDWHO                AS ADDWHO
+                 , KX_STORAGEFEE_EXPENSE.EDITDATE                AS EDITDATE
+                 , KX_STORAGEFEE_EXPENSE.EDITWHO                AS EDITWHO
+                 , USER2.USER_NM                               AS EDITWHO_NM  /*수정자명*/
+                 , '1006706'                                    AS ADJUSTMENT_SUPPLIER_CODE
+                 , '씨제이대한통운(주)'                                AS ADJUSTMENT_SUPPLIER_NAME
+                 , (SELECT SUBSTR(XMLAGG(XMLELEMENT(COL ,',', ZRETURN) ORDER BY ZRETURN).EXTRACT('//text()').GETSTRINGVAL(), 2)
+                      FROM ( SELECT DISTINCT ZINVOICE, ZRETURN
+                               FROM   IF_IB_STOCKSKU_H
+                              WHERE  FI_IF_STATUS = 'CNF'
+                            ) AA
+                     WHERE  AA.ZINVOICE = KX_STORAGEFEE_EXPENSE.ZINVOICE) AS INV_NO 
+                 , (SELECT SUBSTR(XMLAGG(XMLELEMENT(COL ,',', ZRE_BELNR) ORDER BY ZRE_BELNR).EXTRACT('//text()').GETSTRINGVAL(), 2)
+                      FROM  (
+                             SELECT DISTINCT ZINVOICE, ZRE_BELNR
+                               FROM   IF_IB_STOCKSKU_H
+                              WHERE  FI_IF_STATUS = 'CNF'
+                             ) AA
+                     WHERE  AA.ZINVOICE = KX_STORAGEFEE_EXPENSE.ZINVOICE)                                       AS SLIP_NO
+              FROM   KX_STORAGEFEE_EXPENSE
+              LEFT JOIN FRAMEONE_USER USER2 ON USER2.USER_ID = KX_STORAGEFEE_EXPENSE.EDITWHO  /*수정자명*/
+             WHERE 1=1
+               AND    KX_STORAGEFEE_EXPENSE.DCCODE            = #{gDccode}
+               AND    KX_STORAGEFEE_EXPENSE.ZMONTH              =  #{closeDate}
+               AND    KX_STORAGEFEE_EXPENSE.DEL_YN              =  'N'
+             ORDER BY KX_STORAGEFEE_EXPENSE.ZMONTH, KX_STORAGEFEE_EXPENSE.ZCAT
+     </select>
+     <select id="getApprStatus" resultType="IbKxStoragefeeExpenseMMResDto">
+        SELECT /* [ibKxStoragefeeExpenseMMService.sqlx][ibKxStoragefeeExpenseMMService.getApprStatus][비용기표 상태 체크)][chaew][20240415] */
+               STATUS                         AS STATUS
+             , IF_STATUS                      AS IF_STATUS  
+             , ZINVOICE                       AS KEY_NO     
+             , ZINVOICE                      AS IF_DOC_NO
+             , (SELECT FI_IF_STATUS                                                
+                           FROM   IF_IB_STOCKSKU_H
+                           WHERE  ZINVOICE = KX_STORAGEFEE_EXPENSE.ZINVOICE
+                           AND    ROWNUM   = 1) AS FI_IF_STATUS
+             , IF_ID                          AS IF_ID
+        FROM   KX_STORAGEFEE_EXPENSE
+        WHERE  SERIALKEY =  #{serialKey}
+    </select>
+    <update id="updateIfIbStockSkuHeader">
+    	UPDATE /* [ibKxStoragefeeExpenseMMService.sqlx][ibKxStoragefeeExpenseMMService.updateIfIbStockSkuHeader][I/F 테이블 UPDATE(IF_IB_STOCKSKU_H.FI_IF_STATUS)][AhnKihyeong][20160421] */
+		       IF_IB_STOCKSKU_H
+		SET    FI_IF_STATUS         = 'SND'
+		  ,  EDITDATE = sysdate
+		WHERE  ZINVOICE             =  #{ifDocNo} 
+
+    </update>
+    <select id="getIF_IB_STOCKSKU_H" resultType="IfIbStocketcHDto">
+        SELECT  /* [ibKxStoragefeeExpenseMMService.sqlx][getIF_IB_STOCKSKU_H][I/F 데이터 조회(IF_IB_STOCKSKU_H)][sunho.kim][2025.08.04] */
+                SERIALKEY
+              , ZINVOICE
+              , ZCAT
+              , TO_CHAR(ZSEQ)  AS ZSEQ
+              , ZLAST
+              , XRECH
+              , BUKRS
+              , LIFNR
+              , EMPFB
+              , TO_CHAR(BLDAT, 'YYYYMMDD') AS BLDAT 
+              , TO_CHAR(BUDAT, 'YYYYMMDD') AS BUDAT 
+              , WAERS
+              , MWSKZ1
+              , ZTERM
+              , TO_CHAR(ZFBDT, 'YYYYMMDD') AS TO_CHAR 
+              , TO_CHAR(RMWWR)  AS RMWWR
+              , TO_CHAR(WMWST1) AS WMWST1
+              , KIDNO
+              , BKTXT
+              , ZGUBUN
+              , ZBILLNO
+              , CARD_NO
+              , APPR_DATE
+              , APPR_DOCU
+              , CNCL_FLAG
+              , SELL_DOCU
+              , ZTEXT1
+              , ZTEXT2
+              , ZTEXT3
+              , ZTEXT4
+              , ZTEXT5
+              , XDATS
+              , XTIMS
+              , XUSER
+              , XSTAT
+              , XMSGS
+              , ZRETURN
+              , ZRE_BELNR
+              , EXPENSE_SN
+              , ADDDATE
+              , EDITDATE
+              , ADDWHO
+              , EDITWHO
+              , FI_IF_STATUS
+              ,(SELECT IF_ID
+                FROM   KX_STORAGEFEE_EXPENSE
+                WHERE  SERIALKEY = IF_IB_STOCKSKU_H.EXPENSE_SN) AS IF_ID
+        FROM    IF_IB_STOCKSKU_H
+        WHERE   EXPENSE_SN   = #{serialkey}
+        AND     ZINVOICE     = (SELECT ZINVOICE 
+                                FROM   KX_STORAGEFEE_EXPENSE
+                                WHERE  SERIALKEY = #{serialkey})
+        AND     FI_IF_STATUS = DECODE(#{ifType},'POSTING','SND','POSTING_CANCEL','CNF','X')
+        ORDER BY
+                ZSEQ
+    </select>
+    
+    <select id="getIF_IB_STOCKSKU_D" resultType="IfIbStockskuDDto">
+        SELECT   /* [ibKxStoragefeeExpenseMMService.sqlx][getIF_IB_STOCKSKU_D][I/F 데이터 조회(IF_IB_STOCKSKU_D)][sunho.kim][2025.08.04] */
+                SERIALKEY
+              , ZINVOICE
+              , ZCAT
+              , TO_CHAR(ZSEQ) AS ZSEQ
+              , BUZEI
+              , GL_ACCOUNT
+              , MWSKZ
+              , PROFIT_CTR
+              , SHKZG
+              , TO_CHAR(WRBTR) AS WRBTR
+              , MATNR
+              , TO_CHAR(MENGE) AS MENGE
+              , BSTME
+              , ZEBELN
+              , ZEBELP
+              , ZTEXT1
+              , ZTEXT2
+              , ZTEXT3
+              , ZTEXT4
+              , ZTEXT5
+              , ADDDATE
+              , EDITDATE
+              , ADDWHO
+              , EDITWHO
+        FROM    IF_IB_STOCKSKU_D
+        WHERE   ZINVOICE   = #{zinvoice}
+        ORDER BY
+                ZSEQ
+              , TO_NUMBER(BUZEI)
+    </select>
+    
+    
+
+    <update id="updateIfResultIfIbStockSkuH">
+        UPDATE  /* [ibKxStoragefeeExpenseMMService.sqlx][updateIfResultIfIbStockSkuH][I/F 결과 UPDATE][sunho.kim][2025.08.04] */ 
+        IF_IB_STOCKSKU_H
+        SET    FI_IF_STATUS         = CASE WHEN #{ifType} IN ('POSTING_CANCEL') 
+                                           THEN DECODE(#{xstat},'S','CCO',FI_IF_STATUS)
+                                           ELSE DECODE(#{xstat},'S','CNF','ERR')
+                                      END
+             , XSTAT                = #{xstat}
+             , XMSGS                = #{xmsgs}
+             , ZRETURN              = CASE WHEN #{ifType} IN ('POSTING_CANCEL') 
+                                           THEN ZRETURN
+                                           ELSE #{zreturn}
+                                      END
+             , ZRE_BELNR            = CASE WHEN #{ifType} IN ('POSTING_CANCEL') 
+                                           THEN ZRE_BELNR
+                                           ELSE #{zreBelnr}
+                                      END
+             , EDITDATE             = SYSDATE
+             , EDITWHO              = #{gUserId}
+        WHERE  ZINVOICE             = #{zinvoice}
+        AND    ZSEQ                 = NVL(#{zseq},ZSEQ)
+    </update>
+    
+    <update id="updateIfResultIbExpense">
+        UPDATE  /* [ibKxStoragefeeExpenseMMService.sqlx][updateIfResultIbExpense][I/F 결과 UPDATE][sunho.kim][2025.08.04] */ 
+        KX_STORAGEFEE_EXPENSE
+        SET    STATUS    = CASE WHEN #{ifType} IN ('POSTING_CANCEL') 
+                                THEN DECODE(#{xstat},'S','CFM','POE','POE',STATUS)
+                                ELSE DECODE(#{xstat},'S','SCO','POE','POE',STATUS)
+                           END
+             , IF_STATUS = CASE WHEN #{ifType} IN ('POSTING_CANCEL') 
+                                THEN DECODE(#{xstat},'S','CCO','POE','POE',IF_STATUS)
+                                ELSE DECODE(#{xstat},'S','SCO','POE','POE','ERR')
+                           END
+             , EDITDATE  = SYSDATE
+             , EDITWHO   = #{gUserId}
+        WHERE  SERIALKEY = #{serialkey}
+    </update>
+</mapper>

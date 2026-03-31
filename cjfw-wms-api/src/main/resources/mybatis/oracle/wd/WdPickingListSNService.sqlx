@@ -1,0 +1,176 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="wdPickingListSNService">
+
+
+	<select id="getMasterList" resultType="WdPickingListSNResDto">		
+		WITH T_RESULT AS (
+            SELECT /* [WdPickingListSNService.sqlx][getMasterList][이력피킹현황 목록 조회][공두경][2025.07.03] */
+		              WD_INPLAN.DCCODE                                                       AS DCCODE			/*물류센터*/
+		            , NVL(DC1.DCNAME,'')                                        		     AS DCNAME			/*물류센터명*/
+		            , DM_DOCUMENT_D.PLANT                                                    AS PLANT			/*플랜트*/
+		            , WD_INPLAN.SLIPDT                                                       AS SLIPDT			/*출고일자*/
+		            , WD_INPLAN.DOCNO                                                        AS DOCNO			/*주문번호*/
+		            , WD_INPLAN.DOCLINE                                                      AS DOCLINE			/*품목번호*/
+		            , DM_DOCUMENT_H.TO_CUSTKEY                                               AS TO_CUSTKEY		/*관리처코드*/
+		            , DM_DOCUMENT_H.TO_CUSTNAME                                              AS TO_CUSTNAME		/*관리처명*/
+		            , WD_INPLAN.SKU                                                          AS SKU				/*상품코드*/
+		            , MS_SKU.DESCRIPTION                                                     AS SKUNAME			/*상품명칭*/
+		            , WD_INPLAN.ORDERQTY + WD_INPLAN.CANCELQTY                               AS ORDERQTY		/*주문수량*/
+		            , SUM(WD_INVOICE_SN.PICKEDQTY) OVER (PARTITION BY WD_INVOICE.DCCODE
+                                                                     ,WD_INVOICE.STORERKEY
+                                                                     ,WD_INVOICE.ORGANIZE
+                                                                     ,WD_INVOICE.SLIPDT
+                                                                     ,WD_INVOICE.SLIPNO
+                                                                     ,WD_INVOICE.SLIPLINE
+                                                                     ,WD_INVOICE.INVOICENO)  AS PICKEDQTY		/*피킹작업량*/
+		            , WD_INPLAN.CONFIRMQTY                                                   AS CONFIRMQTY		/*확정수량*/
+		            , WD_INPLAN.CANCELQTY                                                    AS CANCELQTY		/*취소량*/
+		            , CASE WHEN WD_INVOICE.INVOICENO IS NULL THEN 1
+		                   WHEN NVL(MS_SKU.LINE01,'N') <![CDATA[<>]]> 'Y' AND WD_INVOICE.CONFIRMQTY > SUM(NVL(WD_INVOICE_SN.PICKEDQTY,0)) OVER (PARTITION BY WD_INVOICE.INVOICENO) THEN 2
+		                   WHEN NVL(MS_SKU.LINE01,'N') = 'Y' AND SUM(NVL(WD_INVOICE_SN.PICKEDQTY,0)) OVER (PARTITION BY WD_INVOICE.INVOICENO) = 0 THEN 2
+		                   WHEN SUM(NVL(WD_INVOICE_SN.PICKEDQTY - WD_INVOICE_SN.CONFIRMQTY,0)) OVER (PARTITION BY WD_INVOICE.INVOICENO) = 0 THEN 6
+		                   ELSE CASE WHEN WD_INVOICE_SN.DCCODE = WD_INVOICE_SN.FROM_DCCODE THEN 3
+		                             ELSE CASE WHEN SUM(NVL(WD_INVOICE_SN.PICKEDQTY - WD_INVOICE_SN.STOCONFIRMQTY,0)) OVER (PARTITION BY WD_INVOICE.INVOICENO) = 0 THEN 5
+		                                       ELSE 4
+		                                  END
+		                        END
+		              END                                                                    AS STATUSCODE		/*진행상태*/
+		            , WD_INVOICE.INVOICENO                                                   AS INVOICENO		/*배송라벨*/
+		            , WD_INVOICE.CONFIRMQTY                                                  AS INVOICEQTY		/*운송장수량*/
+		            , WD_INPLAN.UOM                                                          AS UOM				/*단위*/
+		            , WD_INVOICE_SN.FROM_DCCODE                                              AS FROM_DCCODE		/*작업센터코드*/
+		            , NVL(DC2.DCNAME,'')                                        		     AS FROM_DCNAME		/*작업센터명*/
+		            , WD_INVOICE_SN.SERIALNO                                                 AS SERIALNO		/*이력번호*/
+		            , WD_INVOICE_SN.STOCKID                                                  AS STOCKID			/*개체식별/유통이력*/
+		            , WD_INVOICE_SN.PICKEDQTY                                                AS INVOICEPICKEDQTY		/*피킹작업량*/
+		            , WD_INVOICE_SN.STOCONFIRMQTY                                            AS INVOICESTOCONFIRMQTY	/*STO확정수량*/
+		            , WD_INVOICE_SN.CONFIRMQTY                                               AS INVOICECONFIRMQTY		/*확정수량*/
+		            , NVL(CD1.BASEDESCR,CD1.BASECODE)										 AS ORDERTYPE		/*주문유형*/
+		            , USER1.USER_NM                                              			 AS ADDWHO			/*피킹 입력자*/
+		            , WD_INVOICE_SN.ADDDATE                                               	 AS ADDDATE			/*입력시간*/
+		            ,(WD_INPLAN.ORDERQTY + WD_INPLAN.CANCELQTY)
+		             *DM_DOCUMENT_D.BUNMO
+		             /DM_DOCUMENT_D.BUNJA                                                    AS STORERORDERQTY	/**/
+		            , WD_INPLAN.CANCELQTY
+		             *DM_DOCUMENT_D.BUNMO
+		             /DM_DOCUMENT_D.BUNJA                                                    AS STORERCANCELQTY	/**/
+		            , WD_INVOICE.CONFIRMQTY
+		             *DM_DOCUMENT_D.BUNMO
+		             /DM_DOCUMENT_D.BUNJA                                                    AS STORERINVOICEQTY	/**/
+		            , DM_DOCUMENT_D.STORERUOM                                                AS STORERUOM	/**/
+		       FROM   DM_DOCUMENT_D
+		       JOIN   DM_DOCUMENT_H
+		       ON     DM_DOCUMENT_H.DCCODE              = DM_DOCUMENT_D.DCCODE
+		       AND    DM_DOCUMENT_H.STORERKEY           = DM_DOCUMENT_D.STORERKEY
+		       AND    DM_DOCUMENT_H.ORGANIZE            = DM_DOCUMENT_D.ORGANIZE
+		       AND    DM_DOCUMENT_H.DOCTYPE             = DM_DOCUMENT_D.DOCTYPE
+		       AND    DM_DOCUMENT_H.DOCDT               = DM_DOCUMENT_D.DOCDT
+		       AND    DM_DOCUMENT_H.DOCNO               = DM_DOCUMENT_D.DOCNO
+		       AND    DM_DOCUMENT_H.DELIVERYDATE        = DM_DOCUMENT_D.DELIVERYDATE 
+		       AND    DM_DOCUMENT_H.TO_CUSTTYPE<![CDATA[<>]]> 'D'
+		       AND    DM_DOCUMENT_H.DEL_YN              = 'N'
+		    <if test="ordertype != null and ordertype != ''">				AND    DM_DOCUMENT_H.ORDERTYPE	=	#{ordertype} 		</if>
+			<!-- 고객 다중선택 -->			
+			<if test="toCustkeyMulti != null and toCustkeyMulti != '' ">
+		    	<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+		    		<foreach collection="toCustkeyMulti" item="item">
+		    			OR DM_DOCUMENT_H.TO_CUSTKEY IN
+		    			<foreach collection="item" item="code" open="(" close=")" separator=",">
+		    				#{code} 	 
+		          		</foreach>
+		        	</foreach>
+		      	</trim>			                                    
+            </if>
+		       JOIN   WD_INPLAN
+		       ON     WD_INPLAN.DCCODE                  = DM_DOCUMENT_D.DCCODE
+		       AND    WD_INPLAN.STORERKEY               = DM_DOCUMENT_D.STORERKEY
+		       AND    WD_INPLAN.ORGANIZE                = DM_DOCUMENT_D.ORGANIZE
+		       AND    WD_INPLAN.AREA                    = DM_DOCUMENT_D.AREA
+		       AND    WD_INPLAN.DOCTYPE                 = DM_DOCUMENT_D.DOCTYPE
+		       AND    WD_INPLAN.DOCDT                   = DM_DOCUMENT_D.DOCDT
+		       AND    WD_INPLAN.DOCNO                   = DM_DOCUMENT_D.DOCNO
+		       AND    WD_INPLAN.DOCLINE                 = DM_DOCUMENT_D.DOCLINE
+		       AND    WD_INPLAN.SLIPDT                  = DM_DOCUMENT_D.DELIVERYDATE 
+		       AND    WD_INPLAN.DEL_YN                  = 'N'
+		       JOIN   MS_SKU
+		       ON     MS_SKU.STORERKEY                  = DM_DOCUMENT_D.STORERKEY
+		       AND    MS_SKU.SKU                        = DM_DOCUMENT_D.SKU
+		       AND    MS_SKU.SERIALYN                   = 'Y'
+		       AND    MS_SKU.DEL_YN                     = 'N'
+			<if test="storagetype != null and storagetype != ''">	AND    MS_SKU.STORAGETYPE	=	#{storagetype} 		</if>
+			<if test="skugroup != null and skugroup != ''">			AND    LEFT(MS_SKU.SKUGROUP,2)	=	#{skugroup} 		</if>
+		       LEFT JOIN WD_INVOICE
+		       ON     WD_INVOICE.DCCODE                 = WD_INPLAN.DCCODE
+		       AND    WD_INVOICE.STORERKEY              = WD_INPLAN.STORERKEY
+		       AND    WD_INVOICE.ORGANIZE               = WD_INPLAN.ORGANIZE
+		       AND    WD_INVOICE.SLIPDT                 = WD_INPLAN.SLIPDT
+		       AND    WD_INVOICE.SLIPNO                 = WD_INPLAN.SLIPNO
+		       AND    WD_INVOICE.SLIPLINE               = WD_INPLAN.SLIPLINE
+		       AND    WD_INVOICE.PICK_LIST_NO           IS NULL
+		       AND    WD_INVOICE.DEL_YN                 = 'N'
+		       LEFT JOIN WD_INVOICE_SN
+		       ON     WD_INVOICE_SN.DCCODE              = WD_INVOICE.DCCODE
+		       AND    WD_INVOICE_SN.STORERKEY           = WD_INVOICE.STORERKEY
+		       AND    WD_INVOICE_SN.INVOICENO           = WD_INVOICE.INVOICENO
+		       AND    WD_INVOICE_SN.WD_SLIPDT           = WD_INVOICE.SLIPDT
+		       AND    WD_INVOICE_SN.WD_SLIPNO           = WD_INVOICE.SLIPNO
+		       AND    WD_INVOICE_SN.WD_SLIPLINE         = WD_INVOICE.SLIPLINE
+		       AND    WD_INVOICE_SN.DEL_YN              = 'N'
+		       LEFT JOIN CM_CODE_STORER CD1  ON CD1.STORERKEY  = DM_DOCUMENT_H.STORERKEY AND CD1.CODELIST  = 'ORDERTYPE_WD' 	AND CD1.BASECODE   = DM_DOCUMENT_H.ORDERTYPE
+		       LEFT JOIN CM_DC DC1  ON DC1.DCCODE  = WD_INPLAN.DCCODE
+		       LEFT JOIN CM_DC DC2  ON DC2.DCCODE  = WD_INVOICE_SN.FROM_DCCODE
+		       LEFT JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = WD_INVOICE_SN.ADDWHO
+		       WHERE  DM_DOCUMENT_D.CHANNEL             = '1'
+		       AND    DM_DOCUMENT_D.STORERKEY           = #{gStorerkey} 	 
+		       AND    DM_DOCUMENT_D.DOCTYPE             = 'WD' 	 
+		       AND    DM_DOCUMENT_D.DELIVERYDATE <![CDATA[>=]]> #{fromSlipdt}
+			   AND    DM_DOCUMENT_D.DELIVERYDATE <![CDATA[<=]]> #{toSlipdt}
+		       AND    DM_DOCUMENT_D.DEL_YN              = 'N'
+		    <if test="fixdccode != null and fixdccode != ''">	AND    DM_DOCUMENT_D.DCCODE	=	#{fixdccode} 		</if>		    
+            <if test="organizeMulti != null and organizeMulti != ''">
+               AND DM_DOCUMENT_D.ORGANIZE IN
+               <foreach collection="organizeMulti" item="code" open="(" close=")" separator=",">
+                 #{code}
+               </foreach>
+            </if>    
+		    <if test="plant != null and plant != ''">	AND    DM_DOCUMENT_D.PLANT	=	#{plant} 		</if>
+			<!-- 문서번호 다중선택 -->	
+			<if test="docnoMulti != null and docnoMulti != ''">
+		       AND DM_DOCUMENT_D.DOCNO IN
+		       <foreach collection="docnoMulti" item="code" open="(" close=")" separator=",">
+		         #{code}
+		       </foreach>   
+	        </if>
+			<if test="workdccode != null and workdccode != ''">	AND    WD_INVOICE_SN.FROM_DCCODE	=	#{workdccode} 		</if>                                                                                                              
+		    <!-- 상품 다중선택 -->
+			<if test="sku != null and sku != '' ">
+				<if test="skuMulti != null and skuMulti.size() > 0">
+					<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+						<foreach collection="skuMulti" item="item">
+							OR DM_DOCUMENT_D.SKU IN
+							<foreach collection="item" item="code" open="(" close=")" separator=",">
+								#{code} 	 
+				      		</foreach>
+				    	</foreach>
+				  	</trim>			                                    
+		    	</if>
+	        </if>
+        )
+        SELECT 
+               T_RESULT.*
+              ,DECODE(STATUSCODE,1,'배송분류표미출력',2,'피킹미완료',3,'피킹완료',4,'STO피킹완료',5,'STO출고확정',6,'출고확정','') AS STATUS
+        FROM   T_RESULT
+		WHERE  1=1
+		<if test="status != null and status != ''">	AND    STATUSCODE	=	#{status} 		</if>	                                                                                                                              
+		ORDER BY
+		       STATUSCODE
+		      ,DCCODE
+		      ,SLIPDT
+		      ,DOCNO
+		      ,DOCLINE
+		      ,INVOICENO
+		      ,STOCKID 
+			   		
+	</select>
+</mapper>

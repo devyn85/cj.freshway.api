@@ -1,0 +1,1106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+ * Copyright 2025. CJ OliveNetworks Co. all rights reserved.
+ *
+ * @author      : KimDongHan (liop0123@cj.net)
+ * @date        : 2025.09.03
+ * @description : 지표 > 센터 운영 > 출고 유형별 물동 현황 SQL
+ * @issues      :
+-->
+
+<mapper namespace="kpCenterDayStateService">
+
+	<select id="getMasterT1List" resultType="cjfw.wms.kp.dto.KpCenterDayStateResT1Dto">
+		/* [KpCenterDayStateService.sqlx][KpCenterDayStateService.getMasterT1List][지표 > 센터 운영 > 출고 유형별 물동 현황 배송물동_탭 조회][KimDongHan][2025-09-04] */	
+		 WITH T_TAB AS (
+		SELECT DCCODE                                                                                                                               AS DCCODE
+		     , COURSE                                                                                                                               AS COURSE
+		     , CHANNEL                                                                                                                              AS CHANNEL
+		     , '01'                                                                                                                                 AS TITLE
+		     , TRUNC(CASE WHEN COUNT(DISTINCT PREDELIVERYDATE) = 0 THEN 0 ELSE SUM(PREWEIGHT)/COUNT(DISTINCT PREDELIVERYDATE) END,2)                AS PREMONTH
+		     , TRUNC(CASE WHEN COUNT(DISTINCT DELIVERYDATE) = 0 THEN 0 ELSE SUM(WEIGHT)/COUNT(DISTINCT DELIVERYDATE) END,2)                         AS MONTH
+		     , TRUNC(CASE WHEN COUNT(DISTINCT DELIVERYDATE) = 0 THEN 0 ELSE SUM(WEIGHT)/COUNT(DISTINCT DELIVERYDATE) END
+		       - CASE WHEN COUNT(DISTINCT PREDELIVERYDATE) = 0 THEN 0 ELSE SUM(PREWEIGHT)/COUNT(DISTINCT PREDELIVERYDATE) END,2)                    AS MONTHINCDEC
+		     , TRUNC(CASE WHEN (CASE WHEN COUNT(DISTINCT PREDELIVERYDATE) = 0 THEN 0 ELSE SUM(PREWEIGHT)/COUNT(DISTINCT PREDELIVERYDATE) END) = 0
+		       THEN 100 ELSE ((CASE WHEN COUNT(DISTINCT DELIVERYDATE) = 0 THEN 0 ELSE SUM(WEIGHT)/COUNT(DISTINCT DELIVERYDATE) END
+		       - CASE WHEN COUNT(DISTINCT PREDELIVERYDATE) = 0 THEN 0 ELSE SUM(PREWEIGHT)/COUNT(DISTINCT PREDELIVERYDATE) END)
+		       / (CASE WHEN COUNT(DISTINCT PREDELIVERYDATE) = 0 THEN 0 ELSE SUM(PREWEIGHT)/COUNT(DISTINCT PREDELIVERYDATE)END))*100 END,2)          AS MONTHINCDECPER
+		     , TRUNC(SUM(PREDAY),2)                                                                                                                 AS PREDAY
+		     , TRUNC(SUM(DAY),2)                                                                                                                    AS DAY
+		     , TRUNC(SUM(DAY)-SUM(PREDAY),2)                                                                                                        AS DAYINCDEC
+		     , TRUNC(CASE WHEN SUM(PREDAY) = 0 THEN 100 ELSE ((SUM(DAY)-SUM(PREDAY))/SUM(PREDAY))*100 END,2)                                        AS DAYINCDECPER
+		  FROM ( SELECT KP_DAILYQTY.DCCODE                                                                                                                                   AS DCCODE
+		              , CASE WHEN NVL(KP_DAILYQTY.CHANNEL, '1') IN ('2','3') THEN '2' ELSE NVL(KP_DAILYQTY.CHANNEL, '1') END                                                 AS CHANNEL
+		              , NVL(TRIM(CM_CODE.DATA1),'99')                                                                                                                        AS COURSE
+		              , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = TO_CHAR(ADD_MONTHS(TO_DATE(#{docdt},'YYYYMMDD'),-1),'YYYYMM') THEN KP_DAILYQTY.CONFIRMWEIGHT  ELSE 0 END AS PREWEIGHT
+		              , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = TO_CHAR(ADD_MONTHS(TO_DATE(#{docdt},'YYYYMMDD'),-1),'YYYYMM') THEN KP_DAILYQTY.SLIPDT ELSE NULL END      AS PREDELIVERYDATE
+		              , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = SUBSTR(#{docdt},1,6) THEN KP_DAILYQTY.CONFIRMWEIGHT ELSE 0 END                                           AS WEIGHT                                                                   
+		              , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = SUBSTR(#{docdt},1,6) THEN KP_DAILYQTY.SLIPDT ELSE NULL END                                               AS DELIVERYDATE 
+		              , CASE WHEN KP_DAILYQTY.SLIPDT = TO_CHAR(TO_DATE(#{docdt},'YYYYMMDD')-1,'YYYYMMDD') THEN KP_DAILYQTY.CONFIRMWEIGHT  ELSE 0 END                         AS PREDAY  
+		              , CASE WHEN KP_DAILYQTY.SLIPDT = #{docdt} THEN KP_DAILYQTY.CONFIRMWEIGHT  ELSE 0 END                                                                   AS DAY                                                                                                         
+		           FROM KP_DAILYQTY                
+		           LEFT OUTER JOIN CM_CODE
+		             ON CM_CODE.STORERKEY  = KP_DAILYQTY.STORERKEY
+		            AND CM_CODE.BASECODE   = KP_DAILYQTY.CUSTSTRATEGY3
+		            AND CM_CODE.CODELIST   = 'CUSHRC'
+				<if test="course != null and course != ''">
+		            AND CM_CODE.DATA1      = #{course}
+				</if>
+		          WHERE 1=1
+		            AND KP_DAILYQTY.STORERKEY           = #{gStorerkey}
+				<if test="dccode != null and dccode != ''">
+				    AND KP_DAILYQTY.DCCODE              = #{dccode} 
+				</if>
+		            AND KP_DAILYQTY.CHANNEL              IN ('1','2','3')                
+				<if test="channel != null and channel != ''">
+				    AND KP_DAILYQTY.CHANNEL             = #{channel} 
+				</if>
+		            AND KP_DAILYQTY.DOCTYPE             = 'WD'
+		            AND KP_DAILYQTY.WORKPROCESSCODE     = 'SO'
+		            AND KP_DAILYQTY.SLIPDT BETWEEN TO_CHAR(ADD_MONTHS(TO_DATE(#{docdt},'YYYYMMDD'),-1),'YYYYMM')||'01' AND #{docdt} )
+		 GROUP BY DCCODE
+		        , COURSE
+		        , CHANNEL
+		 UNION ALL
+		SELECT DCCODE                                                                                                                                                     AS DCCODE
+		     , COURSE                                                                                                                                                     AS COURSE
+		     , CHANNEL                                                                                                                                                    AS CHANNEL
+		     , '02'                                                                                                                                                       AS TITLE
+		     , TRUNC(CASE WHEN COUNT(DISTINCT PREDELIVERYDATE) = 0 THEN 0 ELSE COUNT(DISTINCT PREMONTHCUST)/COUNT(DISTINCT PREDELIVERYDATE) END,2)                        AS PREMONTH
+		     , TRUNC(CASE WHEN COUNT(DISTINCT DELIVERYDATE) = 0 THEN 0 ELSE COUNT(DISTINCT MONTHCUST)/COUNT(DISTINCT DELIVERYDATE) END,2)                                 AS MONTH
+		     , TRUNC(CASE WHEN COUNT(DISTINCT DELIVERYDATE) = 0 THEN 0 ELSE COUNT(DISTINCT MONTHCUST)/COUNT(DISTINCT DELIVERYDATE) END
+		       - CASE WHEN COUNT(DISTINCT PREDELIVERYDATE) = 0 THEN 0 ELSE COUNT(DISTINCT PREMONTHCUST)/COUNT(DISTINCT PREDELIVERYDATE) END,2)                            AS MONTHINCDEC
+		     , TRUNC(CASE WHEN (CASE WHEN COUNT(DISTINCT PREDELIVERYDATE) = 0 THEN 0 ELSE COUNT(DISTINCT PREMONTHCUST)/COUNT(DISTINCT PREDELIVERYDATE) END) = 0
+		       THEN  100 ELSE ((CASE WHEN COUNT(DISTINCT DELIVERYDATE) = 0 THEN 0 ELSE COUNT(DISTINCT MONTHCUST)/COUNT(DISTINCT DELIVERYDATE) END
+		       - CASE WHEN COUNT(DISTINCT PREDELIVERYDATE) = 0 THEN 0 ELSE COUNT(DISTINCT PREMONTHCUST)/COUNT(DISTINCT PREDELIVERYDATE) END)
+		       / (CASE WHEN COUNT(DISTINCT PREDELIVERYDATE) = 0 THEN 0 ELSE COUNT(DISTINCT PREMONTHCUST)/COUNT(DISTINCT PREDELIVERYDATE) END))*100 END,2)                 AS MONTHINCDECPER
+		     , TRUNC(COUNT(DISTINCT PREDAYCUST),2)                                                                                                                        AS PREDAY
+		     , TRUNC(COUNT(DISTINCT DAYCUST),2)                                                                                                                           AS DAY
+		     , TRUNC(COUNT(DISTINCT DAYCUST)-COUNT(DISTINCT PREDAYCUST),2)                                                                                                AS DAYINCDEC
+		     , TRUNC(CASE WHEN COUNT(DISTINCT PREDAYCUST) = 0 THEN 100  ELSE ((COUNT(DISTINCT DAYCUST)-COUNT(DISTINCT PREDAYCUST))/COUNT(DISTINCT PREDAYCUST))*100 END,2) AS DAYINCDECPER
+		  FROM ( SELECT KP_DAILYQTY.DCCODE                                                                                                                                  AS DCCODE
+		              , CASE WHEN NVL(KP_DAILYQTY.CHANNEL, '1') IN ('2','3') THEN '2' ELSE NVL(KP_DAILYQTY.CHANNEL, '1') END                                                AS CHANNEL
+		              , NVL(TRIM(CM_CODE.DATA1),'99')                                                                                                                       AS COURSE
+		              , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = TO_CHAR(ADD_MONTHS(TO_DATE(#{docdt},'YYYYMMDD'),-1),'YYYYMM') THEN KP_DAILYQTY.CUSTKEY  ELSE NULL END   AS PREMONTHCUST
+		              , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = TO_CHAR(ADD_MONTHS(TO_DATE(#{docdt},'YYYYMMDD'),-1),'YYYYMM') THEN KP_DAILYQTY.SLIPDT ELSE NULL END     AS PREDELIVERYDATE
+		              , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = SUBSTR(#{docdt},1,6) THEN KP_DAILYQTY.CUSTKEY  ELSE NULL END                                            AS MONTHCUST                                                                 
+		              , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = SUBSTR(#{docdt},1,6) THEN KP_DAILYQTY.SLIPDT ELSE NULL END                                              AS DELIVERYDATE 
+		              , CASE WHEN KP_DAILYQTY.SLIPDT = TO_CHAR(TO_DATE(#{docdt},'YYYYMMDD')-1,'YYYYMMDD') THEN KP_DAILYQTY.CUSTKEY  ELSE NULL END                           AS PREDAYCUST  
+		              , CASE WHEN KP_DAILYQTY.SLIPDT = #{docdt} THEN KP_DAILYQTY.CUSTKEY  ELSE NULL END                                                                     AS DAYCUST                                                                                                         
+		           FROM KP_DAILYQTY                
+		           LEFT OUTER JOIN  CM_CODE
+		             ON CM_CODE.STORERKEY   = KP_DAILYQTY.STORERKEY
+		            AND CM_CODE.BASECODE    = KP_DAILYQTY.CUSTSTRATEGY3
+		            AND CM_CODE.CODELIST    = 'CUSHRC'
+				<if test="course != null and course != ''">
+		            AND CM_CODE.DATA1 = #{course}
+				</if>
+		          WHERE 1=1
+		            AND KP_DAILYQTY.STORERKEY           = #{gStorerkey}
+				<if test="dccode != null and dccode != ''">
+				    AND KP_DAILYQTY.DCCODE              = #{dccode} 
+				</if>
+		            AND KP_DAILYQTY.CHANNEL              IN ('1','2','3')                
+				<if test="channel != null and channel != ''">
+				    AND KP_DAILYQTY.CHANNEL             = #{channel} 
+				</if>
+		            AND KP_DAILYQTY.DOCTYPE             = 'WD'
+		            AND KP_DAILYQTY.WORKPROCESSCODE     = 'SO'
+		            AND KP_DAILYQTY.SLIPDT BETWEEN TO_CHAR(ADD_MONTHS(TO_DATE(#{docdt},'YYYYMMDD'),-1),'YYYYMM')||'01' AND #{docdt} )
+		 GROUP BY DCCODE
+		        , COURSE
+		        , CHANNEL
+		 UNION ALL
+		SELECT DCCODE                                                                                                                                            AS DCCODE
+		     , COURSE                                                                                                                                            AS COURSE
+		     , CHANNEL                                                                                                                                           AS CHANNEL
+		     , '03'                                                                                                                                              AS TITLE
+		     , TRUNC(CASE WHEN PREMONTHCUST = 0 THEN 0 ELSE PREMONTHWEIGHT/PREMONTHCUST END,2)                                                                   AS PREMONTH
+		     , TRUNC(CASE WHEN MONTHCUST = 0 THEN 0 ELSE MONTHWEIGHT/MONTHCUST END,2)                                                                            AS MONTH
+		     , TRUNC(CASE WHEN MONTHCUST = 0 THEN 0 ELSE MONTHWEIGHT/MONTHCUST END - CASE WHEN PREMONTHCUST = 0 THEN 0 ELSE PREMONTHWEIGHT/PREMONTHCUST END,2)   AS MONTHINCDEC
+		     , TRUNC(CASE WHEN (CASE WHEN PREMONTHCUST = 0 THEN 0 ELSE PREMONTHWEIGHT/PREMONTHCUST END) = 0 THEN 100
+		       ELSE ((CASE WHEN MONTHCUST = 0 THEN 0 ELSE MONTHWEIGHT/MONTHCUST END 
+		       -  CASE WHEN PREMONTHCUST = 0 THEN 0 ELSE PREMONTHWEIGHT/PREMONTHCUST END)
+		       / CASE WHEN PREMONTHCUST = 0 THEN 0 ELSE PREMONTHWEIGHT/PREMONTHCUST END)*100 END,2)                                                              AS MONTHINCDECPER
+		     , TRUNC(CASE WHEN PREDAYCUST = 0 THEN 0 ELSE PREDAYWEIGHT/PREDAYCUST END,2)                                                                         AS PREDAY       
+		     , TRUNC(CASE WHEN DAYCUST = 0 THEN 0 ELSE DAYWEIGHT/DAYCUST END,2)                                                                                  AS DAY
+		     , TRUNC(CASE WHEN DAYCUST = 0 THEN 0 ELSE DAYWEIGHT/DAYCUST END - CASE WHEN PREDAYCUST = 0 THEN 0 ELSE PREDAYWEIGHT/PREDAYCUST END,2)               AS DAYINCDEC
+		     , TRUNC(CASE WHEN CASE WHEN PREDAYCUST = 0 THEN 0 ELSE PREDAYWEIGHT/PREDAYCUST END = 0 THEN 100
+		       ELSE ((CASE WHEN DAYCUST = 0 THEN 0 ELSE DAYWEIGHT/DAYCUST END
+		       -  CASE WHEN PREDAYCUST = 0 THEN 0 ELSE PREDAYWEIGHT/PREDAYCUST END)
+		       / CASE WHEN PREDAYCUST = 0 THEN 0 ELSE PREDAYWEIGHT/PREDAYCUST END)*100 END,2)                                                                    AS DAYINCDECPER
+		  FROM ( SELECT DCCODE                                                                                                                                   AS DCCODE
+		              , COURSE                                                                                                                                   AS COURSE
+		              , CHANNEL                                                                                                                                  AS CHANNEL
+		              , CASE WHEN COUNT(DISTINCT PREWEIGHTDELIVERYDATE) = 0 THEN 0 ELSE SUM(PREWEIGHT)/COUNT(DISTINCT PREWEIGHTDELIVERYDATE) END                 AS PREMONTHWEIGHT
+		              , CASE WHEN COUNT(DISTINCT WEIGHTDELIVERYDATE) = 0 THEN 0 ELSE SUM(WEIGHT)/COUNT(DISTINCT WEIGHTDELIVERYDATE) END                          AS MONTHWEIGHT
+		              , SUM(PREWEIGHTDAY)                                                                                                                        AS PREDAYWEIGHT
+		              , SUM(WEIGHTDAY)                                                                                                                           AS DAYWEIGHT
+		              , CASE WHEN COUNT(DISTINCT PRECUSTDELIVERYDATE) = 0 THEN 0 ELSE COUNT(DISTINCT PREMONTHCUST)/COUNT(DISTINCT PRECUSTDELIVERYDATE) END       AS PREMONTHCUST
+		              , CASE WHEN COUNT(DISTINCT CUSTDELIVERYDATE) = 0 THEN 0 ELSE COUNT(DISTINCT MONTHCUST)/COUNT(DISTINCT CUSTDELIVERYDATE) END                AS MONTHCUST
+		              , COUNT(DISTINCT PREDAYCUST)                                                                                                               AS PREDAYCUST
+		              , COUNT(DISTINCT DAYCUST)                                                                                                                  AS DAYCUST
+		           FROM ( SELECT KP_DAILYQTY.DCCODE                                                                                                                                       AS DCCODE
+		                       , CASE WHEN NVL(KP_DAILYQTY.CHANNEL, '1') IN ('2','3') THEN '2' ELSE NVL(KP_DAILYQTY.CHANNEL, '1') END                                                     AS CHANNEL
+		                       , NVL(TRIM(CM_CODE.DATA1),'99')                                                                       AS COURSE
+		                       , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = TO_CHAR(ADD_MONTHS(TO_DATE(#{docdt},'YYYYMMDD'),-1),'YYYYMM') THEN KP_DAILYQTY.CONFIRMWEIGHT  ELSE 0 END     AS PREWEIGHT
+		                       , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = TO_CHAR(ADD_MONTHS(TO_DATE(#{docdt},'YYYYMMDD'),-1),'YYYYMM') THEN KP_DAILYQTY.SLIPDT ELSE NULL END          AS PREWEIGHTDELIVERYDATE
+		                       , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = SUBSTR(#{docdt},1,6) THEN KP_DAILYQTY.CONFIRMWEIGHT  ELSE 0 END                                              AS WEIGHT                                                                   
+		                       , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = SUBSTR(#{docdt},1,6) THEN KP_DAILYQTY.SLIPDT ELSE NULL END                                                   AS WEIGHTDELIVERYDATE 
+		                       , CASE WHEN KP_DAILYQTY.SLIPDT = TO_CHAR(TO_DATE(#{docdt},'YYYYMMDD')-1,'YYYYMMDD') THEN KP_DAILYQTY.CONFIRMWEIGHT  ELSE 0 END                             AS PREWEIGHTDAY  
+		                       , CASE WHEN KP_DAILYQTY.SLIPDT = #{docdt} THEN KP_DAILYQTY.CONFIRMWEIGHT  ELSE 0 END                                                                       AS WEIGHTDAY               
+		                       , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = TO_CHAR(ADD_MONTHS(TO_DATE(#{docdt},'YYYYMMDD'),-1),'YYYYMM') THEN KP_DAILYQTY.CUSTKEY  ELSE NULL END        AS PREMONTHCUST
+		                       , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = TO_CHAR(ADD_MONTHS(TO_DATE(#{docdt},'YYYYMMDD'),-1),'YYYYMM') THEN KP_DAILYQTY.SLIPDT ELSE NULL END          AS PRECUSTDELIVERYDATE
+		                       , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = SUBSTR(#{docdt},1,6) THEN KP_DAILYQTY.CUSTKEY  ELSE NULL END                                                 AS MONTHCUST                                                                 
+		                       , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = SUBSTR(#{docdt},1,6) THEN KP_DAILYQTY.SLIPDT ELSE NULL END                                                   AS CUSTDELIVERYDATE 
+		                       , CASE WHEN KP_DAILYQTY.SLIPDT = TO_CHAR(TO_DATE(#{docdt},'YYYYMMDD')-1,'YYYYMMDD') THEN KP_DAILYQTY.CUSTKEY  ELSE NULL END                                AS PREDAYCUST  
+		                       , CASE WHEN KP_DAILYQTY.SLIPDT = #{docdt} THEN KP_DAILYQTY.CUSTKEY  ELSE NULL END                                                                          AS DAYCUST                                                                                                         
+		                    FROM KP_DAILYQTY
+		                    LEFT OUTER JOIN CM_CODE
+		                      ON CM_CODE.STORERKEY = KP_DAILYQTY.STORERKEY
+		                     AND CM_CODE.BASECODE  = KP_DAILYQTY.CUSTSTRATEGY3
+		                     AND CM_CODE.CODELIST  = 'CUSHRC'
+						<if test="course != null and course != ''">
+		                     AND   CM_CODE.DATA1   = #{course}
+						</if>
+		                   WHERE 1=1
+		                     AND KP_DAILYQTY.STORERKEY           = #{gStorerkey}                        
+						<if test="dccode != null and dccode != ''">
+		                     AND KP_DAILYQTY.DCCODE              = #{dccode} 
+						</if>
+		                     AND KP_DAILYQTY.CHANNEL              IN ('1','2','3')                
+						<if test="channel != null and channel != ''">
+						     AND KP_DAILYQTY.CHANNEL             = #{channel} 
+						</if>
+		                     AND KP_DAILYQTY.DOCTYPE             = 'WD'
+		                     AND KP_DAILYQTY.WORKPROCESSCODE     = 'SO'
+		                     AND KP_DAILYQTY.SLIPDT BETWEEN TO_CHAR(ADD_MONTHS(TO_DATE(#{docdt},'YYYYMMDD'),-1),'YYYYMM')||'01' AND #{docdt} )
+		 GROUP BY DCCODE
+		        , COURSE
+		        , CHANNEL ) )
+		SELECT TT.*
+		  FROM ( SELECT DCCODE                                                                                                 AS DCCODE
+		              , FN_GETDCNAME(DCCODE)                                                                                   AS DCNAME
+		              , '00'                                                                                                   AS COURSE
+		              , ''                                                                                                     AS COURSENM
+		              , '0'                                                                                                    AS CHANNEL
+		              , ''                                                                                                     AS CHANNELNM
+		              , TITLE                                                                                                  AS TITLE
+		              , TITLE                                                                                                  AS INDICATOR
+		              , TITLE                                                                                                  AS UOM
+		              , TRUNC(SUM(PREMONTH),2)                                                                                 AS PREMONTH
+		              , TRUNC(SUM(MONTH),2)                                                                                    AS MONTH
+		              , TRUNC(SUM(MONTH)-SUM(PREMONTH),2)                                                                      AS MONTHINCDEC
+		              , TRUNC(CASE WHEN SUM(PREMONTH) = 0 THEN 100 ELSE ((SUM(MONTH)-SUM(PREMONTH))/SUM(PREMONTH))*100 END,2)  AS MONTHINCDECPER
+		              , TRUNC(SUM(PREDAY),2)                                                                                   AS PREDAY
+		              , TRUNC(SUM(DAY),2)                                                                                      AS DAY
+		              , TRUNC(SUM(DAY)-SUM(PREDAY),2)                                                                          AS DAYINCDEC
+		              , TRUNC(CASE WHEN SUM(PREDAY) = 0 THEN 100 ELSE ((SUM(DAY)-SUM(PREDAY))/SUM(PREDAY))*100 END,2)          AS DAYINCDECPER
+		           FROM T_TAB
+		          WHERE 1=1
+		            AND TITLE <![CDATA[<>]]> '03'
+		          GROUP BY DCCODE
+				         , TITLE
+		          UNION ALL
+		         SELECT DCCODE                                                                                                                AS DCCODE
+		              , FN_GETDCNAME(DCCODE)                                                                                                  AS DCNAME
+		              , '00'                                                                                                                  AS COURSE
+		              , ''                                                                                                                    AS COURSENM
+		              , '0'                                                                                                                   AS CHANNEL
+		              , ''                                                                                                                    AS CHANNELNM
+		              , '03'                                                                                                                  AS TITLE
+		              , '03'                                                                                                                  AS INDICATOR
+		              , '03'                                                                                                                  AS UOM
+		              , TRUNC(CASE WHEN SUM(PREMONTHCUST) = 0 THEN 0 ELSE SUM(PREMONTHWEIGHT)/SUM(PREMONTHCUST) END,2)                        AS PREMONTH
+		              , TRUNC(CASE WHEN SUM(MONTHCUST) = 0 THEN 0 ELSE SUM(MONTHWEIGHT)/SUM(MONTHCUST) END,2)                                 AS MONTH
+		              , TRUNC(CASE WHEN SUM(MONTHCUST) = 0 THEN 0 ELSE SUM(MONTHWEIGHT)/SUM(MONTHCUST) END
+		                - CASE WHEN SUM(PREMONTHCUST) = 0 THEN 0 ELSE SUM(PREMONTHWEIGHT)/SUM(PREMONTHCUST) END,2)                            AS MONTHINCDEC
+		              , TRUNC(CASE WHEN CASE WHEN SUM(PREMONTHCUST) = 0 THEN 0 ELSE SUM(PREMONTHWEIGHT)/SUM(PREMONTHCUST) END = 0 THEN 100
+		                ELSE ((CASE WHEN SUM(MONTHCUST) = 0 THEN 0 ELSE SUM(MONTHWEIGHT)/SUM(MONTHCUST) END
+		                - CASE WHEN SUM(PREMONTHCUST) = 0 THEN 0 ELSE SUM(PREMONTHWEIGHT)/SUM(PREMONTHCUST) END)
+		                / CASE WHEN SUM(PREMONTHCUST) = 0 THEN 0 ELSE SUM(PREMONTHWEIGHT)/SUM(PREMONTHCUST) END)*100 END,2)                   AS MONTHINCDECPER
+		              , TRUNC(CASE WHEN SUM(PREDAYCUST) = 0 THEN 0 ELSE SUM(PREDAYWEIGHT)/SUM(PREDAYCUST) END,2)                              AS PREDAY
+		              , TRUNC(CASE WHEN SUM(DAYCUST) = 0 THEN 0 ELSE SUM(DAYWEIGHT)/SUM(DAYCUST) END,2)                                       AS DAY
+		              , TRUNC(CASE WHEN SUM(DAYCUST) = 0 THEN 0 ELSE SUM(DAYWEIGHT)/SUM(DAYCUST) END
+		                - CASE WHEN SUM(PREDAYCUST) = 0 THEN 0 ELSE SUM(PREDAYWEIGHT)/SUM(PREDAYCUST) END,2)                                  AS DAYINCDEC
+		              , TRUNC(CASE WHEN CASE WHEN SUM(PREDAYCUST) = 0 THEN 0 ELSE SUM(PREDAYWEIGHT)/SUM(PREDAYCUST) END = 0 THEN 100
+		                ELSE ((CASE WHEN SUM(DAYCUST) = 0 THEN 0 ELSE SUM(DAYWEIGHT)/SUM(DAYCUST) END
+		                - CASE WHEN SUM(PREDAYCUST) = 0 THEN 0 ELSE SUM(PREDAYWEIGHT)/SUM(PREDAYCUST) END)
+		                / CASE WHEN SUM(PREDAYCUST) = 0 THEN 0 ELSE SUM(PREDAYWEIGHT)/SUM(PREDAYCUST) END)*100 END,2)                         AS DAYINCDECPER
+		           FROM ( SELECT DCCODE                                          AS DCCODE
+		                       , COURSE                                          AS COURSE
+		                       , CHANNEL                                         AS CHANNEL
+		                       , CASE WHEN TITLE = '01' THEN PREMONTH ELSE 0 END AS PREMONTHWEIGHT
+		                       , CASE WHEN TITLE = '01' THEN MONTH    ELSE 0 END AS MONTHWEIGHT
+		                       , CASE WHEN TITLE = '01' THEN PREDAY   ELSE 0 END AS PREDAYWEIGHT
+		                       , CASE WHEN TITLE = '01' THEN DAY      ELSE 0 END AS DAYWEIGHT
+		                       , CASE WHEN TITLE = '02' THEN PREMONTH ELSE 0 END AS PREMONTHCUST
+		                       , CASE WHEN TITLE = '02' THEN MONTH    ELSE 0 END AS MONTHCUST
+		                       , CASE WHEN TITLE = '02' THEN PREDAY   ELSE 0 END AS PREDAYCUST
+		                       , CASE WHEN TITLE = '02' THEN DAY      ELSE 0 END AS DAYCUST
+		                    FROM T_TAB
+		                   WHERE 1=1
+		                     AND TITLE <![CDATA[<>]]> '03' )
+		          GROUP BY DCCODE   
+		          UNION ALL   
+		         SELECT DCCODE                                                                                                 AS DCCODE
+		              , FN_GETDCNAME(DCCODE)                                                                                   AS DCNAME
+		              , '00'                                                                                                   AS COURSE
+		              , ''                                                                                                     AS COURSENM
+		              , CHANNEL                                                                                                AS CHANNEL
+		              , FN_CODEDESCR(#{gStorerkey}, 'PUTAWAYTYPE', CHANNEL)                                                    AS CHANNELNM
+		              , TITLE                                                                                                  AS TITLE
+		              , TITLE                                                                                                  AS INDICATOR
+		              , TITLE                                                                                                  AS UOM
+		              , TRUNC(SUM(PREMONTH),2)                                                                                 AS PREMONTH
+		              , TRUNC(SUM(MONTH),2)                                                                                    AS MONTH
+		              , TRUNC(SUM(MONTH)-SUM(PREMONTH),2)                                                                      AS MONTHINCDEC
+		              , TRUNC(CASE WHEN SUM(PREMONTH) = 0 THEN 100 ELSE ((SUM(MONTH)-SUM(PREMONTH))/SUM(PREMONTH))*100 END,2)  AS MONTHINCDECPER
+		              , TRUNC(SUM(PREDAY),2)                                                                                   AS PREDAY
+		              , TRUNC(SUM(DAY),2)                                                                                      AS DAY
+		              , TRUNC(SUM(DAY)-SUM(PREDAY),2)                                                                          AS DAYINCDEC
+		              , TRUNC(CASE WHEN SUM(PREDAY) = 0 THEN 100 ELSE ((SUM(DAY)-SUM(PREDAY))/SUM(PREDAY))*100 END,2)          AS DAYINCDECPER
+		           FROM T_TAB
+		          WHERE 1=1
+		            AND TITLE <![CDATA[<>]]> '03'
+		          GROUP BY DCCODE
+				         , CHANNEL
+						 , TITLE
+		          UNION ALL
+		         SELECT DCCODE                                                                                                             AS DCCODE
+		              , FN_GETDCNAME(DCCODE)                                                                                               AS DCNAME
+		              , '00'                                                                                                               AS COURSE
+		              , ''                                                                                                                 AS COURSENM
+		              , CHANNEL                                                                                                            AS CHANNEL
+		              , FN_CODEDESCR(#{gStorerkey}, 'PUTAWAYTYPE', CHANNEL)                                                                AS CHANNELNM
+		              , '03'                                                                                                               AS TITLE
+		              , '03'                                                                                                               AS INDICATOR
+		              , '03'                                                                                                               AS UOM
+		              , TRUNC(CASE WHEN SUM(PREMONTHCUST) = 0 THEN 0 ELSE SUM(PREMONTHWEIGHT)/SUM(PREMONTHCUST) END,2)                     AS PREMONTH
+		              , TRUNC(CASE WHEN SUM(MONTHCUST) = 0 THEN 0 ELSE SUM(MONTHWEIGHT)/SUM(MONTHCUST) END,2)                              AS MONTH
+		              , TRUNC(CASE WHEN SUM(MONTHCUST) = 0 THEN 0 ELSE SUM(MONTHWEIGHT)/SUM(MONTHCUST) END
+		                - CASE WHEN SUM(PREMONTHCUST) = 0 THEN 0 ELSE SUM(PREMONTHWEIGHT)/SUM(PREMONTHCUST) END,2)                         AS MONTHINCDEC
+		              , TRUNC(CASE WHEN CASE WHEN SUM(PREMONTHCUST) = 0 THEN 0 ELSE SUM(PREMONTHWEIGHT)/SUM(PREMONTHCUST) END = 0 THEN 100
+		                ELSE ((CASE WHEN SUM(MONTHCUST) = 0 THEN 0 ELSE SUM(MONTHWEIGHT)/SUM(MONTHCUST) END
+		                - CASE WHEN SUM(PREMONTHCUST) = 0 THEN 0 ELSE SUM(PREMONTHWEIGHT)/SUM(PREMONTHCUST) END)
+		                / CASE WHEN SUM(PREMONTHCUST) = 0 THEN 0 ELSE SUM(PREMONTHWEIGHT)/SUM(PREMONTHCUST) END)*100 END,2)                AS MONTHINCDECPER
+		              , TRUNC(CASE WHEN SUM(PREDAYCUST) = 0 THEN 0 ELSE SUM(PREDAYWEIGHT)/SUM(PREDAYCUST) END,2)                           AS PREDAY
+		              , TRUNC(CASE WHEN SUM(DAYCUST) = 0 THEN 0 ELSE SUM(DAYWEIGHT)/SUM(DAYCUST) END,2)                                    AS DAY
+		              , TRUNC(CASE WHEN SUM(DAYCUST) = 0 THEN 0 ELSE SUM(DAYWEIGHT)/SUM(DAYCUST) END                                       
+		                - CASE WHEN SUM(PREDAYCUST) = 0 THEN 0 ELSE SUM(PREDAYWEIGHT)/SUM(PREDAYCUST) END,2)                               AS DAYINCDEC
+		              , TRUNC(CASE WHEN CASE WHEN SUM(PREDAYCUST) = 0 THEN 0 ELSE SUM(PREDAYWEIGHT)/SUM(PREDAYCUST) END = 0 THEN 100
+		                ELSE ((CASE WHEN SUM(DAYCUST) = 0 THEN 0 ELSE SUM(DAYWEIGHT)/SUM(DAYCUST) END
+		                - CASE WHEN SUM(PREDAYCUST) = 0 THEN 0 ELSE SUM(PREDAYWEIGHT)/SUM(PREDAYCUST) END)
+		                / CASE WHEN SUM(PREDAYCUST) = 0 THEN 0 ELSE SUM(PREDAYWEIGHT)/SUM(PREDAYCUST) END)*100 END,2)        AS DAYINCDECPER
+		           FROM ( SELECT DCCODE                                          AS DCCODE
+		                       , COURSE                                          AS COURSE
+		                       , CHANNEL                                         AS CHANNEL
+		                       , CASE WHEN TITLE = '01' THEN PREMONTH ELSE 0 END AS PREMONTHWEIGHT
+		                       , CASE WHEN TITLE = '01' THEN MONTH    ELSE 0 END AS MONTHWEIGHT
+		                       , CASE WHEN TITLE = '01' THEN PREDAY   ELSE 0 END AS PREDAYWEIGHT
+		                       , CASE WHEN TITLE = '01' THEN DAY      ELSE 0 END AS DAYWEIGHT
+		                       , CASE WHEN TITLE = '02' THEN PREMONTH ELSE 0 END AS PREMONTHCUST
+		                       , CASE WHEN TITLE = '02' THEN MONTH    ELSE 0 END AS MONTHCUST
+		                       , CASE WHEN TITLE = '02' THEN PREDAY   ELSE 0 END AS PREDAYCUST
+		                       , CASE WHEN TITLE = '02' THEN DAY      ELSE 0 END AS DAYCUST
+		                    FROM T_TAB 
+						   WHERE 1=1
+		                     AND TITLE <![CDATA[<>]]> '03' )
+		          GROUP BY DCCODE
+				         , CHANNEL  
+		          UNION ALL
+		         SELECT DCCODE                                                                                                 AS DCCODE
+		              , FN_GETDCNAME(DCCODE)                                                                                   AS DCNAME
+		              , COURSE                                                                                                 AS COURSE 
+		              , FN_CODEDESCR(#{gStorerkey}, 'CUSTORG_KP', COURSE)                                                      AS COURSENM
+		              , '0'                                                                                                    AS CHANNEL
+		              , ''                                                                                                     AS CHANNELNM
+		              , TITLE                                                                                                  AS TITLE
+		              , TITLE                                                                                                  AS INDICATOR
+		              , TITLE                                                                                                  AS UOM
+		              , TRUNC(SUM(PREMONTH),2)                                                                                 AS PREMONTH
+		              , TRUNC(SUM(MONTH),2)                                                                                    AS MONTH
+		              , TRUNC(SUM(MONTH)-SUM(PREMONTH),2)                                                                      AS MONTHINCDEC
+		              , TRUNC(CASE WHEN SUM(PREMONTH) = 0 THEN 100 ELSE ((SUM(MONTH)-SUM(PREMONTH))/SUM(PREMONTH))*100 END,2)  AS MONTHINCDECPER
+		              , TRUNC(SUM(PREDAY),2)                                                                                   AS PREDAY
+		              , TRUNC(SUM(DAY),2)                                                                                      AS DAY
+		              , TRUNC(SUM(DAY)-SUM(PREDAY),2)                                                                          AS DAYINCDEC
+		              , TRUNC(CASE WHEN SUM(PREDAY) = 0 THEN 100 ELSE ((SUM(DAY)-SUM(PREDAY))/SUM(PREDAY))*100 END,2)          AS DAYINCDECPER
+		           FROM T_TAB
+		          WHERE 1=1
+		            AND TITLE <![CDATA[<>]]> '03'
+		          GROUP BY DCCODE
+				         , COURSE
+						 , TITLE
+		          UNION ALL
+		         SELECT DCCODE                                                                                                                AS DCCODE
+		              , FN_GETDCNAME(DCCODE)                                                                                                  AS DCNAME
+		              , COURSE                                                                                                                AS COURSE
+		              , FN_CODEDESCR(#{gStorerkey}, 'CUSTORG_KP', COURSE)                                                                     AS COURSENM
+		              , '0'                                                                                                                   AS CHANNEL
+		              , ''                                                                                                                    AS CHANNELNM
+		              , '03'                                                                                                                  AS TITLE
+		              , '03'                                                                                                                  AS INDICATOR
+		              , '03'                                                                                                                  AS UOM
+		              , TRUNC(CASE WHEN SUM(PREMONTHCUST) = 0 THEN 0 ELSE SUM(PREMONTHWEIGHT)/SUM(PREMONTHCUST) END,2)                        AS PREMONTH
+		              , TRUNC(CASE WHEN SUM(MONTHCUST) = 0 THEN 0 ELSE SUM(MONTHWEIGHT)/SUM(MONTHCUST) END,2)                                 AS MONTH
+		              , TRUNC(CASE WHEN SUM(MONTHCUST) = 0 THEN 0 ELSE SUM(MONTHWEIGHT)/SUM(MONTHCUST) END                                    
+		                - CASE WHEN SUM(PREMONTHCUST) = 0 THEN 0 ELSE SUM(PREMONTHWEIGHT)/SUM(PREMONTHCUST) END,2)                            AS MONTHINCDEC
+		              , TRUNC(CASE WHEN CASE WHEN SUM(PREMONTHCUST) = 0 THEN 0 ELSE SUM(PREMONTHWEIGHT)/SUM(PREMONTHCUST) END = 0 THEN 100
+		                ELSE ((CASE WHEN SUM(MONTHCUST) = 0 THEN 0 ELSE SUM(MONTHWEIGHT)/SUM(MONTHCUST) END
+		                - CASE WHEN SUM(PREMONTHCUST) = 0 THEN 0 ELSE SUM(PREMONTHWEIGHT)/SUM(PREMONTHCUST) END)
+		                / CASE WHEN SUM(PREMONTHCUST) = 0 THEN 0 ELSE SUM(PREMONTHWEIGHT)/SUM(PREMONTHCUST) END)*100 END,2)                   AS MONTHINCDECPER
+		              , TRUNC(CASE WHEN SUM(PREDAYCUST) = 0 THEN 0 ELSE SUM(PREDAYWEIGHT)/SUM(PREDAYCUST) END,2)                              AS PREDAY
+		              , TRUNC(CASE WHEN SUM(DAYCUST) = 0 THEN 0 ELSE SUM(DAYWEIGHT)/SUM(DAYCUST) END,2)                                       AS DAY
+		              , TRUNC(CASE WHEN SUM(DAYCUST) = 0 THEN 0 ELSE SUM(DAYWEIGHT)/SUM(DAYCUST) END
+		                - CASE WHEN SUM(PREDAYCUST) = 0 THEN 0 ELSE SUM(PREDAYWEIGHT)/SUM(PREDAYCUST) END,2)                                  AS DAYINCDEC
+		              , TRUNC(CASE WHEN CASE WHEN SUM(PREDAYCUST) = 0 THEN 0 ELSE SUM(PREDAYWEIGHT)/SUM(PREDAYCUST) END = 0 THEN 100
+		                ELSE ((CASE WHEN SUM(DAYCUST) = 0 THEN 0 ELSE SUM(DAYWEIGHT)/SUM(DAYCUST) END
+		                - CASE WHEN SUM(PREDAYCUST) = 0 THEN 0 ELSE SUM(PREDAYWEIGHT)/SUM(PREDAYCUST) END)
+		                / CASE WHEN SUM(PREDAYCUST) = 0 THEN 0 ELSE SUM(PREDAYWEIGHT)/SUM(PREDAYCUST) END)*100 END,2)                         AS DAYINCDECPER
+		           FROM ( SELECT DCCODE                                          AS DCCODE
+		                       , COURSE                                          AS COURSE
+		                       , CHANNEL                                         AS CHANNEL
+		                       , CASE WHEN TITLE = '01' THEN PREMONTH ELSE 0 END AS PREMONTHWEIGHT
+		                       , CASE WHEN TITLE = '01' THEN MONTH    ELSE 0 END AS MONTHWEIGHT
+		                       , CASE WHEN TITLE = '01' THEN PREDAY   ELSE 0 END AS PREDAYWEIGHT
+		                       , CASE WHEN TITLE = '01' THEN DAY      ELSE 0 END AS DAYWEIGHT
+		                       , CASE WHEN TITLE = '02' THEN PREMONTH ELSE 0 END AS PREMONTHCUST
+		                       , CASE WHEN TITLE = '02' THEN MONTH    ELSE 0 END AS MONTHCUST
+		                       , CASE WHEN TITLE = '02' THEN PREDAY   ELSE 0 END AS PREDAYCUST
+		                       , CASE WHEN TITLE = '02' THEN DAY      ELSE 0 END AS DAYCUST
+		                    FROM T_TAB
+		                   WHERE 1=1
+		                     AND TITLE <![CDATA[<>]]> '03' )
+		          GROUP BY DCCODE
+				         , COURSE
+		          UNION ALL
+		         SELECT DCCODE                                              AS DCCODE
+		              , FN_GETDCNAME(DCCODE)                                AS DCNAME
+		              , COURSE                                              AS COURSE
+		              , FN_CODEDESCR(#{gStorerkey}, 'CUSTORG_KP', COURSE)   AS COURSENM
+		              , CHANNEL                                             AS 
+		              , FN_CODEDESCR(#{gStorerkey}, 'PUTAWAYTYPE', CHANNEL) AS CHANNELNM
+		              , TITLE                                               AS TITLE
+		              , TITLE                                               AS INDICATOR
+		              , TITLE                                               AS UOM
+		              , TRUNC(PREMONTH,2)                                   AS PREMONTH
+		              , TRUNC(MONTH,2)                                      AS MONTH
+		              , TRUNC(MONTHINCDEC,2)                                AS MONTHINCDEC
+		              , TRUNC(MONTHINCDECPER,2)                             AS MONTHINCDECPER
+		              , TRUNC(PREDAY,2)                                     AS PREDAY
+		              , TRUNC(DAY,2)                                        AS DAY
+		              , TRUNC(DAYINCDEC,2)                                  AS DAYINCDEC
+		              , TRUNC(DAYINCDECPER,2)                               AS DAYINCDECPER
+		           FROM T_TAB ) TT
+		 ORDER BY TT.DCCODE
+		        , TT.COURSE
+		        , TT.CHANNEL
+		        , TT.TITLE		
+	</select>
+
+    <select id="getMasterT2List" resultType="cjfw.wms.kp.dto.KpCenterDayStateResT2Dto">
+		/* [KpCenterDayStateService.sqlx][KpCenterDayStateService.getMasterT2List][지표 > 센터 운영 > 출고 유형별 물동 현황 수송물동_탭 조회][KimDongHan][2025-09-04] */
+		WITH T_TAB AS ( SELECT DCCODE                                                                                          AS DCCODE
+		                     , COURSE                                                                                          AS COURSE
+		                     , CHANNEL                                                                                         AS CHANNEL
+		                     , '01'                                                                                            AS TITLE
+		                     , TRUNC(CASE WHEN COUNT(DISTINCT PREDELIVERYDATE) = 0 
+							              THEN 0 
+										  ELSE SUM(PREWEIGHT)/COUNT(DISTINCT PREDELIVERYDATE) END,2)                           AS PREMONTH
+		                     , TRUNC(CASE WHEN COUNT(DISTINCT DELIVERYDATE) = 0 
+							              THEN 0 
+										  ELSE SUM(WEIGHT)/COUNT(DISTINCT DELIVERYDATE) END,2)                                 AS MONTH
+		                     , TRUNC(CASE WHEN COUNT(DISTINCT DELIVERYDATE) = 0 
+							              THEN 0 
+										  ELSE SUM(WEIGHT)/COUNT(DISTINCT DELIVERYDATE) END
+		                           - CASE WHEN COUNT(DISTINCT PREDELIVERYDATE) = 0 
+								          THEN 0 
+										  ELSE SUM(PREWEIGHT)/COUNT(DISTINCT PREDELIVERYDATE) END,2)                           AS MONTHINCDEC
+		                     , TRUNC(CASE WHEN (CASE WHEN COUNT(DISTINCT PREDELIVERYDATE) = 0 
+							                         THEN 0 
+													 ELSE SUM(PREWEIGHT)/COUNT(DISTINCT PREDELIVERYDATE) END) = 0
+		                                  THEN 100 
+										  ELSE ((CASE WHEN COUNT(DISTINCT DELIVERYDATE) = 0 
+										              THEN 0 
+													  ELSE SUM(WEIGHT)/COUNT(DISTINCT DELIVERYDATE) END
+		                                       - CASE WHEN COUNT(DISTINCT PREDELIVERYDATE) = 0 
+								                      THEN 0 
+										              ELSE SUM(PREWEIGHT)/COUNT(DISTINCT PREDELIVERYDATE) END)
+		                                      / (CASE WHEN COUNT(DISTINCT PREDELIVERYDATE) = 0 
+											          THEN 0 
+													  ELSE SUM(PREWEIGHT)/COUNT(DISTINCT PREDELIVERYDATE)END))*100 END,2)      AS MONTHINCDECPER
+		                     , TRUNC(SUM(PREDAY),2)                                                                            AS PREDAY
+		                     , TRUNC(SUM(DAY),2)                                                                               AS DAY
+		                     , TRUNC(SUM(DAY)-SUM(PREDAY),2)                                                                   AS DAYINCDEC
+		                     , TRUNC(CASE WHEN SUM(PREDAY) = 0 THEN 100 ELSE ((SUM(DAY)-SUM(PREDAY))/SUM(PREDAY))*100 END,2)   AS DAYINCDECPER
+		                  FROM ( SELECT KP_DAILYQTY.DCCODE                                                                                            AS DCCODE
+		                              , CASE WHEN LEFT(KP_DAILYQTY.CUSTKEY,4) = '2170' 
+									         THEN LEFT(KP_DAILYQTY.CUSTKEY,4)
+		                                     ELSE KP_DAILYQTY.CUSTKEY END                                                                             AS COURSE
+		                              , CASE WHEN NVL(KP_DAILYQTY.CHANNEL, '1') IN ('2','3') 
+									         THEN '2' 
+		                                     ELSE NVL(KP_DAILYQTY.CHANNEL, '1') END                                                                   AS CHANNEL
+		                              , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = TO_CHAR(ADD_MONTHS(TO_DATE(#{docdt},'YYYYMMDD'),-1),'YYYYMM') 
+		                                     THEN KP_DAILYQTY.CONFIRMWEIGHT  ELSE 0 END                                                               AS PREWEIGHT
+		                              , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = TO_CHAR(ADD_MONTHS(TO_DATE(#{docdt},'YYYYMMDD'),-1),'YYYYMM')  
+		                                     THEN KP_DAILYQTY.SLIPDT 
+											 ELSE NULL END                                                                                            AS PREDELIVERYDATE
+		                              , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = SUBSTR(#{docdt},1,6) 
+		                                     THEN KP_DAILYQTY.CONFIRMWEIGHT  
+											 ELSE 0 END                                                                                               AS WEIGHT                                                                   
+		                              , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = SUBSTR(#{docdt},1,6) 
+		                                     THEN KP_DAILYQTY.SLIPDT 
+											 ELSE NULL END                                                                                            AS DELIVERYDATE 
+		                              , CASE WHEN KP_DAILYQTY.SLIPDT = TO_CHAR(TO_DATE(#{docdt},'YYYYMMDD')-1,'YYYYMMDD') 
+									         THEN KP_DAILYQTY.CONFIRMWEIGHT  
+											 ELSE 0 END                                                                                               AS PREDAY  
+		                              , CASE WHEN KP_DAILYQTY.SLIPDT = #{docdt} 
+									         THEN KP_DAILYQTY.CONFIRMWEIGHT  ELSE 0 END                                                               AS DAY        
+		                           FROM KP_DAILYQTY                            
+		                          WHERE 1=1
+		                            AND KP_DAILYQTY.STORERKEY            = #{gStorerkey}
+		                            AND KP_DAILYQTY.SLIPDT               BETWEEN TO_CHAR(ADD_MONTHS(TO_DATE(#{docdt},'YYYYMMDD'),-1),'YYYYMM')||'01' AND #{docdt}
+								<if test="dccode != null and dccode != ''">
+		                            AND KP_DAILYQTY.DCCODE              = #{dccode} 
+								</if>
+								<if test="channel == 1">
+		                            AND KP_DAILYQTY.CHANNEL              = '1'
+								</if>
+								<if test="channel == 2">
+		                            AND KP_DAILYQTY.CHANNEL              IN ('2', '3')
+								</if>
+		                            AND KP_DAILYQTY.DOCTYPE              = 'WD'
+		                            AND KP_DAILYQTY.WORKPROCESSCODE      = 'STO' )
+		                 GROUP BY DCCODE
+		                        , COURSE
+		                        , CHANNEL  
+		                 UNION ALL
+		                SELECT DCCODE                                                                                                                                          AS DCCODE
+		                     , COURSE                                                                                                                                          AS COURSE
+		                     , CHANNEL                                                                                                                                         AS CHANNEL
+		                     , '02'                                                                                                                                            AS TITLE
+		                     , TRUNC(CASE WHEN COUNT(DISTINCT PREDELIVERYDATE) = 0 THEN 0 ELSE COUNT(DISTINCT PREMONTHCAR)/COUNT(DISTINCT PREDELIVERYDATE) END,2)              AS PREMONTH
+		                     , TRUNC(CASE WHEN COUNT(DISTINCT DELIVERYDATE) = 0 THEN 0 ELSE COUNT(DISTINCT MONTHCAR)/COUNT(DISTINCT DELIVERYDATE) END,2)                       AS MONTH
+		                     , TRUNC(CASE WHEN COUNT(DISTINCT DELIVERYDATE) = 0 THEN 0 ELSE COUNT(DISTINCT MONTHCAR)/COUNT(DISTINCT DELIVERYDATE) END                          
+		                       - CASE WHEN COUNT(DISTINCT PREDELIVERYDATE) = 0 THEN 0 ELSE COUNT(DISTINCT PREMONTHCAR)/COUNT(DISTINCT PREDELIVERYDATE) END,2)                  AS MONTHINCDEC
+		                     , TRUNC(CASE WHEN (CASE WHEN COUNT(DISTINCT PREDELIVERYDATE) = 0 THEN 0 ELSE COUNT(DISTINCT PREMONTHCAR)/COUNT(DISTINCT PREDELIVERYDATE) END) = 0
+		                       THEN 100 ELSE ((CASE WHEN COUNT(DISTINCT DELIVERYDATE) = 0 THEN 0 ELSE COUNT(DISTINCT MONTHCAR)/COUNT(DISTINCT DELIVERYDATE) END
+		                       - CASE WHEN COUNT(DISTINCT PREDELIVERYDATE) = 0 THEN 0 ELSE COUNT(DISTINCT PREMONTHCAR)/COUNT(DISTINCT PREDELIVERYDATE) END)
+		                       / (CASE WHEN COUNT(DISTINCT PREDELIVERYDATE) = 0 THEN 0 ELSE COUNT(DISTINCT PREMONTHCAR)/COUNT(DISTINCT PREDELIVERYDATE) END))*100 END,2)       AS MONTHINCDECPER
+		                     , TRUNC(COUNT(DISTINCT PREDAYCAR),2)                                                                                                              AS PREDAY
+		                     , TRUNC(COUNT(DISTINCT DAYCAR),2)                                                                                                                 AS DAY
+		                     , TRUNC(COUNT(DISTINCT DAYCAR)-COUNT(DISTINCT PREDAYCAR),2)                                                                                       AS DAYINCDEC
+		                     , TRUNC(CASE WHEN COUNT(DISTINCT PREDAYCAR)  = 0 THEN 100                                                                                         
+		                       ELSE ((COUNT(DISTINCT DAYCAR)-COUNT(DISTINCT PREDAYCAR))/COUNT(DISTINCT PREDAYCAR))*100 END,2)                                                  AS DAYINCDECPER
+		                  FROM ( SELECT KP_DAILYQTY.DCCODE                                                                                          AS DCCODE
+		                              , CASE WHEN LEFT(KP_DAILYQTY.CUSTKEY,4) = '2170' THEN LEFT(KP_DAILYQTY.CUSTKEY,4)                             
+		                                     ELSE KP_DAILYQTY.CUSTKEY END                                                                           AS COURSE
+		                              , CASE WHEN NVL(KP_DAILYQTY.CHANNEL, '1') IN ('2','3') THEN '2' 
+		                                     ELSE NVL(KP_DAILYQTY.CHANNEL, '1') END                                                                 AS CHANNEL
+		                              , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = TO_CHAR(ADD_MONTHS(TO_DATE(#{docdt},'YYYYMMDD'),-1),'YYYYMM') 
+		                                     THEN KP_DAILYQTY.CARNO  ELSE NULL END                                                                  AS PREMONTHCAR
+		                              , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = TO_CHAR(ADD_MONTHS(TO_DATE(#{docdt},'YYYYMMDD'),-1),'YYYYMM')  
+		                                     THEN KP_DAILYQTY.SLIPDT ELSE NULL END                                                                  AS PREDELIVERYDATE
+		                              , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = SUBSTR(#{docdt},1,6) 
+		                                     THEN KP_DAILYQTY.CARNO  ELSE NULL END                                                                  AS MONTHCAR                                                                 
+		                              , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = SUBSTR(#{docdt},1,6) 
+		                                     THEN KP_DAILYQTY.SLIPDT ELSE NULL END                                                                  AS DELIVERYDATE 
+		                              , CASE WHEN KP_DAILYQTY.SLIPDT = TO_CHAR(TO_DATE(#{docdt},'YYYYMMDD')-1,'YYYYMMDD') 
+		                                     THEN KP_DAILYQTY.CARNO  ELSE NULL END                                                                  AS PREDAYCAR  
+		                              , CASE WHEN KP_DAILYQTY.SLIPDT = #{docdt} 
+		                                     THEN KP_DAILYQTY.CARNO  ELSE NULL END                                                                  AS DAYCAR                                                                                                         
+		                           FROM KP_DAILYQTY
+		                          WHERE 1=1
+		                            AND KP_DAILYQTY.STORERKEY = #{gStorerkey}
+		                            AND KP_DAILYQTY.SLIPDT BETWEEN TO_CHAR(ADD_MONTHS(TO_DATE(#{docdt},'YYYYMMDD'),-1),'YYYYMM')||'01' AND #{docdt}
+								<if test="dccode != null and dccode != ''">
+		                            AND KP_DAILYQTY.DCCODE              = #{dccode} 
+								</if>
+								<if test="channel == 1">
+		                            AND KP_DAILYQTY.CHANNEL              = '1'
+								</if>
+								<if test="channel == 2">
+		                            AND KP_DAILYQTY.CHANNEL              IN ('2', '3')
+								</if>
+		                            AND KP_DAILYQTY.DOCTYPE              = 'WD'
+		                            AND KP_DAILYQTY.WORKPROCESSCODE      = 'STO' )
+		                 GROUP BY DCCODE
+		                        , COURSE
+		                        , CHANNEL 
+		                UNION ALL
+		               SELECT DCCODE                                                                                                   AS DCCODE
+		                    , COURSE                                                                                                   AS COURSE
+		                    , CHANNEL                                                                                                  AS CHANNEL
+		                    , '03'                                                                                                     AS TITLE
+		                    , TRUNC(CASE WHEN PREMONTHCAR = 0 THEN 0 ELSE PREMONTHWEIGHT/PREMONTHCAR END,2)                            AS PREMONTH
+		                    , TRUNC(CASE WHEN MONTHCAR = 0 THEN 0 ELSE MONTHWEIGHT/MONTHCAR END,2)                                     AS MONTH
+		                    , TRUNC(CASE WHEN MONTHCAR = 0 THEN 0 ELSE MONTHWEIGHT/MONTHCAR END 
+		                    -  CASE WHEN PREMONTHCAR = 0 THEN 0 ELSE PREMONTHWEIGHT/PREMONTHCAR END,2)                                 AS MONTHINCDEC
+		                    , TRUNC(CASE WHEN (CASE WHEN PREMONTHCAR = 0 THEN 0 ELSE PREMONTHWEIGHT/PREMONTHCAR END) = 0 THEN 100
+		                      ELSE ((CASE WHEN MONTHCAR = 0 THEN 0 ELSE MONTHWEIGHT/MONTHCAR END 
+		                      - CASE WHEN PREMONTHCAR = 0 THEN 0 ELSE PREMONTHWEIGHT/PREMONTHCAR END)
+		                      / CASE WHEN PREMONTHCAR = 0 THEN 0 ELSE PREMONTHWEIGHT/PREMONTHCAR END)*100 END,2)                       AS MONTHINCDECPER
+		                    , TRUNC(CASE WHEN PREDAYCAR = 0 THEN 0 ELSE PREDAYWEIGHT/PREDAYCAR END,2)                                  AS PREDAY       
+		                    , TRUNC(CASE WHEN DAYCAR = 0 THEN 0 ELSE DAYWEIGHT/DAYCAR END,2)                                           AS DAY
+		                    , TRUNC(CASE WHEN DAYCAR = 0 THEN 0 ELSE DAYWEIGHT/DAYCAR END
+		                      - CASE WHEN PREDAYCAR = 0 THEN 0 ELSE PREDAYWEIGHT/PREDAYCAR END,2)                                      AS DAYINCDEC
+		                    , TRUNC(CASE WHEN CASE WHEN PREDAYCAR = 0 THEN 0 ELSE PREDAYWEIGHT/PREDAYCAR END = 0 THEN 100
+		                      ELSE ((CASE WHEN DAYCAR = 0 THEN 0 ELSE DAYWEIGHT/DAYCAR END
+		                      - CASE WHEN PREDAYCAR = 0 THEN 0 ELSE PREDAYWEIGHT/PREDAYCAR END)
+		                      / CASE WHEN PREDAYCAR = 0 THEN 0 ELSE PREDAYWEIGHT/PREDAYCAR END)*100 END,2)                             AS DAYINCDECPER
+		                 FROM ( SELECT DCCODE                                                                                                                            AS DCCODE
+		                             , COURSE                                                                                                                            AS COURSE
+		                             , CHANNEL                                                                                                                           AS CHANNEL
+		                             , CASE WHEN COUNT(DISTINCT PREWEIGHTDELIVERYDATE) = 0 THEN 0 ELSE SUM(PREWEIGHT)/COUNT(DISTINCT PREWEIGHTDELIVERYDATE) END          AS PREMONTHWEIGHT
+		                             , CASE WHEN COUNT(DISTINCT WEIGHTDELIVERYDATE) = 0 THEN 0 ELSE SUM(WEIGHT)/COUNT(DISTINCT WEIGHTDELIVERYDATE) END                   AS MONTHWEIGHT
+		                             , SUM(PREWEIGHTDAY)                                                                                                                 AS PREDAYWEIGHT
+		                             , SUM(WEIGHTDAY)                                                                                                                    AS DAYWEIGHT
+		                             , CASE WHEN COUNT(DISTINCT PREDELIVERYDATECAR) = 0 THEN 0 ELSE COUNT(DISTINCT PREMONTHCAR)/COUNT(DISTINCT PREDELIVERYDATECAR) END   AS PREMONTHCAR
+		                             , CASE WHEN COUNT(DISTINCT DELIVERYDATECAR) = 0 THEN 0 ELSE COUNT(DISTINCT MONTHCAR)/COUNT(DISTINCT DELIVERYDATECAR) END            AS MONTHCAR
+		                             , COUNT(DISTINCT PREDAYCAR)                                                                                                         AS PREDAYCAR
+		                             , COUNT(DISTINCT DAYCAR)                                                                                                            AS DAYCAR
+		                          FROM ( SELECT KP_DAILYQTY.DCCODE                                                                                                               AS DCCODE
+		                                      , CASE WHEN LEFT(KP_DAILYQTY.CUSTKEY,4) = '2170' THEN LEFT(KP_DAILYQTY.CUSTKEY,4)
+		                                             ELSE KP_DAILYQTY.CUSTKEY END                                                                                                AS COURSE
+		                                      , CASE WHEN NVL(KP_DAILYQTY.CHANNEL, '1') IN ('2','3') THEN '2' 
+		                                             ELSE NVL(KP_DAILYQTY.CHANNEL, '1') END                                                                                      AS CHANNEL
+		                                      , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = TO_CHAR(ADD_MONTHS(TO_DATE(#{docdt},'YYYYMMDD'),-1),'YYYYMM') 
+		                                             THEN KP_DAILYQTY.CONFIRMWEIGHT  ELSE 0 END                                                                                  AS PREWEIGHT
+		                                      , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = TO_CHAR(ADD_MONTHS(TO_DATE(#{docdt},'YYYYMMDD'),-1),'YYYYMM')  
+		                                             THEN KP_DAILYQTY.SLIPDT ELSE NULL END                                                                                       AS PREWEIGHTDELIVERYDATE
+		                                      , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = SUBSTR(#{docdt},1,6) 
+		                                             THEN KP_DAILYQTY.CONFIRMWEIGHT  ELSE 0 END                                                                                  AS WEIGHT                                                                   
+		                                      , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = SUBSTR(#{docdt},1,6) 
+		                                             THEN KP_DAILYQTY.SLIPDT ELSE NULL END                                                                                       AS WEIGHTDELIVERYDATE 
+		                                      , CASE WHEN KP_DAILYQTY.SLIPDT = TO_CHAR(TO_DATE(#{docdt},'YYYYMMDD')-1,'YYYYMMDD') THEN KP_DAILYQTY.CONFIRMWEIGHT  ELSE 0 END     AS PREWEIGHTDAY  
+		                                      , CASE WHEN KP_DAILYQTY.SLIPDT = #{docdt} THEN KP_DAILYQTY.CONFIRMWEIGHT  ELSE 0 END                                               AS WEIGHTDAY               
+		                                      , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = TO_CHAR(ADD_MONTHS(TO_DATE(#{docdt},'YYYYMMDD'),-1),'YYYYMM') 
+		                                             THEN KP_DAILYQTY.CARNO  ELSE NULL END                                                                                       AS PREMONTHCAR
+		                                      , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = TO_CHAR(ADD_MONTHS(TO_DATE(#{docdt},'YYYYMMDD'),-1),'YYYYMM')  
+		                                             THEN KP_DAILYQTY.SLIPDT ELSE NULL END                                                                                       AS PREDELIVERYDATECAR
+		                                      , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = SUBSTR(#{docdt},1,6) 
+		                                             THEN KP_DAILYQTY.CARNO  ELSE NULL END                                                                                       AS MONTHCAR                                                                 
+		                                      , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = SUBSTR(#{docdt},1,6) 
+		                                             THEN KP_DAILYQTY.SLIPDT ELSE NULL END                                                                                       AS DELIVERYDATECAR
+		                                      , CASE WHEN KP_DAILYQTY.SLIPDT = TO_CHAR(TO_DATE(#{docdt},'YYYYMMDD')-1,'YYYYMMDD') 
+		                                             THEN KP_DAILYQTY.CARNO  ELSE NULL END                                                                                       AS PREDAYCAR  
+		                                      , CASE WHEN KP_DAILYQTY.SLIPDT = #{docdt} 
+		                                             THEN KP_DAILYQTY.CARNO  ELSE NULL END                                                                                       AS DAYCAR                                                                                                         
+		                                   FROM KP_DAILYQTY                                
+		                                  WHERE 1=1
+		                                    AND KP_DAILYQTY.STORERKEY = #{gStorerkey}
+		                                    AND KP_DAILYQTY.SLIPDT BETWEEN TO_CHAR(ADD_MONTHS(TO_DATE(#{docdt},'YYYYMMDD'),-1),'YYYYMM')||'01' AND #{docdt}
+										<if test="dccode != null and dccode != ''">
+		                                    AND KP_DAILYQTY.DCCODE = #{dccode} 
+										</if>
+										<if test="channel == 1">
+		                                    AND KP_DAILYQTY.CHANNEL = '1'
+										</if>
+										<if test="channel == 2">
+		                                    AND KP_DAILYQTY.CHANNEL IN ('2', '3')
+										</if>
+		                                    AND KP_DAILYQTY.DOCTYPE         = 'WD'
+		                                    AND KP_DAILYQTY.WORKPROCESSCODE = 'STO' )
+		                         GROUP BY DCCODE
+		                                , COURSE
+		                                , CHANNEL ) )
+         SELECT TT.*
+		  FROM ( SELECT DCCODE                                                      AS DCCODE
+		              , FN_GETDCNAME(DCCODE)                                        AS DCNAME
+                      , '00'                                                        AS COURSE
+                      , ''                                                          AS COURSENM
+                      , '0'                                                         AS CHANNEL
+                      , ''                                                          AS CHANNELNM
+                      , TITLE                                                       AS TITLE
+                      , TITLE                                                       AS INDICATOR
+                      , TITLE                                                       AS UOM
+		              , TRUNC(SUM(PREMONTH),2)                                      AS PREMONTH
+		              , TRUNC(SUM(MONTH),2)                                         AS MONTH
+		              , TRUNC(SUM(MONTH)-SUM(PREMONTH),2)                           AS MONTHINCDEC
+		              , TRUNC(CASE WHEN SUM(PREMONTH) = 0 THEN 100 ELSE
+		                     ((SUM(MONTH)-SUM(PREMONTH))/SUM(PREMONTH))*100 END,2)  AS MONTHINCDECPER
+		              , TRUNC(SUM(PREDAY),2)                                        AS PREDAY
+		              , TRUNC(SUM(DAY),2)                                           AS DAY
+		              , TRUNC(SUM(DAY)-SUM(PREDAY),2)                               AS DAYINCDEC
+		              , TRUNC(CASE WHEN SUM(PREDAY) = 0 THEN 100 ELSE
+		                     ((SUM(DAY)-SUM(PREDAY))/SUM(PREDAY))*100 END,2)        AS DAYINCDECPER
+		           FROM T_TAB
+		          WHERE 1=1
+		            AND TITLE <![CDATA[<>]]> '03'
+		          GROUP BY DCCODE
+				         , TITLE
+		          UNION ALL
+		         SELECT DCCODE                                                                                                           AS DCCODE
+		              , FN_GETDCNAME(DCCODE)                                                                                             AS DCNAME
+                      , '00'                                                                                                             AS COURSE
+                      , ''                                                                                                               AS COURSENM
+                      , '0'                                                                                                              AS CHANNEL
+                      , ''                                                                                                               AS CHANNELNM
+                      , '03'                                                                                                             AS TITLE
+                      , '03'                                                                                                             AS INDICATOR
+                      , '03'                                                                                                             AS UOM
+		              , TRUNC(CASE WHEN SUM(PREMONTHCAR) = 0 THEN 0 ELSE SUM(PREMONTHWEIGHT)/SUM(PREMONTHCAR) END,2)                     AS PREMONTH
+		              , TRUNC(CASE WHEN SUM(MONTHCAR) = 0 THEN 0 ELSE SUM(MONTHWEIGHT)/SUM(MONTHCAR) END,2)                              AS MONTH
+		              , TRUNC(CASE WHEN SUM(MONTHCAR) = 0 THEN 0 ELSE SUM(MONTHWEIGHT)/SUM(MONTHCAR) END
+		                - CASE WHEN SUM(PREMONTHCAR) = 0 THEN 0 ELSE SUM(PREMONTHWEIGHT)/SUM(PREMONTHCAR) END,2)                         AS MONTHINCDEC
+		              , TRUNC(CASE WHEN CASE WHEN SUM(PREMONTHCAR) = 0 THEN 0 ELSE SUM(PREMONTHWEIGHT)/SUM(PREMONTHCAR) END = 0 THEN 100
+		                ELSE ((CASE WHEN SUM(MONTHCAR) = 0 THEN 0 ELSE SUM(MONTHWEIGHT)/SUM(MONTHCAR) END
+		                - CASE WHEN SUM(PREMONTHCAR) = 0 THEN 0 ELSE SUM(PREMONTHWEIGHT)/SUM(PREMONTHCAR) END)
+		                / CASE WHEN SUM(PREMONTHCAR) = 0 THEN 0 ELSE SUM(PREMONTHWEIGHT)/SUM(PREMONTHCAR) END)*100 END,2)                 AS MONTHINCDECPER
+		              , TRUNC(CASE WHEN SUM(PREDAYCAR) = 0 THEN 0 ELSE SUM(PREDAYWEIGHT)/SUM(PREDAYCAR) END,2)                            AS PREDAY
+		              , TRUNC(CASE WHEN SUM(DAYCAR) = 0 THEN 0 ELSE SUM(DAYWEIGHT)/SUM(DAYCAR) END,2)                                     AS DAY
+		              , TRUNC(CASE WHEN SUM(DAYCAR) = 0 THEN 0 ELSE SUM(DAYWEIGHT)/SUM(DAYCAR) END                                        
+		                - CASE WHEN SUM(PREDAYCAR) = 0 THEN 0 ELSE SUM(PREDAYWEIGHT)/SUM(PREDAYCAR) END,2)                                AS DAYINCDEC
+		              , TRUNC(CASE WHEN CASE WHEN SUM(PREDAYCAR) = 0 THEN 0 ELSE SUM(PREDAYWEIGHT)/SUM(PREDAYCAR) END = 0 THEN 100        
+		                ELSE ((CASE WHEN SUM(DAYCAR) = 0 THEN 0 ELSE SUM(DAYWEIGHT)/SUM(DAYCAR) END                                       
+		                -  CASE WHEN SUM(PREDAYCAR) = 0 THEN 0 ELSE SUM(PREDAYWEIGHT)/SUM(PREDAYCAR) END)                                 
+		                / CASE WHEN SUM(PREDAYCAR) = 0 THEN 0 ELSE SUM(PREDAYWEIGHT)/SUM(PREDAYCAR) END)*100 END,2)                       AS DAYINCDECPER
+		           FROM ( SELECT DCCODE                                          AS DCCODE
+		                       , COURSE                                          AS COURSE
+		                       , CHANNEL                                         AS CHANNEL
+		                       , CASE WHEN TITLE = '01' THEN PREMONTH ELSE 0 END AS PREMONTHWEIGHT
+		                       , CASE WHEN TITLE = '01' THEN MONTH    ELSE 0 END AS MONTHWEIGHT
+		                       , CASE WHEN TITLE = '01' THEN PREDAY   ELSE 0 END AS PREDAYWEIGHT
+		                       , CASE WHEN TITLE = '01' THEN DAY      ELSE 0 END AS DAYWEIGHT
+		                       , CASE WHEN TITLE = '02' THEN PREMONTH ELSE 0 END AS PREMONTHCAR
+		                       , CASE WHEN TITLE = '02' THEN MONTH    ELSE 0 END AS MONTHCAR
+		                       , CASE WHEN TITLE = '02' THEN PREDAY   ELSE 0 END AS PREDAYCAR
+		                       , CASE WHEN TITLE = '02' THEN DAY      ELSE 0 END AS DAYCAR
+		                    FROM T_TAB
+		                   WHERE 1=1
+		                     AND TITLE <![CDATA[<>]]> '03' )
+		          GROUP BY DCCODE   
+		          UNION ALL   
+		         SELECT DCCODE                                                    AS DCCODE
+		              , FN_GETDCNAME(DCCODE)                                      AS DCNAME
+                      , '00'                                                      AS COURSE
+                      , ''                                                        AS COURSENM
+                      , CHANNEL                                                   AS CHANNEL
+                      , FN_CODEDESCR(#{gStorerkey}, 'PUTAWAYTYPE', CHANNEL)        AS CHANNELNM
+                      , TITLE                                                     AS TITLE
+                      , TITLE                                                     AS INDICATOR
+                      , TITLE                                                     AS UOM
+		              , TRUNC(SUM(PREMONTH),2)                                    AS PREMONTH
+		              , TRUNC(SUM(MONTH),2)                                       AS MONTH
+		              , TRUNC(SUM(MONTH)-SUM(PREMONTH),2)                         AS MONTHINCDEC
+		              , TRUNC(CASE WHEN SUM(PREMONTH) = 0 THEN 100 ELSE           
+		                ((SUM(MONTH)-SUM(PREMONTH))/SUM(PREMONTH))*100 END,2)     AS MONTHINCDECPER
+		              , TRUNC(SUM(PREDAY),2) AS PREDAY                            
+		              , TRUNC(SUM(DAY),2) AS DAY                                  
+		              , TRUNC(SUM(DAY)-SUM(PREDAY),2)                             AS DAYINCDEC
+		              , TRUNC(CASE WHEN SUM(PREDAY) = 0 THEN 100 ELSE             
+		                ((SUM(DAY)-SUM(PREDAY))/SUM(PREDAY))*100 END,2)           AS DAYINCDECPER
+		           FROM T_TAB
+		          WHERE 1=1
+		            AND TITLE <![CDATA[<>]]> '03'
+		          GROUP BY DCCODE
+				         , CHANNEL
+						 , TITLE
+		          UNION ALL
+		         SELECT DCCODE                                                                                                             AS DCCODE
+		              , FN_GETDCNAME(DCCODE)                                                                                               AS DCNAME
+                      , '00'                                                                                                               AS COURSE
+                      , ''                                                                                                                 AS COURSENM
+                      , CHANNEL                                                                                                            AS CHANNEL
+                      , FN_CODEDESCR(#{gStorerkey}, 'PUTAWAYTYPE', CHANNEL)                                                                AS CHANNELNM
+                      , '03'                                                                                                               AS TITLE
+                      , '03'                                                                                                               AS INDICATOR
+                      , '03'                                                                                                               AS UOM
+		              , TRUNC(CASE WHEN SUM(PREMONTHCAR) = 0 THEN 0 ELSE SUM(PREMONTHWEIGHT)/SUM(PREMONTHCAR) END,2)                       AS PREMONTH
+		              , TRUNC(CASE WHEN SUM(MONTHCAR) = 0 THEN 0 ELSE SUM(MONTHWEIGHT)/SUM(MONTHCAR) END,2)                                AS MONTH
+		              , TRUNC(CASE WHEN SUM(MONTHCAR) = 0 THEN 0 ELSE SUM(MONTHWEIGHT)/SUM(MONTHCAR) END
+		                - CASE WHEN SUM(PREMONTHCAR) = 0 THEN 0 ELSE SUM(PREMONTHWEIGHT)/SUM(PREMONTHCAR) END,2)                           AS MONTHINCDEC
+		              , TRUNC(CASE WHEN CASE WHEN SUM(PREMONTHCAR) = 0 THEN 0 ELSE SUM(PREMONTHWEIGHT)/SUM(PREMONTHCAR) END = 0 THEN 100
+		                ELSE ((CASE WHEN SUM(MONTHCAR) = 0 THEN 0 ELSE SUM(MONTHWEIGHT)/SUM(MONTHCAR) END
+		                - CASE WHEN SUM(PREMONTHCAR) = 0 THEN 0 ELSE SUM(PREMONTHWEIGHT)/SUM(PREMONTHCAR) END)
+		                / CASE WHEN SUM(PREMONTHCAR) = 0 THEN 0 ELSE SUM(PREMONTHWEIGHT)/SUM(PREMONTHCAR) END)*100 END,2)                  AS MONTHINCDECPER
+		              , TRUNC(CASE WHEN SUM(PREDAYCAR) = 0 THEN 0 ELSE SUM(PREDAYWEIGHT)/SUM(PREDAYCAR) END,2)                             AS PREDAY
+		              , TRUNC(CASE WHEN SUM(DAYCAR) = 0 THEN 0 ELSE SUM(DAYWEIGHT)/SUM(DAYCAR) END,2)                                      AS DAY
+		              , TRUNC(CASE WHEN SUM(DAYCAR) = 0 THEN 0 ELSE SUM(DAYWEIGHT)/SUM(DAYCAR) END                                         
+		                - CASE WHEN SUM(PREDAYCAR) = 0 THEN 0 ELSE SUM(PREDAYWEIGHT)/SUM(PREDAYCAR) END,2)                                 AS DAYINCDEC
+		              , TRUNC(CASE WHEN CASE WHEN SUM(PREDAYCAR) = 0 THEN 0 ELSE SUM(PREDAYWEIGHT)/SUM(PREDAYCAR) END = 0 THEN 100         
+		                ELSE ((CASE WHEN SUM(DAYCAR) = 0 THEN 0 ELSE SUM(DAYWEIGHT)/SUM(DAYCAR) END                                        
+		                -  CASE WHEN SUM(PREDAYCAR) = 0 THEN 0 ELSE SUM(PREDAYWEIGHT)/SUM(PREDAYCAR) END)                                  
+		                / CASE WHEN SUM(PREDAYCAR) = 0 THEN 0 ELSE SUM(PREDAYWEIGHT)/SUM(PREDAYCAR) END)*100 END,2)                        AS DAYINCDECPER
+		           FROM ( SELECT DCCODE
+		                       , COURSE
+		                       , CHANNEL
+		                       , CASE WHEN TITLE = '01' THEN PREMONTH ELSE 0 END AS PREMONTHWEIGHT
+		                       , CASE WHEN TITLE = '01' THEN MONTH    ELSE 0 END AS MONTHWEIGHT
+		                       , CASE WHEN TITLE = '01' THEN PREDAY   ELSE 0 END AS PREDAYWEIGHT
+		                       , CASE WHEN TITLE = '01' THEN DAY      ELSE 0 END AS DAYWEIGHT
+		                       , CASE WHEN TITLE = '02' THEN PREMONTH ELSE 0 END AS PREMONTHCAR
+		                       , CASE WHEN TITLE = '02' THEN MONTH    ELSE 0 END AS MONTHCAR
+		                       , CASE WHEN TITLE = '02' THEN PREDAY   ELSE 0 END AS PREDAYCAR
+		                       , CASE WHEN TITLE = '02' THEN DAY      ELSE 0 END AS DAYCAR
+		                    FROM T_TAB
+		                   WHERE 1=1
+		                     AND TITLE <![CDATA[<>]]> '03' )
+		          GROUP BY DCCODE
+				         , CHANNEL  
+		          UNION ALL
+		         SELECT DCCODE                                                                                                AS DCCODE
+		              , FN_GETDCNAME(DCCODE)                                                                                  AS DCNAME
+		              , COURSE                                                                                                AS COURSE
+		              , FN_GETDCNAME(DCCODE)||'->'||FN_DESCR_ORGANIZE(LEFT(COURSE,4),COURSE)                                  AS COURSENM
+                      , '0'                                                                                                   AS CHANNEL
+                      , ''                                                                                                    AS CHANNELNM
+                      , TITLE                                                                                                 AS TITLE
+                      , TITLE                                                                                                 AS INDICATOR
+                      , TITLE                                                                                                 AS UOM
+		              , TRUNC(SUM(PREMONTH),2)                                                                                AS PREMONTH
+		              , TRUNC(SUM(MONTH),2)                                                                                   AS MONTH
+		              , TRUNC(SUM(MONTH)-SUM(PREMONTH),2)                                                                     AS MONTHINCDEC
+		              , TRUNC(CASE WHEN SUM(PREMONTH) = 0 THEN 100 ELSE((SUM(MONTH)-SUM(PREMONTH))/SUM(PREMONTH))*100 END,2)  AS MONTHINCDECPER
+		              , TRUNC(SUM(PREDAY),2)                                                                                  AS PREDAY
+		              , TRUNC(SUM(DAY),2)                                                                                     AS DAY
+		              , TRUNC(SUM(DAY)-SUM(PREDAY),2)                                                                         AS DAYINCDEC
+		              , TRUNC(CASE WHEN SUM(PREDAY) = 0 THEN 100 ELSE ((SUM(DAY)-SUM(PREDAY))/SUM(PREDAY))*100 END,2)         AS DAYINCDECPER
+		           FROM T_TAB
+		          WHERE 1=1
+		            AND TITLE <![CDATA[<>]]> '03'
+		          GROUP BY DCCODE
+				         , COURSE
+						 , TITLE
+		          UNION ALL
+		         SELECT DCCODE                                                                                                               AS DCCODE
+		              , FN_GETDCNAME(DCCODE)                                                                                                 AS DCNAME
+		              , COURSE                                                                                                               AS COURSE
+                      , FN_GETDCNAME(DCCODE)||'->'||FN_DESCR_ORGANIZE(LEFT(COURSE,4),COURSE)                                                 AS COURSENM
+                      , '0'                                                                                                                  AS CHANNEL
+                      , ''                                                                                                                   AS CHANNELNM
+                      , '03'                                                                                                                 AS TITLE
+                      , '03'                                                                                                                 AS INDICATOR
+                      , '03'                                                                                                                 AS UOM
+		              , TRUNC(CASE WHEN SUM(PREMONTHCAR) = 0 THEN 0 ELSE SUM(PREMONTHWEIGHT)/SUM(PREMONTHCAR) END,2)                         AS PREMONTH
+		              , TRUNC(CASE WHEN SUM(MONTHCAR) = 0 THEN 0 ELSE SUM(MONTHWEIGHT)/SUM(MONTHCAR) END,2)                                  AS MONTH
+		              , TRUNC(CASE WHEN SUM(MONTHCAR) = 0 THEN 0 ELSE SUM(MONTHWEIGHT)/SUM(MONTHCAR) END
+		                - CASE WHEN SUM(PREMONTHCAR) = 0 THEN 0 ELSE SUM(PREMONTHWEIGHT)/SUM(PREMONTHCAR) END,2)                             AS MONTHINCDEC
+		              , TRUNC(CASE WHEN CASE WHEN SUM(PREMONTHCAR) = 0 THEN 0 ELSE SUM(PREMONTHWEIGHT)/SUM(PREMONTHCAR) END = 0 THEN 100
+		                ELSE ((CASE WHEN SUM(MONTHCAR) = 0 THEN 0 ELSE SUM(MONTHWEIGHT)/SUM(MONTHCAR) END
+		                - CASE WHEN SUM(PREMONTHCAR) = 0 THEN 0 ELSE SUM(PREMONTHWEIGHT)/SUM(PREMONTHCAR) END)
+		                / CASE WHEN SUM(PREMONTHCAR) = 0 THEN 0 ELSE SUM(PREMONTHWEIGHT)/SUM(PREMONTHCAR) END)*100 END,2)                    AS MONTHINCDECPER
+		              , TRUNC(CASE WHEN SUM(PREDAYCAR) = 0 THEN 0 ELSE SUM(PREDAYWEIGHT)/SUM(PREDAYCAR) END,2)                               AS PREDAY
+		              , TRUNC(CASE WHEN SUM(DAYCAR) = 0 THEN 0 ELSE SUM(DAYWEIGHT)/SUM(DAYCAR) END,2)                                        AS DAY
+		              , TRUNC(CASE WHEN SUM(DAYCAR) = 0 THEN 0 ELSE SUM(DAYWEIGHT)/SUM(DAYCAR) END                                           
+		                - CASE WHEN SUM(PREDAYCAR) = 0 THEN 0 ELSE SUM(PREDAYWEIGHT)/SUM(PREDAYCAR) END,2)                                   AS DAYINCDEC
+		              , TRUNC(CASE WHEN CASE WHEN SUM(PREDAYCAR) = 0 THEN 0 ELSE SUM(PREDAYWEIGHT)/SUM(PREDAYCAR) END = 0 THEN 100           
+		                ELSE ((CASE WHEN SUM(DAYCAR) = 0 THEN 0 ELSE SUM(DAYWEIGHT)/SUM(DAYCAR) END                                          
+		                - CASE WHEN SUM(PREDAYCAR) = 0 THEN 0 ELSE SUM(PREDAYWEIGHT)/SUM(PREDAYCAR) END)                                     
+		                / CASE WHEN SUM(PREDAYCAR) = 0 THEN 0 ELSE SUM(PREDAYWEIGHT)/SUM(PREDAYCAR) END)*100 END,2)                          AS DAYINCDECPER
+		           FROM ( SELECT DCCODE
+		                       , COURSE
+		                       , CHANNEL
+		                       , CASE WHEN TITLE = '01' THEN PREMONTH ELSE 0 END AS PREMONTHWEIGHT
+		                       , CASE WHEN TITLE = '01' THEN MONTH    ELSE 0 END AS MONTHWEIGHT
+		                       , CASE WHEN TITLE = '01' THEN PREDAY   ELSE 0 END AS PREDAYWEIGHT
+		                       , CASE WHEN TITLE = '01' THEN DAY      ELSE 0 END AS DAYWEIGHT
+		                       , CASE WHEN TITLE = '02' THEN PREMONTH ELSE 0 END AS PREMONTHCAR
+		                       , CASE WHEN TITLE = '02' THEN MONTH    ELSE 0 END AS MONTHCAR
+		                       , CASE WHEN TITLE = '02' THEN PREDAY   ELSE 0 END AS PREDAYCAR
+		                       , CASE WHEN TITLE = '02' THEN DAY      ELSE 0 END AS DAYCAR
+		                    FROM T_TAB
+		                   WHERE 1=1
+		                     AND TITLE <![CDATA[<>]]> '03' )
+		          GROUP BY DCCODE
+				         , COURSE
+		          UNION ALL
+		         SELECT DCCODE                                                               AS DCCODE
+		              , FN_GETDCNAME(DCCODE)                                                 AS DCNAME
+		              , COURSE                                                               AS COURSE
+		              , FN_GETDCNAME(DCCODE)||'->'||FN_DESCR_ORGANIZE(LEFT(COURSE,4),COURSE) AS COURSENM
+                      , CHANNEL                                                              AS CHANNEL
+                      , FN_CODEDESCR(#{gStorerkey}, 'PUTAWAYTYPE', CHANNEL)                   AS CHANNELNM
+                      , TITLE                                                                AS TITLE
+                      , TITLE                                                                AS INDICATOR
+                      , TITLE                                                                AS UOM
+		              , TRUNC(PREMONTH,2)                                                    AS PREMONTH
+		              , TRUNC(MONTH,2)                                                       AS MONTH
+		              , TRUNC(MONTHINCDEC,2)                                                 AS MONTHINCDEC
+		              , TRUNC(MONTHINCDECPER,2)                                              AS MONTHINCDECPER
+		              , TRUNC(PREDAY,2)                                                      AS PREDAY
+		              , TRUNC(DAY,2)                                                         AS DAY
+		              , TRUNC(DAYINCDEC,2)                                                   AS DAYINCDEC
+		              , TRUNC(DAYINCDECPER,2)                                                AS DAYINCDECPER
+		           FROM T_TAB ) TT
+		 ORDER BY TT.DCCODE
+		        , TT.COURSE
+		        , TT.CHANNEL
+		        , TT.TITLE    
+	</select>
+	
+	<select id="getMasterT3List" resultType="cjfw.wms.kp.dto.KpCenterDayStateResT3Dto">
+		/* [KpCenterDayStateService.sqlx][KpCenterDayStateService.getMasterT3List][지표 > 센터 운영 > 출고 유형별 물동 현황 배송차량_탭 조회][KimDongHan][2025-09-04] */
+		  WITH T_TAB AS (
+		SELECT DCCODE                                                                                                                                                  AS DCCODE
+		     , COURSE                                                                                                                                                  AS COURSE
+		     , CAPACITY                                                                                                                                                AS CAPACITY
+		     , '01'                                                                                                                                                    AS TITLE
+		     , TRUNC(CASE WHEN COUNT(DISTINCT PREDELIVERYDATE) = 0 THEN 0 ELSE COUNT(DISTINCT PREMONTHCAR)/COUNT(DISTINCT PREDELIVERYDATE) END,2)                      AS PREMONTH
+		     , TRUNC(CASE WHEN COUNT(DISTINCT DELIVERYDATE) = 0 THEN 0 ELSE COUNT(DISTINCT MONTHCAR)/COUNT(DISTINCT DELIVERYDATE) END,2)                               AS MONTH
+		     , TRUNC(CASE WHEN COUNT(DISTINCT DELIVERYDATE) = 0 THEN 0 ELSE COUNT(DISTINCT MONTHCAR)/COUNT(DISTINCT DELIVERYDATE) END
+		       - CASE WHEN COUNT(DISTINCT PREDELIVERYDATE) = 0 THEN 0 ELSE COUNT(DISTINCT PREMONTHCAR)/COUNT(DISTINCT PREDELIVERYDATE) END,2)                          AS MONTHINCDEC
+		     , TRUNC(CASE WHEN (CASE WHEN COUNT(DISTINCT PREDELIVERYDATE) = 0 THEN 0 ELSE COUNT(DISTINCT PREMONTHCAR)/COUNT(DISTINCT PREDELIVERYDATE) END) = 0
+		       THEN 100 ELSE ((CASE WHEN COUNT(DISTINCT DELIVERYDATE) = 0 THEN 0 ELSE COUNT(DISTINCT MONTHCAR)/COUNT(DISTINCT DELIVERYDATE) END
+		       -  CASE WHEN COUNT(DISTINCT PREDELIVERYDATE) = 0 THEN 0 ELSE COUNT(DISTINCT PREMONTHCAR)/COUNT(DISTINCT PREDELIVERYDATE) END)
+		       / (CASE WHEN COUNT(DISTINCT PREDELIVERYDATE) = 0 THEN 0 ELSE COUNT(DISTINCT PREMONTHCAR)/COUNT(DISTINCT PREDELIVERYDATE) END))*100 END,2)               AS MONTHINCDECPER
+		     , TRUNC(COUNT(DISTINCT PREDAYCAR),2)                                                                                                                      AS PREDAY
+		     , TRUNC(COUNT(DISTINCT DAYCAR),2)                                                                                                                         AS DAY
+		     , TRUNC(COUNT(DISTINCT DAYCAR)-COUNT(DISTINCT PREDAYCAR),2)                                                                                               AS DAYINCDEC
+		     , TRUNC(CASE WHEN COUNT(DISTINCT PREDAYCAR)  = 0 THEN 100 ELSE ((COUNT(DISTINCT DAYCAR)-COUNT(DISTINCT PREDAYCAR))/COUNT(DISTINCT PREDAYCAR))*100 END,2)  AS DAYINCDECPER
+		  FROM ( SELECT KP_DAILYQTY.DCCODE                                                                                                                                  AS DCCODE
+		              , TRIM(CM_CAR.CONTRACTTYPE)                                                                                                                           AS COURSE
+		              , CASE WHEN TO_NUMBER(NVL(CM_CAR.CARCAPACITY,'0')) > 5 THEN '5' ELSE CM_CAR.CARCAPACITY END                                                           AS CAPACITY
+		              , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = TO_CHAR(ADD_MONTHS(TO_DATE(#{docdt},'YYYYMMDD'),-1),'YYYYMM') THEN KP_DAILYQTY.CARNO  ELSE NULL END     AS PREMONTHCAR
+		              , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = TO_CHAR(ADD_MONTHS(TO_DATE(#{docdt},'YYYYMMDD'),-1),'YYYYMM') THEN KP_DAILYQTY.SLIPDT ELSE NULL END     AS PREDELIVERYDATE
+		              , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = SUBSTR(#{docdt},1,6) THEN KP_DAILYQTY.CARNO  ELSE NULL END                                              AS MONTHCAR                                                                   
+		              , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = SUBSTR(#{docdt},1,6) THEN KP_DAILYQTY.SLIPDT ELSE NULL END                                              AS DELIVERYDATE 
+		              , CASE WHEN KP_DAILYQTY.SLIPDT = TO_CHAR(TO_DATE(#{docdt},'YYYYMMDD')-1,'YYYYMMDD') THEN KP_DAILYQTY.CARNO  ELSE NULL END                             AS PREDAYCAR  
+		              , CASE WHEN KP_DAILYQTY.SLIPDT = #{docdt} THEN KP_DAILYQTY.CARNO  ELSE NULL END                                                                       AS DAYCAR        
+		           FROM KP_DAILYQTY
+		           JOIN CM_CAR
+		             ON CM_CAR.CARNO        = KP_DAILYQTY.CARNO
+		            AND CM_CAR.DEL_YN       = 'N'
+		            <!--AND CM_CAR.CARCAPACITY >= '1'-->
+		            AND CM_CAR.CARCAPACITY	 IN (SELECT BASECODE FROM CM_CODE WHERE CODELIST='CARCAPACITY' AND DEL_YN ='N')
+				<if test="contracttype != null and contracttype != ''">
+		            AND CM_CAR.CONTRACTTYPE = #{contracttype}
+				</if>
+				<if test="carcapacity != null and carcapacity != ''">
+					<if test="carcapacity == 5">
+		            AND TO_NUMBER(NVL(CM_CAR.CARCAPACITY,'0')) >= 5
+					</if>
+					<if test="carcapacity != 5">
+		            AND CM_CAR.CARCAPACITY = #{carcapacity}
+					</if>
+				</if>                        
+		          WHERE 1=1
+		            AND KP_DAILYQTY.STORERKEY  = #{gStorerkey}
+		            AND KP_DAILYQTY.SLIPDT BETWEEN TO_CHAR(ADD_MONTHS(TO_DATE(#{docdt},'YYYYMMDD'),-1),'YYYYMM')||'01' AND #{docdt}
+				<if test="dccode != null and dccode != ''">
+		            AND KP_DAILYQTY.DCCODE = #{dccode}
+				</if>
+		            AND KP_DAILYQTY.DOCTYPE = 'WD' )
+		 GROUP BY DCCODE
+		        , COURSE 
+		        , CAPACITY 
+		 UNION ALL
+		SELECT DCCODE                                                                                             AS DCCODE
+		     , COURSE                                                                                             AS COURSE
+		     , CAPACITY                                                                                           AS CAPACITY
+		     , '02'                                                                                               AS TITLE
+		     , TRUNC(PREMONTHCAPA,2)                                                                              AS PREMONTH
+		     , TRUNC(MONTHCAPA,2)                                                                                 AS MONTH
+		     , TRUNC(MONTHCAPA - PREMONTHCAPA,2)                                                                  AS MONTHINCDEC
+		     , CASE WHEN PREMONTHCAPA = 0 THEN 100 ELSE TRUNC((MONTHCAPA - PREMONTHCAPA)/PREMONTHCAPA*100,2) END  AS MONTHINCDECPER
+		     , TRUNC(PREDAYCAPA,2)                                                                                AS PREDAY
+		     , TRUNC(DAYCAPA,2)                                                                                   AS DAY
+		     , TRUNC(DAYCAPA - PREDAYCAPA,2)                                                                      AS DAYINCDEC
+		     , CASE WHEN PREDAYCAPA = 0 THEN 100 ELSE TRUNC((DAYCAPA - PREDAYCAPA)/PREDAYCAPA*100,2) END          AS DAYINCDEC
+		  FROM ( SELECT DCCODE                                                                                                                                     AS DCCODE
+		              , COURSE                                                                                                                                     AS COURSE
+		              , CAPACITY                                                                                                                                   AS CAPACITY
+		              , CASE WHEN (COUNT(DISTINCT PREMONTHCAR) = 0 OR COUNT(DISTINCT PREWEIGHTDELIVERYDATE) = 0)  THEN 0 
+		                ELSE (SUM(PREWEIGHT)/(TO_NUMBER(CAPACITY)*1000*0.8*COUNT(DISTINCT PREMONTHCAR)))/COUNT(DISTINCT PREWEIGHTDELIVERYDATE)*100 END             AS PREMONTHCAPA
+		              , CASE WHEN (COUNT(DISTINCT MONTHCAR) = 0  OR COUNT(DISTINCT WEIGHTDELIVERYDATE) = 0) THEN 0 
+		                ELSE (SUM(WEIGHT)/((TO_NUMBER(CAPACITY)*1000*0.8)*COUNT(DISTINCT MONTHCAR)))/COUNT(DISTINCT WEIGHTDELIVERYDATE)*100 END                    AS MONTHCAPA
+		              , CASE WHEN COUNT(DISTINCT PREDAYCAR) = 0 THEN 0 ELSE SUM(PREWEIGHTDAY)/((TO_NUMBER(CAPACITY)*1000*0.8)*COUNT(DISTINCT PREDAYCAR))*100 END   AS PREDAYCAPA
+		              , CASE WHEN COUNT(DISTINCT DAYCAR) = 0 THEN 0 ELSE SUM(WEIGHTDAY)/((TO_NUMBER(CAPACITY)*1000*0.8)*COUNT(DISTINCT DAYCAR))*100 END            AS DAYCAPA
+		           FROM ( SELECT KP_DAILYQTY.DCCODE                                                                                                                                   AS DCCODE
+		                       , TRIM(CM_CAR.CONTRACTTYPE)                                                                                                                            AS COURSE
+		                       , CASE WHEN TO_NUMBER(NVL(CM_CAR.CARCAPACITY,'0')) > 5 THEN '5' ELSE CM_CAR.CARCAPACITY END                                                            AS CAPACITY
+		                       , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = TO_CHAR(ADD_MONTHS(TO_DATE(#{docdt},'YYYYMMDD'),-1),'YYYYMM') THEN KP_DAILYQTY.CONFIRMWEIGHT  ELSE 0 END AS PREWEIGHT
+		                       , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = TO_CHAR(ADD_MONTHS(TO_DATE(#{docdt},'YYYYMMDD'),-1),'YYYYMM') THEN KP_DAILYQTY.SLIPDT ELSE NULL END      AS PREWEIGHTDELIVERYDATE
+		                       , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = SUBSTR(#{docdt},1,6) THEN KP_DAILYQTY.CONFIRMWEIGHT  ELSE 0 END                                          AS WEIGHT                                                                   
+		                       , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = SUBSTR(#{docdt},1,6) THEN KP_DAILYQTY.SLIPDT ELSE NULL END                                               AS WEIGHTDELIVERYDATE                
+		                       , CASE WHEN KP_DAILYQTY.SLIPDT = TO_CHAR(TO_DATE(#{docdt},'YYYYMMDD')-1,'YYYYMMDD') THEN KP_DAILYQTY.CONFIRMWEIGHT  ELSE 0 END                         AS PREWEIGHTDAY  
+		                       , CASE WHEN KP_DAILYQTY.SLIPDT = #{docdt} THEN KP_DAILYQTY.CONFIRMWEIGHT  ELSE 0 END                                                                   AS WEIGHTDAY                              
+		                       , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = TO_CHAR(ADD_MONTHS(TO_DATE(#{docdt},'YYYYMMDD'),-1),'YYYYMM') THEN KP_DAILYQTY.CARNO  ELSE NULL END      AS PREMONTHCAR
+		                       , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = SUBSTR(#{docdt},1,6) THEN KP_DAILYQTY.CARNO  ELSE NULL END                                               AS MONTHCAR                                                                   
+		                       , CASE WHEN KP_DAILYQTY.SLIPDT = TO_CHAR(TO_DATE(#{docdt},'YYYYMMDD')-1,'YYYYMMDD') THEN KP_DAILYQTY.CARNO  ELSE NULL END                              AS PREDAYCAR  
+		                       , CASE WHEN KP_DAILYQTY.SLIPDT = #{docdt} THEN KP_DAILYQTY.CARNO  ELSE NULL END                                                                        AS DAYCAR        
+		                    FROM KP_DAILYQTY
+		                    JOIN CM_CAR
+		                      ON CM_CAR.CARNO        = KP_DAILYQTY.CARNO
+		                     AND CM_CAR.DEL_YN       = 'N'
+		                     <!--AND CM_CAR.CARCAPACITY	>= '1'-->
+		                     AND CM_CAR.CARCAPACITY	 IN (SELECT BASECODE FROM CM_CODE WHERE CODELIST='CARCAPACITY' AND DEL_YN ='N')
+						<if test="contracttype != null and contracttype != ''">
+		                     AND CM_CAR.CONTRACTTYPE = #{contracttype}
+						</if>
+						<if test="carcapacity != null and carcapacity != ''">
+							<if test="carcapacity == 5">
+		                     AND TO_NUMBER(NVL(CM_CAR.CARCAPACITY,'0')) >= 5
+							</if>
+							<if test="carcapacity != 5">
+		                     AND CM_CAR.CARCAPACITY = #{carcapacity}
+							</if>
+						</if>                        
+		                   WHERE 1=1
+		                     AND KP_DAILYQTY.STORERKEY = #{gStorerkey}
+		                     AND KP_DAILYQTY.SLIPDT    BETWEEN TO_CHAR(ADD_MONTHS(TO_DATE(#{docdt},'YYYYMMDD'),-1),'YYYYMM')||'01' AND #{docdt}
+						<if test="dccode != null and dccode != ''">
+		                     AND KP_DAILYQTY.DCCODE    = #{dccode}
+						</if>
+		                     AND KP_DAILYQTY.DOCTYPE   = 'WD'  )        
+		          GROUP BY DCCODE
+		                 , COURSE 
+		                 , CAPACITY )  
+		 UNION ALL 
+		SELECT DCCODE                                                                                             AS DCCODE
+		     , COURSE                                                                                             AS COURSE
+		     , CAPACITY                                                                                           AS CAPACITY
+		     , '03'                                                                                               AS TITLE
+		     , TRUNC(PREMONTHCAPA,2)                                                                              AS PREMONTH
+		     , TRUNC(MONTHCAPA,2)                                                                                 AS MONTH
+		     , TRUNC(MONTHCAPA - PREMONTHCAPA,2)                                                                  AS MONTHINCDEC
+		     , CASE WHEN PREMONTHCAPA = 0 THEN 100 ELSE TRUNC((MONTHCAPA - PREMONTHCAPA)/PREMONTHCAPA*100,2) END  AS MONTHINCDECPER
+		     , TRUNC(PREDAYCAPA,2)                                                                                AS PREDAY
+		     , TRUNC(DAYCAPA,2)                                                                                   AS DAY
+		     , TRUNC(DAYCAPA - PREDAYCAPA,2)                                                                      AS DAYINCDEC
+		     , CASE WHEN PREDAYCAPA = 0 THEN 100 ELSE TRUNC((DAYCAPA - PREDAYCAPA)/PREDAYCAPA*100,2) END          AS DAYINCDEC
+		  FROM ( SELECT DCCODE                                                                                                          AS DCCODE
+		              , COURSE                                                                                                          AS COURSE
+		              , CAPACITY                                                                                                        AS CAPACITY
+		              , CASE WHEN (COUNT(DISTINCT PREMONTHCAR) = 0 OR COUNT(DISTINCT PREDELIVERYDATE) = 0) THEN 0 
+		                ELSE (COUNT(DISTINCT PREMONTHCUST)/COUNT(DISTINCT PREMONTHCAR))/COUNT(DISTINCT PREDELIVERYDATE) END             AS PREMONTHCAPA
+		              , CASE WHEN (COUNT(DISTINCT MONTHCAR) = 0  OR COUNT(DISTINCT DELIVERYDATE) = 0) THEN 0 
+		                ELSE (COUNT(DISTINCT MONTHCUST)/COUNT(DISTINCT MONTHCAR))/COUNT(DISTINCT DELIVERYDATE) END                      AS MONTHCAPA
+		              , CASE WHEN COUNT(DISTINCT PREDAYCAR) = 0 THEN 0 ELSE COUNT(DISTINCT PREDAYCUST)/COUNT(DISTINCT PREDAYCAR) END    AS PREDAYCAPA
+		              , CASE WHEN COUNT(DISTINCT DAYCAR) = 0 THEN 0    ELSE COUNT(DISTINCT DAYCUST)/COUNT(DISTINCT DAYCAR) END          AS DAYCAPA
+		           FROM ( SELECT KP_DAILYQTY.DCCODE                                                                                                                               AS DCCODE
+		                       , TRIM(CM_CAR.CONTRACTTYPE)                                                                                                                        AS COURSE
+		                       , CASE WHEN TO_NUMBER(NVL(CM_CAR.CARCAPACITY,'0')) > 5 THEN '5' ELSE CM_CAR.CARCAPACITY END                                                        AS CAPACITY
+		                       , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = TO_CHAR(ADD_MONTHS(TO_DATE(#{docdt},'YYYYMMDD'),-1),'YYYYMM') THEN KP_DAILYQTY.SLIPDT  ELSE NULL END AS PREMONTHCUST
+		                       , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = TO_CHAR(ADD_MONTHS(TO_DATE(#{docdt},'YYYYMMDD'),-1),'YYYYMM') THEN KP_DAILYQTY.SLIPDT ELSE NULL END  AS PREDELIVERYDATE
+		                       , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = SUBSTR(#{docdt},1,6) THEN KP_DAILYQTY.CUSTKEY  ELSE NULL END                                         AS MONTHCUST                                                                   
+		                       , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = SUBSTR(#{docdt},1,6) THEN KP_DAILYQTY.SLIPDT ELSE NULL END                                           AS DELIVERYDATE                
+		                       , CASE WHEN KP_DAILYQTY.SLIPDT = TO_CHAR(TO_DATE(#{docdt},'YYYYMMDD')-1,'YYYYMMDD') THEN KP_DAILYQTY.CUSTKEY  ELSE NULL END                        AS PREDAYCUST  
+		                       , CASE WHEN KP_DAILYQTY.SLIPDT = #{docdt} THEN KP_DAILYQTY.CUSTKEY  ELSE NULL END                                                                  AS DAYCUST                              
+		                       , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = TO_CHAR(ADD_MONTHS(TO_DATE(#{docdt},'YYYYMMDD'),-1),'YYYYMM') THEN KP_DAILYQTY.CARNO  ELSE NULL END  AS PREMONTHCAR
+		                       , CASE WHEN SUBSTR(KP_DAILYQTY.SLIPDT, 1,6) = SUBSTR(#{docdt},1,6) THEN KP_DAILYQTY.CARNO  ELSE NULL END                                           AS MONTHCAR                                                                   
+		                       , CASE WHEN KP_DAILYQTY.SLIPDT = TO_CHAR(TO_DATE(#{docdt},'YYYYMMDD')-1,'YYYYMMDD') THEN KP_DAILYQTY.CARNO  ELSE NULL END                          AS PREDAYCAR  
+		                       , CASE WHEN KP_DAILYQTY.SLIPDT = #{docdt} THEN KP_DAILYQTY.CARNO  ELSE NULL END                                                                    AS DAYCAR        
+		                    FROM KP_DAILYQTY
+		                    JOIN CM_CAR
+		                      ON CM_CAR.CARNO        = KP_DAILYQTY.CARNO
+		                     AND CM_CAR.DEL_YN       = 'N'
+		                     <!--AND CM_CAR.CARCAPACITY	>= '1'-->
+		                     AND CM_CAR.CARCAPACITY	 IN (SELECT BASECODE FROM CM_CODE WHERE CODELIST='CARCAPACITY' AND DEL_YN ='N')
+						<if test="contracttype != null and contracttype != ''">
+		                     AND CM_CAR.CONTRACTTYPE           = #{contracttype}
+						</if>
+						<if test="carcapacity != null and carcapacity != ''">
+							<if test="carcapacity == 5">
+		                     AND TO_NUMBER(NVL(CM_CAR.CARCAPACITY,'0')) >= 5
+							</if>
+							<if test="carcapacity != 5">
+		                     AND CM_CAR.CARCAPACITY                  = #{carcapacity}
+							</if>
+						</if>                        
+		                   WHERE 1=1
+		                     AND KP_DAILYQTY.STORERKEY = #{gStorerkey}
+		                     AND KP_DAILYQTY.SLIPDT BETWEEN TO_CHAR(ADD_MONTHS(TO_DATE(#{docdt},'YYYYMMDD'),-1),'YYYYMM')||'01' AND #{docdt}
+						<if test="dccode != null and dccode != ''">
+		                     AND KP_DAILYQTY.DCCODE  = #{dccode}
+						</if>
+		                     AND KP_DAILYQTY.DOCTYPE = 'WD' )        
+		          GROUP BY DCCODE
+		                 , COURSE 
+		                 , CAPACITY ) )
+		SELECT TT.*
+		 FROM ( SELECT DCCODE                                                                                                 AS DCCODE
+		             , FN_GETDCNAME(DCCODE)                                                                                   AS DCNAME
+		             , '00'                                                                                                   AS COURSE
+		             , ''                                                                                                     AS COURSENM
+		             , '0'                                                                                                    AS CAPACITY
+		             , ''                                                                                                     AS CAPACITYNM
+		             , TITLE                                                                                                  AS TITLE
+		             , TITLE                                                                                                  AS INDICATOR
+		             , TITLE                                                                                                  AS UOM
+		             , TRUNC(SUM(PREMONTH),2)                                                                                 AS PREMONTH
+		             , TRUNC(SUM(MONTH),2)                                                                                    AS MONTH
+		             , TRUNC(SUM(MONTH)-SUM(PREMONTH),2)                                                                      AS MONTHINCDEC
+		             , TRUNC(CASE WHEN SUM(PREMONTH) = 0 THEN 100 ELSE ((SUM(MONTH)-SUM(PREMONTH))/SUM(PREMONTH))*100 END,2)  AS MONTHINCDECPER
+		             , TRUNC(SUM(PREDAY),2)                                                                                   AS PREDAY
+		             , TRUNC(SUM(DAY),2)                                                                                      AS DAY
+		             , TRUNC(SUM(DAY)-SUM(PREDAY),2)                                                                          AS DAYINCDEC
+		             , TRUNC(CASE WHEN SUM(PREDAY) = 0 THEN 100 ELSE ((SUM(DAY)-SUM(PREDAY))/SUM(PREDAY))*100 END,2)          AS DAYINCDECPER
+		          FROM T_TAB
+		         WHERE 1=1
+		         GROUP BY DCCODE
+				        , TITLE  
+		         UNION ALL   
+		        SELECT DCCODE                                                                                                 AS DCCODE
+		             , FN_GETDCNAME(DCCODE)                                                                                   AS DCNAME
+		             , '00'                                                                                                   AS COURSE
+		             , ''                                                                                                     AS COURSENM
+		             , CAPACITY                                                                                               AS CAPACITY
+		             , FN_CODEDESCR(#{gStorerkey}, 'CARCAPACITY', CAPACITY)                                                   AS CAPACITYNM
+		             , TITLE                                                                                                  AS TITLE
+		             , TITLE                                                                                                  AS INDICATOR
+		             , TITLE                                                                                                  AS UOM
+		             , TRUNC(SUM(PREMONTH),2)                                                                                 AS PREMONTH
+		             , TRUNC(SUM(MONTH),2)                                                                                    AS MONTH
+		             , TRUNC(SUM(MONTH)-SUM(PREMONTH),2)                                                                      AS MONTHINCDEC
+		             , TRUNC(CASE WHEN SUM(PREMONTH) = 0 THEN 100 ELSE ((SUM(MONTH)-SUM(PREMONTH))/SUM(PREMONTH))*100 END,2)  AS MONTHINCDECPER
+		             , TRUNC(SUM(PREDAY),2)                                                                                   AS PREDAY
+		             , TRUNC(SUM(DAY),2)                                                                                      AS DAY
+		             , TRUNC(SUM(DAY)-SUM(PREDAY),2)                                                                          AS DAYINCDEC
+		             , TRUNC(CASE WHEN SUM(PREDAY) = 0 THEN 100 ELSE ((SUM(DAY)-SUM(PREDAY))/SUM(PREDAY))*100 END,2)          AS DAYINCDECPER
+		          FROM T_TAB
+		         WHERE 1=1
+		         GROUP BY DCCODE
+				        , CAPACITY
+						, TITLE
+		         UNION ALL
+		        SELECT DCCODE                                                                                                 AS DCCODE
+		             , FN_GETDCNAME(DCCODE)                                                                                   AS DCNAME
+		             , COURSE                                                                                                 AS COURSE
+		             , FN_CODEDESCR(#{gStorerkey}, 'CONTRACTTYPE', COURSE)                                                    AS COURSENM
+		             , '0'                                                                                                    AS CAPACITY
+		             , ''                                                                                                     AS CAPACITYNM
+		             , TITLE                                                                                                  AS TITLE
+		             , TITLE                                                                                                  AS INDICATOR
+		             , TITLE                                                                                                  AS UOM
+		             , TRUNC(SUM(PREMONTH),2)                                                                                 AS PREMONTH
+		             , TRUNC(SUM(MONTH),2)                                                                                    AS MONTH
+		             , TRUNC(SUM(MONTH)-SUM(PREMONTH),2)                                                                      AS MONTHINCDEC
+		             , TRUNC(CASE WHEN SUM(PREMONTH) = 0 THEN 100 ELSE ((SUM(MONTH)-SUM(PREMONTH))/SUM(PREMONTH))*100 END,2)  AS MONTHINCDECPER
+		             , TRUNC(SUM(PREDAY),2)                                                                                   AS PREDAY
+		             , TRUNC(SUM(DAY),2)                                                                                      AS DAY
+		             , TRUNC(SUM(DAY)-SUM(PREDAY),2)                                                                          AS DAYINCDEC
+		             , TRUNC(CASE WHEN SUM(PREDAY) = 0 THEN 100 ELSE ((SUM(DAY)-SUM(PREDAY))/SUM(PREDAY))*100 END,2)          AS DAYINCDECPER
+		          FROM T_TAB
+		         WHERE 1=1
+		         GROUP BY DCCODE
+				        , COURSE
+						, TITLE
+		         UNION ALL
+		        SELECT DCCODE                                               AS DCCODE
+		             , FN_GETDCNAME(DCCODE)                                 AS DCNAME
+		             , COURSE                                               AS COURSE
+		             , FN_CODEDESCR(#{gStorerkey}, 'CONTRACTTYPE', COURSE)  AS COURSENM
+		             , CAPACITY                                             AS CAPACITY
+		             , FN_CODEDESCR(#{gStorerkey}, 'CARCAPACITY', CAPACITY) AS CAPACITYNM
+		             , TITLE                                                AS TITLE
+		             , TITLE                                                AS INDICATOR
+		             , TITLE                                                AS UOM
+		             , TRUNC(PREMONTH,2)                                    AS PREMONTH
+		             , TRUNC(MONTH,2)                                       AS MONTH
+		             , TRUNC(MONTHINCDEC,2)                                 AS MONTHINCDEC
+		             , TRUNC(MONTHINCDECPER,2)                              AS MONTHINCDECPER
+		             , TRUNC(PREDAY,2)                                      AS PREDAY
+		             , TRUNC(DAY,2)                                         AS DAY
+		             , TRUNC(DAYINCDEC,2)                                   AS DAYINCDEC
+		             , TRUNC(DAYINCDECPER,2)                                AS DAYINCDECPER
+		          FROM T_TAB )TT
+		 ORDER BY TT.DCCODE
+		        , TT.COURSE
+		        , TO_NUMBER(TT.CAPACITY)
+		        , TT.TITLE 	
+	</select>
+
+</mapper>

@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="StConvertContractSNService">
+
+
+	<select id="getDataHeaderList"  resultType="StConvertContractSNResDto">
+	    SELECT /* [stConvertContractSNService.sqlx][getDataHeaderList][상품이력계약정보 조회][ParkJinWoo][20251112] */
+	           '0'                                   AS CHECKYN              /* 체크여부 */
+	         , ST_SERIALINFO.SKU                     AS SKU                  /* 상품코드 */
+	         , MS_SKU.DESCRIPTION                    AS SKUNAME              /* 상품명 */
+	         , ST_SERIALINFO.SERIALNO                AS SERIALNO             /* 이력번호 */
+	         , ST_SERIALINFO.FACTORYNAME             AS FACTORYNAME          /* 공장명 */
+	         , ST_SERIALINFO.CONVSERIALNO            AS CONVSERIALNO         /* BL번호 */
+	         , ST_SERIALINFO.BUTCHERYDT              AS BUTCHERYDT           /* 도축일자 */
+	         , ST_SERIALINFO.CONTRACTCUSTKEY         AS CONTRACTCOMPANY      /* 계약업체코드 */
+	         , (SELECT DESCRIPTION
+	              FROM MS_CUST
+	             WHERE MS_CUST.STORERKEY = ST_SERIALINFO.STORERKEY
+	               AND MS_CUST.CUSTKEY   = ST_SERIALINFO.CONTRACTCUSTKEY
+	               AND ROWNUM = 1)                  AS CONTRACTCOMPANYNAME   /* 계약업체명 */
+	         , (SELECT EMPNAME1
+	              FROM MS_CUST
+	             WHERE MS_CUST.STORERKEY = ST_SERIALINFO.STORERKEY
+	               AND MS_CUST.CUSTKEY   = ST_SERIALINFO.CONTRACTCUSTKEY
+	               AND ROWNUM = 1)                  AS CONTRACTCOMPANYEMPNAME1 /* 계약담당자명 */
+	         , ST_SERIALINFO.FROMVALIDDT             AS FROMVALIDDT          /* 유효시작일자 */
+	         , ST_SERIALINFO.TOVALIDDT               AS TOVALIDDT            /* 유효종료일자 */
+	         , ST_SERIALINFO.CONTRACTTYPE            AS CONTRACTTYPE         /* 계약유형 */
+	         , ST_SERIALINFO.STOCKID                 AS BARCODE              /* 바코드 */
+	         , ST_SERIALINFO.POKEY                   AS POKEY                /* 구매주문번호 */
+	         , ST_SERIALINFO.POLINE                  AS POLINE               /* 구매주문라인번호 */
+	         , ST_SERIALINFO.HEADERSERIALKEY         AS HEADERSERIALKEY      /* 헤더시리얼키 */
+	         , ST_SERIALINFO.DETAILSERIALKEY         AS DETAILSERIALKEY      /* 디테일시리얼키 */
+	         , ST_SERIALINFO.CONTRACTCUSTKEY         AS CONTRACTCOMPANY_ORG  /* 원본계약업체코드 */
+	         , ST_SERIALINFO.CONTRACTTYPE            AS CONTRACTTYPE_ORG     /* 원본계약유형 */
+	    FROM   ST_SNINFO ST_SERIALINFO
+	           JOIN MS_SKU
+	             ON MS_SKU.STORERKEY = ST_SERIALINFO.STORERKEY
+	            AND MS_SKU.SKU       = ST_SERIALINFO.SKU
+	            AND MS_SKU.DEL_YN    = 'N'
+	    WHERE  1 = 1
+	    <!-- 상품 다중선택 (REGEXP_SUBSTR + CONNECT BY 고정 사용) -->
+	    <if test="multiSku != null and multiSku != ''">
+	        AND ST_SERIALINFO.SKU IN (
+	            SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL))
+	              FROM (SELECT #{multiSku} AS VAL FROM DUAL)
+	             CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) &gt; 0
+	        )
+	    </if>
+	    AND EXISTS (
+	        SELECT 1
+	          FROM ST_STOCK
+	         WHERE ST_STOCK.STORERKEY = ST_SERIALINFO.STORERKEY
+	           AND ST_STOCK.SKU       = ST_SERIALINFO.SKU
+	           AND ST_STOCK.STOCKID   = ST_SERIALINFO.STOCKID
+	           <![CDATA[ AND 'N' = ST_SERIALINFO.DEL_YN ]]>
+	    )
+	    <if test="serialNo != null and serialNo != ''">
+	        <![CDATA[ AND ST_SERIALINFO.SERIALNO = #{serialNo} ]]>
+	    </if>
+	    <if test="blNo != null and blNo != ''">
+	        <![CDATA[ AND ST_SERIALINFO.CONVSERIALNO LIKE #{blNo} ]]>
+	        <!-- 필요 시 포함검색을 원하면 '%'+blNo+'%' 형태로 바꿔서 넘겨줘 -->
+	    </if>
+	    <if test="contractCompany != null and contractCompany != ''">
+	        <![CDATA[ AND ST_SERIALINFO.CONTRACTCUSTKEY = #{contractCompany} ]]>
+	    </if>
+	    ORDER BY SKU
+	           , SERIALNO
+	           , CONVSERIALNO
+	           , POKEY
+	           , POLINE
+	</select>
+	
+	 <!-- 수불마감 정보 INSERT (로그) -->
+	<insert id="insert" >
+	    /* [stConvertContractSNService.sqlx][insert][계약정보변경 로그][ParkJinWoo][20251112] */
+	    INSERT INTO MG_DATAMODIFYLOG (
+	           TABLENAME              /* 테이블명 */
+	         , SERIALKEY              /* 시리얼키 */
+	         , SOURCETYPE             /* 소스타입 */
+	         , DCCODE                 /* 물류센터코드 */
+	         , STORERKEY              /* 고객사코드 */
+	         , SEARCHKEY1             /* 검색키1(상품코드) */
+	         , SEARCHKEY2             /* 검색키2(바코드) */
+	         , SEARCHKEY3             /* 검색키3 */
+	         , LOGDATA1               /* 로그데이터1(변경내용 요약) */
+	         , LOGDATA2               /* 로그데이터2 */
+	         , LOGDATA3               /* 로그데이터3 */
+	         , TRAFFICCOP             /* 트래픽 플래그 */
+	         , ARCHIVECOP             /* 아카이브 플래그 */
+	         , LOGDATE                /* 로그일시 */
+	         , LOGWHO                 /* 로그작성자 */
+	    )
+	    VALUES (
+	           'ST_STOCK_SERIALINFODETAIL'                                        /* 테이블명 */
+	         , #{detailSerialKey}                                                 /* 시리얼키 */
+	         , 'ST_CONVERTCONTRACTSN'                                             /* 소스타입 */
+	         , ''                                                                 /* 물류센터코드 */
+	         , #{gStorerkey}                                                      /* 고객사코드 */
+	         , #{sku}                                                             /* 검색키1(상품코드) */
+	         , #{barcode}                                                         /* 검색키2(바코드) */
+	         , ''                                                                 /* 검색키3 */
+	         , ('[계약유형:' || #{contractTypeOrg} || '=>'
+	            || #{contractType} || '][계약고객:' || #{contractCompanyOrg}
+	            || '=>' || #{contractCompany} || ']')                             /* 로그데이터1(변경요약) */
+	         , NULL                                                               /* 로그데이터2 */
+	         , NULL                                                               /* 로그데이터3 */
+	         , NULL                                                               /* 트래픽 플래그 */
+	         , NULL                                                               /* 아카이브 플래그 */
+	         , SYSDATE                                                            /* 로그일시 */
+	         , #{gUserId}                                                         /* 로그작성자 */
+	    )
+	</insert>
+	
+	<!-- 수불마감 정보 UPDATE (실데이터 반영) -->
+	<update id="update" >
+	    /* [stConvertContractSNService.sqlx][update][계약정보변경 반영][ParkJinWoo][20251112] */
+	    UPDATE ST_STOCK_SERIALINFODETAIL
+	       SET CONTRACTTYPE    = #{contractType}      /* 계약유형 */
+	           , CONTRACTCUSTKEY = #{contractCompany}   /* 계약업체코드 */
+	           , EDITDATE        = SYSDATE              /* 수정일시 */
+	           , EDITWHO         = #{gUserId}           /* 수정자 */
+	     WHERE <![CDATA[ SERIALKEY = #{detailSerialKey} ]]>
+	       AND 	 <![CDATA[  SKU = #{sku}  ]]>
+	</update>
+
+
+</mapper>

@@ -1,0 +1,450 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="tmPlanOrderNewPopupService">
+
+    <select id="getNewOrderCount" resultType="int">
+		SELECT 
+		        SUM(COUNT(DISTINCT DM_DOCUMENT_H.TO_CUSTKEY || '-' || DM_DOCUMENT_H.TO_CUSTTYPE)) AS CNT
+		FROM DM_DOCUMENT_H
+		JOIN   DM_DOCUMENT_D
+		  ON     DM_DOCUMENT_D.DCCODE       = DM_DOCUMENT_H.DCCODE
+		  AND    DM_DOCUMENT_D.STORERKEY    = DM_DOCUMENT_H.STORERKEY
+		  AND    DM_DOCUMENT_D.DOCTYPE      = DM_DOCUMENT_H.DOCTYPE
+		  AND    DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+		  AND    DM_DOCUMENT_D.DOCNO        = DM_DOCUMENT_H.DOCNO
+		  AND    DM_DOCUMENT_D.DEL_YN       = 'N'
+		JOIN   WD_INPLAN
+		  ON     WD_INPLAN.DCCODE           = DM_DOCUMENT_D.DCCODE
+		  AND    WD_INPLAN.STORERKEY        = DM_DOCUMENT_D.STORERKEY
+		  AND    WD_INPLAN.DOCTYPE          = DM_DOCUMENT_D.DOCTYPE
+		  AND    WD_INPLAN.SLIPDT           = DM_DOCUMENT_D.DELIVERYDATE
+		  AND    WD_INPLAN.DOCNO            = DM_DOCUMENT_D.DOCNO
+		  AND    WD_INPLAN.DOCLINE          = DM_DOCUMENT_D.DOCLINE
+		LEFT OUTER JOIN TM_INPLAN
+		   ON    DM_DOCUMENT_H.DOCNO   = TM_INPLAN.DOCNO
+		  AND    DM_DOCUMENT_H.DOCTYPE = TM_INPLAN.DOCTYPE
+		  AND    DM_DOCUMENT_H.DCCODE  = TM_INPLAN.DCCODE
+		  AND    WD_INPLAN.SLIPDT      = TM_INPLAN.SLIPDT
+		  AND    WD_INPLAN.SLIPNO      = TM_INPLAN.SLIPNO
+		  AND    TM_INPLAN.DEL_YN      = 'N'
+		WHERE DM_DOCUMENT_H.DELIVERYDATE    = #{deliveryDate}
+		  AND   DM_DOCUMENT_H.DCCODE        = #{dccode}
+		  AND   DM_DOCUMENT_H.STATUS        <![CDATA[<]]> '90'
+		  AND   DM_DOCUMENT_H.WORKPROCESSCODE IN ('SO', 'JASO')
+		  AND   TM_INPLAN.DCCODE           IS NULL
+		GROUP BY
+		       DM_DOCUMENT_H.STORERKEY
+		      ,DM_DOCUMENT_H.DCCODE
+		      ,DM_DOCUMENT_H.DELIVERYDATE
+		      ,DM_DOCUMENT_H.DOCTYPE
+		      ,DM_DOCUMENT_H.DOCDT
+		      ,DM_DOCUMENT_H.DOCNO
+		      ,DM_DOCUMENT_H.WORKPROCESSCODE
+		      ,DM_DOCUMENT_H.ORDERTYPE
+		      ,DM_DOCUMENT_H.DELIVERYTYPE
+		      ,DM_DOCUMENT_H.TO_CUSTTYPE
+		      ,DM_DOCUMENT_H.TO_CUSTKEY
+		      ,DM_DOCUMENT_H.TO_ZIPCODE
+		      ,DM_DOCUMENT_H.COURIER
+		      ,WD_INPLAN.SLIPDT
+		      ,WD_INPLAN.SLIPTYPE
+		      ,WD_INPLAN.SLIPNO
+    </select>
+
+    <select id="getNewOrder" resultType="TmPlanOrderNewPopupCustResDto">
+		WITH NEW_CUST AS (
+		  SELECT
+		           DM_DOCUMENT_H.DCCODE               AS DCCODE
+		          ,DM_DOCUMENT_H.DELIVERYDATE         AS DELIVERYDT
+		          ,DM_DOCUMENT_H.STORERKEY            AS STORERKEY
+		          ,WD_INPLAN.SLIPDT                   AS SLIPDT
+		          ,WD_INPLAN.SLIPNO                   AS SLIPNO
+		          ,WD_INPLAN.SLIPTYPE                 AS SLIPTYPE
+		          ,DM_DOCUMENT_H.TO_ZIPCODE           AS ZIPCODE
+		          ,DM_DOCUMENT_H.TO_CUSTTYPE          AS CUSTTYPE
+		          ,DM_DOCUMENT_H.TO_CUSTKEY           AS CUSTKEY
+		          ,DM_DOCUMENT_H.DOCDT                AS DOCDT
+		          ,DM_DOCUMENT_H.DOCNO                AS DOCNO
+		          ,DM_DOCUMENT_H.DOCTYPE              AS DOCTYPE
+		          ,DM_DOCUMENT_H.ORDERTYPE            AS ORDERTYPE
+		          ,SUM(FN_GET_SKUCUBE( DM_DOCUMENT_H.STORERKEY
+		                           ,WD_INPLAN.SKU
+		                           ,DM_DOCUMENT_H.DCCODE) * WD_INPLAN.ORDERQTY )      AS CUBE
+		          ,SUM(WD_INPLAN.ORDERQTY)            AS ORDERQTY
+		          ,SUM(FN_CONV_UOM( DM_DOCUMENT_H.STORERKEY
+		                           ,WD_INPLAN.SKU
+		                           ,WD_INPLAN.UOM
+		                           ,'KG'
+		                           ,DECODE(DM_DOCUMENT_D.DEL_YN,'N',WD_INPLAN.ORDERQTY,0)))
+		                                               AS WEIGHT
+		          ,DM_DOCUMENT_H.COURIER              AS COURIER
+		          ,MAX(MS_CUSTDLVINFO.TRUTHCUSTKEY)   AS TRUTHCUSTKEY
+		          ,MAX(MS_CUSTDLVINFO.LATITUDE)       AS LATITUDE
+		          ,MAX(MS_CUSTDLVINFO.LONGITUDE)      AS LONGITUDE
+		          ,MAX(NVL(DM_DOCUMENT_H.B2C_YN,'N')) AS B2C_YN
+		          ,MAX(DM_DOCUMENT_D.OPEN_TIME)       AS OPEN_TIME
+		          ,MAX(NVL(DM_DOCUMENT_H.TPL_TYPE, 'N')) AS TPL_TYPE
+		    FROM   DM_DOCUMENT_H
+		    JOIN   DM_DOCUMENT_D
+		    ON     DM_DOCUMENT_D.DCCODE       = DM_DOCUMENT_H.DCCODE
+		    AND    DM_DOCUMENT_D.STORERKEY    = DM_DOCUMENT_H.STORERKEY
+		    AND    DM_DOCUMENT_D.DOCTYPE      = DM_DOCUMENT_H.DOCTYPE
+		    AND    DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+		    AND    DM_DOCUMENT_D.DOCNO        = DM_DOCUMENT_H.DOCNO
+		    AND    DM_DOCUMENT_D.DEL_YN       = 'N'
+		    JOIN   WD_INPLAN
+		    ON     WD_INPLAN.DCCODE           = DM_DOCUMENT_D.DCCODE
+		    AND    WD_INPLAN.STORERKEY        = DM_DOCUMENT_D.STORERKEY
+		    AND    WD_INPLAN.DOCTYPE          = DM_DOCUMENT_D.DOCTYPE
+		    AND    WD_INPLAN.SLIPDT           = DM_DOCUMENT_D.DELIVERYDATE
+		    AND    WD_INPLAN.DOCNO            = DM_DOCUMENT_D.DOCNO
+		    AND    WD_INPLAN.DOCLINE          = DM_DOCUMENT_D.DOCLINE
+		    LEFT OUTER JOIN MS_CUSTDLVINFO
+		    ON     MS_CUSTDLVINFO.STORERKEY   = DM_DOCUMENT_H.STORERKEY
+		    AND    MS_CUSTDLVINFO.CUSTTYPE    = DM_DOCUMENT_H.TO_CUSTTYPE
+		    AND    MS_CUSTDLVINFO.DLVCUSTKEY  = DM_DOCUMENT_H.TO_CUSTKEY
+		    LEFT OUTER JOIN CM_CODE FO_DC_MAPPING
+		    ON     FO_DC_MAPPING.STORERKEY    = DM_DOCUMENT_H.STORERKEY
+		    AND    FO_DC_MAPPING.CODELIST     = 'FO_DC_MAPPING'
+		    AND    FO_DC_MAPPING.BASECODE     = DM_DOCUMENT_H.DCCODE
+		    LEFT OUTER JOIN TM_INPLAN
+		    ON   TM_INPLAN.SLIPDT  = WD_INPLAN.SLIPDT
+		    AND   TM_INPLAN.SLIPNO  = WD_INPLAN.SLIPNO
+		    AND   TM_INPLAN.DOCTYPE = DM_DOCUMENT_H.DOCTYPE
+		    AND    TM_INPLAN.DEL_YN      = 'N'
+		    WHERE  DM_DOCUMENT_H.STATUS      <![CDATA[ < ]]> '90'
+		    AND    DM_DOCUMENT_H.DCCODE       = #{dccode}
+		    AND    DM_DOCUMENT_H.DELIVERYDATE = #{deliveryDate}
+		    AND    DM_DOCUMENT_H.DEL_YN       = 'N'
+		    AND    TM_INPLAN.SERIALKEY IS NULL
+		    GROUP BY
+		           DM_DOCUMENT_H.DCCODE
+		          ,DM_DOCUMENT_H.DELIVERYDATE
+		          ,DM_DOCUMENT_H.COURIER
+		          ,DM_DOCUMENT_H.WORKPROCESSCODE
+		          ,DM_DOCUMENT_H.DELIVERYTYPE
+		          ,WD_INPLAN.SLIPDT
+		          ,WD_INPLAN.SLIPNO
+		          ,WD_INPLAN.SLIPTYPE
+		          ,DM_DOCUMENT_H.STORERKEY
+		          ,DM_DOCUMENT_H.TO_CUSTTYPE
+		          ,DM_DOCUMENT_H.TO_CUSTKEY
+		          ,DM_DOCUMENT_H.TO_ZIPCODE
+		          ,DM_DOCUMENT_H.DOCDT
+		          ,DM_DOCUMENT_H.DOCNO
+		          ,DM_DOCUMENT_H.DOCTYPE
+		          ,DM_DOCUMENT_H.ORDERTYPE
+		          
+		),
+		GROUP_CUST AS (
+		SELECT 
+		   NEW_CUST.TRUTHCUSTKEY
+		 , NEW_CUST.CUSTTYPE
+		 , NEW_CUST.STORERKEY
+		 , SUM(ORDERQTY)  AS ORDERQTY
+		 , SUM(WEIGHT)    AS WEIGHT
+		 , SUM(CUBE)      AS CUBE
+		FROM NEW_CUST
+		GROUP BY  NEW_CUST.TRUTHCUSTKEY
+				    , NEW_CUST.CUSTTYPE
+				    , NEW_CUST.STORERKEY
+		)
+		SELECT 
+		   GROUP_CUST.TRUTHCUSTKEY
+		 , GROUP_CUST.CUSTTYPE
+		 , GROUP_CUST.STORERKEY
+		 , MS_CUSTDLVINFO.LATITUDE
+		 , MS_CUSTDLVINFO.LONGITUDE
+		 , MS_CUST.DESCRIPTION
+		 , MS_CUSTDLVINFO.ADDRESS1
+		 , MS_CUSTDLVINFO.ADDRESS2
+		 , MS_CUSTDLVINFO.FACEINSPECT
+		 , MS_CUSTDLVINFO.REQDLVTIME1_FROM
+		 , MS_CUSTDLVINFO.REQDLVTIME1_TO
+		 , MS_CUSTDLVINFO.KEYTYPE
+		 , MS_CUSTDLVINFO.KEYDETAIL
+		 , GROUP_CUST.WEIGHT
+		 , GROUP_CUST.CUBE
+		 , GROUP_CUST.ORDERQTY
+		 , NVL(MS_CUSTDLVINFO.FACEINSPECT, 'N')    AS FACEINSPECT
+		 , NVL(MS_CUSTDLVINFO.KIDS_CL_YN, 'N')     AS KIDS_CL_YN
+		 , NVL(MS_CUSTDLVINFO.DLV_WAIT_YN, 'N')    AS DLV_WAIT_YN
+		 , NVL(MS_CUSTDLVINFO.DISTANT_YN, 'N')     AS DISTANT_YN
+		 , NVL(MS_CUSTDLVINFO.LNG_DISTANT_YN, 'N') AS LNG_DISTANT_YN
+		 , CASE WHEN EXISTS (
+		          SELECT 1 
+		          FROM RT_CLAIMINFO RC 
+		          WHERE RC.DCCODE = #{dccode}
+		            AND RC.MNGPLC_ID = GROUP_CUST.TRUTHCUSTKEY
+		            AND RC.DEL_YN = 'N'
+		            AND RC.SOURCEDT BETWEEN TO_CHAR(TO_DATE(#{deliveryDate}, 'YYYYMMDD') - 60, 'YYYYMMDD')
+		                                AND TO_CHAR(TO_DATE(#{deliveryDate}, 'YYYYMMDD') + 60, 'YYYYMMDD')
+		      ) THEN 'Y' ELSE 'N' END AS CLAIMYN
+		  , GREATEST(
+		        NVL(MS_CUSTDLVINFO.FACEINSPECT, 'N') -- 대면검수여부
+		      , NVL(MS_CUSTDLVINFO.KIDS_CL_YN, 'N') -- 키즈분류여부
+		      , NVL(MS_CUSTDLVINFO.DLV_WAIT_YN, 'N') -- 납품대기여부
+		      , NVL(MS_CUSTDLVINFO.DISTANT_YN, 'N') -- 격오지여부
+		      , NVL(MS_CUSTDLVINFO.LNG_DISTANT_YN, 'N') -- 장거리여부
+		      , CASE WHEN MS_CUSTDLVINFO.UNLOAD_LVL_CD > '00' THEN 'Y' ELSE 'N' END -- 하차난이도
+		    ) AS SPECIAL_YN
+		
+		FROM GROUP_CUST
+		-- STORERKEY, CUSTTYPE, DLVCUSTKEY
+		LEFT OUTER JOIN MS_CUSTDLVINFO
+		ON  GROUP_CUST.STORERKEY    = MS_CUSTDLVINFO.STORERKEY
+		AND GROUP_CUST.CUSTTYPE     = MS_CUSTDLVINFO.CUSTTYPE
+		AND GROUP_CUST.TRUTHCUSTKEY = MS_CUSTDLVINFO.DLVCUSTKEY
+		-- STORERKEY, CUSTKEY, CUSTTYPE
+		LEFT OUTER JOIN MS_CUST
+		ON  GROUP_CUST.STORERKEY    = MS_CUST.STORERKEY
+		AND GROUP_CUST.CUSTTYPE     = MS_CUST.CUSTTYPE
+		AND GROUP_CUST.TRUTHCUSTKEY = MS_CUST.CUSTKEY
+    </select>
+
+    <!-- ============================================
+         신규 주문 실착지 목록 조회 (setDispatch 반환 형식)
+         - SP 호출 전 DM_DOCUMENT_H/D, WD_INPLAN에서 신규 주문 조회
+         - getNewOrderCount와 동일한 조건 (TM_INPLAN.DCCODE IS NULL)
+         - 고정차량(DEFCARNO): 반품/자소 차량 (전용차량과 별개)
+         ============================================ -->
+    <select id="getNewOrdersForDispatch" resultType="TmSetDispatchUnassignedOrderResDto">
+        WITH NEW_CUST AS (
+            SELECT /* [TmPlanOrderNewPopupService.sqlx][getNewOrdersForDispatch][신규 주문 실착지 목록 조회][2026.01.29] */
+                   DM_DOCUMENT_H.STORERKEY
+                 , DM_DOCUMENT_H.DCCODE
+                 , DM_DOCUMENT_H.DELIVERYDATE
+                 , DM_DOCUMENT_H.TO_CUSTTYPE            AS CUSTTYPE
+                 , MAX(MS_CUSTDLVINFO.TRUTHCUSTKEY)     AS TRUTHCUSTKEY
+                 , SUM(WD_INPLAN.ORDERQTY)              AS ORDERQTY
+                 , TRUNC(NVL(SUM((WD_INPLAN.ORDERQTY * (MS_UOM.BUNJA / MS_UOM.BUNMO)) * MS_UOM.CUBE), 0) / POWER(10, 9), 5) AS CUBE
+                 , SUM(FN_CONV_UOM(DM_DOCUMENT_H.STORERKEY, WD_INPLAN.SKU, WD_INPLAN.UOM, 'KG',
+                       DECODE(DM_DOCUMENT_D.DEL_YN, 'N', WD_INPLAN.ORDERQTY, 0))) AS WEIGHT
+                 , MAX(CASE WHEN DM_DOCUMENT_H.ORDERTYPE IN ('NB','SNB','RP') THEN DM_DOCUMENT_H.DCCODE || '반품차량'
+                            WHEN DM_DOCUMENT_H.WORKPROCESSCODE = 'JASO' THEN DM_DOCUMENT_H.DCCODE || '자소차량'
+                            ELSE ''
+                       END) AS DEFCARNO
+            FROM DM_DOCUMENT_H
+            JOIN DM_DOCUMENT_D
+              ON DM_DOCUMENT_D.DCCODE       = DM_DOCUMENT_H.DCCODE
+             AND DM_DOCUMENT_D.STORERKEY    = DM_DOCUMENT_H.STORERKEY
+             AND DM_DOCUMENT_D.DOCTYPE      = DM_DOCUMENT_H.DOCTYPE
+             AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+             AND DM_DOCUMENT_D.DOCNO        = DM_DOCUMENT_H.DOCNO
+             AND DM_DOCUMENT_D.DEL_YN       = 'N'
+            JOIN WD_INPLAN
+              ON WD_INPLAN.DCCODE           = DM_DOCUMENT_D.DCCODE
+             AND WD_INPLAN.STORERKEY        = DM_DOCUMENT_D.STORERKEY
+             AND WD_INPLAN.DOCTYPE          = DM_DOCUMENT_D.DOCTYPE
+             AND WD_INPLAN.SLIPDT           = DM_DOCUMENT_D.DELIVERYDATE
+             AND WD_INPLAN.DOCNO            = DM_DOCUMENT_D.DOCNO
+             AND WD_INPLAN.DOCLINE          = DM_DOCUMENT_D.DOCLINE
+            LEFT JOIN MS_UOM
+              ON MS_UOM.STORERKEY           = WD_INPLAN.STORERKEY
+             AND MS_UOM.SKU                 = WD_INPLAN.SKU
+             AND MS_UOM.UOM                 = DECODE(WD_INPLAN.UOM, 'KG', 'BASE', 'KG')
+            LEFT OUTER JOIN MS_CUSTDLVINFO
+              ON MS_CUSTDLVINFO.STORERKEY   = DM_DOCUMENT_H.STORERKEY
+             AND MS_CUSTDLVINFO.CUSTTYPE    = DM_DOCUMENT_H.TO_CUSTTYPE
+             AND MS_CUSTDLVINFO.DLVCUSTKEY  = DM_DOCUMENT_H.TO_CUSTKEY
+            LEFT OUTER JOIN TM_INPLAN
+              ON DM_DOCUMENT_H.DOCNO   = TM_INPLAN.DOCNO
+             AND DM_DOCUMENT_H.DOCTYPE = TM_INPLAN.DOCTYPE
+             AND DM_DOCUMENT_H.DCCODE  = TM_INPLAN.DCCODE
+             AND WD_INPLAN.SLIPDT      = TM_INPLAN.SLIPDT
+             AND WD_INPLAN.SLIPNO      = TM_INPLAN.SLIPNO
+             AND TM_INPLAN.DEL_YN      = 'N'
+            WHERE DM_DOCUMENT_H.DELIVERYDATE     = #{deliveryDate}
+              AND DM_DOCUMENT_H.DCCODE           = #{dccode}
+              AND DM_DOCUMENT_H.STATUS           <![CDATA[<]]> '90'
+              AND DM_DOCUMENT_H.WORKPROCESSCODE  IN ('SO', 'JASO')
+              AND TM_INPLAN.DCCODE               IS NULL
+            GROUP BY
+                  DM_DOCUMENT_H.STORERKEY
+                , DM_DOCUMENT_H.DCCODE
+                , DM_DOCUMENT_H.DELIVERYDATE
+                , DM_DOCUMENT_H.TO_CUSTTYPE
+                , DM_DOCUMENT_H.TO_CUSTKEY
+        )
+        , GROUP_CUST AS (
+            SELECT
+                  NEW_CUST.STORERKEY
+                , NEW_CUST.DCCODE
+                , NEW_CUST.DELIVERYDATE
+                , NEW_CUST.CUSTTYPE
+                , NEW_CUST.TRUTHCUSTKEY
+                , SUM(NEW_CUST.ORDERQTY)  AS ORDERQTY
+                , SUM(NEW_CUST.WEIGHT)    AS WEIGHT
+                , SUM(NEW_CUST.CUBE)      AS CUBE
+                , MAX(NEW_CUST.DEFCARNO)  AS DEFCARNO
+            FROM NEW_CUST
+            GROUP BY
+                  NEW_CUST.STORERKEY
+                , NEW_CUST.DCCODE
+                , NEW_CUST.DELIVERYDATE
+                , NEW_CUST.CUSTTYPE
+                , NEW_CUST.TRUTHCUSTKEY
+        )
+        , CLAIM_INFO AS (
+            SELECT DISTINCT RT_CLAIMINFO.MNGPLC_ID, RT_CLAIMINFO.STORERKEY
+            FROM RT_CLAIMINFO
+            INNER JOIN GROUP_CUST
+                  ON GROUP_CUST.TRUTHCUSTKEY = RT_CLAIMINFO.MNGPLC_ID
+            WHERE RT_CLAIMINFO.MNGPLC_ID IS NOT NULL
+              AND RT_CLAIMINFO.DEL_YN = 'N'
+              AND RT_CLAIMINFO.SOURCEDT BETWEEN TO_CHAR(TO_DATE(#{deliveryDate}, 'YYYYMMDD') - 60, 'YYYYMMDD') AND #{deliveryDate}
+        )
+        , POP_INFO AS (
+            SELECT MS_CUSTXPOP.DCCODE
+                 , MS_CUSTXPOP.STORERKEY
+                 , MS_CUSTXPOP.CUSTTYPE
+                 , MS_CUSTXPOP.CUSTKEY
+                 , MS_CUSTXPOP.POPNO
+                 , MS_CUSTXPOP.POPNAME
+                 , ROW_NUMBER() OVER (
+                       PARTITION BY MS_CUSTXPOP.DCCODE, MS_CUSTXPOP.CUSTKEY, MS_CUSTXPOP.CUSTTYPE, MS_CUSTXPOP.STORERKEY
+                       ORDER BY MS_CUSTXPOP.FROMDATE DESC, MS_CUSTXPOP.TODATE ASC
+                   ) AS RN
+            FROM MS_CUSTXPOP
+            JOIN MS_CUST
+              ON MS_CUSTXPOP.STORERKEY = MS_CUST.STORERKEY
+             AND MS_CUSTXPOP.CUSTKEY   = MS_CUST.CUSTKEY
+             AND MS_CUSTXPOP.CUSTTYPE  = MS_CUST.CUSTTYPE
+            WHERE #{deliveryDate} BETWEEN MS_CUSTXPOP.FROMDATE AND MS_CUSTXPOP.TODATE
+              AND MS_CUSTXPOP.DCCODE = #{dccode}
+        )
+        , DEDICATED_CARS AS (
+            SELECT MS_CUSTXCAR.STORERKEY
+                 , MS_CUSTXCAR.DCCODE
+                 , MS_CUSTXCAR.CUSTCARTYPE
+                 , MS_CUSTXCAR.CUSTKEY
+                 , LISTAGG(MS_CUSTXCAR.CARNO, ',') WITHIN GROUP (ORDER BY MS_CUSTXCAR.CARNO) AS CARNO_LIST
+            FROM MS_CUSTXCAR
+            JOIN CM_CAR ON CM_CAR.CARNO = MS_CUSTXCAR.CARNO
+            WHERE MS_CUSTXCAR.STORERKEY = 'FW00'
+              AND MS_CUSTXCAR.DCCODE = #{dccode}
+              AND ${deliveryDate} BETWEEN MS_CUSTXCAR.FROMDATE AND MS_CUSTXCAR.TODATE
+              AND MS_CUSTXCAR.APPLY_YN = 'Y'
+              AND MS_CUSTXCAR.CUSTCARTYPE = '10'
+            GROUP BY MS_CUSTXCAR.STORERKEY, MS_CUSTXCAR.DCCODE, MS_CUSTXCAR.CUSTKEY, MS_CUSTXCAR.CUSTCARTYPE
+        )
+        , BLOCKED_CARS AS (
+            SELECT MS_CUSTXCAR.STORERKEY
+                 , MS_CUSTXCAR.DCCODE
+                 , MS_CUSTXCAR.CUSTCARTYPE
+                 , MS_CUSTXCAR.CUSTKEY
+                 , LISTAGG(MS_CUSTXCAR.CARNO, ',') WITHIN GROUP (ORDER BY MS_CUSTXCAR.CARNO) AS CARNO_LIST
+            FROM MS_CUSTXCAR
+            JOIN CM_CAR ON CM_CAR.CARNO = MS_CUSTXCAR.CARNO
+            WHERE MS_CUSTXCAR.STORERKEY = 'FW00'
+              AND MS_CUSTXCAR.DCCODE = #{dccode}
+              AND ${deliveryDate} BETWEEN MS_CUSTXCAR.FROMDATE AND MS_CUSTXCAR.TODATE
+              AND MS_CUSTXCAR.APPLY_YN = 'Y'
+              AND MS_CUSTXCAR.CUSTCARTYPE = '99'
+            GROUP BY MS_CUSTXCAR.STORERKEY, MS_CUSTXCAR.DCCODE, MS_CUSTXCAR.CUSTKEY, MS_CUSTXCAR.CUSTCARTYPE
+        )
+        <![CDATA[
+        SELECT
+              GROUP_CUST.TRUTHCUSTKEY                                           AS ID
+            , MS_CUSTDLVINFO.LONGITUDE                                          AS LOCATION_LNG
+            , MS_CUSTDLVINFO.LATITUDE                                           AS LOCATION_LAT
+            , GROUP_CUST.STORERKEY                                              AS STORERKEY
+            , GROUP_CUST.CUSTTYPE                                               AS CUST_TYPE
+            , FN_DESCR_CUST(MS_CUSTDLVINFO.STORERKEY, MS_CUSTDLVINFO.CUSTKEY)   AS CUST_NAME
+            , FN_DESCR_CUST(MS_CUSTDLVINFO.STORERKEY, MS_CUSTDLVINFO.CUSTKEY)   AS DESCRIPTION
+            , TRIM(MS_CUSTDLVINFO.TRUTHADDRESS1 || ' ' || MS_CUSTDLVINFO.TRUTHADDRESS2) AS CUST_ADDRESS
+            , GROUP_CUST.CUBE                                                   AS CUBE
+            , GROUP_CUST.WEIGHT                                                 AS WEIGHT
+            , GROUP_CUST.ORDERQTY                                               AS ORDER_QTY
+            , NVL(MS_CUSTDLVINFO.AVG_WORK_TIME, 10) * 60                        AS SERVICE
+            , NVL(MS_CUSTDLVINFO.FACEINSPECT, 'N')                              AS FACE_INSPECT
+            , NVL(MS_CUSTDLVINFO.KIDS_CL_YN, 'N')                               AS KIDS_CL_YN
+            , NVL(MS_CUSTDLVINFO.DLV_WAIT_YN, 'N')                              AS DLV_WAIT_YN
+            , NVL(MS_CUSTDLVINFO.DISTANT_YN, 'N')                               AS DISTANT_YN
+            , NVL(MS_CUSTDLVINFO.LNG_DISTANT_YN, 'N')                           AS LNG_DISTANT_YN
+            , CASE WHEN MS_CUSTDLVINFO.UNLOAD_LVL_CD > '00' THEN 'Y'
+                   WHEN MS_CUSTDLVINFO.UNLOAD_LVL_CD IS NULL THEN 'N'
+                   ELSE 'N'
+              END                                                               AS UNLOAD_LVL_YN
+            , GREATEST(
+                  NVL(MS_CUSTDLVINFO.FACEINSPECT, 'N')
+                , NVL(MS_CUSTDLVINFO.KIDS_CL_YN, 'N')
+                , NVL(MS_CUSTDLVINFO.DLV_WAIT_YN, 'N')
+                , NVL(MS_CUSTDLVINFO.DISTANT_YN, 'N')
+                , NVL(MS_CUSTDLVINFO.LNG_DISTANT_YN, 'N')
+                , CASE WHEN MS_CUSTDLVINFO.UNLOAD_LVL_CD > '00' THEN 'Y' ELSE 'N' END
+              )                                                                 AS SPECIAL_CONDITION_YN
+            , CASE WHEN CLAIM_INFO.MNGPLC_ID IS NOT NULL THEN 'Y' ELSE 'N' END  AS CLAIM_YN
+            , FN_CODEDESCR('STD', 'CRM_DLV_KEYTYPE', MS_CUSTDLVINFO.KEYTYPE2)   AS KEY_CUST_TYPE
+            , FN_CODEDESCR('STD', 'CRM_DLV_KEYTYPE', MS_CUSTDLVINFO.KEYTYPE2)   AS PASSWORD_TYPE
+            , MS_CUSTDLVINFO.KEYTYPE2                                           AS PASSWORD_TYPE_CD
+            , 'N'                                                               AS RETURN_YN
+            , '1'                                                               AS TM_DELIVERY_TYPE
+            , NVL(GROUP_CUST.DEFCARNO, POP_INFO.POPNAME)                        AS DEF_CARNO
+            , POP_INFO.POPNO                                                    AS POP
+            , DEDICATED_CARS.CARNO_LIST                                         AS DEDICATED_CARNO_LIST
+            , DEDICATED_CARS.CUSTCARTYPE                                        AS DEDICATED_CUST_CAR_TYPE
+            , BLOCKED_CARS.CARNO_LIST                                           AS BLOCKED_CARNO_LIST
+            , BLOCKED_CARS.CUSTCARTYPE                                          AS BLOCKED_CUST_CAR_TYPE
+            -- OTD 시간 처리 (reqdlvtime1From/To와 동일한 값 사용)
+            , CASE WHEN MS_CUSTDLVINFO.REQDLVTIME2_FROM IS NOT NULL
+                   THEN NVL2(MS_CUSTDLVINFO.REQDLVTIME2_FROM,
+                        REGEXP_REPLACE(SUBSTR(LPAD(REPLACE(MS_CUSTDLVINFO.REQDLVTIME2_FROM, ':', ''), 4, '0'), 1, 2), '^24', '00')
+                        || ':' ||
+                        CASE WHEN TO_NUMBER(SUBSTR(LPAD(REPLACE(MS_CUSTDLVINFO.REQDLVTIME2_FROM, ':', ''), 4, '0'), 3, 2)) > 59 THEN '59'
+                             ELSE SUBSTR(LPAD(REPLACE(MS_CUSTDLVINFO.REQDLVTIME2_FROM, ':', ''), 4, '0'), 3, 2)
+                        END,
+                   '')
+              END                                                               AS OTD_TIME_FROM
+            , CASE WHEN MS_CUSTDLVINFO.REQDLVTIME2_TO IS NOT NULL
+                   THEN NVL2(MS_CUSTDLVINFO.REQDLVTIME2_TO,
+                        REGEXP_REPLACE(SUBSTR(LPAD(REPLACE(MS_CUSTDLVINFO.REQDLVTIME2_TO, ':', ''), 4, '0'), 1, 2), '^24', '00')
+                        || ':' ||
+                        CASE WHEN TO_NUMBER(SUBSTR(LPAD(REPLACE(MS_CUSTDLVINFO.REQDLVTIME2_TO, ':', ''), 4, '0'), 3, 2)) > 59 THEN '59'
+                             ELSE SUBSTR(LPAD(REPLACE(MS_CUSTDLVINFO.REQDLVTIME2_TO, ':', ''), 4, '0'), 3, 2)
+                        END,
+                   '')
+              END                                                               AS OTD_TIME_TO
+            -- reqdlvtime1From/To (OTD 시간과 동일)
+            , CASE WHEN MS_CUSTDLVINFO.REQDLVTIME2_FROM IS NOT NULL
+                   THEN NVL2(MS_CUSTDLVINFO.REQDLVTIME2_FROM,
+                        REGEXP_REPLACE(SUBSTR(LPAD(REPLACE(MS_CUSTDLVINFO.REQDLVTIME2_FROM, ':', ''), 4, '0'), 1, 2), '^24', '00')
+                        || ':' ||
+                        CASE WHEN TO_NUMBER(SUBSTR(LPAD(REPLACE(MS_CUSTDLVINFO.REQDLVTIME2_FROM, ':', ''), 4, '0'), 3, 2)) > 59 THEN '59'
+                             ELSE SUBSTR(LPAD(REPLACE(MS_CUSTDLVINFO.REQDLVTIME2_FROM, ':', ''), 4, '0'), 3, 2)
+                        END,
+                   '')
+              END                                                               AS REQDLVTIME1_FROM
+            , CASE WHEN MS_CUSTDLVINFO.REQDLVTIME2_TO IS NOT NULL
+                   THEN NVL2(MS_CUSTDLVINFO.REQDLVTIME2_TO,
+                        REGEXP_REPLACE(SUBSTR(LPAD(REPLACE(MS_CUSTDLVINFO.REQDLVTIME2_TO, ':', ''), 4, '0'), 1, 2), '^24', '00')
+                        || ':' ||
+                        CASE WHEN TO_NUMBER(SUBSTR(LPAD(REPLACE(MS_CUSTDLVINFO.REQDLVTIME2_TO, ':', ''), 4, '0'), 3, 2)) > 59 THEN '59'
+                             ELSE SUBSTR(LPAD(REPLACE(MS_CUSTDLVINFO.REQDLVTIME2_TO, ':', ''), 4, '0'), 3, 2)
+                        END,
+                   '')
+              END                                                               AS REQDLVTIME1_TO
+        FROM GROUP_CUST
+        LEFT OUTER JOIN MS_CUSTDLVINFO
+          ON GROUP_CUST.STORERKEY    = MS_CUSTDLVINFO.STORERKEY
+         AND GROUP_CUST.CUSTTYPE     = MS_CUSTDLVINFO.CUSTTYPE
+         AND GROUP_CUST.TRUTHCUSTKEY = MS_CUSTDLVINFO.DLVCUSTKEY
+        LEFT OUTER JOIN CLAIM_INFO
+          ON GROUP_CUST.TRUTHCUSTKEY = CLAIM_INFO.MNGPLC_ID
+         AND GROUP_CUST.STORERKEY    = CLAIM_INFO.STORERKEY
+        LEFT OUTER JOIN POP_INFO
+          ON POP_INFO.DCCODE    = GROUP_CUST.DCCODE
+         AND POP_INFO.CUSTKEY   = GROUP_CUST.TRUTHCUSTKEY
+         AND POP_INFO.CUSTTYPE  = GROUP_CUST.CUSTTYPE
+         AND POP_INFO.STORERKEY = GROUP_CUST.STORERKEY
+         AND POP_INFO.RN = 1
+        LEFT OUTER JOIN DEDICATED_CARS
+          ON DEDICATED_CARS.DCCODE  = GROUP_CUST.DCCODE
+         AND DEDICATED_CARS.CUSTKEY = GROUP_CUST.TRUTHCUSTKEY
+        LEFT OUTER JOIN BLOCKED_CARS
+          ON BLOCKED_CARS.DCCODE  = GROUP_CUST.DCCODE
+         AND BLOCKED_CARS.CUSTKEY = GROUP_CUST.TRUTHCUSTKEY
+        ]]>
+    </select>
+
+</mapper>

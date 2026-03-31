@@ -1,0 +1,2632 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="wdKxDeliveryInvoiceService">
+<!-- 
+
+    접수확정
+	  ->insertMasterReceipt
+	  ->
+	  
+	N배송 목록
+	일반/반품 목록
+	운송장 출력
+        ->getMasterList2
+ -->
+ 
+	<!-- 주문 리스트 조회 -->
+    <select id="getMasterList" resultType="cjfw.wms.wd.dto.WdKxDeliveryInvoiceResDto">
+		 SELECT /* [wdKxDeliveryInvoiceService.sqlx][wdKxDeliveryInvoiceService.getMasterList][주문 목록 조회][sss][2026.01.06]*/
+                DECODE(DELIVERYINFO_EMP.STATUS, '00', '10', DELIVERYINFO_EMP.STATUS)                                              AS STATUS             /*상태(10:업로드,11:업로드삭제,12:접수실패,13:배송제외,14:배송분리,16:접수확정,17:송장분리완료,20:택배접수완료,21:택배접수취소)*/
+               ,FN_CODEDESCR(#{gStorerkey}, 'STATUS_INVOICENO', DECODE(DELIVERYINFO_EMP.STATUS, '00', '10', DELIVERYINFO_EMP.STATUS))    AS STATUSNM           /*상태(00이면 10으로 치환)*/
+              , CASE WHEN MS_UOM.CUBE IS NULL OR MS_UOM.CUBE = 0 AND DELIVERYINFO_EMP.RCPT_HOUR_TYPE IS NULL THEN --최초 I/F때만 Default값 세팅 
+                    '01'
+             	ELSE
+             		DELIVERYINFO_EMP.EXCEPT_REASON_CD	 
+             	END                                                                              AS EXCEPT_REASON_CD  /*제외사유코드*/ 
+               ,CASE WHEN DELIVERYINFO_EMP.DELIVERY_SVC_TYPE = '03' THEN 'Y' ELSE 'N' END         AS N_DELIVERY_YN     /*N배송여부*/
+               ,DELIVERYINFO_EMP.RCPT_HOUR_TYPE                                                   AS RCPT_HOUR_TYPE    /*접수시간대구분(1:오전,2:오후)*/
+		       ,DELIVERYINFO_EMP.REQ_DATE                                                         AS REQ_DATE          /*접수일자(원: 납품요청일자)*/
+		       ,DELIVERYINFO_EMP.EMP_DOCNO                                                        AS DOCNO             /*주문고유번호(고객사용번호 아님)*/
+		       ,DELIVERYINFO_EMP.EMP_CUST_DOCNO                                                   AS EMP_CUST_DOCNO    /*사이트주문번호*/
+		       ,DELIVERYINFO_EMP.EMP_CUSTKEY                                                      AS EMP_CUSTKEY       /*EMP고객코드*/               			
+		       ,DELIVERYINFO_EMP.EMP_CUSTNM                                                       AS EMP_CUSTNM        /*EMP고객명*/               			
+		       ,CASE WHEN CD6.SKU IS NOT NULL THEN 'Y' ELSE 'N' END                               AS NSKUYN            /*N상품여부*/
+		      , DM_DOCUMENT_D.SKU                                                                 AS SKU               /*상품코드*/
+		      , MS_SKU.DESCRIPTION                                                                AS DESCRIPTION       /*상품명*/
+		       ,NVL(MS_UOM.CUBEDESCR,'10-10-10')                                             AS CUBEDESCR         /*상품 체적 설명 길이(Length)-너비(Width)-높이(Height) 단위 mm*/
+              , CASE WHEN MS_UOM.CUBE IS NULL OR MS_UOM.CUBE = 0 THEN 
+                    1000	
+             	ELSE
+             		CEIL(MS_UOM.CUBE)	 
+             	END                                                                         AS VOLUME            /*상품부피*/
+               ,CASE WHEN MS_UOM.CUBE IS NULL OR MS_UOM.CUBE = 0 THEN 
+                    1000	
+             	ELSE
+             		CEIL(MS_UOM.CUBE)	 
+             	END * DM_DOCUMENT_D.ORDERQTY		                                             AS TOTVOLUME         /*총상품부피 = 상품부피 * 주문수량*/ 		
+		      , DM_DOCUMENT_D.ORDERQTY                                                            AS ORDERQTY          /*주문수량*/
+              --, SUM(DM_DOCUMENT_D.ORDERQTY) OVER (PARTITION BY DM_DOCUMENT_D.SKU ORDER BY
+              --        DM_DOCUMENT_D.DOCDT
+              --       ,NVL(DELIVERYINFO_EMP.DELIVERY_TEL,DELIVERYINFO_EMP.DELIVERY_PHONE)
+              --       ,DELIVERYINFO_EMP.DELIVERY_ZIPCODE
+              --       ,DELIVERYINFO_EMP.DELIVERY_NAME                                                                  
+              --       ,MS_SKU.STORAGETYPE)                                                             AS CUM_ORDER_QT /*누적주문수량*/
+		      <if test="stockYn == 'Y'.toString()">
+			      , ST_STOCK.QTY_2600                                                                       AS QTY_2600     /*재고(2600)*/
+			      , ST_STOCK.QTY_2900                                                                       AS QTY_2900     /*재고(2900)*/
+			      , ST_STOCK.QTY_2600 + ST_STOCK.QTY_2900                                                   AS TOTSTOCKQTY  /*총재고*/
+		      </if>
+		      --                                                                                                        
+		      , DELIVERYINFO_EMP.ORDER_NAME                                                             AS ORDR_NM      /*주문자명*/
+		      , NVL(DAMO.DEC(DELIVERYINFO_EMP.ORDER_TEL), DAMO.DEC(DELIVERYINFO_EMP.ORDER_PHONE))       AS ORDR_TEL_NO  /*주문자 전화번호*/
+		      , DELIVERYINFO_EMP.DELIVERY_NAME                                                          AS RCVR_NM      /*수화인명*/
+		      , DELIVERYINFO_EMP.DELIVERY_NAME                                                          AS RCVR_NM2     /*수화인명(마스킹)*/
+		      , NVL(DAMO.DEC(DELIVERYINFO_EMP.DELIVERY_TEL), DAMO.DEC(DELIVERYINFO_EMP.DELIVERY_PHONE)) AS RCVR_TEL_NO  /*수화인 전화번호*/
+		      , DAMO.DEC(DELIVERYINFO_EMP.DELIVERY_TEL)                                                 AS RCVR_TEL_NO2 /*수화인 전화번호(마스킹)*/
+		      , DAMO.DEC(DELIVERYINFO_EMP.DELIVERY_PHONE)                                               AS RCVR_CELL_NO /*수화인 휴대폰번호*/
+		      , DAMO.DEC(DELIVERYINFO_EMP.DELIVERY_ZIPCODE)                                             AS RCVR_ZIP_NO  /*수화인 우편번호*/
+		      , DAMO.DEC(DELIVERYINFO_EMP.DELIVERY_ADDR)                                                AS RCVR_ADDR    /*수화인 주소*/
+		      , DAMO.DEC(DELIVERYINFO_EMP.DELIVERY_ADDR)                                                AS RCVR_ADDR_ORI /*원수화인 주소*/
+			  , DELIVERYINFO_EMP.DELIVERY_MSG                                                           AS DELIVERY_MSG /*배송 메시지*/
+			  --                                                                                        
+		       ,''                                                                               AS CUSTKEY           /*고객코드*/
+               ,DELIVERYINFO_EMP.DELIVERY_SVC_TYPE                                               AS DELIVERY_SVC_TYPE /*배송서비스구분(01:일반,02:반품,03:N배송)*/
+		       ,DM_DOCUMENT_D.DCCODE                                                             AS DCCODE            /*물류센터*/
+		       ,'01'                                                                             AS ORDERTYPE         /*접수구분(01:일반,02:반품)*/
+		       ,FN_CODEDESCR(#{gStorerkey}, 'RECEPTION_DIV', '01')                               AS ORDERTYPENM       /*접수구분명(01:일반,02:반품)*/
+		       ,'01'                                                                             AS WORKTYPE          /*작업구분코드(작업유형(01 일반, 02 교환, 03 A/S)*/
+		       ,'01'                                                                             AS REQUESTTYPE       /*요청구분코드*/
+		       ,NVL(MS_SKU.STORAGETYPE, '10')                                                    AS STORAGETYPE       /*저장조건*/
+		       ,NVL(CD3.BASEDESCR,MS_SKU.STORAGETYPE) 								             AS STORAGETYPENM     /*저장조건명*/
+		       ,''                                                                               AS PACKAGEKEY        /*패키지키(없으면 기본값 생성) [TODO: 생성규칙 확인]*/
+		       ,NULL                                                                             AS PACKAGEKEY_LINE   /*패키지 라인(기본값)*/
+		       ,'01'                                                                             AS EXPENSETYPE       /*비용유형*/
+		       ,'03'                                                                             AS FEETYPE           /*요금유형*/
+		       ,FN_CODEDESCR(#{gStorerkey}, 'FARE_DIV', '03')                                    AS FEETYPE_DESC      /*요금유형설명*/
+		       ,'01'                                                                             AS CONTRACTTYPE      /*계약유형*/
+		       ,'01'                                                                             AS BOXTYPE           /*박스타입*/
+		       ,1                                                                                AS BOXQTY            /*박스수량*/
+		       ,0                                                                                AS COST              /*비용*/
+ 	           ,CASE WHEN DELIVERYINFO_EMP.DELIVERY_SVC_TYPE = '03' THEN 
+	               '30565515' /*N배송-업체ID*/
+	           ELSE
+		          CASE WHEN DELIVERYINFO_EMP.RCPT_HOUR_TYPE = '1' THEN 
+		              '30451233' /*일반오전-업체ID*/
+		          WHEN DELIVERYINFO_EMP.RCPT_HOUR_TYPE = '2' THEN
+		              '30553376' /*일반오후-업체ID-확인중*/ 
+		          ELSE 
+		              '' 
+		          END                  
+	           END AS KX_CUSTKEY      /*KX고객사키*/         	            
+			   ,NVL(DAMO.DEC(DELIVERYINFO_EMP.ORDER_PHONE),DAMO.DEC(DELIVERYINFO_EMP.ORDER_TEL)) AS ORDR_CELL_NO  /*주문자 휴대폰번호*/
+		       ,''                                                                               AS ORDR_SAFE_NO  /*주문자 안심번호*/
+		       ,''                                                                               AS ORDR_ZIP_NO   /*주문자 우편번호*/
+		       ,''                                                                               AS ORDR_ADDR     /*주문자 주소*/
+		       ,''                                                                               AS SENDR_NM      /*송화인명*/
+		       ,''                                                                               AS SENDR_TEL_NO  /*송화인 전화번호*/
+		       ,''                                                                               AS SENDR_CELL_NO /*송화인 휴대폰번호*/
+		       ,''                                                                               AS SENDR_SAFE_NO /*송화인 안심번호*/
+		       ,''                                                                               AS SENDR_ZIP_NO  /*송화인 우편번호*/
+		       ,''                                                                               AS SENDR_ADDR    /*송화인 주소*/
+		      , DAMO.DEC(DELIVERYINFO_EMP.DELIVERY_PHONE)                                        AS RCVR_CELL_NO2 /*수화인 휴대폰번호(마스킹)*/
+		      , ''                                                                               AS RCVR_SAFE_NO  /*수화인 안심번호*/
+		      , DELIVERYINFO_EMP.INVOICENO                                                       AS INVOICENO     /*운송장번호*/
+		      , REPLACE(DELIVERYINFO_EMP.INVOICENO, '-', '')                                     AS INVOICENO2    /*운송장번호(숫자만)*/
+		      , SUBSTR(DELIVERYINFO_EMP.INVOICENO,0, 4)||'-'||SUBSTR(DELIVERYINFO_EMP.INVOICENO,5,4)||'-'||SUBSTR(DELIVERYINFO_EMP.INVOICENO,9,4) AS INVOICENO3 /*운송장번호(포맷)*/
+		      , ''                                                                                                 AS PRT_ST             /*출력상태*/
+		     -- , '(' || FN_CODEDESCR(MS_SKU.STORERKEY, 'STORAGETYPE', MS_SKU.STORAGETYPE) || ')' || MS_SKU.DESCRIPTION || ' / ' || DM_DOCUMENT_D.ORDERQTY AS DESCRIPTION_QTY /*상품명/수량*/
+		      , '01'                                                                                               AS DLV_DV             /*택배구분*/
+		      , DELIVERYINFO_EMP.RCPT_ERR_YN                                                                       AS RCPT_ERR_YN        /*접수에러여부*/
+		      , DELIVERYINFO_EMP.RCPT_ERR_MSG                                                                      AS RCPT_ERR_MSG       /*접수에러메세지*/
+		      , NVL(DELIVERYINFO_EMP.DEL_YN, 'N')                                                                  AS DEL_YN             /*삭제여부*/
+		      , DM_DOCUMENT_D.DOCNO                                                                                AS DOCNO_FW           /*주문번호(FW)*/
+		      , DM_DOCUMENT_D.DOCLINE                                                                              AS DOCLINE_FW         /*주문항번(FW)*/
+		      , DELIVERYINFO_EMP.SITE_TYPE                                                                         AS SITE_TYPE          /*온라인구분*/
+		      , DELIVERYINFO_EMP.BIGO                                                                              AS BIGO               /*비고*/
+		      , FN_CODEDESCR(#{gStorerkey}, 'RECEIPT_TIME_SLOT', '')                                               AS RCPT_HOUR_TYPE_NM  /*접수시간대*/
+		      , DELIVERYINFO_EMP.ADDWHO                                                                            AS ADDWHO             /*최초등록자*/
+		      , DELIVERYINFO_EMP.ADDDATE                                                                           AS ADDDATE            /*최초등록일자*/
+        	  , DELIVERYINFO_EMP.EDITWHO                                                                           AS EDITWHO            /*최종수정자*/
+			  --
+			  , DELIVERYINFO_EMP.SERIALKEY                                                       AS SERIALKEY         /*데이터번호*/
+			  , DM_DOCUMENT_D.DOCDT                                                              AS DOCDT
+			  , DM_DOCUMENT_D.STORERUOM                                                          AS UOM               /**단위*/
+           FROM DELIVERYINFO_EMP
+           JOIN DM_DOCUMENT_D 
+             ON DM_DOCUMENT_D.DOCNO        = DELIVERYINFO_EMP.DOCNO
+            AND DM_DOCUMENT_D.DOCLINE      = DELIVERYINFO_EMP.DOCLINE
+            AND DM_DOCUMENT_D.DELIVERYDATE = DELIVERYINFO_EMP.REQ_DATE
+            AND DM_DOCUMENT_D.DEL_YN       = 'N'
+            AND DM_DOCUMENT_D.STORERKEY    = #{gStorerkey}
+           JOIN MS_SKU
+             ON MS_SKU.STORERKEY  = #{gStorerkey}
+            AND MS_SKU.SKU       = DM_DOCUMENT_D.SKU
+      LEFT JOIN MS_UOM 
+             ON MS_SKU.STORERKEY = MS_UOM.STORERKEY
+            AND MS_SKU.SKU       = MS_UOM.SKU
+            AND MS_SKU.BASEUOM   = MS_UOM.BASEUOM
+            AND MS_UOM.UOM       = DM_DOCUMENT_D.STORERUOM
+  LEFT JOIN (
+                    
+                    SELECT DISTINCT DATA1 AS EMP_CUSTKEY,DATA2 AS SKU
+                      FROM CM_CODE_STORER CD6
+                     WHERE CD6.STORERKEY = #{gStorerkey}
+                       AND CD6.CODELIST  = 'N_DELIVERY_CUST_SKU'  
+             ) CD6   
+          ON DELIVERYINFO_EMP.EMP_CUSTKEY      = CD6.EMP_CUSTKEY
+         AND MS_SKU.SKU       = CD6.SKU        
+	  <!-- 재고조회가 필요시에만 조회(속도) -->
+      <if test="stockYn == 'Y'.toString()">                  
+	      LEFT JOIN (SELECT ST_STOCK.STORERKEY                                                   AS STORERKEY
+					       ,ST_STOCK.SKU                                                         AS SKU
+					       ,MAX(ST_STOCK.UOM)                                                    AS UOM
+					       ,NVL(SUM(CASE WHEN ST_STOCK.DCCODE = '2600' THEN ST_STOCK.QTY ELSE 0 END),0) AS QTY_2600
+					       ,NVL(SUM(CASE WHEN ST_STOCK.DCCODE = '2900' THEN ST_STOCK.QTY ELSE 0 END),0) AS QTY_2900
+					   FROM ST_STOCK
+					   JOIN MS_SKU ON MS_SKU.STORERKEY = ST_STOCK.STORERKEY
+					              AND MS_SKU.SKU       = ST_STOCK.SKU
+					   JOIN MS_LOCATION ON MS_LOCATION.DCCODE    = ST_STOCK.DCCODE
+					                   AND MS_LOCATION.LOC       = ST_STOCK.LOC
+					                   AND MS_LOCATION.LOCTYPE IN ('STAGE','PICK','KEEP','CROSS','FIRSTOUT','LONGSTAY','CANCEL')
+					                   AND MS_LOCATION.LOCCATEGORY IN ('RACK','YARD','AUTO')
+					                   AND MS_LOCATION.LOCFLAG   = 'GOOD'
+					                   AND MS_LOCATION.OUT_YN    = 'Y'
+					                   AND MS_LOCATION.DEL_YN    = 'N'
+					                   AND MS_LOCATION.STOCKTYPE = 'GOOD'
+					   JOIN CM_LOT ON CM_LOT.STORERKEY = ST_STOCK.STORERKEY
+					              AND CM_LOT.LOT       = ST_STOCK.LOT
+					              AND 'TRUE'           = CASE WHEN CM_LOT.LOTTABLE01 = 'STD' OR  MS_SKU.DURATIONTYPE = 'N'
+					                                          THEN 'TRUE'
+					                                          WHEN MS_SKU.DURATIONTYPE = '1' AND FN_ISDATE(CM_LOT.LOTTABLE01) = 1 AND TO_DATE(CM_LOT.LOTTABLE01,'YYYYMMDD') <![CDATA[<]]> TRUNC(SYSDATE)
+					                                          THEN 'FALSE'
+					                                          WHEN MS_SKU.DURATIONTYPE IN ('2','3') AND FN_ISDATE(CM_LOT.LOTTABLE01) = 1 AND TO_DATE(CM_LOT.LOTTABLE01,'YYYYMMDD') + MS_SKU.DURATION - 1 <![CDATA[<]]> TRUNC(SYSDATE)
+					                                          THEN 'FALSE'
+					                                          ELSE 'TRUE'
+					                                      END
+					  WHERE ST_STOCK.STORERKEY = #{gStorerkey}
+					    AND ST_STOCK.DCCODE = #{fixdccode}
+					    AND ST_STOCK.QTY <![CDATA[>]]> 0
+					    AND ST_STOCK.DCCODE NOT IN ('1000', '2170')
+					  GROUP BY ST_STOCK.STORERKEY
+					         , ST_STOCK.SKU 
+					 ) ST_STOCK          
+	             ON ST_STOCK.SKU       = MS_SKU.SKU
+	            AND ST_STOCK.STORERKEY = MS_SKU.STORERKEY
+	 </if> 
+	       LEFT JOIN CM_CODE_STORER CD3  ON CD3.STORERKEY = MS_SKU.STORERKEY AND CD3.CODELIST  = 'STORAGETYPE' AND CD3.BASECODE   = MS_SKU.STORAGETYPE                 
+           LEFT JOIN CM_CODE_STORER CD6 
+             ON (CD6.STORERKEY =  #{gStorerkey} 
+            AND CD6.CODELIST  = 'N_DELIVERY_CUST_SKU' 
+            AND CD6.DATA1     = DELIVERYINFO_EMP.EMP_CUSTKEY
+            AND CD6.DATA2     = DM_DOCUMENT_D.SKU
+            ) /*거래처N배송*/       
+          WHERE DM_DOCUMENT_D.DCCODE       = #{fixdccode} 
+            AND DM_DOCUMENT_D.DELIVERYDATE = #{reqDate}
+	    <!-- START.serialkey.다중OR검색 
+	         ->접수 시 호출
+	         ->개인정보 팝업 조회 시
+	    -->
+	    
+	    <!-- 대량처리 시 사용 -->
+	    <if test="serialkeyMulti != null and serialkeyMulti != '' ">
+	  	<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+	  		<foreach collection="serialkeyMulti" item="item">
+	  			OR DELIVERYINFO_EMP.SERIALKEY IN
+	  			<foreach collection="item" item="code" open="(" close=")" separator=",">
+	  				#{code} 	 
+	        		</foreach>
+	      	</foreach>
+	    	</trim>			                                    
+	    </if>
+	    <!-- END.serialkey.다중OR검색 -->        
+        
+        
+        <!-- 제외사유 -->    
+        <if test="exceptReasonCd != null and exceptReasonCd != ''"> AND DELIVERYINFO_EMP.EXCEPT_REASON_CD = #{exceptReasonCd} </if>
+           
+        
+        <!-- 판매사이트주문번호.다중검색 -->
+        <if test="empCustDocnoMulti != null and empCustDocnoMulti != ''">
+            AND DELIVERYINFO_EMP.EMP_CUST_DOCNO IN
+            <foreach collection="empCustDocnoMulti" item="item" open="(" separator="," close=")">
+                #{item}
+            </foreach> 
+        </if>        
+        
+        <!-- 판매사이트코드.다중검색 -->
+        <if test="empCustkeyMulti != null and empCustkeyMulti != ''">
+            AND DELIVERYINFO_EMP.EMP_CUSTKEY IN
+            <foreach collection="empCustkeyMulti" item="item" open="(" separator="," close=")">
+                #{item}
+            </foreach> 
+        </if>   
+        
+        <!-- 운송장번호.다중검색 -->
+        <if test="invoicenoMulti != null and invoicenoMulti != ''">
+            AND DELIVERYINFO_EMP.INVOICENOO IN
+            <foreach collection="invoicenoMulti" item="item" open="(" separator="," close=")">
+                #{item}
+            </foreach> 
+        </if>	
+        
+		<!-- 배송서비스구분 -->
+        <if test="deliverySvcType != null and deliverySvcType != ''"> AND DELIVERYINFO_EMP.DELIVERY_SVC_TYPE = #{deliverySvcType} </if>
+        <!-- 접수시간대구분-->
+        <if test="rcptHourType != null and rcptHourType != ''"> AND DELIVERYINFO_EMP.RCPT_HOUR_TYPE = #{rcptHourType} </if>
+        
+        <!-- START.상품.다중OR검색 -->
+        <if test="skuMulti != null and skuMulti != '' ">
+			<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+				<foreach collection="skuMulti" item="item">
+					OR DM_DOCUMENT_D.SKU IN
+					<foreach collection="item" item="code" open="(" close=")" separator=",">
+						#{code} 	 
+		      		</foreach>
+		    	</foreach>
+		  	</trim>			                                    
+        </if>
+        <!-- END.상품.다중OR검색 -->	
+        
+        <!-- 진행상태 다중선택 -->
+        <if test="statusMulti != null and statusMulti != ''">
+            AND (CASE WHEN DELIVERYINFO_EMP.STATUS = '00' THEN 
+                    '10'
+                ELSE
+                    DELIVERYINFO_EMP.STATUS
+                END) IN
+            <foreach collection="statusMulti" item="item" open="(" separator="," close=")">
+                REPLACE(#{item},'-','')
+            </foreach> 
+        </if>	        
+        
+        <!-- START.공통.화면별 정열순서 
+            ->테이블에 정열	순서 컬럼이 없을 경우 아래 기본 정열순서를 사용한다.
+        -->
+        ORDER BY 
+        <choose>
+          <when test="prdOrd1 != null and prdOrd1 != ''">
+			<trim suffixOverrides=",">
+                 <if test="prdOrd1 != null and prdOrd1 != ''">${prdOrd1},</if>
+                 <if test="prdOrd2 != null and prdOrd2 != ''">${prdOrd2},</if>
+                 <if test="prdOrd3 != null and prdOrd3 != ''">${prdOrd3},</if>
+                 <if test="prdOrd4 != null and prdOrd4 != ''">${prdOrd4},</if>
+                 <if test="prdOrd5 != null and prdOrd5 != ''">${prdOrd5},</if>
+                 <if test="prdOrd6 != null and prdOrd6 != ''">${prdOrd6},</if>
+                 <if test="prdOrd7 != null and prdOrd7 != ''">${prdOrd7},</if>
+                 <if test="prdOrd8 != null and prdOrd8 != ''">${prdOrd8},</if>
+             </trim>		
+          </when>
+          <otherwise>
+               DM_DOCUMENT_D.DOCDT DESC
+              ,DELIVERYINFO_EMP.DELIVERY_ZIPCODE
+              ,DELIVERYINFO_EMP.DELIVERY_ADDR
+              ,NVL(DAMO.DEC(DELIVERYINFO_EMP.DELIVERY_TEL), DAMO.DEC(DELIVERYINFO_EMP.DELIVERY_PHONE))
+              ,DELIVERYINFO_EMP.EMP_CUSTKEY
+	          ,MS_SKU.STORAGETYPE DESC /*저장조건(냉동부터)*/
+              ,(CASE WHEN MS_UOM.CUBE IS NULL OR MS_UOM.CUBE = 0 THEN 
+                    1000	
+             	ELSE
+             		CEIL(MS_UOM.CUBE)	 
+             	END * DM_DOCUMENT_D.ORDERQTY) DESC /*총상품부피 큰 순*/ 
+              ,DELIVERYINFO_EMP.ADDDATE  
+                                              
+          </otherwise>
+        </choose>
+        <!-- END.공통.화면별 정열순서 -->		
+    </select> 
+ 
+	<!-- N배송 목록 조회	-->
+	<select id="getMasterList2" resultType="cjfw.wms.wd.dto.WdKxDeliveryInvoiceResDto">
+		SELECT /* [wdKxDeliveryInvoiceService.sqlx][wdKxDeliveryInvoiceService.getMasterList2][N배송 목록 조회][sss][2026.01.06]*/                                                          
+                DECODE(WD_KX_ORDER.STATUS, '00', '10', WD_KX_ORDER.STATUS)                   AS STATUS            /*상태 택배송장 발행상태(10:업로드,11:업로드삭제,12:접수실패,13:배송제외,14:배송분리,16:접수확정,17:송장분리완료,20:택배접수완료,21:택배접수취소)*/                  
+               ,NVL(CD2.BASEDESCR,WD_KX_ORDER.STATUS)                                        AS STATUSNM          /*상태명*/   
+               ,WD_KX_ORDER.EXCEPT_REASON_CD                                                 AS EXCEPT_REASON_CD  /*제외사유코드*/
+               ,CASE WHEN WD_KX_ORDER.DELIVERY_SVC_TYPE = '03' THEN 'Y' ELSE 'N' END         AS N_DELIVERY_YN     /*N배송여부*/
+               ,WD_KX_ORDER.RCPT_HOUR_TYPE                                                   AS RCPT_HOUR_TYPE    /*접수시간대구분(1:오전,2:오후)*/
+               ,WD_KX_ORDER.DOCDT                                                            AS DOCDT             /*접수일자 - 택배접수시각*/
+               ,WD_KX_ORDER.REQ_DATE                                                         AS REQ_DATE          /*요청일자 - 접수일자(원: 납품요청일자)*/
+	           ,WD_KX_ORDER.PARCEL_RCPT_DATE	                                             AS PARCEL_RCPT_DATE  /*택배접수일자*/
+	           ,WD_KX_ORDER.PARCEL_RCPT_HOUR	                                             AS PARCEL_RCPT_HOUR  /*택배접수시간*/               
+               ,WD_KX_ORDER.DOCNO                                                            AS DOCNO             /*택배문서번호*/
+               ,DELIVERYINFO_EMP.EMP_CUST_DOCNO                                              AS EMP_CUST_DOCNO    /*사이트주문번호-*/
+               ,DELIVERYINFO_EMP.EMP_CUSTKEY                                                 AS EMP_CUSTKEY       /*EMP고객코드-판매사이트코드*/                          
+               ,DELIVERYINFO_EMP.EMP_CUSTNM                                                  AS EMP_CUSTNM        /*EMP고객명*/ 
+			   ,WD_KX_ORDER.INVOICENO                                                        AS INVOICENO         /*운송장번호*/
+               ,REPLACE(WD_KX_ORDER.INVOICENO, '-', '')                                      AS INVOICENO2        /*운송장번호(숫자만)*/
+               ,SUBSTR(WD_KX_ORDER.INVOICENO,0, 4)||'-'||SUBSTR(WD_KX_ORDER.INVOICENO,5,4)||
+                '-'||SUBSTR(WD_KX_ORDER.INVOICENO,9,4)                                       AS INVOICENO3        /*운송장번호(포맷)*/
+               ,CASE WHEN CD6.SKU IS NOT NULL THEN 'Y' ELSE 'N' END                          AS NSKUYN            /*N상품여부*/     
+               ,WD_KX_ORDER.SKU                                                              AS SKU               /*상품코드*/
+               ,WD_KX_ORDER.DESCRIPTION                                                      AS DESCRIPTION       /*상품명*/
+		       ,NVL(MS_UOM.CUBEDESCR,'10-10-10')                                             AS CUBEDESCR         /*상품 체적 설명 길이(Length)-너비(Width)-높이(Height) 단위 mm*/
+              , CASE WHEN MS_UOM.CUBE IS NULL OR MS_UOM.CUBE = 0 THEN 
+                    1000	
+             	ELSE
+             		CEIL(MS_UOM.CUBE)	 
+             	END                                                                         AS VOLUME            /*상품부피*/
+               ,CASE WHEN MS_UOM.CUBE IS NULL OR MS_UOM.CUBE = 0 THEN 
+                    1000	
+             	ELSE
+             		CEIL(MS_UOM.CUBE)	 
+             	END * WD_KX_ORDER.ORDERQTY		                                             AS TOTVOLUME         /*총상품부피 = 상품부피 * 주문수량*/ 		
+               ,MS_PARCEL_BOX.CUBE                                                           AS CUBE              /*박스체적*/
+               ,WD_KX_ORDER.ORDERQTY                                                         AS ORDERQTY          /*주문수량*/    
+               ,WD_KX_ORDER.BOXQTY 															 AS BOXQTY	          /*박스수량-송장분리 후 수량*/			
+               --,SUM(WD_KX_ORDER.BOXQTY) OVER (PARTITION BY WD_KX_ORDER.SKU ORDER BY
+               --                               WD_KX_ORDER.DOCDT				                         
+			   --                              ,WD_KX_ORDER.DOCNO    --일자의 DOCNO기준 누적 상품수                   
+			   --		                      )                                                  AS CUM_ORDER_QTY /*누적주문수량*/
+               ,WD_KX_ORDER.BOXTYPE                                                          AS BOXTYPE       /*박스번호*/  
+               ,MS_PARCEL_BOX.BOXNM                                                          AS BOXNM         /*박스명*/
+               <!-- 재고조회가 필요시에만 조회(속도) -->
+      		   <if test="stockYn == 'Y'.toString()"> 
+	               , ST_STOCK.QTY_2600                                                           AS QTY_2600      /*재고(2600)*/
+	               , ST_STOCK.QTY_2900                                                           AS QTY_2900      /*재고(2900)*/
+	               , ST_STOCK.QTY_2600 + ST_STOCK.QTY_2900                                       AS TOTSTOCKQTY   /*총재고*/
+               </if>
+               --                                                                               
+            , WD_KX_ORDER.ORDR_NM                                                                                 AS ORDR_NM       /*주문자명*/
+            , WD_KX_ORDER.ORDR_TEL_NO1||'-'||WD_KX_ORDER.ORDR_TEL_NO2||'-'||DAMO.DEC(WD_KX_ORDER.ORDR_TEL_NO3)    AS ORDR_TEL_NO   /*주문자 전화번호*/
+            , WD_KX_ORDER.ORDR_CELL_NO1||'-'||WD_KX_ORDER.ORDR_CELL_NO2||'-'||DAMO.DEC(WD_KX_ORDER.ORDR_CELL_NO3) AS ORDR_CELL_NO  /*주문자 휴대폰번호*/
+            , WD_KX_ORDER.ORDR_SAFE_NO1||'-'||WD_KX_ORDER.ORDR_SAFE_NO2||'-'||DAMO.DEC(WD_KX_ORDER.ORDR_SAFE_NO3) AS ORDR_SAFE_NO  /*주문자 안심번호*/
+            , WD_KX_ORDER.ORDR_ZIP_NO                                                                             AS ORDR_ZIP_NO   /*주문자 우편번호*/
+            , WD_KX_ORDER.ORDR_ADDR||' '||DAMO.DEC(WD_KX_ORDER.ORDR_DETAIL_ADDR)                                  AS ORDR_ADDR     /*주문자 주소*/            
+            --                                                                                     
+            , WD_KX_ORDER.RCVR_NM                                                                                 AS RCVR_NM      /*수화인명*/
+            , WD_KX_ORDER.RCVR_TEL_NO1||'-'||WD_KX_ORDER.RCVR_TEL_NO2||'-'||DAMO.DEC(WD_KX_ORDER.RCVR_TEL_NO3)    AS RCVR_TEL_NO  /*수화인 전화번호*/
+            , WD_KX_ORDER.RCVR_CELL_NO1||'-'||WD_KX_ORDER.RCVR_CELL_NO2||'-'||DAMO.DEC(WD_KX_ORDER.RCVR_CELL_NO3) AS RCVR_CELL_NO /*수화인 휴대폰번호*/
+            , WD_KX_ORDER.RCVR_SAFE_NO1||'-'||WD_KX_ORDER.RCVR_SAFE_NO2||'-'||DAMO.DEC(WD_KX_ORDER.RCVR_SAFE_NO3) AS RCVR_SAFE_NO /*수화인 안심번호*/
+            , WD_KX_ORDER.RCVR_ZIP_NO                                                                             AS RCVR_ZIP_NO  /*수화인 우편번호*/
+            , WD_KX_ORDER.RCVR_ADDR||' '||DAMO.DEC(WD_KX_ORDER.RCVR_DETAIL_ADDR)                                  AS RCVR_ADDR    /*수화인 주소*/
+            , WD_KX_ORDER.ETC_1                                                                                   AS DELIVERY_MSG /*배송 메시지*/
+            --
+             ,''                                                                                                     AS CUSTKEY           /*고객코드*/
+             ,WD_KX_ORDER.DELIVERY_SVC_TYPE                                                                          AS DELIVERY_SVC_TYPE /*배송서비스구분(01:일반,02:반품,03:N배송)*/
+             ,WD_KX_ORDER.DCCODE                                                                                     AS DCCODE            /*물류센터*/
+             ,WD_KX_ORDER.ORDERTYPE                                                                                  AS ORDERTYPE         /*접수구분(01:일반,02:반품)*/ 
+             ,NVL(CD4.BASEDESCR,WD_KX_ORDER.ORDERTYPE)                                                               AS ORDERTYPENM       /*접수구분명(01:일반,02:반품)*/
+             ,WD_KX_ORDER.WORKTYPE                                                                                   AS WORKTYPE          /*작업구분코드(작업유형(01 일반, 02 교환, 03 A/S)*/
+             ,NVL(CD5.BASEDESCR,WD_KX_ORDER.WORKTYPE)                                                                AS WORKTYPENM        /*작업구분명*/
+             ,WD_KX_ORDER.REQUESTTYPE                                                                                AS REQUESTTYPE       /*요청구분코드(01 일반, 02 취소)*/
+             ,NVL(MS_SKU.STORAGETYPE, '10')                                                                          AS STORAGETYPE       /*합포장구분(보관유형)*/
+             ,NVL(CD3.BASEDESCR,MS_SKU.STORAGETYPE) 			  				                                     AS STORAGETYPENM     /*저장조건명*/
+             ,WD_KX_ORDER.PACKAGEKEY                                                                                 AS PACKAGEKEY        /*패키지키(없으면 기본값 생성) [TODO: 생성규칙 확인]*/
+             ,WD_KX_ORDER.PACKAGEKEY_LINE                                                                            AS PACKAGEKEY_LINE   /*패키지 라인(기본값)*/
+             ,WD_KX_ORDER.EXPENSETYPE                                                                                AS EXPENSETYPE       /*비용유형(01 계약운임, 02 자료운임)*/
+             ,WD_KX_ORDER.FEETYPE                                                                                    AS FEETYPE           /*요금유형(01 선불, 02 착불, 03 신용)*/
+             ,FN_CODEDESCR(#{gStorerkey}, 'FARE_DIV', '03')                                                          AS FEETYPE_DESC      /*요금유형설명*/
+             ,WD_KX_ORDER.CONTRACTTYPE                                                                               AS CONTRACTTYPE      /*계약유형(01 일반 품목)*/
+             ,WD_KX_ORDER.COST                                                                                       AS COST              /*비용*/
+            --
+             ,WD_KX_ORDER.SENDR_NM                                                                                   AS SENDR_NM      /*송화인명*/
+             ,WD_KX_ORDER.SENDR_TEL_NO1||'-'||WD_KX_ORDER.SENDR_TEL_NO2||'-'||DAMO.DEC(WD_KX_ORDER.SENDR_TEL_NO3)    AS SENDR_TEL_NO  /*송화인 전화번호*/
+             ,WD_KX_ORDER.SENDR_CELL_NO1||'-'||WD_KX_ORDER.SENDR_CELL_NO2||'-'||DAMO.DEC(WD_KX_ORDER.SENDR_CELL_NO3) AS SENDR_CELL_NO /*송화인 휴대폰번호*/
+             ,''                                                                                                     AS SENDR_SAFE_NO /*송화인 안심번호*/
+             ,WD_KX_ORDER.SENDR_ZIP_NO                                                                               AS SENDR_ZIP_NO  /*송화인 우편번호*/
+             ,WD_KX_ORDER.SENDR_ADDR||' '||DAMO.DEC(WD_KX_ORDER.SENDR_DETAIL_ADDR)                                   AS SENDR_ADDR    /*송화인 주소*/
+             --
+            , WD_KX_ORDER.PRT_ST                                                                                     AS PRT_ST         /*출력상태 - /*운송장 출력상태 (01: 미출력, 02: 선출력, 03: 선발번)*/
+            ,NVL(CD1.BASEDESCR,WD_KX_ORDER.PRT_ST)                                                                   AS PRT_STNM       /*출력상태명*/
+            --, '(' || FN_CODEDESCR(MS_SKU.STORERKEY, 'STORAGETYPE', MS_SKU.STORAGETYPE) || ')' || MS_SKU.DESCRIPTION || ' / ' || WD_KX_ORDER.ORDERQTY AS DESCRIPTION_QTY /*상품명/수량*/
+            ,'01'                                                                                                   AS DLV_DV             /*택배구분*/
+            ,WD_KX_ORDER.PRINT_CNT	                                                                                AS PRINT_CNT	      /*출력횟수*/
+            ,WD_KX_ORDER.RCPT_ERR_YN                                                                                AS RCPT_ERR_YN        /*접수에러여부*/
+            ,WD_KX_ORDER.RCPT_ERR_MSG                                                                               AS RCPT_ERR_MSG       /*접수에러메세지*/
+            ,NVL(DELIVERYINFO_EMP.DEL_YN, 'N')                                                                      AS DEL_YN             /*삭제여부*/
+            ,WD_KX_ORDER.DOCNO_FW                                                                                   AS DOCNO_FW           /*주문번호(FW)*/
+            ,WD_KX_ORDER.DOCLINE_FW                                                                                 AS DOCLINE_FW         /*주문항번(FW)*/
+            ,DELIVERYINFO_EMP.SITE_TYPE                                                                             AS SITE_TYPE          /*온라인구분*/
+            ,DELIVERYINFO_EMP.BIGO                                                                                  AS BIGO               /*비고*/
+            ,FN_CODEDESCR(#{gStorerkey}, 'RECEIPT_TIME_SLOT', '')                                                   AS RCPT_HOUR_TYPE_NM  /*접수시간대*/
+		    ,NVL(USER1.USER_NM,WD_KX_ORDER.ADDWHO)                                                                  AS ADDWHO            /*등록자*/
+		    ,TO_CHAR(WD_KX_ORDER.ADDDATE,'YYYY-MM-DD HH24:MI:SS')                                                   AS ADDDATE	          /*등록일시*/
+            --
+	        ,CASE WHEN DELIVERYINFO_EMP.DELIVERY_SVC_TYPE = '03' THEN 
+	             '30565515' /*N배송-업체ID*/
+	         ELSE
+		        CASE WHEN DELIVERYINFO_EMP.RCPT_HOUR_TYPE = '1' THEN 
+		            '30451233' /*일반오전-업체ID*/
+		        WHEN DELIVERYINFO_EMP.RCPT_HOUR_TYPE = '2' THEN
+		            '30553376' /*일반오후-업체ID-확인중*/ 
+		        ELSE 
+		            '' 
+		        END                  
+	         END AS KX_CUSTKEY      /*KX고객사키*/                
+            ,WD_KX_ORDER.SERIALKEY                                                          AS SERIALKEY      /*데이터번호*/
+            ,DELIVERYINFO_EMP.SERIALKEY                                                     AS SERIALKEY_EMP  /*데이터번호-주문 배송지정보*/
+            ,WD_KX_ORDER.UNIT_CD                                                            AS UNIT_CD        /*단위코드*/
+            ,WD_KX_ORDER.SEQ                                                                AS SEQ            /*순번*/
+            /*인쇄용*/
+            ,TO_CHAR(TO_DATE(WD_KX_ORDER.REQ_DATE,'YYYYMMDD'),'YYYY.MM.DD')                  AS DOCDT2         /*접수일자 포맷(YYYY.MM.DD)-인쇄용*/
+            --
+            ,WD_KX_ORDER.RCVR_NM                                                                                 AS RECEIVER      /*인쇄.수화인명*/
+            ,WD_KX_ORDER.RCVR_TEL_NO1||'-'||WD_KX_ORDER.RCVR_TEL_NO2||'-'||DAMO.DEC(WD_KX_ORDER.RCVR_TEL_NO3)    AS CALL1         /*인쇄.수화인 전화번호*/
+            ,WD_KX_ORDER.RCVR_CELL_NO1||'-'||WD_KX_ORDER.RCVR_CELL_NO2||'-'||DAMO.DEC(WD_KX_ORDER.RCVR_CELL_NO3) AS CALL2         /*인쇄.수화인 휴대폰번호*/
+            ,WD_KX_ORDER.RCVR_ADDR||' '||DAMO.DEC(WD_KX_ORDER.RCVR_DETAIL_ADDR)                                  AS ADDRESS1      /*인쇄.수화인 주소*/
+            ,DAMO.DEC(WD_KX_ORDER.RCVR_DETAIL_ADDR)                                                              AS ORDER1        /*인쇄.수화인 주소-상세*/
+            --
+	        ,WD_KX_ORDER.SENDR_NM                                                                                AS SENDER        /*인쇄.발송자명*/          
+	        ,WD_KX_ORDER.SENDR_NM                                                                                AS FROM_CUSTNAME /*인쇄.발송자명*/          
+            ,WD_KX_ORDER.SENDR_TEL_NO1||'-'||WD_KX_ORDER.SENDR_TEL_NO2||'-'||DAMO.DEC(WD_KX_ORDER.SENDR_TEL_NO3) AS CALL3         /*송화인 전화번호*/
+            ,WD_KX_ORDER.COST                                                                                    AS FARE1         /*인쇄.비용*/
+            ,WD_KX_ORDER.FEETYPE                                                                                 AS SETTLEMENT1   /*요금유형(01 선불, 02 착불, 03 신용)*/
+		    , WD_KX_ORDER.CLSFCD	         AS CLSFCD	        /*도착지코드*/
+		    , WD_KX_ORDER.SUBCLSFCD	         AS SUBCLSFCD       /*도착지서브코드*/
+		    , DAMO.DEC(WD_KX_ORDER.CLSFADDR) AS CLSFADDR        /*주소약칭*/
+		    , WD_KX_ORDER.CLLDLVBRANNM	     AS CLLDLVBRANNM	/*배송집배점명*/
+		    , WD_KX_ORDER.CLLDLVEMPNM	     AS CLLDLVEMPNM	    /*배송SM명*/
+		    , WD_KX_ORDER.CLLDLVEMPNICKNM    AS CLLDLVEMPNICKNM /*SM분류코드*/
+		    , WD_KX_ORDER.RSPSDIV	         AS RSPSDIV	        /*권역구분*/
+		    , WD_KX_ORDER.P2PCD	             AS P2PCD	        /*P2P코드*/
+		    --	            
+		    , WD_KX_ORDER.REMARK_2	         AS REMARK2	    /*운송장대체번호*/	            
+           FROM WD_KX_ORDER       /*출고검수*/
+           JOIN DELIVERYINFO_EMP  /*주문 배송지정보*/
+             ON WD_KX_ORDER.DOCNO_FW     = DELIVERYINFO_EMP.DOCNO
+            AND WD_KX_ORDER.DOCLINE_FW   = DELIVERYINFO_EMP.DOCLINE
+           JOIN DM_DOCUMENT_D 
+             ON DM_DOCUMENT_D.DOCNO        = DELIVERYINFO_EMP.DOCNO
+            AND DM_DOCUMENT_D.DOCLINE      = DELIVERYINFO_EMP.DOCLINE
+            AND DM_DOCUMENT_D.DELIVERYDATE = DELIVERYINFO_EMP.REQ_DATE            
+           JOIN MS_SKU                                                                                                                                                                                               
+             ON MS_SKU.STORERKEY  = #{gStorerkey}                                                                                                                                                                           
+            AND MS_SKU.SKU        = WD_KX_ORDER.SKU
+           JOIN MS_UOM 
+             ON MS_SKU.STORERKEY = MS_UOM.STORERKEY
+            AND MS_SKU.SKU       = MS_UOM.SKU
+            AND MS_SKU.BASEUOM   = MS_UOM.BASEUOM
+            AND MS_UOM.UOM       = DM_DOCUMENT_D.STORERUOM                  
+      LEFT JOIN MS_PARCEL_BOX
+             ON WD_KX_ORDER.BOXTYPE     = MS_PARCEL_BOX.BOXNO
+      LEFT JOIN (
+                    SELECT DISTINCT DATA1 AS EMP_CUSTKEY,DATA2 AS SKU
+                      FROM CM_CODE_STORER CD6
+                     WHERE CD6.STORERKEY = #{gStorerkey}
+                       AND CD6.CODELIST  = 'N_DELIVERY_CUST_SKU'  
+                 ) CD6   
+          ON DELIVERYINFO_EMP.EMP_CUSTKEY      = CD6.EMP_CUSTKEY
+         AND MS_SKU.SKU       = CD6.SKU                    
+	  JOIN (SELECT '씨제이프레시웨이㈜'  AS SENDR_NM
+                  ,'02-2149-6114'   AS SENDR_TEL_NO
+                  ,'02-2149-6114'   AS SENDR_CELL_NO
+                  ,'21074'          AS SENDR_ZIP_NO
+                  ,'경기도 용인시 기흥구 기곡로 32(하갈동) 씨제이프레시웨이주식회사' AS SENDR_ADDR 
+             FROM DUAL
+	       ) SENDER_INFO   
+	   ON 1=1          
+      <!-- 재고조회가 필요시에만 조회(속도) -->
+      <if test="stockYn == 'Y'.toString()">                      
+	      LEFT JOIN (SELECT ST_STOCK.STORERKEY                                                   AS STORERKEY
+	                       ,ST_STOCK.SKU                                                         AS SKU
+	                       ,MAX(ST_STOCK.UOM)                                                    AS UOM
+	                       ,NVL(SUM(CASE WHEN ST_STOCK.DCCODE = '2600' THEN ST_STOCK.QTY ELSE 0 END),0) AS QTY_2600
+	                       ,NVL(SUM(CASE WHEN ST_STOCK.DCCODE = '2900' THEN ST_STOCK.QTY ELSE 0 END),0) AS QTY_2900
+	                   FROM ST_STOCK
+	                   JOIN MS_SKU ON MS_SKU.STORERKEY = ST_STOCK.STORERKEY
+	                              AND MS_SKU.SKU       = ST_STOCK.SKU
+	                   JOIN MS_LOCATION ON MS_LOCATION.DCCODE    = ST_STOCK.DCCODE
+	                                   AND MS_LOCATION.LOC       = ST_STOCK.LOC
+	                                   AND MS_LOCATION.LOCTYPE IN ('STAGE','PICK','KEEP','CROSS','FIRSTOUT','LONGSTAY','CANCEL')
+	                                   AND MS_LOCATION.LOCCATEGORY IN ('RACK','YARD','AUTO')
+	                                   AND MS_LOCATION.LOCFLAG   = 'GOOD'
+	                                   AND MS_LOCATION.OUT_YN    = 'Y'
+	                                   AND MS_LOCATION.DEL_YN    = 'N'
+	                                   AND MS_LOCATION.STOCKTYPE = 'GOOD'
+	                   JOIN CM_LOT ON CM_LOT.STORERKEY = ST_STOCK.STORERKEY
+	                              AND CM_LOT.LOT       = ST_STOCK.LOT
+	                              AND 'TRUE'           = CASE WHEN CM_LOT.LOTTABLE01 = 'STD' OR  MS_SKU.DURATIONTYPE = 'N'
+	                                                          THEN 'TRUE'
+	                                                          WHEN MS_SKU.DURATIONTYPE = '1' AND FN_ISDATE(CM_LOT.LOTTABLE01) = 1 AND TO_DATE(CM_LOT.LOTTABLE01,'YYYYMMDD') <![CDATA[<]]>  TRUNC(SYSDATE)
+	                                                          THEN 'FALSE'
+	                                                          WHEN MS_SKU.DURATIONTYPE IN ('2','3') AND FN_ISDATE(CM_LOT.LOTTABLE01) = 1 AND TO_DATE(CM_LOT.LOTTABLE01,'YYYYMMDD') + MS_SKU.DURATION - 1  <![CDATA[<]]>  TRUNC(SYSDATE)
+	                                                          THEN 'FALSE'
+	                                                          ELSE 'TRUE'
+	                                                      END
+	                  WHERE ST_STOCK.STORERKEY = #{gStorerkey}
+	                    AND ST_STOCK.DCCODE = '2600'
+	                    AND ST_STOCK.QTY  >  0
+	                    AND ST_STOCK.DCCODE NOT IN ('1000', '2170')
+	                  GROUP BY ST_STOCK.STORERKEY
+	                         , ST_STOCK.SKU 
+	                 ) ST_STOCK          
+	           ON ST_STOCK.SKU       = MS_SKU.SKU
+	          AND ST_STOCK.STORERKEY = MS_SKU.STORERKEY  
+	</if>          
+	LEFT JOIN CM_CODE_STORER CD1  ON (CD1.STORERKEY = #{gStorerkey} AND CD1.CODELIST = 'OUTPUT_STATUS'    AND CD1.BASECODE = WD_KX_ORDER.PRT_ST)    /*출력상태*/
+	LEFT JOIN CM_CODE_STORER CD2  ON (CD2.STORERKEY = #{gStorerkey} AND CD2.CODELIST = 'STATUS_INVOICENO' AND CD2.BASECODE = WD_KX_ORDER.STATUS)    /*상태명*/         
+	LEFT JOIN CM_CODE_STORER CD3  ON CD3.STORERKEY  = #{gStorerkey} AND CD3.CODELIST = 'STORAGETYPE'      AND CD3.BASECODE = MS_SKU.STORAGETYPE     /*저장조건명*/
+	LEFT JOIN CM_CODE_STORER CD4  ON (CD4.STORERKEY = #{gStorerkey} AND CD4.CODELIST = 'RECEPTION_DIV'    AND CD4.BASECODE = WD_KX_ORDER.ORDERTYPE) /*접수구분*/         
+	LEFT JOIN CM_CODE_STORER CD5  ON (CD5.STORERKEY = #{gStorerkey} AND CD5.CODELIST = 'WORK_DIV'         AND CD5.BASECODE = WD_KX_ORDER.WORKTYPE)  /*작업구분명*/
+    LEFT JOIN FRAMEONE_USER USER1 ON USER1.USER_ID  = WD_KX_ORDER.ADDWHO   /*등록자명*/
+        WHERE WD_KX_ORDER.DCCODE        = #{fixdccode} 
+          AND DELIVERYINFO_EMP.REQ_DATE = #{reqDate}       
+          AND DELIVERYINFO_EMP.DELIVERY_SVC_TYPE = #{deliverySvcTypeTab} /*배송서비스구분(01:일반,02:반품,03:N배송)*/            
+    
+	    <!-- START.serialkey.다중OR검색 
+	         ->N배송/일반/반품 조회 시 호출
+	         ->운송장 출력 시 호출
+	         ->개인정보 조회 시
+	    -->
+	    <if test="serialkeyMulti != null and serialkeyMulti != '' ">
+	  	<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+	  		<foreach collection="serialkeyMulti" item="item">
+	  			OR WD_KX_ORDER.SERIALKEY IN
+	  			<foreach collection="item" item="code" open="(" close=")" separator=",">
+	  				#{code} 	 
+	        		</foreach>
+	      	</foreach>
+	    	</trim>			                                    
+	    </if>
+	    <!-- END.serialkey.다중OR검색 -->
+        
+        <!-- 제외사유 -->    
+        <if test="exceptReasonCd != null and exceptReasonCd != ''"> AND DELIVERYINFO_EMP.EXCEPT_REASON_CD = #{exceptReasonCd} </if>
+        
+        <!-- 판매사이트주문번호 -->
+        <if test="empCustDocnoMulti != null and empCustDocnoMulti != ''">
+            AND DELIVERYINFO_EMP.EMP_CUST_DOCNO IN
+            <foreach collection="empCustDocnoMulti" item="item" open="(" separator="," close=")">
+                #{item}
+            </foreach> 
+        </if>        
+        
+        <!-- 판매사이트코드 -->
+        <if test="empCustkeyMulti != null and empCustkeyMulti != ''">
+            AND DELIVERYINFO_EMP.EMP_CUSTKEY IN
+            <foreach collection="empCustkeyMulti" item="item" open="(" separator="," close=")">
+                #{item}
+            </foreach> 
+        </if>   
+        
+        <!-- 운송장번호 다중선택 -->
+        <if test="invoicenoMulti != null and invoicenoMulti != ''">
+            AND DELIVERYINFO_EMP.INVOICENOO IN
+            <foreach collection="invoicenoMulti" item="item" open="(" separator="," close=")">
+                REPLACE(#{item},'-','')
+            </foreach> 
+        </if>	
+
+        <!-- 접수시간대구분-->
+        <if test="rcptHourType != null and rcptHourType != ''"> AND DELIVERYINFO_EMP.RCPT_HOUR_TYPE = #{rcptHourType} </if>
+        
+        <!-- START.상품.다중OR검색 -->
+        <if test="skuMulti != null and skuMulti != '' ">
+			<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+				<foreach collection="skuMulti" item="item">
+					OR DM_DOCUMENT_D.SKU IN
+					<foreach collection="item" item="code" open="(" close=")" separator=",">
+						#{code} 	 
+		      		</foreach>
+		    	</foreach>
+		  	</trim>			                                    
+        </if>    
+        
+        <!-- 진행상태 다중선택 -->
+        <if test="statusMulti != null and statusMulti != ''">
+            AND WD_KX_ORDER.STATUS IN
+            <foreach collection="statusMulti" item="item" open="(" separator="," close=")">
+                REPLACE(#{item},'-','')
+            </foreach> 
+        </if>	        
+	    ORDER BY WD_KX_ORDER.DOCDT DESC
+	           , WD_KX_ORDER.CUSTKEY
+	           , WD_KX_ORDER.RCVR_ZIP_NO
+	           , WD_KX_ORDER.RCVR_ADDR
+	           , WD_KX_ORDER.RCVR_DETAIL_ADDR
+	           , CASE WHEN WD_KX_ORDER.SEQ IS NULL THEN
+	                1
+	             ELSE
+	                 WD_KX_ORDER.SEQ
+	             END
+ 			   , MS_SKU.STORAGETYPE DESC /*저장조건(냉동부터)*/	             
+               , MS_PARCEL_BOX.CUBE DESC /*박스체적 큰 순*/
+               , (CASE WHEN MS_UOM.CUBE IS NULL OR MS_UOM.CUBE = 0 THEN 
+                     1000	
+             	 ELSE
+             	 	CEIL(MS_UOM.CUBE)	 
+             	 END * WD_KX_ORDER.ORDERQTY) DESC /*총상품부피 큰 순*/
+               ,WD_KX_ORDER.ADDDATE  
+    </select>
+
+
+    
+    <!-- 체크 정보 을(를) 조회 -->
+    <select id="selectChkIntMaster01"  parameterType="hashMap" resultType="hashMap">
+    <![CDATA[
+        SELECT /* [WdQuickRequestService.selectChkIntMaster01][접수여부 체크][sss][20250717]*/
+               MAX((
+                   SELECT CASE WHEN COUNT(*) > 0 THEN 'Y' ELSE 'N' END AS CHK1
+                     FROM WD_KX_ORDER
+                    WHERE DOCNO_FW   = #{docnoFw} 
+                      AND DOCLINE_FW = #{doclineFw} 
+                  )) AS CHK1 /*체크.IF존재여부*/
+              ,MAX(CASE WHEN STATUS >= '16' THEN 'Y' ELSE 'N' END) AS CHK2 /*체크.택배송장 발행상태(10:업로드,11:업로드삭제,12:접수실패,13:배송제외,14:배송분리,16:접수확정,17:송장분리완료,20:택배접수완료,21:택배접수취소)*/
+              ,MAX(FN_CODEDESCR(#{gStorerkey}, 'STATUS_INVOICENO', DECODE(DELIVERYINFO_EMP.STATUS, '00', '10', DELIVERYINFO_EMP.STATUS))) AS STATUSNM /*상태명*/ 
+          FROM DELIVERYINFO_EMP
+         WHERE SERIALKEY = #{serialkey}           
+    ]]>
+    </select>     
+    
+	<update id="updateMasterList01">
+		MERGE INTO DELIVERYINFO_EMP T
+		USING (
+		    SELECT A.SERIALKEY,A.EXCEPT_REASON_CD,A.RCPT_HOUR_TYPE,A.N_DELIVERY_YN,A.DELIVERY_ADDR,
+ 					<foreach collection="list" item="item" index="index" separator="">
+			            <if test="index == 0">
+			               #{item.gUserId}
+			            </if>
+			        </foreach> AS EDITWHO
+		    FROM (
+				    <foreach collection="list" item="item" separator="UNION ALL">
+				        SELECT #{item.serialkey} AS SERIALKEY,#{item.exceptReasonCd} AS EXCEPT_REASON_CD,#{item.rcptHourType} AS RCPT_HOUR_TYPE,#{item.nDeliveryYn} AS N_DELIVERY_YN, DAMO.ENC(#{item.rcvrAddr}) AS DELIVERY_ADDR
+                          FROM DUAL
+				    </foreach>
+		        ) A
+		) S
+		ON (T.SERIALKEY = S.SERIALKEY)
+		WHEN MATCHED THEN
+		UPDATE SET
+		    T.EXCEPT_REASON_CD  = S.EXCEPT_REASON_CD
+		   ,T.DELIVERY_ADDR     = S.DELIVERY_ADDR
+		   ,T.RCPT_HOUR_TYPE    = S.RCPT_HOUR_TYPE
+		   ,T.DELIVERY_SVC_TYPE = CASE  WHEN S.N_DELIVERY_YN = 'Y' THEN 
+		                              '03'
+		                          ELSE 
+		                              '01'
+		                          END
+		   ,T.STATUS            = CASE WHEN S.EXCEPT_REASON_CD IS NOT NULL THEN 
+		                              '13'
+		                          ELSE 
+		                              '10'
+		                          END
+		   ,T.EDITWHO  = S.EDITWHO
+		   ,T.EDITDATE = SYSDATE
+	</update>
+	
+	
+    <!-- 주소정제 결과 저장 -->
+    <update id="updateAddrRfnSmResult">
+        UPDATE /* [wdKxDeliveryInvoiceService.sqlx][wdKxDeliveryInvoiceService.updateAddrRfnSmResult]*/
+               DELIVERYINFO_EMP
+           SET EDITDATE    = SYSDATE
+              ,EDITWHO     = #{gUserId}    
+               <choose>
+	              <when test="resultCd == 'S'.toString()"> 
+	                  ,RCPT_ERR_YN  = 'N' /*접수성공*/
+	                  ,RCPT_ERR_MSG = ''  /*접수에러메세지 초기화*/
+	                  ,STATUS       = '16' /*10:업로드,11:업로드삭제,12:접수실패,13:배송제외,14:배송분리,16:접수확정,17:송장분리완료,20:택배접수완료,21:택배접수취소*/
+	              </when>
+	              <otherwise>
+	                  ,RCPT_ERR_YN  = 'Y' /*접수실패 시*/
+	                  ,RCPT_ERR_MSG = SUBSTR(#{resultDetail},1,500) /*접수에러메세지*/ 
+	                  ,STATUS       = '12' /*체크.택배송장 발행상태(10:업로드,11:업로드삭제,12:접수실패,13:배송제외,14:배송분리,16:접수확정,17:송장분리완료,20:택배접수완료,21:택배접수취소)*/
+	              </otherwise>
+	          </choose>               
+	     WHERE SERIALKEY = #{serialkey}    
+    </update>  
+    
+    <!-- 운송장번호 채번 후 결과 저장(실패 시만 저장) -->
+    <update id="updateReqInvcNoResult">
+        UPDATE /* [wdKxDeliveryInvoiceService.sqlx][wdKxDeliveryInvoiceService.updateReqInvcNoResult]*/
+               WD_KX_ORDER
+           SET RCPT_ERR_YN  = 'Y' /*접수실패 시*/
+	          ,RCPT_ERR_MSG = SUBSTR(#{resultDetail},1,500) /*접수에러메세지*/ 
+	          ,STATUS       = '12' /*체크.택배송장 발행상태(10:업로드,11:업로드삭제,12:접수실패,13:배송제외,14:배송분리,16:접수확정,17:송장분리완료,20:택배접수완료,21:택배접수취소)*/
+              --  
+			  ,EDITDATE    = SYSDATE
+              ,EDITWHO     = #{gUserId}         
+	     WHERE (DOCDT, DOCNO) IN (
+						             SELECT DOCDT, DOCNO
+						               FROM WD_KX_ORDER
+	                                  WHERE SERIALKEY = #{serialkey}
+					               )	/*운송장 단위로 처리 = docno*/              
+    </update>     
+        
+    
+    <!-- 저장.N배송 update - 전체 -->
+    <update id="updateMasterNDeliveryDivideAll01">
+        UPDATE /* [WdKxDeliveryInvoiceService.sqlx][wdKxDeliveryInvoiceService.updateMasterNDeliveryDivideAll01][N배송 분리 처리][sss][2025.12.29]*/
+               DELIVERYINFO_EMP T1
+           SET DELIVERY_SVC_TYPE = '03' /*N배송*/
+              ,EDITDATE          = SYSDATE
+              ,EDITWHO           = #{gUserId} 
+         WHERE REQ_DATE       = #{reqDate}
+           AND RCPT_HOUR_TYPE = #{rcptHourType}    /*시간구분(1:오전,2:오후)*/        
+           AND (T1.DELIVERY_NAME, T1.DELIVERY_ADDR, T1.DELIVERY_ADDR ,NVL(T1.DELIVERY_TEL,T1.DELIVERY_PHONE) ) IN (
+                            SELECT DELIVERYINFO_EMP.DELIVERY_NAME, DELIVERYINFO_EMP.DELIVERY_ADDR, DELIVERYINFO_EMP.DELIVERY_ADDR ,NVL(DELIVERYINFO_EMP.DELIVERY_TEL,DELIVERYINFO_EMP.DELIVERY_PHONE)                                                   
+                              FROM DELIVERYINFO_EMP                                                 
+                              JOIN DM_DOCUMENT_D 
+                                ON DM_DOCUMENT_D.DOCNO        = DELIVERYINFO_EMP.DOCNO
+                               AND DM_DOCUMENT_D.DOCLINE      = DELIVERYINFO_EMP.DOCLINE
+                               AND DM_DOCUMENT_D.DELIVERYDATE = DELIVERYINFO_EMP.REQ_DATE
+                               AND DM_DOCUMENT_D.DEL_YN       = 'N'
+                               AND DM_DOCUMENT_D.STORERKEY    = #{gStorerkey}                                  
+                             WHERE REQ_DATE = #{reqDate}                                              
+                               AND EXISTS (SELECT 1                                                    
+                                             FROM CM_CODE_STORER CD6                                   
+                                            WHERE CD6.STORERKEY = #{gStorerkey}                                
+                                              AND CD6.CODELIST  = 'N_DELIVERY_CUST_SKU'                
+                                              AND CD6.DATA1     = DELIVERYINFO_EMP.EMP_CUSTKEY                       
+                                              AND CD6.DATA2     = DM_DOCUMENT_D.SKU                               
+                                         ) /*N배송 상품리스트*/  
+                         )
+            AND STATUS NOT IN ('17','20') /*택배송장 발행상태(10:업로드,11:업로드삭제,12:접수실패,13:배송제외,14:배송분리,16:접수확정,17:송장분리완료,20:택배접수완료,21:택배접수취소)*/                 
+    </update> 
+    
+    <!-- 저장.N배송 update - 전체 -->
+    <update id="updateMasterNDeliveryDivideAll02">
+        UPDATE /* [WdKxDeliveryInvoiceService.sqlx][wdKxDeliveryInvoiceService.updateMasterNDeliveryDivideAll02][N배송 분리 처리][sss][2025.12.29]*/
+               DELIVERYINFO_EMP T1
+           SET STATUS            = '14'   /*14:배송분리*/
+              ,EDITDATE          = SYSDATE
+              ,EDITWHO           = #{gUserId} 
+         WHERE REQ_DATE = #{reqDate}
+            AND RCPT_HOUR_TYPE = #{rcptHourType}    /*시간구분(1:오전,2:오후)*/      
+            AND STATUS NOT IN ('17','20') /*택배송장 발행상태(10:업로드,11:업로드삭제,12:접수실패,13:배송제외,14:배송분리,16:접수확정,17:송장분리완료,20:택배접수완료,21:택배접수취소)*/                 
+    </update>  
+    
+    
+    <!-- 저장.운송장대체번호 update - 전체 -->
+    <update id="updateMasterNDeliveryDivideAll03">
+		UPDATE /* [WdKxDeliveryInvoiceService.sqlx][wdKxDeliveryInvoiceService.updateMasterNDeliveryDivideAll03][운송장대체번호 처리][sss][2025.12.29]*/
+		       DELIVERYINFO_EMP T
+		SET OTHER05 = (
+		                SELECT NO
+		                 FROM (
+		                        SELECT ROW_NUMBER() OVER (ORDER BY NAME, ADDR, PHONE) AS NO -->하루 기준 오전/오후, 이름, 주소, 전화번호 순으로 번호 부여해야 하므로 ROW_NUMBER() 사용
+		                              ,NAME
+		                              ,PHONE
+		                              ,ADDR
+		                              ,RCPT_HOUR_TYPE
+		                              ,REQ_DATE
+		                        FROM (
+		                            SELECT DELIVERYINFO_EMP.DELIVERY_NAME    AS NAME 
+		                                  ,NVL(DELIVERYINFO_EMP.DELIVERY_TEL, DELIVERYINFO_EMP.DELIVERY_PHONE) AS PHONE
+		                                  ,DELIVERYINFO_EMP.DELIVERY_ADDR    AS ADDR
+		                                  ,DELIVERYINFO_EMP.RCPT_HOUR_TYPE   AS RCPT_HOUR_TYPE
+		                                  ,MAX(DELIVERYINFO_EMP.REQ_DATE)    AS REQ_DATE
+		                            FROM DELIVERYINFO_EMP
+		                            WHERE REQ_DATE = #{reqDate}
+		                            GROUP BY DELIVERY_NAME
+		                                    ,NVL(DELIVERY_TEL, DELIVERY_PHONE)
+		                                    ,DELIVERY_ADDR
+		                                    ,RCPT_HOUR_TYPE
+		                            )
+		                 ) S
+		            WHERE T.DELIVERY_NAME                       = S.NAME
+		              AND NVL(T.DELIVERY_TEL, T.DELIVERY_PHONE) = S.PHONE
+		              AND T.DELIVERY_ADDR                       = S.ADDR
+		              AND T.RCPT_HOUR_TYPE                      = S.RCPT_HOUR_TYPE
+		              --
+		              AND T.REQ_DATE                             = S.REQ_DATE
+		)
+		WHERE T.REQ_DATE     = #{reqDate}
+		  AND RCPT_HOUR_TYPE = #{rcptHourType}    /*시간구분(1:오전,2:오후)*/    
+		  AND STATUS NOT IN ('17','20') /*택배송장 발행상태(10:업로드,11:업로드삭제,12:접수실패,13:배송제외,14:배송분리,16:접수확정,17:송장분리완료,20:택배접수완료,21:택배접수취소)*/                
+    </update>      
+    
+    <!-- 상품코드 유효성 체크 정보 을(를) 조회 -->
+    <select id="checkMasterNDeliveryDivideAll"  resultType="hashMap"> 
+    <![CDATA[
+        SELECT /* [WdKxDeliveryInvoiceService.sqlx][checkMasterNDeliveryDivideAll][N배송분리 시 유효성 체크 조회][sss][2025.06.02] */
+               CASE WHEN COUNT(*) > 0 THEN 'Y' ELSE 'N' END AS CHK1         /*체크.시간대.존재여부*/
+              ,MAX((
+                   SELECT CASE WHEN COUNT(*) > 0 THEN 'Y' ELSE 'N' END
+                     FROM WD_KX_ORDER
+                    WHERE REQ_DATE       = #{reqDate}
+                      AND RCPT_HOUR_TYPE = #{rcptHourType}    /*시간구분(1:오전,2:오후)*/     
+                      AND STATUS NOT IN ('20')
+                  )) AS CHK2 /*체크.센터접수내역*/
+              ,MAX(EMP_CUST_DOCNO)                          AS EMP_CUST_DOCNO /*판매사이트주문번호*/
+          FROM DELIVERYINFO_EMP   
+         WHERE DELIVERYINFO_EMP.REQ_DATE = #{reqDate}
+           AND RCPT_HOUR_TYPE IS NULL                    
+    ]]>
+    </select>      
+    
+    <!-- 저장.N배송 update -->
+    <update id="updateMasterNDeliveryYn">
+        BEGIN
+	    <foreach collection="list" item="item" separator="">
+            UPDATE /* [wdKxDeliveryInvoiceService.sqlx][wdKxDeliveryInvoiceService.updateMasterNDeliveryYn][N배송 분리 처리][sss][2025.12.29]*/
+                   DELIVERYINFO_EMP T1
+               SET DELIVERY_SVC_TYPE = '03' /*배송서비스구분(01:일반,02:반품,03:N배송)*/
+                  ,EDITDATE          = SYSDATE
+                  ,EDITWHO           = #{item.gUserId}     
+             WHERE EXISTS (SELECT 1
+                             FROM DELIVERYINFO_EMP
+                            WHERE SERIALKEY = #{item.serialkey}     
+                              AND EXISTS (SELECT 1
+                                            FROM CM_CODE_STORER CD6
+                                           WHERE CD6.STORERKEY = #{item.gStorerkey}     
+                                             AND CD6.CODELIST  = 'N_DELIVERY_CUST_SKU'  
+                                             AND CD6.DATA1     = #{item.empCustkey}     
+                                             AND CD6.DATA2     = #{item.sku}            
+                                        )
+                             AND EMP_CUSTKEY    = #{item.empCustkey}
+                             AND EMP_CUST_DOCNO = T1.EMP_CUST_DOCNO /*같은 온라인번호의 모든 상품 update*/ 
+                             AND EMP_CUST_DOCNO > ' '
+                          )
+                AND STATUS IN ('00','10') /*택배송장 발행상태(10:업로드,11:업로드삭제,12:접수실패,13:배송제외,14:배송분리,16:접수확정,17:송장분리완료,20:택배접수완료,21:택배접수취소)*/          
+             ; /*한주문에 1개의 N배송상품이 있으면 모두 N배송 처리*/                  
+	    </foreach>
+	    END;	    
+    </update>             
+    
+    <!-- 저장.상품 체적 미존재 처리 - 전체 - 현재 미사용 -->
+    <update id="updateMasterNDeliveryDivideAll12">
+        UPDATE /* [WdKxDeliveryInvoiceService.sqlx][wdKxDeliveryInvoiceService.updateMasterNDeliveryDivideAll][N배송 분리 처리][sss][2025.12.29]*/
+               DELIVERYINFO_EMP
+           SET EXCEPT_REASON_CD  = '01'  /*제외사유코드(01:체적없음(CBM))*/
+              ,STATUS            = '13'  /*13:배송제외*/
+              ,EDITDATE          = SYSDATE
+              ,EDITWHO           = #{gUserId} 
+         WHERE REQ_DATE = #{reqDate}
+           AND EXISTS (SELECT 1
+                         FROM MS_SKU
+                        JOIN DM_DOCUMENT_D 
+                          ON DM_DOCUMENT_D.DOCNO        = DELIVERYINFO_EMP.DOCNO       
+                         AND DM_DOCUMENT_D.DOCLINE      = DELIVERYINFO_EMP.DOCLINE     
+                         AND DM_DOCUMENT_D.DELIVERYDATE = DELIVERYINFO_EMP.REQ_DATE                       
+                    LEFT JOIN MS_UOM 
+                           ON MS_SKU.STORERKEY = MS_UOM.STORERKEY
+                          AND MS_SKU.SKU       = MS_UOM.SKU
+                          AND MS_SKU.BASEUOM   = MS_UOM.BASEUOM
+                          AND MS_UOM.UOM       = DM_DOCUMENT_D.STORERUOM   
+                      WHERE MS_SKU.STORERKEY = #{gStorerkey} 
+                          AND (MS_UOM.CUBE IS NULL OR MS_UOM.CUBE = 0) 
+                          AND DM_DOCUMENT_D.DELIVERYDATE = #{reqDate}
+                          AND EXISTS (SELECT 1                                                    
+                                        FROM CM_CODE_STORER CD6                                   
+                                       WHERE CD6.STORERKEY = #{gStorerkey}                     
+                                         AND CD6.CODELIST  = 'N_DELIVERY_CUST_SKU'                
+                                         AND CD6.DATA1     = WD_KX_ORDER.CUSTKEY                       
+                                         AND CD6.DATA2     = WD_KX_ORDER.SKU                               
+                                    ) /*N배송 상품리스트*/  
+                   )
+            AND STATUS NOT IN ('20') /*택배송장 발행상태(10:업로드,11:업로드삭제,12:접수실패,13:배송제외,14:배송분리,16:접수확정,17:송장분리완료,20:택배접수완료,21:택배접수취소)*/                    
+    </update>     
+    
+    <!-- 저장.반품 update - 전체 -->
+    <update id="updateMasterNDeliveryDivideRefund">
+        UPDATE /* [WdKxDeliveryInvoiceService.sqlx][wdKxDeliveryInvoiceService.updateMasterNDeliveryDivideAll][N배송 분리 처리][sss][2025.12.29]*/
+               DELIVERYINFO_EMP T1
+           SET DELIVERY_SVC_TYPE = '02' /*배송서비스구분(01:일반,02:반품,03:N배송)*/
+              ,EDITDATE          = SYSDATE
+              ,EDITWHO           = #{gUserId} 
+         WHERE REQ_DATE = #{reqDate}
+           AND DELIVERY_SVC_TYPE = '02' /*배송서비스구분(01:일반,02:반품,03:N배송)*/
+    </update>        
+    
+    <!-- 접수확정 -->
+	<update id="insertMasterReceipt">
+	    INSERT /* [WdKxDeliveryInvoiceService.sqlx][wdKxDeliveryInvoiceService.insertMasterReceipt][접수확정][sss][2025.12.29]*/
+	      INTO WD_KX_ORDER (
+	         SERIALKEY              /*데이터번호*/
+	        ,DCCODE                 /*센터코드*/
+	        ,CUSTKEY                /*고객사키*/
+	        ,DOCDT                  /*접수일자 - 택배*/
+	        ,DOCNO                  /*문서번호*/
+	        ,ORDERTYPE              /*주문유형*/
+	        ,WORKTYPE               /*작업유형(01:일반,02:교환,03:A/S)*/   
+	        ,REQUESTTYPE            /*요청유형(01 일반, 02 취소)*/
+	        ,PACKAGEKEY             /*패키지키*/
+	        ,PACKAGEKEY_LINE        /*패키지키라인*/
+	        ,EXPENSETYPE            /*비용유형*/
+	        ,FEETYPE                /*요금유형*/
+	        ,CONTRACTTYPE           /*계약유형*/
+	        ,BOXTYPE                /*박스타입*/
+	        ,BOXQTY                 /*박스수량*/
+	        ,COST                   /*비용*/
+	        ,KX_CUSTKEY             /*KX고객사키*/
+	        ,SENDR_NM               /*송화인명*/
+	        ,SENDR_TEL_NO1          /*송화인전화번호1*/
+	        ,SENDR_TEL_NO2          /*송화인전화번호2*/
+	        ,SENDR_TEL_NO3          /*송화인전화번호3*/
+	        ,SENDR_CELL_NO1         /*송화인휴대폰번호1*/
+	        ,SENDR_CELL_NO2         /*송화인휴대폰번호2*/
+	        ,SENDR_CELL_NO3         /*송화인휴대폰번호3*/
+	        ,SENDR_SAFE_NO1         /*송화인안심번호1*/
+	        ,SENDR_SAFE_NO2         /*송화인안심번호2*/
+	        ,SENDR_SAFE_NO3         /*송화인안심번호3*/
+	        ,SENDR_ZIP_NO           /*송화인우편번호*/
+	        ,SENDR_ADDR             /*송화인주소*/
+	        ,SENDR_DETAIL_ADDR      /*송화인상세주소*/
+	        ,RCVR_NM                /*수화인명*/
+	        ,RCVR_TEL_NO1           /*수화인전화번호1*/
+	        ,RCVR_TEL_NO2           /*수화인전화번호2*/
+	        ,RCVR_TEL_NO3           /*수화인전화번호3*/
+	        ,RCVR_CELL_NO1          /*수화인휴대폰번호1*/
+	        ,RCVR_CELL_NO2          /*수화인휴대폰번호2*/
+	        ,RCVR_CELL_NO3          /*수화인휴대폰번호3*/
+	        ,RCVR_SAFE_NO1          /*수화인안심번호1*/
+	        ,RCVR_SAFE_NO2          /*수화인안심번호2*/
+	        ,RCVR_SAFE_NO3          /*수화인안심번호3*/
+	        ,RCVR_ZIP_NO            /*수화인우편번호*/
+	        ,RCVR_ADDR              /*수화인주소*/
+	        ,RCVR_DETAIL_ADDR       /*수화인상세주소*/
+	        ,ORDR_NM                /*주문자명*/             
+	        ,ORDR_TEL_NO1           /*주문자전화번호1*/         
+	        ,ORDR_TEL_NO2           /*주문자전화번호2*/         
+	        ,ORDR_TEL_NO3           /*주문자전화번호3*/         
+	        ,ORDR_CELL_NO1          /*주문자휴대폰번호1*/        
+	        ,ORDR_CELL_NO2          /*주문자휴대폰번호2*/        
+	        ,ORDR_CELL_NO3          /*주문자휴대폰번호3*/        
+	        ,ORDR_SAFE_NO1          /*주문자안심번호1*/         
+	        ,ORDR_SAFE_NO2          /*주문자안심번호2*/         
+	        ,ORDR_SAFE_NO3          /*주문자안심번호3*/         
+	        ,ORDR_ZIP_NO            /*주문자우편번호*/          
+	        ,ORDR_ADDR              /*주문자주소*/            
+	        ,ORDR_DETAIL_ADDR       /*주문자상세주소*/          
+	        ,INVOICENO              /*송장번호*/
+	        ,ORI_INVOICENO          /*원송장번호*/
+	        ,ORI_ORD_NO             /*원주문번호*/
+	        ,COLCT_EXPCT_YMD        /*집하예정일*/
+	        ,COLCT_EXPCT_HOUR       /*집하예정시간*/
+	        ,SHIP_EXPCT_YMD         /*출고예정일*/
+	        ,SHIP_EXPCT_HOUR        /*출고예정시간*/
+	        ,PRT_ST                 /*출력상태*/
+	        ,ARTICLE_AMT            /*상품금액*/
+	        ,REMARK_1               /*비고1*/
+	        ,REMARK_2               /*비고2*/
+	        ,REMARK_3               /*비고3*/
+	        ,COD_YN                 /*착불여부*/
+	        ,SKU                    /*상품코드*/
+	        ,DESCRIPTION            /*상품명*/
+	        ,ORDERQTY               /*주문수량*/
+	        ,UNIT_CD                /*단위코드*/
+	        ,UNIT_NM                /*단위명*/
+	        ,GDS_AMT                /*상품금액*/
+	        ,ETC_1                  /*기타1*/
+	        ,ETC_2                  /*기타2*/
+	        ,ETC_3                  /*기타3*/
+	        ,ETC_4                  /*기타4*/
+	        ,ETC_5                  /*기타5*/
+	        ,DLV_DV                 /*배송구분*/
+	        ,RCPT_ERR_YN            /*접수에러여부*/
+	        ,RCPT_ERR_MSG           /*접수에러메세지*/
+	        ,STATUS                 /*상태(10:업로드,11:업로드삭제,12:접수실패,13:배송제외,14:배송분리,16:접수확정,17:송장분리완료,20:택배접수완료,21:택배접수취소)*/
+			,DEL_YN                 /*삭제여부*/ 
+			,DOCNO_FW               /*FW주문번호*/ 
+			,DOCLINE_FW             /*FW주문번호상세*/ 
+	        ,ADDWHO                 /*등록자*/
+	        ,ADDDATE                /*등록일*/
+	        ,EDITWHO                /*수정자*/
+	        ,EDITDATE               /*수정일*/
+	        ,REQ_DATE               /*납품요청일자*/
+	        ,RCPT_HOUR_TYPE         /*접수시간대구분*/
+	        ,DELIVERY_SVC_TYPE      /*배송서비스구분(01:일반,02:반품,03:N배송)*/
+	        ,EXCEPT_REASON_CD       /*제외사유코드*/
+	        ,SEQ                    /*순번*/
+			,PRINT_CNT	            /*출력횟수*/
+			,CLSFCD	                /*도착지코드*/
+			,SUBCLSFCD	            /*도착지서브코드*/
+			,CLSFADDR	            /*주소약칭*/
+			,CLLDLVBRANNM	        /*배송집배점명*/
+			,CLLDLVEMPNM	        /*배송SM명*/
+			,CLLDLVEMPNICKNM        /*SM분류코드*/
+			,RSPSDIV	            /*권역구분*/
+			,P2PCD	                /*P2P코드*/
+	    ) 
+          SELECT SEQ_IF_WD_KX_ORDER.NEXTVAL AS SERIALKEY       /*시리얼키*/        
+                ,A.DCCODE                 /*센터코드*/
+                ,A.CUSTKEY                /*고객사키*/
+                ,A.DOCDT                  /*접수일자 - 택배*/
+                ,CASE WHEN A.DELIVERY_SVC_TYPE = '01' THEN 
+                     'G' --일반
+                 WHEN A.DELIVERY_SVC_TYPE = '02' THEN 
+                     'R' --N배송 오후
+                 WHEN A.DELIVERY_SVC_TYPE = '03' THEN 
+                     'N' --N배송 오후
+                 ELSE 
+                     '' 
+                 END||TO_CHAR(SYSDATE,'YYMMDD')||(
+                          SELECT LPAD(NVL(MAX(T1.SEQ),0) + 1,6,'0')
+                            FROM WD_KX_ORDER T1
+                           WHERE T1.DOCDT = TO_CHAR(SYSDATE,'YYYYMMDD')
+                         ) AS DOCNO           /*문서번호*/          
+                ,A.ORDERTYPE              /*주문유형*/
+                ,A.WORKTYPE               /*작업유형(01:일반,02:교환,03:A/S)*/   
+            ,A.REQUESTTYPE
+            ,A.PACKAGEKEY
+            ,A.PACKAGEKEY_LINE
+            ,A.EXPENSETYPE
+            ,A.FEETYPE
+            ,A.CONTRACTTYPE
+            ,A.BOXTYPE
+            ,A.BOXQTY
+            ,A.COST
+            ,A.KX_CUSTKEY
+            ,A.SENDR_NM
+            ,A.SENDR_TEL_NO1
+            ,A.SENDR_TEL_NO2
+            ,A.SENDR_TEL_NO3
+            ,A.DELIVERY_PHONE1
+            ,A.DELIVERY_PHONE2
+            ,A.DELIVERY_PHONE3
+            ,A.SENDR_SAFE_NO1
+            ,A.SENDR_SAFE_NO2
+            ,A.SENDR_SAFE_NO3
+            ,A.SENDR_ZIP_NO
+            ,A.SENDR_ADDR
+            ,A.SENDR_DETAIL_ADDR
+            ,A.RCVR_NM
+            ,A.RCVR_TEL_NO1
+            ,A.RCVR_TEL_NO2
+            ,A.RCVR_TEL_NO3
+            ,A.RCVR_CELL_NO1
+            ,A.RCVR_CELL_NO2
+            ,A.RCVR_CELL_NO3
+            ,A.RCVR_SAFE_NO1
+            ,A.RCVR_SAFE_NO2
+            ,A.RCVR_SAFE_NO3
+            ,A.RCVR_ZIP_NO
+            ,A.RCVR_ADDR
+            ,A.RCVR_DETAIL_ADDR
+            ,A.ORDR_NM
+            ,A.ORDER_TEL1
+            ,A.ORDER_TEL2
+            ,A.ORDER_TEL3
+            ,A.ORDER_PHONE1
+            ,A.ORDER_PHONE2
+            ,A.ORDER_PHONE3
+            ,A.ORDER_SAFE_NO1
+            ,A.ORDER_SAFE_NO2
+            ,A.ORDER_SAFE_NO3
+            ,A.ORDER_ZIP_NO
+            ,A.ORDER_ADDR
+            ,A.ORDER_DETAIL_ADDR
+            ,A.INVOICENO
+            ,A.ORI_INVOICENO
+            ,A.ORI_ORD_NO
+            ,A.COLCT_EXPCT_YMD
+            ,A.COLCT_EXPCT_HOUR
+            ,A.SHIP_EXPCT_YMD
+            ,A.SHIP_EXPCT_HOUR
+            ,A.PRT_ST
+            ,A.ARTICLE_AMT
+            ,A.REMARK_1
+            ,A.REMARK_2
+            ,A.REMARK_3
+            ,A.COD_YN
+            ,A.SKU
+            ,A.DESCRIPTION
+            ,A.ORDERQTY
+            ,A.UNIT_CD
+            ,A.UNIT_NM
+            ,A.GDS_AMT
+            ,A.ETC_1
+            ,A.ETC_2
+            ,A.ETC_3
+            ,A.ETC_4
+            ,A.ETC_5
+            ,A.DLV_DV
+            ,A.RCPT_ERR_YN
+            ,A.RCPT_ERR_MSG
+            ,A.STATUS
+            ,A.DEL_YN
+            ,A.DOCNO_FW
+            ,A.DOCLINE_FW
+            ,A.ADDWHO
+            ,A.ADDDATE
+            ,A.EDITWHO
+            ,A.EDITDATE
+            ,A.REQ_DATE
+            ,A.RCPT_HOUR_TYPE
+            ,A.DELIVERY_SVC_TYPE
+            ,A.EXCEPT_REASON_CD
+            ,A.SEQ
+            ,A.PRINT_CNT
+            ,A.CLSFCD
+            ,A.SUBCLSFCD
+            ,A.CLSFADDR
+            ,A.CLLDLVBRANNM
+            ,A.CLLDLVEMPNM
+            ,A.CLLDLVEMPNICKNM
+            ,A.RSPSDIV
+            ,A.P2PCD
+           FROM (				
+	   <foreach collection="list" item="item" separator="UNION ALL"> 
+          SELECT NULL                                                           AS SERIALKEY       /*시리얼키*/          
+		        ,#{item.dccode}                                                 AS DCCODE          /*센터코드*/          
+		        ,DELIVERYINFO_EMP.EMP_CUSTKEY                                   AS CUSTKEY         /*고객사키*/          
+		        ,TO_CHAR(SYSDATE,'YYYYMMDD')                                    AS DOCDT           /*접수일자 - 택배*/           
+		        ,NULL AS DOCNO           /*문서번호*/          
+		        ,#{item.ordertype}                                              AS ORDERTYPE       /*주문유형(01 일반,02 반품)*/          
+		        ,#{item.worktype}                                               AS WORKTYPE        /*작업유형(01:일반,02:교환,03:A/S)*/          
+		        ,#{item.requesttype}                                            AS REQUESTTYPE     /*요청유형*/          
+		        ,#{item.packagekey}                                             AS PACKAGEKEY      /*패키지키*/          
+		        ,#{item.packagekeyLine}                                         AS PACKAGEKEY_LINE /*패키지키라인*/        
+		        ,ETC_INFO.EXPENSETYPE                                           AS EXPENSETYPE     /*비용유형*/          
+		        ,ETC_INFO.FEETYPE                                               AS FEETYPE         /*요금유형*/          
+		        ,ETC_INFO.CONTRACTTYPE                                          AS CONTRACTTYPE    /*계약유형*/          
+		        ,'준비중'                                                         AS BOXTYPE         /*박스타입*/          
+		        ,NULL                                                           AS BOXQTY          /*박스수량*/          
+		        ,#{item.cost}                                                   AS COST            /*비용*/            
+		        ,CASE WHEN DELIVERYINFO_EMP.DELIVERY_SVC_TYPE = '03' THEN 
+		             '30565515' /*N배송-업체ID*/
+		         ELSE
+			        CASE WHEN DELIVERYINFO_EMP.RCPT_HOUR_TYPE = '1' THEN 
+			            '30451233' /*일반오전-업체ID*/
+			        WHEN DELIVERYINFO_EMP.RCPT_HOUR_TYPE = '2' THEN
+			            '30553376' /*일반오후-업체ID-확인중*/ 
+			        ELSE 
+			            '' 
+			        END                  
+		         END AS KX_CUSTKEY      /*KX고객사키*/         	         
+		        ,SENDER_INFO.SENDR_NM                                                           AS SENDR_NM          /*발송자명*/          
+		        ,LOGISONESVC.FN_DELIVERY_INFO('TEL',SENDER_INFO.SENDR_TEL_NO,'1','')            AS SENDR_TEL_NO1     /*송화인전화번호1 - table 정보없어 변수로*/
+		        ,LOGISONESVC.FN_DELIVERY_INFO('TEL',SENDER_INFO.SENDR_TEL_NO,'2','')            AS SENDR_TEL_NO2     /*송화인전화번호2*/
+		        ,DAMO.ENC(LOGISONESVC.FN_DELIVERY_INFO('TEL',SENDER_INFO.SENDR_TEL_NO,'3',''))  AS SENDR_TEL_NO3     /*송화인전화번호3*/
+		        ,LOGISONESVC.FN_DELIVERY_INFO('TEL',SENDER_INFO.SENDR_CELL_NO,'1','')           AS DELIVERY_PHONE1   /*송화인휴대폰번호1*/
+		        ,LOGISONESVC.FN_DELIVERY_INFO('TEL',SENDER_INFO.SENDR_CELL_NO,'2','')           AS DELIVERY_PHONE2   /*송화인휴대폰번호2*/
+		        ,DAMO.ENC(LOGISONESVC.FN_DELIVERY_INFO('TEL',SENDER_INFO.SENDR_CELL_NO,'3','')) AS DELIVERY_PHONE3   /*송화인휴대폰번호3*/
+		        ,''                                                                             AS SENDR_SAFE_NO1    /*송화인안심번호1*/    
+		        ,''                                                                             AS SENDR_SAFE_NO2    /*송화인안심번호2*/    
+		        ,''                                                                             AS SENDR_SAFE_NO3    /*송화인안심번호3*/    
+		        ,SENDER_INFO.SENDR_ZIP_NO                                                       AS SENDR_ZIP_NO      /*송화인우편번호*/   
+		        ,LOGISONESVC.FN_DELIVERY_INFO('ADDR',SENDER_INFO.SENDR_ADDR,'1','')             AS SENDR_ADDR        /*송화인주소*/      
+		        ,DAMO.ENC(LOGISONESVC.FN_DELIVERY_INFO('ADDR',SENDER_INFO.SENDR_ADDR,'2',''))   AS SENDR_DETAIL_ADDR /*송화인상세주소*/   
+	   
+		        --                                                                                    
+		        ,DELIVERYINFO_EMP.DELIVERY_NAME                                                       AS RCVR_NM          /*수화인명*/
+		        ,LOGISONESVC.FN_DELIVERY_INFO('TEL',DAMO.DEC(NVL(DELIVERYINFO_EMP.DELIVERY_TEL,DELIVERYINFO_EMP.DELIVERY_PHONE)),'1','')           AS RCVR_TEL_NO1     /*수화인 전화번호1*/
+		        ,LOGISONESVC.FN_DELIVERY_INFO('TEL',DAMO.DEC(NVL(DELIVERYINFO_EMP.DELIVERY_TEL,DELIVERYINFO_EMP.DELIVERY_PHONE)),'2','')           AS RCVR_TEL_NO2     /*수화인 전화번호2*/
+		        ,DAMO.ENC(LOGISONESVC.FN_DELIVERY_INFO('TEL',DAMO.DEC(NVL(DELIVERYINFO_EMP.DELIVERY_TEL,DELIVERYINFO_EMP.DELIVERY_PHONE)),'3','')) AS RCVR_TEL_NO3     /*수화인 전화번호3*/
+		        ,LOGISONESVC.FN_DELIVERY_INFO('TEL',DAMO.DEC(DELIVERYINFO_EMP.DELIVERY_PHONE),'1','')           AS RCVR_CELL_NO1    /*수화인휴대폰번호1*/    
+		        ,LOGISONESVC.FN_DELIVERY_INFO('TEL',DAMO.DEC(DELIVERYINFO_EMP.DELIVERY_PHONE),'2','')           AS RCVR_CELL_NO2    /*수화인휴대폰번호2*/    
+		        ,DAMO.ENC(LOGISONESVC.FN_DELIVERY_INFO('TEL',DAMO.DEC(DELIVERYINFO_EMP.DELIVERY_PHONE),'3','')) AS RCVR_CELL_NO3    /*수화인휴대폰번호3*/    
+		        ,''                                                                                             AS RCVR_SAFE_NO1    /*수화인안심번호1*/         
+		        ,''                                                                                             AS RCVR_SAFE_NO2    /*수화인안심번호2*/         
+		        ,''                                                                                             AS RCVR_SAFE_NO3    /*수화인안심번호3*/         
+		        ,DAMO.DEC(DELIVERYINFO_EMP.DELIVERY_ZIPCODE)                                                    AS RCVR_ZIP_NO      /*수화인우편번호*/           
+		        ,LOGISONESVC.FN_DELIVERY_INFO('ADDR',DAMO.DEC(DELIVERYINFO_EMP.DELIVERY_ADDR),'1','')           AS RCVR_ADDR        /*수화인주소*/      
+		        ,DAMO.ENC(LOGISONESVC.FN_DELIVERY_INFO('ADDR',DAMO.DEC(DELIVERYINFO_EMP.DELIVERY_ADDR),'2','')) AS RCVR_DETAIL_ADDR /*수화인상세주소*/ 
+		        --                                                                                              
+		        ,DELIVERYINFO_EMP.ORDER_NAME 								                                    AS ORDR_NM      /*주문자명*/            	
+		        ,LOGISONESVC.FN_DELIVERY_INFO('TEL',DAMO.DEC(DELIVERYINFO_EMP.ORDER_TEL),'1','')                AS ORDER_TEL1   /*주문자전화번호1*/           
+		        ,LOGISONESVC.FN_DELIVERY_INFO('TEL',DAMO.DEC(DELIVERYINFO_EMP.ORDER_TEL),'2','')                AS ORDER_TEL2   /*주문자전화번호2*/           
+		        ,DAMO.ENC(LOGISONESVC.FN_DELIVERY_INFO('TEL',DAMO.DEC(DELIVERYINFO_EMP.ORDER_TEL),'3',''))      AS ORDER_TEL3   /*주문자전화번호3*/           
+		        ,LOGISONESVC.FN_DELIVERY_INFO('TEL',DAMO.DEC(DELIVERYINFO_EMP.ORDER_PHONE),'1','')              AS ORDER_PHONE1 /*주문자휴대폰번호1*/          
+		        ,LOGISONESVC.FN_DELIVERY_INFO('TEL',DAMO.DEC(DELIVERYINFO_EMP.ORDER_PHONE),'2','')              AS ORDER_PHONE2 /*주문자휴대폰번호2*/          
+		        ,DAMO.ENC(LOGISONESVC.FN_DELIVERY_INFO('TEL',DAMO.DEC(DELIVERYINFO_EMP.ORDER_PHONE),'3',''))    AS ORDER_PHONE3 /*주문자휴대폰번호3*/          
+		        ,NULL                                    AS ORDER_SAFE_NO1     /*주문자안심번호1*/       
+		        ,NULL                                    AS ORDER_SAFE_NO2     /*주문자안심번호2*/       
+		        ,NULL                                    AS ORDER_SAFE_NO3     /*주문자안심번호3*/       
+		        ,NULL                                    AS ORDER_ZIP_NO       /*주문자 우편번호*/
+		        ,NULL                                    AS ORDER_ADDR          /*주문자주소*/         
+		        ,NULL                                    AS ORDER_DETAIL_ADDR   /*주문자상세주소*/            
+		        ,'준비중'                                  AS INVOICENO          /*송장번호*/                      
+		        ,NULL                                    AS ORI_INVOICENO      /*원송장번호*/                      
+		        ,NULL                                    AS ORI_ORD_NO         /*원주문번호*/                      
+		        ,NULL                                    AS COLCT_EXPCT_YMD    /*집하예정일*/                      
+		        ,NULL                                    AS COLCT_EXPCT_HOUR   /*집하예정시간*/                      
+		        ,NULL                                    AS SHIP_EXPCT_YMD     /*출고예정일*/                      
+		        ,NULL                                    AS SHIP_EXPCT_HOUR    /*출고예정시간*/                      
+		        ,'02'                                    AS PRT_ST /*운송장 출력상태 (01: 미출력, 02: 선출력, 03: 선발번)*/
+		        ,0                                       AS ARTICLE_AMT       /*상품금액*/                          
+		        ,''                                      AS REMARK_1          /*비고1*/                           
+		        ,DELIVERYINFO_EMP.OTHER05                AS REMARK_2          /*비고2 - 운송장대체번호*/                           
+		        ,#{item.volume}                          AS REMARK_3          /*비고3 - 체적*/                           
+		        ,'N'                                     AS COD_YN            /*착불여부*/                          
+		        ,#{item.sku}                             AS SKU               /*상품코드*/                          
+		        ,#{item.description}                     AS DESCRIPTION       /*상품명*/                           
+		        ,#{item.orderqty}                        AS ORDERQTY          /*주문수량*/                          
+		        ,#{item.uom}                             AS UNIT_CD           /*단위코드*/                          
+		        ,#{item.uom}                             AS UNIT_NM           /*단위명*/                           
+		        ,0                                  AS GDS_AMT           /*상품금액*/                          
+		        ,DELIVERYINFO_EMP.DELIVERY_MSG      AS ETC_1             /*기타1 - 메송메세지*/                           
+		        ,NULL                               AS ETC_2             /*기타2 - 배송메세지2(송화인비고)*/                           
+		        ,DELIVERYINFO_EMP.DELIVERY_MSG      AS ETC_3             /*기타3 - 배송메세지3(수화인비고)*/                           
+		        ,NULL                               AS ETC_4             /*기타4*/                           
+		        ,DELIVERYINFO_EMP.EMP_CUST_DOCNO    AS ETC_5             /*기타5 - EMP 고객주문번호(알리주문번호)*/                           
+		        ,'01'                               AS DLV_DV            /*택배구분 (01: 택배)*/                       
+		        ,'N'                                AS RCPT_ERR_YN       /*접수에러여부*/                        
+		        ,NULL                               AS RCPT_ERR_MSG      /*접수에러메세지*/ 
+		        ,'16'                               AS STATUS            /*상태(10:업로드,11:업로드삭제,12:접수실패,13:배송제외,14:배송분리,16:접수확정,17:송장분리완료,20:택배접수완료,21:택배접수취소)*/
+				,'N'                                AS DEL_YN            /*삭제여부*/ 
+				,DELIVERYINFO_EMP.DOCNO             AS DOCNO_FW          /*FW주문번호*/ 
+				,DELIVERYINFO_EMP.DOCLINE           AS DOCLINE_FW        /*FW주문번호상세*/                      
+		        ,#{item.gUserId}                    AS ADDWHO            /*등록자*/                           
+		        ,SYSDATE                            AS ADDDATE           /*등록일*/                           
+		        ,#{item.gUserId}                    AS EDITWHO           /*수정자*/                           
+		        ,SYSDATE                            AS EDITDATE          /*수정일*/     
+		        ,REQ_DATE                           AS REQ_DATE          /*납품요청일자*/                     
+		        ,DELIVERYINFO_EMP.RCPT_HOUR_TYPE    AS RCPT_HOUR_TYPE    /*접수시간대구분*/                       
+		        ,DELIVERYINFO_EMP.DELIVERY_SVC_TYPE AS DELIVERY_SVC_TYPE /*배송서비스구분(01:일반,02:반품,03:N배송)*/                       
+		        ,DELIVERYINFO_EMP.EXCEPT_REASON_CD  AS EXCEPT_REASON_CD  /*제외사유코드*/
+		        ,NULL                               AS SEQ               /*순번*/     
+			    ,0                                  AS PRINT_CNT	     /*출력횟수*/
+			    /*주소정제 값*/
+			    ,#{item.clsfcd}                     AS CLSFCD	         /*도착지코드*/
+			    ,#{item.subclsfcd}                  AS SUBCLSFCD	     /*도착지서브코드*/
+			    ,DAMO.ENC(#{item.clsfaddr})         AS CLSFADDR	         /*주소약칭*/
+			    ,#{item.clldlvbrannm}               AS CLLDLVBRANNM	     /*배송집배점명*/
+			    ,#{item.clldlvempnm}                AS CLLDLVEMPNM	     /*배송SM명*/
+			    ,#{item.clldlvempnicknm}            AS CLLDLVEMPNICKNM   /*SM분류코드*/
+			    ,#{item.rspsdiv}                    AS RSPSDIV	         /*권역구분*/
+			    ,#{item.p2pcd}                      AS P2PCD	         /*P2P코드*/	                           
+		   FROM DELIVERYINFO_EMP
+		      ,(SELECT '씨제이프레시웨이㈜'  AS SENDR_NM
+	                  ,'02-2149-6114'   AS SENDR_TEL_NO
+	                  ,'02-2149-6114'   AS SENDR_CELL_NO
+	                  ,'21074'          AS SENDR_ZIP_NO
+	                  ,'경기도 용인시 기흥구 기곡로 32(하갈동) 씨제이프레시웨이주식회사' AS SENDR_ADDR 
+	             FROM DUAL
+		       ) SENDER_INFO
+		      ,(SELECT '01' AS EXPENSETYPE  /*비용유형(01:일반,02:특수,03:대형)*/
+		              ,'03' AS FEETYPE      /*요금유형(01:착불,02:선불,03:무료)*/
+	                  ,'01' AS CONTRACTTYPE /*계약품목코드(01:일반 품목)*/
+		         FROM DUAL
+		       ) ETC_INFO
+		  WHERE SERIALKEY   = #{item.serialkey} /*시리얼키*/  
+	    </foreach>
+	    ) A
+	</update>
+	
+	
+	<!-- 송장 분리 처리 -->
+	<update id="insertMasterInvoceDivide"> 
+	    INSERT INTO WD_KX_ORDER (
+	         SERIALKEY              /*데이터번호*/
+	        ,DCCODE                 /*센터코드*/ 
+	        ,CUSTKEY                /*고객사키*/
+	        ,DOCDT                  /*접수일자 - 택배*/
+	        ,DOCNO                  /*문서번호*/
+	        ,ORDERTYPE              /*주문유형*/
+	        ,WORKTYPE               /*작업유형(01:일반,02:교환,03:A/S)*/   
+	        ,REQUESTTYPE            /*요청유형(01 일반, 02 취소)*/
+	        ,PACKAGEKEY             /*패키지키*/
+	        ,PACKAGEKEY_LINE        /*패키지키라인*/
+	        ,EXPENSETYPE            /*비용유형*/
+	        ,FEETYPE                /*요금유형*/
+	        ,CONTRACTTYPE           /*계약유형*/
+	        ,BOXTYPE                /*박스타입*/
+	        ,BOXQTY                 /*박스수량*/
+	        ,COST                   /*비용*/
+	        ,KX_CUSTKEY             /*KX고객사키*/
+	        ,SENDR_NM               /*송화인명*/
+	        ,SENDR_TEL_NO1          /*송화인전화번호1*/
+	        ,SENDR_TEL_NO2          /*송화인전화번호2*/
+	        ,SENDR_TEL_NO3          /*송화인전화번호3*/
+	        ,SENDR_CELL_NO1         /*송화인휴대폰번호1*/
+	        ,SENDR_CELL_NO2         /*송화인휴대폰번호2*/
+	        ,SENDR_CELL_NO3         /*송화인휴대폰번호3*/
+	        ,SENDR_SAFE_NO1         /*송화인안심번호1*/
+	        ,SENDR_SAFE_NO2         /*송화인안심번호2*/
+	        ,SENDR_SAFE_NO3         /*송화인안심번호3*/
+	        ,SENDR_ZIP_NO           /*송화인우편번호*/
+	        ,SENDR_ADDR             /*송화인주소*/
+	        ,SENDR_DETAIL_ADDR      /*송화인상세주소*/
+	        ,RCVR_NM                /*수화인명*/
+	        ,RCVR_TEL_NO1           /*수화인전화번호1*/
+	        ,RCVR_TEL_NO2           /*수화인전화번호2*/
+	        ,RCVR_TEL_NO3           /*수화인전화번호3*/
+	        ,RCVR_CELL_NO1          /*수화인휴대폰번호1*/
+	        ,RCVR_CELL_NO2          /*수화인휴대폰번호2*/
+	        ,RCVR_CELL_NO3          /*수화인휴대폰번호3*/
+	        ,RCVR_SAFE_NO1          /*수화인안심번호1*/
+	        ,RCVR_SAFE_NO2          /*수화인안심번호2*/
+	        ,RCVR_SAFE_NO3          /*수화인안심번호3*/
+	        ,RCVR_ZIP_NO            /*수화인우편번호*/
+	        ,RCVR_ADDR              /*수화인주소*/
+	        ,RCVR_DETAIL_ADDR       /*수화인상세주소*/
+	        ,ORDR_NM                /*주문자명*/             
+	        ,ORDR_TEL_NO1           /*주문자전화번호1*/         
+	        ,ORDR_TEL_NO2           /*주문자전화번호2*/         
+	        ,ORDR_TEL_NO3           /*주문자전화번호3*/         
+	        ,ORDR_CELL_NO1          /*주문자휴대폰번호1*/        
+	        ,ORDR_CELL_NO2          /*주문자휴대폰번호2*/        
+	        ,ORDR_CELL_NO3          /*주문자휴대폰번호3*/        
+	        ,ORDR_SAFE_NO1          /*주문자안심번호1*/         
+	        ,ORDR_SAFE_NO2          /*주문자안심번호2*/         
+	        ,ORDR_SAFE_NO3          /*주문자안심번호3*/         
+	        ,ORDR_ZIP_NO            /*주문자우편번호*/          
+	        ,ORDR_ADDR              /*주문자주소*/            
+	        ,ORDR_DETAIL_ADDR       /*주문자상세주소*/          
+	        ,INVOICENO              /*송장번호*/
+	        ,ORI_INVOICENO          /*원송장번호*/
+	        ,ORI_ORD_NO             /*원주문번호*/
+	        ,COLCT_EXPCT_YMD        /*집하예정일*/
+	        ,COLCT_EXPCT_HOUR       /*집하예정시간*/
+	        ,SHIP_EXPCT_YMD         /*출고예정일*/
+	        ,SHIP_EXPCT_HOUR        /*출고예정시간*/
+	        ,PRT_ST                 /*출력상태*/
+	        ,ARTICLE_AMT            /*상품금액*/
+	        ,REMARK_1               /*비고1*/
+	        ,REMARK_2               /*비고2*/
+	        ,REMARK_3               /*비고3*/
+	        ,COD_YN                 /*착불여부*/
+	        ,SKU                    /*상품코드*/
+	        ,DESCRIPTION            /*상품명*/
+	        ,ORDERQTY               /*주문수량*/
+	        ,UNIT_CD                /*단위코드*/
+	        ,UNIT_NM                /*단위명*/
+	        ,GDS_AMT                /*상품금액*/
+	        ,ETC_1                  /*기타1*/
+	        ,ETC_2                  /*기타2*/
+	        ,ETC_3                  /*기타3*/
+	        ,ETC_4                  /*기타4*/
+	        ,ETC_5                  /*기타5*/
+	        ,DLV_DV                 /*배송구분*/
+	        ,RCPT_ERR_YN            /*접수에러여부*/
+	        ,RCPT_ERR_MSG           /*접수에러메세지*/
+	        ,STATUS                 /*상태(10:업로드,11:업로드삭제,12:접수실패,13:배송제외,14:배송분리,16:접수확정,17:송장분리완료,20:택배접수완료,21:택배접수취소)*/
+			,DEL_YN                 /*삭제여부*/ 
+			,DOCNO_FW               /*FW주문번호*/ 
+			,DOCLINE_FW             /*FW주문번호상세*/ 
+	        ,ADDWHO                 /*등록자*/
+	        ,ADDDATE                /*등록일*/
+	        ,EDITWHO                /*수정자*/
+	        ,EDITDATE               /*수정일*/
+	        ,REQ_DATE               /*납품요청일자*/
+	        ,RCPT_HOUR_TYPE         /*접수시간대구분*/
+	        ,DELIVERY_SVC_TYPE      /*배송서비스구분(01:일반,02:반품,03:N배송)*/
+	        ,EXCEPT_REASON_CD       /*제외사유코드*/
+	        ,SEQ                    /*순번*/
+			,PRINT_CNT	            /*출력횟수*/
+			,CLSFCD	                /*도착지코드*/
+			,SUBCLSFCD	            /*도착지서브코드*/
+			,CLSFADDR	            /*주소약칭*/
+			,CLLDLVBRANNM	        /*배송집배점명*/
+			,CLLDLVEMPNM	        /*배송SM명*/
+			,CLLDLVEMPNICKNM        /*SM분류코드*/
+			,RSPSDIV	            /*권역구분*/
+			,P2PCD	                /*P2P코드*/	        
+	    ) 
+	   SELECT 
+	         SEQ_IF_WD_KX_ORDER.NEXTVAL         /*데이터번호*/
+	        ,WD_KX_ORDER.DCCODE                 /*센터코드*/
+	        ,WD_KX_ORDER.CUSTKEY                /*고객사키*/
+	        ,WD_KX_ORDER.DOCDT                  /*접수일자 - 택배*/ 
+	        ,WD_KX_ORDER.DOCNO ||'_'||WD_KX_ORDER.REMARK_2||'_'||TO_CHAR(#{seq}) AS DOCNO  /*문서번호*/
+	        ,WD_KX_ORDER.ORDERTYPE              /*주문유형*/
+	        ,WD_KX_ORDER.WORKTYPE               /*작업유형(01:일반,02:교환,03:A/S)*/   
+	        ,WD_KX_ORDER.REQUESTTYPE            /*요청유형(01 일반, 02 취소)*/
+			/*
+			-다수데이터를 한 송장에 출력할 경우 처리
+			  ex:합포 없는 경우 YYYYMMDD_고객ID_고객사용번 호 or 
+			                 YYYYMMDD_고객ID_운송장번호 
+			  합포장 키와 합포장 순번은 반드시 무결성이  보장 되어야 합니다
+			*/	        
+	        ,TO_CHAR(SYSDATE,'YYYYMMDD')||'_'||WD_KX_ORDER.KX_CUSTKEY||'_'||WD_KX_ORDER.DOCNO ||'_'||WD_KX_ORDER.REMARK_2||'_'||TO_CHAR(#{seq}) AS PACKAGEKEY  /*패키지키. */
+	        --
+	        ,WD_KX_ORDER.PACKAGEKEY_LINE        /*패키지키라인*/
+	        ,WD_KX_ORDER.EXPENSETYPE            /*비용유형*/
+	        ,WD_KX_ORDER.FEETYPE                /*요금유형*/
+	        ,WD_KX_ORDER.CONTRACTTYPE           /*계약유형*/
+	  ,#{boxtype}                   AS BOXTYPE /*박스타입*/
+	  ,#{boxqty}                    AS BOXQTY  /*박스수량*/
+	        ,WD_KX_ORDER.COST                   /*비용*/
+	        ,WD_KX_ORDER.KX_CUSTKEY             /*KX고객사키*/
+	        ,WD_KX_ORDER.SENDR_NM               /*송화인명*/
+	        ,WD_KX_ORDER.SENDR_TEL_NO1          /*송화인전화번호1*/
+	        ,WD_KX_ORDER.SENDR_TEL_NO2          /*송화인전화번호2*/
+	        ,WD_KX_ORDER.SENDR_TEL_NO3          /*송화인전화번호3*/
+	        ,WD_KX_ORDER.SENDR_CELL_NO1         /*송화인휴대폰번호1*/
+	        ,WD_KX_ORDER.SENDR_CELL_NO2         /*송화인휴대폰번호2*/
+	        ,WD_KX_ORDER.SENDR_CELL_NO3         /*송화인휴대폰번호3*/
+	        ,WD_KX_ORDER.SENDR_SAFE_NO1         /*송화인안심번호1*/
+	        ,WD_KX_ORDER.SENDR_SAFE_NO2         /*송화인안심번호2*/
+	        ,WD_KX_ORDER.SENDR_SAFE_NO3         /*송화인안심번호3*/
+	        ,WD_KX_ORDER.SENDR_ZIP_NO           /*송화인우편번호*/
+	        ,WD_KX_ORDER.SENDR_ADDR             /*송화인주소*/
+	        ,WD_KX_ORDER.SENDR_DETAIL_ADDR      /*송화인상세주소*/
+	        ,WD_KX_ORDER.RCVR_NM                /*수화인명*/
+	        ,WD_KX_ORDER.RCVR_TEL_NO1           /*수화인전화번호1*/
+	        ,WD_KX_ORDER.RCVR_TEL_NO2           /*수화인전화번호2*/
+	        ,WD_KX_ORDER.RCVR_TEL_NO3           /*수화인전화번호3*/
+	        ,WD_KX_ORDER.RCVR_CELL_NO1          /*수화인휴대폰번호1*/
+	        ,WD_KX_ORDER.RCVR_CELL_NO2          /*수화인휴대폰번호2*/
+	        ,WD_KX_ORDER.RCVR_CELL_NO3          /*수화인휴대폰번호3*/
+	        ,WD_KX_ORDER.RCVR_SAFE_NO1          /*수화인안심번호1*/
+	        ,WD_KX_ORDER.RCVR_SAFE_NO2          /*수화인안심번호2*/
+	        ,WD_KX_ORDER.RCVR_SAFE_NO3          /*수화인안심번호3*/
+	        ,WD_KX_ORDER.RCVR_ZIP_NO            /*수화인우편번호*/
+	        ,WD_KX_ORDER.RCVR_ADDR              /*수화인주소*/
+	        ,WD_KX_ORDER.RCVR_DETAIL_ADDR       /*수화인상세주소*/
+	        ,WD_KX_ORDER.ORDR_NM                /*주문자명*/             
+	        ,WD_KX_ORDER.ORDR_TEL_NO1           /*주문자전화번호1*/         
+	        ,WD_KX_ORDER.ORDR_TEL_NO2           /*주문자전화번호2*/         
+	        ,WD_KX_ORDER.ORDR_TEL_NO3           /*주문자전화번호3*/         
+	        ,WD_KX_ORDER.ORDR_CELL_NO1          /*주문자휴대폰번호1*/        
+	        ,WD_KX_ORDER.ORDR_CELL_NO2          /*주문자휴대폰번호2*/        
+	        ,WD_KX_ORDER.ORDR_CELL_NO3          /*주문자휴대폰번호3*/        
+	        ,WD_KX_ORDER.ORDR_SAFE_NO1          /*주문자안심번호1*/         
+	        ,WD_KX_ORDER.ORDR_SAFE_NO2          /*주문자안심번호2*/         
+	        ,WD_KX_ORDER.ORDR_SAFE_NO3          /*주문자안심번호3*/         
+	        ,WD_KX_ORDER.ORDR_ZIP_NO            /*주문자우편번호*/          
+	        ,WD_KX_ORDER.ORDR_ADDR              /*주문자주소*/            
+	        ,WD_KX_ORDER.ORDR_DETAIL_ADDR       /*주문자상세주소*/          
+	      ,'준비중' AS INVOICENO          /*송장번호*/
+	        ,WD_KX_ORDER.ORI_INVOICENO          /*원송장번호*/
+	        ,WD_KX_ORDER.ORI_ORD_NO             /*원주문번호*/
+	        ,WD_KX_ORDER.COLCT_EXPCT_YMD        /*집하예정일*/
+	        ,WD_KX_ORDER.COLCT_EXPCT_HOUR       /*집하예정시간*/
+	        ,WD_KX_ORDER.SHIP_EXPCT_YMD         /*출고예정일*/
+	        ,WD_KX_ORDER.SHIP_EXPCT_HOUR        /*출고예정시간*/
+	        ,WD_KX_ORDER.PRT_ST                 /*출력상태*/
+	        ,WD_KX_ORDER.ARTICLE_AMT            /*상품금액*/
+	        ,WD_KX_ORDER.REMARK_1               /*비고1*/
+	        ,WD_KX_ORDER.REMARK_2               /*비고2*/
+	        ,WD_KX_ORDER.REMARK_3               /*비고3*/
+	        ,WD_KX_ORDER.COD_YN                 /*착불여부*/
+	        ,WD_KX_ORDER.SKU                    /*상품코드*/
+	        ,WD_KX_ORDER.DESCRIPTION            /*상품명*/
+	        ,WD_KX_ORDER.ORDERQTY               /*주문수량*/
+	        ,WD_KX_ORDER.UNIT_CD                /*단위코드*/
+	        ,WD_KX_ORDER.UNIT_NM                /*단위명*/
+	        ,WD_KX_ORDER.GDS_AMT                /*상품금액*/
+	        ,WD_KX_ORDER.ETC_1                  /*기타1*/
+	        ,WD_KX_ORDER.ETC_2                  /*기타2*/
+	    ,TO_CHAR(NVL(#{volume},0))   AS ETC_3 /*기타3 - 체적정보*/
+	        ,WD_KX_ORDER.ETC_4                  /*기타4*/
+	        ,WD_KX_ORDER.ETC_5                  /*기타5*/
+	        ,WD_KX_ORDER.DLV_DV                 /*배송구분*/
+	        ,WD_KX_ORDER.RCPT_ERR_YN            /*접수에러여부*/
+	        ,WD_KX_ORDER.RCPT_ERR_MSG           /*접수에러메세지*/
+	        ,'17'                            AS STATUS /*상태(10:업로드,11:업로드삭제,12:접수실패,13:배송제외,14:배송분리,16:접수확정,17:송장분리완료,20:택배접수완료,21:택배접수취소)*/
+			,WD_KX_ORDER.DEL_YN              AS DEL_YN            /*삭제여부*/ 
+			,WD_KX_ORDER.DOCNO_FW            AS DOCNO_FW          /*FW주문번호*/ 
+			,WD_KX_ORDER.DOCLINE_FW          AS DOCLINE_FW        /*FW주문번호상세*/ 
+	        ,#{gUserId}                      AS ADDWHO            /*등록자*/
+	        ,SYSDATE                         AS ADDDATE           /*등록일*/
+	        ,#{gUserId}                      AS EDITWHO           /*수정자*/
+	        ,SYSDATE                         AS EDITDATE          /*수정일*/
+	        ,WD_KX_ORDER.REQ_DATE            AS REQ_DATE          /*납품요청일자*/
+	        ,WD_KX_ORDER.RCPT_HOUR_TYPE      AS RCPT_HOUR_TYPE    /*접수시간대구분*/
+	        ,WD_KX_ORDER.DELIVERY_SVC_TYPE   AS DELIVERY_SVC_TYPE /*배송서비스구분(01:일반,02:반품,03:N배송)*/
+	        ,WD_KX_ORDER.EXCEPT_REASON_CD    AS EXCEPT_REASON_CD  /*제외사유코드*/
+	        ,#{seq}                          AS SEQ               /*순번*/
+			,WD_KX_ORDER.PRINT_CNT	         AS PRINT_CNT	      /*출력횟수*/
+			,WD_KX_ORDER.CLSFCD	             AS CLSFCD	          /*도착지코드*/
+			,WD_KX_ORDER.SUBCLSFCD	         AS SUBCLSFCD	      /*도착지서브코드*/
+			,WD_KX_ORDER.CLSFADDR	         AS CLSFADDR	      /*주소약칭*/
+			,WD_KX_ORDER.CLLDLVBRANNM	     AS CLLDLVBRANNM	  /*배송집배점명*/
+			,WD_KX_ORDER.CLLDLVEMPNM	     AS CLLDLVEMPNM	      /*배송SM명*/
+			,WD_KX_ORDER.CLLDLVEMPNICKNM     AS CLLDLVEMPNICKNM   /*SM분류코드*/
+			,WD_KX_ORDER.RSPSDIV	         AS RSPSDIV	          /*권역구분*/
+			,WD_KX_ORDER.P2PCD	             AS P2PCD	          /*P2P코드*/	        
+	   FROM WD_KX_ORDER /*출고검수*/
+	  WHERE SERIALKEY   = #{serialkey} /*시리얼키-첫번째 For문의 serialkey*/  
+	  /*송장분리 INSERT*/
+	</update>
+	
+	<!-- 송장분리 전 데잍처 삭제처리-->
+    <update id="deleteMasterInvoceDivide">
+       DELETE /* [wdKxDeliveryInvoiceService.sqlx][wdKxDeliveryInvoiceService.deleteMasterInvoceDivide][삭제][sss][20250105]*/
+              WD_KX_ORDER
+        WHERE SERIALKEY = #{serialkey} /*시리얼키*/  
+    </update>		
+	
+    <!-- 센터접수번호 조회	-->       
+    <select id="getMasterKey" resultType="cjfw.wms.wd.dto.WdKxDeliveryInvoiceResDto">
+        SELECT  /* [wdKxDeliveryInvoiceService.sqlx][wdKxDeliveryInvoiceService.getMasterKey][운송장번호 채번][sss][20250105]*/
+               REPLACE(INVOICENO,'-','') AS INVOICENO
+              ,SERIALKEY                 AS SERIALKEY 
+          FROM WD_KX_INVOICENO
+         WHERE DEL_YN = 'N'
+           AND CUSTKEY = #{kxCustkey}
+           AND ROWNUM = 1
+         ORDER BY SERIALKEY
+    </select>   	
+	
+	<!-- 운송장번호 사용처리 -->
+    <update id="updateDelYnInvoiceNo">
+       UPDATE /* [wdKxDeliveryInvoiceService.sqlx][wdKxDeliveryInvoiceService.updateDelYnInvoiceNo][운송장번호 사용처리][sss][20250105]*/
+              WD_KX_INVOICENO
+          SET DEL_YN    = 'Y'
+             ,EDITDATE  = SYSDATE
+             ,EDITWHO   = #{gUserId}
+        WHERE SERIALKEY = #{serialkey} /*시리얼키*/
+    </update>	
+    
+    <!-- 접수 상태 처리 - 송장분리 -->
+    <update id="updateDeliveryStatusDivide">
+        UPDATE /* [wdKxDeliveryInvoiceService.sqlx][wdKxDeliveryInvoiceService.updateDeliveryStatusDivide][송장분리완료 처리][sss][20250105]*/
+              DELIVERYINFO_EMP
+          SET STATUS    = '17' /*10:업로드,11:업로드삭제,12:접수실패,13:배송제외,14:배송분리,16:접수확정,17:송장분리완료,20:택배접수완료,21:택배접수취소*/
+			 ,EDITDATE        = SYSDATE
+             ,EDITWHO         = #{gUserId}
+        WHERE SERIALKEY       = #{serialkeyEmp} /*시리얼키*/  
+          AND STATUS  IN ('12','16') /*12:접수실패,16:접수확정*/
+    </update>    
+    
+    <!-- 접수 상태 처리 -->
+    <update id="updateInvoiceNo">
+        UPDATE /* [wdKxDeliveryInvoiceService.sqlx][wdKxDeliveryInvoiceService.updateInvoiceNo][운송장번호 채번후 동기화][sss][20250105]*/
+              DELIVERYINFO_EMP
+          SET INVOICENO       = #{invoiceno}
+             ,EDITDATE        = SYSDATE
+             ,EDITWHO         = #{gUserId}
+        WHERE SERIALKEY       = #{serialkey} /*시리얼키*/  
+    </update>   
+    
+    <!-- 저장.N배송 update -->
+    <update id="updateMasterList02">
+        UPDATE /* [wdKxDeliveryInvoiceService.sqlx][wdKxDeliveryInvoiceService.updateMasterList02]*/
+               WD_KX_ORDER
+           SET BOXTYPE  = #{boxtype} /*박스번호*/
+              ,BOXQTY   = NVL(#{boxqty},BOXQTY)  /*박스수량*/ 
+              ,SEQ      = NVL(#{seq},SEQ)        /*순서*/ 
+              ,DOCNO    = SUBSTR(DOCNO, 1,INSTR(DOCNO, '_', -1))||#{seq}            /*문서번호*/
+              ,PACKAGEKEY = SUBSTR(PACKAGEKEY, 1,INSTR(PACKAGEKEY, '_', -1))||'_'||#{seq} 
+               --            
+              ,EDITDATE    = SYSDATE
+              ,EDITWHO     = #{gUserId}    
+         WHERE SERIALKEY   = #{serialkey} /*시리얼키*/  
+    </update>  
+    
+	<!-- 저장.N배송 신규추가 insert -->
+	<update id="insertMasterList02">
+	    INSERT /* [wdKxDeliveryInvoiceService.sqlx][wdKxDeliveryInvoiceService.insertMasterList02][N배송 등록][sss][2026.01.06]*/
+	      INTO WD_KX_ORDER (
+	         SERIALKEY              /*데이터번호*/
+	        ,DCCODE                 /*센터코드*/ 
+	        ,CUSTKEY                /*고객사키*/
+	        ,DOCDT                  /*접수일자 - 택배*/
+	        ,DOCNO                  /*문서번호*/
+	        ,ORDERTYPE              /*주문유형*/
+	        ,WORKTYPE               /*작업유형(01:일반,02:교환,03:A/S)*/   
+	        ,REQUESTTYPE            /*요청유형(01 일반, 02 취소)*/
+	        ,PACKAGEKEY             /*패키지키*/
+	        ,PACKAGEKEY_LINE        /*패키지키라인*/
+	        ,EXPENSETYPE            /*비용유형*/
+	        ,FEETYPE                /*요금유형*/
+	        ,CONTRACTTYPE           /*계약유형*/
+	        ,BOXTYPE                /*박스타입*/
+	        ,BOXQTY                 /*박스수량*/
+	        ,COST                   /*비용*/
+	        ,KX_CUSTKEY             /*KX고객사키*/
+	        ,SENDR_NM               /*송화인명*/
+	        ,SENDR_TEL_NO1          /*송화인전화번호1*/
+	        ,SENDR_TEL_NO2          /*송화인전화번호2*/
+	        ,SENDR_TEL_NO3          /*송화인전화번호3*/
+	        ,SENDR_CELL_NO1         /*송화인휴대폰번호1*/
+	        ,SENDR_CELL_NO2         /*송화인휴대폰번호2*/
+	        ,SENDR_CELL_NO3         /*송화인휴대폰번호3*/
+	        ,SENDR_SAFE_NO1         /*송화인안심번호1*/
+	        ,SENDR_SAFE_NO2         /*송화인안심번호2*/
+	        ,SENDR_SAFE_NO3         /*송화인안심번호3*/
+	        ,SENDR_ZIP_NO           /*송화인우편번호*/
+	        ,SENDR_ADDR             /*송화인주소*/
+	        ,SENDR_DETAIL_ADDR      /*송화인상세주소*/
+	        ,RCVR_NM                /*수화인명*/
+	        ,RCVR_TEL_NO1           /*수화인전화번호1*/
+	        ,RCVR_TEL_NO2           /*수화인전화번호2*/
+	        ,RCVR_TEL_NO3           /*수화인전화번호3*/
+	        ,RCVR_CELL_NO1          /*수화인휴대폰번호1*/
+	        ,RCVR_CELL_NO2          /*수화인휴대폰번호2*/
+	        ,RCVR_CELL_NO3          /*수화인휴대폰번호3*/
+	        ,RCVR_SAFE_NO1          /*수화인안심번호1*/
+	        ,RCVR_SAFE_NO2          /*수화인안심번호2*/
+	        ,RCVR_SAFE_NO3          /*수화인안심번호3*/
+	        ,RCVR_ZIP_NO            /*수화인우편번호*/
+	        ,RCVR_ADDR              /*수화인주소*/
+	        ,RCVR_DETAIL_ADDR       /*수화인상세주소*/
+	        ,ORDR_NM                /*주문자명*/             
+	        ,ORDR_TEL_NO1           /*주문자전화번호1*/         
+	        ,ORDR_TEL_NO2           /*주문자전화번호2*/         
+	        ,ORDR_TEL_NO3           /*주문자전화번호3*/         
+	        ,ORDR_CELL_NO1          /*주문자휴대폰번호1*/        
+	        ,ORDR_CELL_NO2          /*주문자휴대폰번호2*/        
+	        ,ORDR_CELL_NO3          /*주문자휴대폰번호3*/        
+	        ,ORDR_SAFE_NO1          /*주문자안심번호1*/         
+	        ,ORDR_SAFE_NO2          /*주문자안심번호2*/         
+	        ,ORDR_SAFE_NO3          /*주문자안심번호3*/         
+	        ,ORDR_ZIP_NO            /*주문자우편번호*/          
+	        ,ORDR_ADDR              /*주문자주소*/            
+	        ,ORDR_DETAIL_ADDR       /*주문자상세주소*/          
+	        ,INVOICENO              /*송장번호*/
+	        ,ORI_INVOICENO          /*원송장번호*/
+	        ,ORI_ORD_NO             /*원주문번호*/
+	        ,COLCT_EXPCT_YMD        /*집하예정일*/
+	        ,COLCT_EXPCT_HOUR       /*집하예정시간*/
+	        ,SHIP_EXPCT_YMD         /*출고예정일*/
+	        ,SHIP_EXPCT_HOUR        /*출고예정시간*/
+	        ,PRT_ST                 /*출력상태*/
+	        ,ARTICLE_AMT            /*상품금액*/
+	        ,REMARK_1               /*비고1*/
+	        ,REMARK_2               /*비고2*/
+	        ,REMARK_3               /*비고3*/
+	        ,COD_YN                 /*착불여부*/
+	        ,SKU                    /*상품코드*/
+	        ,DESCRIPTION            /*상품명*/
+	        ,ORDERQTY               /*주문수량*/
+	        ,UNIT_CD                /*단위코드*/
+	        ,UNIT_NM                /*단위명*/
+	        ,GDS_AMT                /*상품금액*/
+	        ,ETC_1                  /*기타1*/
+	        ,ETC_2                  /*기타2*/
+	        ,ETC_3                  /*기타3*/
+	        ,ETC_4                  /*기타4*/
+	        ,ETC_5                  /*기타5*/
+	        ,DLV_DV                 /*배송구분*/
+	        ,RCPT_ERR_YN            /*접수에러여부*/
+	        ,RCPT_ERR_MSG           /*접수에러메세지*/
+	        ,STATUS                 /*상태(10:업로드,11:업로드삭제,12:접수실패,13:배송제외,14:배송분리,16:접수확정,17:송장분리완료,20:택배접수완료,21:택배접수취소)*/
+			,DEL_YN                 /*삭제여부*/ 
+			,DOCNO_FW               /*FW주문번호*/ 
+			,DOCLINE_FW             /*FW주문번호상세*/ 
+	        ,ADDWHO                 /*등록자*/
+	        ,ADDDATE                /*등록일*/
+	        ,EDITWHO                /*수정자*/
+	        ,EDITDATE               /*수정일*/
+	        ,REQ_DATE               /*납품요청일자*/
+	        ,RCPT_HOUR_TYPE         /*접수시간대구분*/
+	        ,DELIVERY_SVC_TYPE      /*배송서비스구분(01:일반,02:반품,03:N배송)*/
+	        ,EXCEPT_REASON_CD       /*제외사유코드*/
+	        ,SEQ                    /*순번*/
+			,PRINT_CNT	            /*출력횟수*/          
+			,CLSFCD	                /*도착지코드*/         
+			,SUBCLSFCD	            /*도착지서브코드*/       
+			,CLSFADDR	            /*주소약칭*/          
+			,CLLDLVBRANNM	        /*배송집배점명*/        
+			,CLLDLVEMPNM	        /*배송SM명*/         
+			,CLLDLVEMPNICKNM        /*SM분류코드*/        
+			,RSPSDIV	            /*권역구분*/          
+			,P2PCD	                /*P2P코드*/	    		        
+	    )
+	   SELECT 
+	         SEQ_IF_WD_KX_ORDER.NEXTVAL         /*데이터번호*/
+	        ,WD_KX_ORDER.DCCODE                 /*센터코드*/
+	        ,WD_KX_ORDER.CUSTKEY                /*고객사키*/
+	        ,WD_KX_ORDER.DOCDT                  /*접수일자*/
+	        ,WD_KX_ORDER.DOCNO                  /*문서번호*/
+	        ,WD_KX_ORDER.ORDERTYPE              /*주문유형*/
+	        ,WD_KX_ORDER.WORKTYPE               /*작업유형(01:일반,02:교환,03:A/S)*/   
+	        ,WD_KX_ORDER.REQUESTTYPE            /*요청유형(01 일반, 02 취소)*/
+	        ,WD_KX_ORDER.PACKAGEKEY             /*패키지키*/
+	        ,WD_KX_ORDER.PACKAGEKEY_LINE        /*패키지키라인*/
+	        ,WD_KX_ORDER.EXPENSETYPE            /*비용유형*/
+	        ,WD_KX_ORDER.FEETYPE                /*요금유형*/
+	        ,WD_KX_ORDER.CONTRACTTYPE           /*계약유형*/
+	  ,#{boxtype}                   AS BOXTYPE /*박스타입*/
+	  ,#{boxqty}                    AS BOXQTY  /*박스수량*/
+	        ,WD_KX_ORDER.COST                   /*비용*/
+	        ,WD_KX_ORDER.KX_CUSTKEY             /*KX고객사키*/
+	        ,WD_KX_ORDER.SENDR_NM               /*송화인명*/
+	        ,WD_KX_ORDER.SENDR_TEL_NO1          /*송화인전화번호1*/
+	        ,WD_KX_ORDER.SENDR_TEL_NO2          /*송화인전화번호2*/
+	        ,WD_KX_ORDER.SENDR_TEL_NO3          /*송화인전화번호3*/
+	        ,WD_KX_ORDER.SENDR_CELL_NO1         /*송화인휴대폰번호1*/
+	        ,WD_KX_ORDER.SENDR_CELL_NO2         /*송화인휴대폰번호2*/
+	        ,WD_KX_ORDER.SENDR_CELL_NO3         /*송화인휴대폰번호3*/
+	        ,WD_KX_ORDER.SENDR_SAFE_NO1         /*송화인안심번호1*/
+	        ,WD_KX_ORDER.SENDR_SAFE_NO2         /*송화인안심번호2*/
+	        ,WD_KX_ORDER.SENDR_SAFE_NO3         /*송화인안심번호3*/
+	        ,WD_KX_ORDER.SENDR_ZIP_NO           /*송화인우편번호*/
+	        ,WD_KX_ORDER.SENDR_ADDR             /*송화인주소*/
+	        ,WD_KX_ORDER.SENDR_DETAIL_ADDR      /*송화인상세주소*/
+	        ,WD_KX_ORDER.RCVR_NM                /*수화인명*/
+	        ,WD_KX_ORDER.RCVR_TEL_NO1           /*수화인전화번호1*/
+	        ,WD_KX_ORDER.RCVR_TEL_NO2           /*수화인전화번호2*/
+	        ,WD_KX_ORDER.RCVR_TEL_NO3           /*수화인전화번호3*/
+	        ,WD_KX_ORDER.RCVR_CELL_NO1          /*수화인휴대폰번호1*/
+	        ,WD_KX_ORDER.RCVR_CELL_NO2          /*수화인휴대폰번호2*/
+	        ,WD_KX_ORDER.RCVR_CELL_NO3          /*수화인휴대폰번호3*/
+	        ,WD_KX_ORDER.RCVR_SAFE_NO1          /*수화인안심번호1*/
+	        ,WD_KX_ORDER.RCVR_SAFE_NO2          /*수화인안심번호2*/
+	        ,WD_KX_ORDER.RCVR_SAFE_NO3          /*수화인안심번호3*/
+	        ,WD_KX_ORDER.RCVR_ZIP_NO            /*수화인우편번호*/
+	        ,WD_KX_ORDER.RCVR_ADDR              /*수화인주소*/
+	        ,WD_KX_ORDER.RCVR_DETAIL_ADDR       /*수화인상세주소*/
+	        ,WD_KX_ORDER.ORDR_NM                /*주문자명*/             
+	        ,WD_KX_ORDER.ORDR_TEL_NO1           /*주문자전화번호1*/         
+	        ,WD_KX_ORDER.ORDR_TEL_NO2           /*주문자전화번호2*/         
+	        ,WD_KX_ORDER.ORDR_TEL_NO3           /*주문자전화번호3*/         
+	        ,WD_KX_ORDER.ORDR_CELL_NO1          /*주문자휴대폰번호1*/        
+	        ,WD_KX_ORDER.ORDR_CELL_NO2          /*주문자휴대폰번호2*/        
+	        ,WD_KX_ORDER.ORDR_CELL_NO3          /*주문자휴대폰번호3*/        
+	        ,WD_KX_ORDER.ORDR_SAFE_NO1          /*주문자안심번호1*/         
+	        ,WD_KX_ORDER.ORDR_SAFE_NO2          /*주문자안심번호2*/         
+	        ,WD_KX_ORDER.ORDR_SAFE_NO3          /*주문자안심번호3*/         
+	        ,WD_KX_ORDER.ORDR_ZIP_NO            /*주문자우편번호*/          
+	        ,WD_KX_ORDER.ORDR_ADDR              /*주문자주소*/            
+	        ,WD_KX_ORDER.ORDR_DETAIL_ADDR       /*주문자상세주소*/          
+	        ,WD_KX_ORDER.INVOICENO              /*송장번호*/
+	        ,WD_KX_ORDER.ORI_INVOICENO          /*원송장번호*/
+	        ,WD_KX_ORDER.ORI_ORD_NO             /*원주문번호*/
+	        ,WD_KX_ORDER.COLCT_EXPCT_YMD        /*집하예정일*/
+	        ,WD_KX_ORDER.COLCT_EXPCT_HOUR       /*집하예정시간*/
+	        ,WD_KX_ORDER.SHIP_EXPCT_YMD         /*출고예정일*/
+	        ,WD_KX_ORDER.SHIP_EXPCT_HOUR        /*출고예정시간*/
+	        ,WD_KX_ORDER.PRT_ST                 /*출력상태*/
+	        ,WD_KX_ORDER.ARTICLE_AMT            /*상품금액*/
+	        ,WD_KX_ORDER.REMARK_1               /*비고1*/
+	        ,WD_KX_ORDER.REMARK_2               /*비고2*/
+	        ,WD_KX_ORDER.REMARK_3               /*비고3*/
+	        ,WD_KX_ORDER.COD_YN                 /*착불여부*/
+	        ,WD_KX_ORDER.SKU                    /*상품코드*/
+	        ,WD_KX_ORDER.DESCRIPTION            /*상품명*/
+	        ,WD_KX_ORDER.ORDERQTY               /*주문수량*/
+	        ,WD_KX_ORDER.UNIT_CD                /*단위코드*/
+	        ,WD_KX_ORDER.UNIT_NM                /*단위명*/
+	        ,WD_KX_ORDER.GDS_AMT                /*상품금액*/
+	        ,WD_KX_ORDER.ETC_1                  /*기타1*/
+	        ,WD_KX_ORDER.ETC_2                  /*기타2*/
+	        ,WD_KX_ORDER.ETC_3                  /*기타3 - 체적정보*/
+	        ,WD_KX_ORDER.ETC_4                  /*기타4*/
+	        ,WD_KX_ORDER.ETC_5                  /*기타5*/
+	        ,WD_KX_ORDER.DLV_DV                 /*배송구분*/
+	        ,WD_KX_ORDER.RCPT_ERR_YN            /*접수에러여부*/
+	        ,WD_KX_ORDER.RCPT_ERR_MSG           /*접수에러메세지*/
+	        ,WD_KX_ORDER.STATUS                 /*상태(10:업로드,11:업로드삭제,12:접수실패,13:배송제외,14:배송분리,16:접수확정,17:송장분리완료,20:택배접수완료,21:택배접수취소)*/
+			,WD_KX_ORDER.DEL_YN                 /*삭제여부*/ 
+			,WD_KX_ORDER.DOCNO_FW               /*FW주문번호*/ 
+			,WD_KX_ORDER.DOCLINE_FW             /*FW주문번호상세*/ 
+	        ,#{gUserId}                      AS ADDWHO    /*등록자*/
+	        ,SYSDATE                         AS ADDDATE   /*등록일*/
+	        ,#{gUserId}                      AS EDITWHO   /*수정자*/
+	        ,SYSDATE                         AS EDITDATE  /*수정일*/
+	        ,WD_KX_ORDER.REQ_DATE            AS REQ_DATE  /*납품요청일자*/
+	        ,WD_KX_ORDER.RCPT_HOUR_TYPE      AS RCPT_HOUR_TYPE    /*접수시간대구분*/
+	        ,WD_KX_ORDER.DELIVERY_SVC_TYPE   AS DELIVERY_SVC_TYPE /*배송서비스구분(01:일반,02:반품,03:N배송)*/
+	        ,WD_KX_ORDER.EXCEPT_REASON_CD    AS EXCEPT_REASON_CD  /*제외사유코드*/
+	        ,(
+	          SELECT NVL(MAX(T1.SEQ),0) + 1 
+	            FROM WD_KX_ORDER T1
+	           WHERE T1.DOCNO_FW    = WD_KX_ORDER.DOCNO_FW 
+	             AND T1.DOCLINE_FW  = WD_KX_ORDER.DOCLINE_FW
+	             AND T1.DOCDT       = WD_KX_ORDER.DOCDT
+	         ) AS SEQ               /*순번*/
+			,WD_KX_ORDER.PRINT_CNT	         AS PRINT_CNT	      /*출력횟수*/
+			,WD_KX_ORDER.CLSFCD	             AS CLSFCD	          /*도착지코드*/
+			,WD_KX_ORDER.SUBCLSFCD	         AS SUBCLSFCD	      /*도착지서브코드*/
+			,WD_KX_ORDER.CLSFADDR	         AS CLSFADDR	      /*주소약칭*/
+			,WD_KX_ORDER.CLLDLVBRANNM	     AS CLLDLVBRANNM	  /*배송집배점명*/
+			,WD_KX_ORDER.CLLDLVEMPNM	     AS CLLDLVEMPNM	      /*배송SM명*/
+			,WD_KX_ORDER.CLLDLVEMPNICKNM     AS CLLDLVEMPNICKNM   /*SM분류코드*/
+			,WD_KX_ORDER.RSPSDIV	         AS RSPSDIV	          /*권역구분*/
+			,WD_KX_ORDER.P2PCD	             AS P2PCD	          /*P2P코드*/	    	         
+	   FROM WD_KX_ORDER /*출고검수*/
+	  WHERE SERIALKEY   = #{serialkey} /*시리얼키*/  
+	  /*행추가해서 등록하는 insert*/
+	</update>    
+	
+	<!-- 송장분리 전 데잍처 삭제처리-->
+    <update id="deleteMasterList02">
+    <![CDATA[
+       DELETE /* [wdKxDeliveryInvoiceService.sqlx][wdKxDeliveryInvoiceService.deleteMasterList02][삭제][sss][20250105]*/
+              WD_KX_ORDER
+        WHERE SERIALKEY = #{serialkey} /*시리얼키*/  
+          AND STATUS < '20' /*택배송장 발행상태(10:업로드,11:업로드삭제,12:접수실패,13:배송제외,14:배송분리,16:접수확정,17:송장분리완료,20:택배접수완료,21:택배접수취소)*/
+    ]]>
+    </update>	
+    
+    <!-- 주문상태 업데이트 - 송장분리 후 분리된 모든 전표를 삭제 시 업로드로 돌림 -->
+    <update id="updateMasterList02Status">
+       UPDATE /* [wdKxDeliveryInvoiceService.sqlx][wdKxDeliveryInvoiceService.updateMasterList02Status][상태update][sss][20250105]*/
+              DELIVERYINFO_EMP A
+          SET STATUS           = '10' /*상태(10:업로드,11:업로드삭제,12:접수실패,13:배송제외,14:배송분리,16:접수확정,17:송장분리완료,20:택배접수완료,21:택배접수취소)*/
+             ,EXCEPT_REASON_CD = ''
+             ,DELIVERY_SVC_TYPE = ''   /*배송서비스구분 초기화*/
+             ,RCPT_HOUR_TYPE   = ''   /*접수시간대구분 초기화*/
+             ,OTHER05          = ''   /*운송장사전번호*/
+             ,RCPT_ERR_YN      = 'N'  /*접수에러여부 초기화*/
+             ,RCPT_ERR_MSG     = ''   /*접수에러메세지 초기화*/
+        WHERE REQ_DATE = #{reqDate}
+          AND DOCNO    = #{docnoFw}
+          AND DOCLINE  = #{doclineFw}
+          AND NOT EXISTS (SELECT 1
+                            FROM WD_KX_ORDER
+                           WHERE DOCNO_FW   = A.DOCNO
+                             AND DOCLINE_FW = A.DOCLINE
+                         ) 
+    </update>	
+    
+    <!-- 포장수량 업데이트 - 송장분리 후 분리된 모든 전표를 삭제 시 삭제된 상품의 수량을 같은 전표에 합침 처리-->
+    <update id="updateMasterList02StatusBoxqty">
+    <![CDATA[
+      UPDATE /* [wdKxDeliveryInvoiceService.sqlx][wdKxDeliveryInvoiceService.updateMasterList02StatusBoxqty][삭제수량 update][sss][20250105]*/
+             WD_KX_ORDER A
+         SET BOXQTY = BOXQTY + (SELECT MAX(NVL(BOXQTY,0)) 
+                                  FROM WD_KX_ORDER 
+                                 WHERE SERIALKEY = #{serialkey} /*삭제된 시리얼키*/
+                               )
+       WHERE SERIALKEY = (
+                          SELECT SERIALKEY
+                            FROM (
+                                  SELECT ROW_NUMBER() OVER(PARTITION BY DOCNO_FW ORDER BY SEQ DESC) AS RN
+                                        ,SERIALKEY
+                                        ,SEQ
+                                    FROM WD_KX_ORDER A
+                                   WHERE DOCDT    = #{docdt}
+                                     AND DOCNO_FW = #{docnoFw}
+                                     AND BOXTYPE  = #{boxtype}
+                                     AND SEQ <> #{seq}
+                                ) A
+                           WHERE RN = 1
+                         ) /*같은 BOXTYPE에 최종 SEQ에 삭제된 수량을 더해줌 - 없으면 SKIP 후 수동처리*/
+    ]]>
+    </update>	    	
+            	
+    
+    <!-- 출력 여부처리 -->
+    <update id="updateDelYnInvoiceprtSt">
+       UPDATE /* [wdKxDeliveryInvoiceService.sqlx][wdKxDeliveryInvoiceService.updateDelYnInvoiceprtSt][출력처리][sss][20250105]*/
+              WD_KX_ORDER 
+          SET PRT_ST    = '02' /*운송장 출력상태 (01: 미출력, 02: 선출력, 03: 선발번)*/
+             ,PRINT_CNT = NVL(PRINT_CNT,0) + 1 /*출력횟수*/
+             ,EDITDATE  = SYSDATE
+             ,EDITWHO   = #{gUserId}
+        WHERE DOCDT = #{docdt}
+	      AND DOCNO = #{docno}
+    </update>	 
+    
+    <!-- 체크 정보 을(를) 조회 -->
+    <select id="selectChkIntMasterReceipt01"  parameterType="hashMap" resultType="hashMap">
+    <![CDATA[
+        SELECT /* [WdQuickRequestService.selectChkIntMasterReceipt01][택배접수 체크][sss][20250717]*/
+               MAX((
+                   SELECT CASE WHEN COUNT(*) > 0 THEN 'Y' ELSE 'N' END
+                     FROM WD_KX_ORDER
+                    WHERE REQ_DATE = #{reqDate}
+                      AND RCPT_HOUR_TYPE = #{rcptHourType}    /*시간구분(1:오전,2:오후)*/     
+                      AND STATUS NOT IN ('20')
+                  )) AS CHK1 /*체크.센터접수내역*/
+               --   
+               ,MAX(DELIVERYINFO_EMP.EMP_CUST_DOCNO) AS EMP_CUST_DOCNO /*사이트주문번호*/
+          FROM DELIVERYINFO_EMP
+         WHERE REQ_DATE      = #{reqDate}
+           AND RCPT_HOUR_TYPE = #{rcptHourType}    /*시간구분(1:오전,2:오후)*/     
+           AND STATUS NOT IN ('20')
+
+    ]]>
+    </select>    
+    
+    <!-- 체크 정보 을(를) 조회 -->
+    <select id="selectChkIntMasterReceipt"  parameterType="hashMap" resultType="hashMap">
+    <![CDATA[
+        SELECT /* [WdQuickRequestService.selectChkIntMasterReceipt][택배접수 체크][sss][20250717]*/
+               MAX(CASE WHEN DELIVERYINFO_EMP.STATUS IN ('16','20','22') THEN 'Y' ELSE 'N' END)     AS CHK1 /*체크.택배송장 발행상태(10:업로드,11:업로드삭제,12:접수실패,13:배송제외,14:배송분리,16:접수확정,17:송장분리완료,20:택배접수완료,21:택배접수취소)*/ 
+              ,MAX(CASE WHEN (EXCEPT_REASON_CD IS NOT NULL OR STATUS = '13') THEN 'Y' ELSE 'N' END) AS CHK2 /*체크.제외사유*/                                      
+              ,MAX(DELIVERYINFO_EMP.EMP_CUST_DOCNO)                            AS EMP_CUST_DOCNO /*사이트주문번호*/
+          FROM DELIVERYINFO_EMP
+         WHERE DELIVERYINFO_EMP.SERIALKEY = #{serialkey}  
+    ]]>
+    </select>             
+    
+    <!-- 체크 정보 을(를) 조회 -->
+    <select id="selectChkIntMaster02"  parameterType="hashMap" resultType="hashMap">
+    <![CDATA[
+        SELECT /* [WdQuickRequestService.selectChkIntMaster02][택배접수 체크][sss][20250717]*/
+               MAX(CASE WHEN STATUS  > '17' THEN 'Y' ELSE 'N' END) AS CHK1 /*체크.택배송장 발행상태(10:업로드,11:업로드삭제,12:접수실패,13:배송제외,14:배송분리,16:접수확정,17:송장분리완료,20:택배접수완료,21:택배접수취소)*/ 
+             , MAX(FN_CODEDESCR(#{gStorerkey}, 'STATUS_INVOICENO', DECODE(WD_KX_ORDER.STATUS, '00', '10', WD_KX_ORDER.STATUS))) AS STATUSNM /*상태(00이면 10으로 치환)*/ 
+          FROM WD_KX_ORDER
+         WHERE SERIALKEY = #{serialkey}  
+    ]]>
+    </select>       
+    
+    <!-- 체크 정보 을(를) 조회 -->
+    <select id="selectChkInvoiceDivide"  parameterType="hashMap" resultType="hashMap">
+    <![CDATA[
+        SELECT /* [WdQuickRequestService.selectChkInvoiceDivide][송장분리 시 체크][sss][20250717]*/
+               MAX(CASE WHEN STATUS > '16' THEN 'Y' ELSE 'N' END) AS CHK1           /*체크.택배송장 발행상태(10:업로드,11:업로드삭제,12:접수실패,13:배송제외,14:배송분리,16:접수확정,17:송장분리완료,20:택배접수완료,21:택배접수취소)*/ 
+             , MAX(WD_KX_ORDER.ETC_1)                             AS EMP_CUST_DOCNO /*사이트주문번호*/
+          FROM WD_KX_ORDER
+        WHERE SERIALKEY = #{serialkey}  
+    ]]>
+    </select>
+    
+    <select id="getBoxInfoList" resultType="cjfw.wms.wd.dto.WdKxDeliveryInvoiceBoxResDto">
+        SELECT /* [wdKxDeliveryInvoiceService.sqlx][wdKxDeliveryInvoiceService.getBoxInfoList][택배기준 목록 조회][JiHoPark][2025.12.26]*/
+               MS_PARCEL_BOX.BOXNO        AS BOXNO        /*박스번호*/
+             , MS_PARCEL_BOX.BOXNM        AS BOXNM        /*박스명*/
+             , MS_PARCEL_BOX.STORAGETYPE  AS STORAGETYPE  /*저장조건*/
+             , MS_PARCEL_BOX.INNER_LENGTH AS INNER_LENGTH /*박스내경길이*/
+             , MS_PARCEL_BOX.INNER_WIDTH  AS INNER_WIDTH  /*박스내경폭*/
+             , MS_PARCEL_BOX.INNER_HEIGHT AS INNER_HEIGHT /*박스내경높이*/
+             , MS_PARCEL_BOX.OUTER_LENGTH AS OUTER_LENGTH /*박스외경길이*/
+             , MS_PARCEL_BOX.OUTER_WIDTH  AS OUTER_WIDTH  /*박스외경폭*/
+             , MS_PARCEL_BOX.OUTER_HEIGHT AS OUTER_HEIGHT /*박스외경높이*/
+             , MS_PARCEL_BOX.PRICE        AS PRICE        /*단가*/
+             , MS_PARCEL_BOX.CUBE         AS CAPACITY     /*체적*/
+             , MS_PARCEL_BOX.USE_YN       AS USE_YN       /*사용여부*/
+          FROM MS_PARCEL_BOX
+         WHERE MS_PARCEL_BOX.USE_YN = 'Y'
+         ORDER BY MS_PARCEL_BOX.STORAGETYPE
+              ,MS_PARCEL_BOX.CUBE
+    </select>          
+    
+    <insert id="insertIfCS">
+        INSERT /* [wdKxDeliveryInvoiceService.sqlx][wdKxDeliveryInvoiceService.insertIfCS][IF 입력 영업 (접수확정)][김채원][20240110]*/
+          INTO IF_EMP_INVOICE_S
+               (SERIALKEY
+               ,STOREREKY
+               ,DOCNO
+               ,DOCLINE
+               ,DELIVERY_CD
+               ,DELIVERY_INV_NO
+               ,SITE_TYPE
+               ,BIGO
+               ,IF_DATE
+               ,IF_ID
+               ,IF_DESTINATION
+               ,IF_FLAG
+               ,ADDWHO
+               ,ADDDATE
+               ,EDITWHO
+               ,EDITDATE)
+         SELECT SEQ_IF_EMP_INVOICE_S.NEXTVAL
+               ,#{gStorerkey}
+               ,WD_KX_ORDER.DOCNO_FW
+               ,WD_KX_ORDER.DOCLINE_FW
+               ,'T025'
+               ,WD_KX_ORDER.INVOICENO
+               ,DELIVERYINFO_EMP.SITE_TYPE
+               ,DELIVERYINFO_EMP.BIGO
+               ,SYSDATE
+               ,'SCM0820'
+               ,'CS'
+               ,'N'
+               ,'FRESHWAY'
+               ,SYSDATE
+               ,'FRESHWAY'
+               ,SYSDATE
+		  FROM WD_KX_ORDER	
+           JOIN DELIVERYINFO_EMP  /*주문 배송지정보*/
+             ON WD_KX_ORDER.DOCNO_FW     = DELIVERYINFO_EMP.DOCNO
+            AND WD_KX_ORDER.DOCLINE_FW   = DELIVERYINFO_EMP.DOCLINE		  
+		  WHERE WD_KX_ORDER.SERIALKEY = #{serialkey} /*시리얼키*/  		               
+    </insert>    
+    
+
+    <select id="getMasterList4" resultType="WdKxDeliveryInvoiceResDto">
+        SELECT /* [wdKxDeliveryInvoiceService.sqlx][wdKxDeliveryInvoiceService.getMasterList4][반품택배 목록 조회]*/
+               *
+          FROM DUAL
+         WHERE 1 = 1
+    </select>
+
+    <select id="getMasterList5" resultType="cjfw.wms.wd.dto.WdKxDeliveryInvoiceBoxResDto">
+        SELECT /* [wdKxDeliveryInvoiceService.sqlx][wdKxDeliveryInvoiceService.getMasterList5][택배기준 목록 조회][JiHoPark][2025.12.26]*/
+               MS_PARCEL_BOX.BOXNO        AS BOXNO        /*박스번호*/
+             , MS_PARCEL_BOX.BOXNM        AS BOXNM        /*박스명*/
+             , MS_PARCEL_BOX.STORAGETYPE  AS STORAGETYPE  /*저장조건*/
+             , MS_PARCEL_BOX.INNER_LENGTH AS INNER_LENGTH /*박스내경길이*/
+             , MS_PARCEL_BOX.INNER_WIDTH  AS INNER_WIDTH  /*박스내경폭*/
+             , MS_PARCEL_BOX.INNER_HEIGHT AS INNER_HEIGHT /*박스내경높이*/
+             --
+             , MS_PARCEL_BOX.OUTER_LENGTH AS OUTER_LENGTH /*박스외경길이*/
+             , MS_PARCEL_BOX.OUTER_WIDTH  AS OUTER_WIDTH  /*박스외경폭*/
+             , MS_PARCEL_BOX.OUTER_HEIGHT AS OUTER_HEIGHT /*박스외경높이*/
+             , MS_PARCEL_BOX.PRICE        AS PRICE        /*단가*/
+             , MS_PARCEL_BOX.CUBE         AS CUBE         /*체적*/
+             , MS_PARCEL_BOX.USE_YN       AS USE_YN       /*사용여부*/
+          FROM MS_PARCEL_BOX
+         WHERE 1 = 1
+      <if test="storagetype != null and storagetype != ''">
+          AND MS_PARCEL_BOX.STORAGETYPE = #{storagetype}
+       </if>
+       <if test="boxnm != null and boxnm != ''">
+          AND UPPER(MS_PARCEL_BOX.BOXNM) LIKE '%'|| UPPER(#{boxnm}) || '%'
+       </if>
+       <if test="useYn != null and useYn != ''">
+          AND MS_PARCEL_BOX.USE_YN = #{useYn}
+       </if>
+         ORDER BY MS_PARCEL_BOX.STORAGETYPE,MS_PARCEL_BOX.CUBE DESC
+    </select>
+   
+
+    <insert id="insertMaster5">
+        INSERT /* [wdKxDeliveryInvoiceService.sqlx][wdKxDeliveryInvoiceService.insertMaster5][택배기준 insert][JiHoPark][2025.12.26]*/
+          INTO MS_PARCEL_BOX
+             ( BOXNO
+             , BOXNM
+             , STORAGETYPE
+             , INNER_LENGTH
+             , INNER_WIDTH
+             , INNER_HEIGHT
+             , OUTER_LENGTH
+             , OUTER_WIDTH
+             , OUTER_HEIGHT
+             , CUBE
+             , PRICE
+             , USE_YN
+             , ADDDATE
+             , EDITDATE
+             , ADDWHO
+             , EDITWHO )
+        VALUES
+             ((SELECT TO_CHAR(SYSDATE, 'YYYY')  || LPAD(TO_NUMBER(NVL(MAX(SUBSTR(BOXNO, -5)), '000') +1), 5, '0')
+                 FROM MS_PARCEL_BOX)
+             , #{boxnm}
+             , #{storagetype}
+             , #{innerLength}
+             , #{innerWidth}
+             , #{innerHeight}
+             , #{outerLength}
+             , #{outerWidth}
+             , #{outerHeight}
+             , (#{innerLength} * #{innerWidth} * #{innerHeight}) / 1000
+             , #{price}
+             , #{useYn}
+             , SYSDATE
+             , SYSDATE
+             , #{gUserId}
+             , #{gUserId} )
+    </insert>
+
+     <update id="updateMaster5">
+        UPDATE /* [wdKxDeliveryInvoiceService.sqlx][wdKxDeliveryInvoiceService.updateMaster5][택배기준 UPDATE][JiHoPark][2028.12.26]*/
+               MS_PARCEL_BOX
+           SET BOXNM        = #{boxnm}
+             , STORAGETYPE  = #{storagetype}
+             , INNER_LENGTH = #{innerLength}
+             , INNER_WIDTH  = #{innerWidth}
+             , INNER_HEIGHT = #{innerHeight}
+             , OUTER_LENGTH = #{outerLength}
+             , OUTER_WIDTH  = #{outerWidth}
+             , OUTER_HEIGHT = #{outerHeight}
+             , CUBE         = (#{innerLength} * #{innerWidth} * #{innerHeight}) / 1000
+             , PRICE        = #{price}
+             , USE_YN       = #{useYn}
+             , EDITDATE     = SYSDATE
+             , EDITWHO      = #{gUserId}
+         WHERE MS_PARCEL_BOX.BOXNO = #{boxno}
+    </update>
+    
+    
+	
+    <!-- Day 토큰 조회	-->       
+    <select id="getAccessToken" resultType="String">
+        SELECT DAMO.DEC(ACCESS_TOKEN) AS ACCESS_TOKEN /*토큰번호*/
+          FROM WD_KX_TOKEN
+         WHERE KX_CUST_ID = #{kxCustId}
+           AND EXPIRES_AT > SYSTIMESTAMP /*유효한토큰*/
+    </select>  
+    
+	<!-- Day 토큰 발행 처리 -->     
+	<update id="updateAccessToken">
+		MERGE INTO WD_KX_TOKEN T
+		USING (
+		    SELECT #{kxCustId}       AS KX_CUST_ID
+			      ,DAMO.ENC(#{tokenNum})       AS ACCESS_TOKEN
+			      ,#{tokenExprtnDtm} AS EXPIRES_AT
+		    FROM DUAL
+		) S
+		ON (
+		    T.KX_CUST_ID = S.KX_CUST_ID
+		)
+		WHEN MATCHED THEN
+		    UPDATE SET
+		        T.ACCESS_TOKEN = S.ACCESS_TOKEN
+		       ,T.ISSUED_AT    = SYSTIMESTAMP
+		       ,T.EXPIRES_AT   = S.EXPIRES_AT
+		       ,T.EDITDATE     = SYSDATE
+		       ,T.EDITWHO      = #{gUserId}
+		WHEN NOT MATCHED THEN
+		    INSERT (
+		        KX_CUST_ID
+		       ,ACCESS_TOKEN
+		       ,ISSUED_AT
+		       ,EXPIRES_AT
+		       ,ADDDATE
+		       ,ADDWHO
+		       ,EDITDATE
+			   ,EDITWHO 
+		    )
+		    VALUES (
+		        S.KX_CUST_ID
+		       ,S.ACCESS_TOKEN
+		       ,SYSTIMESTAMP
+		       ,S.EXPIRES_AT
+		       ,SYSDATE
+		       ,#{gUserId}
+		       ,SYSDATE
+		       ,#{gUserId}
+		    )
+    </update>     
+     
+    <!-- 택배접수 API 데이터 전문 조회	-->       
+    <select id="getOrderRequest01" resultType="cjfw.wms.wd.dto.WdKxDeliveryAPI02Dto">
+	  SELECT /*[wdKxDeliveryInvoiceService.sqlx][wdKxDeliveryInvoiceService.getOrderRequest01][택배접수 API 데이터 전문 조회][sss][2026.01.06]*/
+	         #{tokenNum}	   					     AS TOKEN_NUM         /*1.토큰번호*/
+	        ,KX_CUSTKEY				                 AS USER_ID           /*2.중개업체ID*/ 
+	        ,KX_CUSTKEY				                 AS CUST_ID           /*3.KX고객사ID*/	
+	        ,WD_KX_ORDER.REQ_DATE                    AS RCPT_YMD          /*4.접수일자*/
+	        ,WD_KX_ORDER.DOCNO                       AS CUST_USE_NO       /*5.고객사용번호*/
+	        --
+	        ,WD_KX_ORDER.ORDERTYPE                   AS RCPT_DV           /*6.접수구분 (01: 일반, 02: 반품)*/ 
+			,'01'                                    AS WORK_DV_CD        /*7.작업구분코드 (01: 일반,02:N배송)*/
+			,'01'                                    AS REQ_DV_CD         /*8.요청구분코드 (01: 요청, 02: 취소)*/
+			,WD_KX_ORDER.PACKAGEKEY                  AS MPCK_KEY          /*9.합포장 키 (다수 데이터 한 송장 출력 시 사용, 무결성 보장)*/
+			,WD_KX_ORDER.EXPENSETYPE                 AS CAL_DV_CD         /*10.정산구분코드 (01: 계약 운임)*/
+			--
+			,WD_KX_ORDER.FEETYPE                     AS FRT_DV_CD         /*11.운임구분코드 (01: 선불, 02: 착불, 03: 신용)*/
+			,'01'                                    AS CNTR_ITEM_CD      /*12.계약품목코드 (01: 일반 품목)*/
+			,'03'                                    AS BOX_TYPE_CD       /*13.박스타입코드 (01: 극소, 02: 소, 03: 중, 04: 대1, 05: 특대, 06: 취급제한, 07: 대2)*/
+			,'1'                                     AS BOX_QTY           /*14.박스 수량*/
+			,''                                      AS FRT               /*15.운임*/
+			--
+			,KX_CUSTKEY                              AS CUST_MGMT_DLCM_CD /*고객관리거래처코드*/
+			,WD_KX_ORDER.SENDR_NM                    AS SENDR_NM          /*보내는분 명*/
+			,WD_KX_ORDER.SENDR_TEL_NO1               AS SENDR_TEL_NO1     /*보내는분 전화번호1*/
+			,WD_KX_ORDER.SENDR_TEL_NO2               AS SENDR_TEL_NO2     /*보내는분 전화번호2*/
+			,DAMO.DEC(WD_KX_ORDER.SENDR_TEL_NO3)     AS SENDR_TEL_NO3     /*보내는분 전화번호3*/
+			,WD_KX_ORDER.SENDR_CELL_NO1              AS SENDR_CELL_NO1    /*보내는분 휴대폰번호1*/
+			,WD_KX_ORDER.SENDR_CELL_NO1              AS SENDR_CELL_NO2    /*보내는분 휴대폰번호2*/
+			,DAMO.DEC(WD_KX_ORDER.SENDR_CELL_NO1)    AS SENDR_CELL_NO3    /*보내는분 휴대폰번호3*/
+			,''                                      AS SENDR_SAFE_NO1    /*보내는분 안심번호1*/
+			,''                                      AS SENDR_SAFE_NO2    /*보내는분 안심번호2*/
+			,''                                      AS SENDR_SAFE_NO3    /*보내는분 안심번호3*/
+			,WD_KX_ORDER.SENDR_ZIP_NO                AS SENDR_ZIP_NO      /*보내는분 우편번호*/
+			,WD_KX_ORDER.SENDR_ADDR                  AS SENDR_ADDR        /*보내는분 주소*/
+			,DAMO.DEC(WD_KX_ORDER.SENDR_DETAIL_ADDR) AS SENDR_DETAIL_ADDR /*보내는분 상세주소*/
+			--
+			,WD_KX_ORDER.RCVR_NM                     AS RCVR_NM           /*받는분 명 (반품 시 고정 회수지 정보)*/
+			,WD_KX_ORDER.RCVR_TEL_NO1                AS RCVR_TEL_NO1      /*받는분 전화번호1*/
+			,WD_KX_ORDER.RCVR_TEL_NO2                AS RCVR_TEL_NO2      /*받는분 전화번호2*/
+			,DAMO.DEC(WD_KX_ORDER.RCVR_TEL_NO3)      AS RCVR_TEL_NO3      /*받는분 전화번호3*/
+			,WD_KX_ORDER.RCVR_CELL_NO1               AS RCVR_CELL_NO1     /*받는분 휴대폰번호1*/
+			,WD_KX_ORDER.RCVR_CELL_NO2               AS RCVR_CELL_NO2     /*받는분 휴대폰번호2*/
+			,DAMO.DEC(WD_KX_ORDER.RCVR_CELL_NO3)     AS RCVR_CELL_NO3     /*받는분 휴대폰번호3*/
+			,WD_KX_ORDER.RCVR_SAFE_NO1               AS RCVR_SAFE_NO1     /*받는분 안심번호1*/
+			,WD_KX_ORDER.RCVR_SAFE_NO2               AS RCVR_SAFE_NO2     /*받는분 안심번호2*/
+			,DAMO.DEC(WD_KX_ORDER.RCVR_SAFE_NO3)     AS RCVR_SAFE_NO3     /*받는분 안심번호3*/
+			,WD_KX_ORDER.RCVR_ZIP_NO                 AS RCVR_ZIP_NO       /*받는분 우편번호*/
+			,WD_KX_ORDER.RCVR_ADDR                   AS RCVR_ADDR         /*받는분 주소*/
+			,DAMO.DEC(WD_KX_ORDER.RCVR_DETAIL_ADDR)  AS RCVR_DETAIL_ADDR  /*받는분 상세주소*/
+			--
+			,WD_KX_ORDER.ORDR_NM                     AS ORDRR_NM          /*주문자 명*/
+			,WD_KX_ORDER.ORDR_TEL_NO1                AS ORDRR_TEL_NO1     /*주문자 전화번호1*/
+			,WD_KX_ORDER.ORDR_TEL_NO2                AS ORDRR_TEL_NO2     /*주문자 전화번호2*/
+			,DAMO.DEC(WD_KX_ORDER.ORDR_TEL_NO3)      AS ORDRR_TEL_NO3     /*주문자 전화번호3*/
+			,WD_KX_ORDER.ORDR_CELL_NO1               AS ORDRR_CELL_NO1    /*주문자 휴대폰번호1*/
+			,WD_KX_ORDER.ORDR_CELL_NO2               AS ORDRR_CELL_NO2    /*주문자 휴대폰번호2*/
+			,DAMO.DEC(WD_KX_ORDER.ORDR_CELL_NO3)     AS ORDRR_CELL_NO3    /*주문자 휴대폰번호3*/
+			,''                                      AS ORDRR_SAFE_NO1    /*주문자 안심번호1*/
+			,''                                      AS ORDRR_SAFE_NO2    /*주문자 안심번호2*/
+			,''                                      AS ORDRR_SAFE_NO3    /*주문자 안심번호3*/
+			,WD_KX_ORDER.ORDR_ZIP_NO                 AS ORDRR_ZIP_NO      /*주문자 우편번호*/
+			,WD_KX_ORDER.ORDR_ADDR                   AS ORDRR_ADDR        /*주문자 주소*/
+			,DAMO.DEC(WD_KX_ORDER.ORDR_DETAIL_ADDR)  AS ORDRR_DETAIL_ADDR /*주문자 상세주소*/
+			--
+			,WD_KX_ORDER.INVOICENO                   AS INVC_NO           /*운송장 번호 (반품 시 미사용)*/
+			,''                                      AS ORI_INVC_NO       /*원운송장번호 (반품/회수 대상)*/
+			,''                                      AS ORI_ORD_NO        /*원주문 번호*/
+			,''                                      AS COLCT_EXPCT_YMD   /*집화 예정일자*/
+			,''                                      AS COLCT_EXPCT_HOUR  /*집화 예정시간*/
+			,''                                      AS SHIP_EXPCT_YMD    /*배송 예정일자*/
+			,''                                      AS SHIP_EXPCT_HOUR   /*배송 예정시간*/
+			,PRT_ST                                  AS PRT_ST            /*운송장 출력상태 (01: 미출력, 02: 선출력, 03: 선발번)*/
+			,''                                      AS ARTICLE_AMT       /*물품가액*/
+			,WD_KX_ORDER.ETC_1       AS REMARK_1 /*비고1 (배송메세지)*/
+			,WD_KX_ORDER.ETC_2       AS REMARK_2 /*비고2 (보내는분 비고)*/
+			,WD_KX_ORDER.ETC_3       AS REMARK_3 /*비고3 (받는분 비고)*/
+			,'N'                     AS COD_YN   /*COD 여부*/
+			,''                      AS ETC_1    /*기타1*/
+			,''                      AS ETC_2    /*기타2*/
+			,''                      AS ETC_3    /*기타3*/
+			,''                      AS ETC_4    /*기타4*/
+			,''                      AS ETC_5    /*기타5*/
+			,WD_KX_ORDER.DLV_DV      AS DLV_DV   /*택배구분 (01: 택배)*/
+			,''                      AS RCPT_SERIAL /*접수 시리얼 번호*/
+			,1                       AS MPCK_SEQ    /*합포장 순번 (합포 없을 경우 1)*/
+			,WD_KX_ORDER.SKU         AS GDS_CD      /*상품코드*/
+			,WD_KX_ORDER.DESCRIPTION AS GDS_NM      /*상품명*/
+			,WD_KX_ORDER.ORDERQTY    AS GDS_QTY     /*상품수량*/
+			,WD_KX_ORDER.UNIT_CD     AS UNIT_CD     /*단품코드*/
+			,WD_KX_ORDER.UNIT_NM     AS UNIT_NM     /*단품명*/
+			,WD_KX_ORDER.GDS_AMT     AS GDS_AMT     /*상품가액*/
+			--
+			,WD_KX_ORDER.SERIALKEY   AS SERIALKEY     /*시리얼키*/
+			,WD_KX_ORDER.DOCNO_FW    DOCNO_FW  
+		    ,WD_KX_ORDER.DOCLINE_FW  DOCLINE_FW
+		    ,WD_KX_ORDER.DOCDT       DOCDT     
+		    ,WD_KX_ORDER.DOCNO       DOCNO     
+	    FROM WD_KX_ORDER	
+	   WHERE SERIALKEY = #{serialkey} /*시리얼키*/  				       
+    </select>  
+    
+    <select id="getGdsList" resultType="hashMap">
+	    SELECT ROW_NUMBER() OVER(ORDER BY WD_KX_ORDER.SKU) AS MPCK_SEQ /*합포장 순번 (합포 없을 경우 1)*/
+	          ,WD_KX_ORDER.SKU                             AS GDS_CD   /*상품코드*/
+	          ,WD_KX_ORDER.DESCRIPTION                     AS GDS_NM   /*상품명*/
+	          ,WD_KX_ORDER.ORDERQTY                        AS GDS_QTY  /*상품수량*/
+	          ,WD_KX_ORDER.UNIT_CD                         AS UNIT_CD  /*단품코드*/
+	          ,WD_KX_ORDER.UNIT_NM                         AS UNIT_NM  /*단품명*/
+	          ,WD_KX_ORDER.GDS_AMT                         AS GDS_AMT  /*상품가액*/
+	      FROM WD_KX_ORDER    
+	     WHERE DOCDT = #{docdt}
+	       AND DOCNO = #{docno}
+    </select>       
+    
+	<!-- 택배 API 결과 처리 -->     
+	<update id="updateKxDeliveryResult01">
+		UPDATE /* [wdKxDeliveryInvoiceService.sqlx][wdKxDeliveryInvoiceService.updateKxDeliveryResult01][택배 결과처리 등록][sss][2026.01.06]*/
+		       WD_KX_ORDER
+		   SET EDITDATE  = SYSDATE
+		      ,EDITWHO   = #{gUserId}
+	           <choose>
+	             <when test="resultCd == 'S'.toString()">
+	              ,RCPT_ERR_YN  = 'N' /*접수성공*/
+	              ,RCPT_ERR_MSG = ''  /*접수에러메세지 초기화*/
+		 	      /*택배접수정보*/
+		 	  	  ,PARCEL_RCPT_DATE = TO_CHAR(SYSDATE,'YYYYMMDD')  /*택배접수일자*/
+		 	  	  ,PARCEL_RCPT_HOUR = TO_CHAR(SYSDATE,'HH24MI')    /*택배접수시간*/
+		 	  	  ,INVOICENO        = #{invcNo}                    /*운송장번호*/   
+	              ,STATUS       = '20' /*체크.택배송장 발행상태(10:업로드,11:업로드삭제,12:접수실패,13:배송제외,14:배송분리,16:접수확정,17:송장분리완료,20:택배접수완료,21:택배접수취소)*/
+	             </when>
+	             <otherwise>
+	                 ,RCPT_ERR_YN  = 'Y' /*접수실패 시*/
+	                 ,RCPT_ERR_MSG = SUBSTR(#{resultDetail},1,500) /*접수에러메세지*/ 
+	                 ,STATUS       = '12' /*체크.택배송장 발행상태(10:업로드,11:업로드삭제,12:접수실패,13:배송제외,14:배송분리,16:접수확정,17:송장분리완료,20:택배접수완료,21:택배접수취소)*/
+	             </otherwise>
+	           </choose>
+	  WHERE (DOCDT, DOCNO) IN (
+	  				            SELECT DOCDT, DOCNO
+	  				              FROM WD_KX_ORDER
+	                             WHERE SERIALKEY = #{serialkey}
+	  			              )	/*운송장 단위로 처리 = docno*/   
+    </update>      
+    
+	<!-- 택배 API 결과 처리 - 주문 - 현재미사용 -->     
+	<update id="updateKxDeliveryResult02">
+		UPDATE /* [wdKxDeliveryInvoiceService.sqlx][wdKxDeliveryInvoiceService.updateKxDeliveryResult02][택배 결과처리-주문 등록][sss][2026.01.06]*/
+		       DELIVERYINFO_EMP
+		   SET EDITDATE  = SYSDATE
+		      ,EDITWHO   = #{gUserId}
+	           <choose>
+	             <when test="resultCd == 'S'.toString()">
+	              ,RCPT_ERR_YN  = 'N' /*접수성공*/
+	              ,RCPT_ERR_MSG = ''  /*접수에러메세지 초기화*/
+	              ,STATUS       = '20' /*체크.택배송장 발행상태(10:업로드,11:업로드삭제,12:접수실패,13:배송제외,14:배송분리,16:접수확정,17:송장분리완료,20:택배접수완료,21:택배접수취소)*/
+	             </when>
+	             <otherwise>
+	                 ,RCPT_ERR_YN  = 'Y' /*접수실패 시*/
+	                 ,RCPT_ERR_MSG = SUBSTR(#{resultDetail},1,500) /*접수에러메세지*/ 
+	                 ,STATUS       = '12' /*체크.택배송장 발행상태(10:업로드,11:업로드삭제,12:접수실패,13:배송제외,14:배송분리,16:접수확정,17:송장분리완료,20:택배접수완료,21:택배접수취소)*/
+	             </otherwise>
+	           </choose>
+	     WHERE (DOCNO, DOCLINE) IN (
+						             SELECT DOCNO_FW, DOCLINE_FW
+						               FROM WD_KX_ORDER
+	                                  WHERE DOCDT = #{docdt}
+	                                    AND DOCNO = #{docno} /*운송장 단위로 처리 = docno*/  	
+					               )	 	 
+    </update>        
+    
+	<!-- 저장.I/F insert -->
+	<insert id="insertMasterList03">
+	    INSERT /* [wdKxDeliveryInvoiceService.sqlx][wdKxDeliveryInvoiceService.insertMasterList03][N배송 등록][sss][2026.01.06]*/
+	      INTO IF_WD_KX_ORDER (
+	         SERIALKEY              /*데이터번호*/
+	        ,DCCODE                 /*센터코드*/ 
+	        ,CUSTKEY                /*고객사키*/
+	        ,DOCDT                  /*접수일자 - 택배*/
+	        ,DOCNO                  /*문서번호*/
+	        ,ORDERTYPE              /*주문유형*/
+	        ,WORKTYPE               /*작업유형(01:일반,02:교환,03:A/S)*/   
+	        ,REQUESTTYPE            /*요청유형(01 일반, 02 취소)*/
+	        ,PACKAGEKEY             /*패키지키*/
+	        ,PACKAGEKEY_LINE        /*패키지키라인*/
+	        ,EXPENSETYPE            /*비용유형*/
+	        ,FEETYPE                /*요금유형*/
+	        ,CONTRACTTYPE           /*계약유형*/
+	        ,BOXTYPE                /*박스타입*/
+	        ,BOXQTY                 /*박스수량*/
+	        ,COST                   /*비용*/
+	        ,KX_CUSTKEY             /*KX고객사키*/
+	        ,SENDR_NM               /*송화인명*/
+	        ,SENDR_TEL_NO1          /*송화인전화번호1*/
+	        ,SENDR_TEL_NO2          /*송화인전화번호2*/
+	        ,SENDR_TEL_NO3          /*송화인전화번호3*/
+	        ,SENDR_CELL_NO1         /*송화인휴대폰번호1*/
+	        ,SENDR_CELL_NO2         /*송화인휴대폰번호2*/
+	        ,SENDR_CELL_NO3         /*송화인휴대폰번호3*/
+	        ,SENDR_SAFE_NO1         /*송화인안심번호1*/
+	        ,SENDR_SAFE_NO2         /*송화인안심번호2*/
+	        ,SENDR_SAFE_NO3         /*송화인안심번호3*/
+	        ,SENDR_ZIP_NO           /*송화인우편번호*/
+	        ,SENDR_ADDR             /*송화인주소*/
+	        ,SENDR_DETAIL_ADDR      /*송화인상세주소*/
+	        ,RCVR_NM                /*수화인명*/
+	        ,RCVR_TEL_NO1           /*수화인전화번호1*/
+	        ,RCVR_TEL_NO2           /*수화인전화번호2*/
+	        ,RCVR_TEL_NO3           /*수화인전화번호3*/
+	        ,RCVR_CELL_NO1          /*수화인휴대폰번호1*/
+	        ,RCVR_CELL_NO2          /*수화인휴대폰번호2*/
+	        ,RCVR_CELL_NO3          /*수화인휴대폰번호3*/
+	        ,RCVR_SAFE_NO1          /*수화인안심번호1*/
+	        ,RCVR_SAFE_NO2          /*수화인안심번호2*/
+	        ,RCVR_SAFE_NO3          /*수화인안심번호3*/
+	        ,RCVR_ZIP_NO            /*수화인우편번호*/
+	        ,RCVR_ADDR              /*수화인주소*/
+	        ,RCVR_DETAIL_ADDR       /*수화인상세주소*/
+	        ,ORDR_NM                /*주문자명*/             
+	        ,ORDR_TEL_NO1           /*주문자전화번호1*/         
+	        ,ORDR_TEL_NO2           /*주문자전화번호2*/         
+	        ,ORDR_TEL_NO3           /*주문자전화번호3*/         
+	        ,ORDR_CELL_NO1          /*주문자휴대폰번호1*/        
+	        ,ORDR_CELL_NO2          /*주문자휴대폰번호2*/        
+	        ,ORDR_CELL_NO3          /*주문자휴대폰번호3*/        
+	        ,ORDR_SAFE_NO1          /*주문자안심번호1*/         
+	        ,ORDR_SAFE_NO2          /*주문자안심번호2*/         
+	        ,ORDR_SAFE_NO3          /*주문자안심번호3*/         
+	        ,ORDR_ZIP_NO            /*주문자우편번호*/          
+	        ,ORDR_ADDR              /*주문자주소*/            
+	        ,ORDR_DETAIL_ADDR       /*주문자상세주소*/          
+	        ,INVOICENO              /*송장번호*/
+	        ,ORI_INVOICENO          /*원송장번호*/
+	        ,ORI_ORD_NO             /*원주문번호*/
+	        ,COLCT_EXPCT_YMD        /*집하예정일*/
+	        ,COLCT_EXPCT_HOUR       /*집하예정시간*/
+	        ,SHIP_EXPCT_YMD         /*출고예정일*/
+	        ,SHIP_EXPCT_HOUR        /*출고예정시간*/
+	        ,PRT_ST                 /*출력상태*/
+	        ,ARTICLE_AMT            /*상품금액*/
+	        ,REMARK_1               /*비고1*/
+	        ,REMARK_2               /*비고2*/
+	        ,REMARK_3               /*비고3*/
+	        ,COD_YN                 /*착불여부*/
+	        ,SKU                    /*상품코드*/
+	        ,DESCRIPTION            /*상품명*/
+	        ,ORDERQTY               /*주문수량*/
+	        ,UNIT_CD                /*단위코드*/
+	        ,UNIT_NM                /*단위명*/
+	        ,GDS_AMT                /*상품금액*/
+	        ,ETC_1                  /*기타1*/
+	        ,ETC_2                  /*기타2*/
+	        ,ETC_3                  /*기타3*/
+	        ,ETC_4                  /*기타4*/
+	        ,ETC_5                  /*기타5*/
+	        ,DLV_DV                 /*배송구분*/
+	        ,RCPT_ERR_YN            /*접수에러여부*/
+	        ,RCPT_ERR_MSG           /*접수에러메세지*/
+	        ,IF_ID
+            ,IF_DESTINATION
+            ,IF_FLAG
+	        ,ADDWHO                 /*등록자*/
+	        ,ADDDATE                /*등록일*/
+	        ,EDITWHO                /*수정자*/
+	        ,EDITDATE               /*수정일*/
+	        ,REQ_DATE               /*납품요청일자*/
+	        ,RCPT_HOUR_TYPE         /*접수시간대구분*/
+	        ,DELIVERY_SVC_TYPE      /*배송서비스구분(01:일반,02:반품,03:N배송)*/
+	        ,EXCEPT_REASON_CD       /*제외사유코드*/
+	        ,SEQ                    /*순번*/
+	        ,PARCEL_RCPT_DATE	    /*택배접수일자*/
+	        ,PARCEL_RCPT_HOUR	    /*택배접수시간*/
+	    )
+	   SELECT 
+	         SEQ_IF_WD_KX_ORDER.NEXTVAL         /*데이터번호*/
+	        ,WD_KX_ORDER.DCCODE                 /*센터코드*/
+	        ,WD_KX_ORDER.CUSTKEY                /*고객사키*/
+	        ,DOCDT                              /*접수일자 - 택배*/
+	        ,WD_KX_ORDER.DOCNO                  /*문서번호*/
+	        ,WD_KX_ORDER.ORDERTYPE              /*주문유형*/
+	        ,WD_KX_ORDER.WORKTYPE               /*작업유형(01:일반,02:교환,03:A/S)*/   
+	        ,WD_KX_ORDER.REQUESTTYPE            /*요청유형(01 일반, 02 취소)*/
+	        ,WD_KX_ORDER.PACKAGEKEY             /*패키지키*/
+	        ,WD_KX_ORDER.PACKAGEKEY_LINE        /*패키지키라인*/
+	        ,WD_KX_ORDER.EXPENSETYPE            /*비용유형*/
+	        ,WD_KX_ORDER.FEETYPE                /*요금유형*/
+	        ,WD_KX_ORDER.CONTRACTTYPE           /*계약유형*/
+	        ,WD_KX_ORDER.BOXTYPE                /*박스타입*/
+	        ,WD_KX_ORDER.BOXQTY                 /*박스수량*/
+	        ,WD_KX_ORDER.COST                   /*비용*/
+	        ,WD_KX_ORDER.KX_CUSTKEY             /*KX고객사키*/
+	        ,WD_KX_ORDER.SENDR_NM               /*송화인명*/
+	        ,WD_KX_ORDER.SENDR_TEL_NO1          /*송화인전화번호1*/
+	        ,WD_KX_ORDER.SENDR_TEL_NO2          /*송화인전화번호2*/
+	        ,WD_KX_ORDER.SENDR_TEL_NO3          /*송화인전화번호3*/
+	        ,WD_KX_ORDER.SENDR_CELL_NO1         /*송화인휴대폰번호1*/
+	        ,WD_KX_ORDER.SENDR_CELL_NO2         /*송화인휴대폰번호2*/
+	        ,WD_KX_ORDER.SENDR_CELL_NO3         /*송화인휴대폰번호3*/
+	        ,WD_KX_ORDER.SENDR_SAFE_NO1         /*송화인안심번호1*/
+	        ,WD_KX_ORDER.SENDR_SAFE_NO2         /*송화인안심번호2*/
+	        ,WD_KX_ORDER.SENDR_SAFE_NO3         /*송화인안심번호3*/
+	        ,WD_KX_ORDER.SENDR_ZIP_NO           /*송화인우편번호*/
+	        ,WD_KX_ORDER.SENDR_ADDR             /*송화인주소*/
+	        ,WD_KX_ORDER.SENDR_DETAIL_ADDR      /*송화인상세주소*/
+	        ,WD_KX_ORDER.RCVR_NM                /*수화인명*/
+	        ,WD_KX_ORDER.RCVR_TEL_NO1           /*수화인전화번호1*/
+	        ,WD_KX_ORDER.RCVR_TEL_NO2           /*수화인전화번호2*/
+	        ,WD_KX_ORDER.RCVR_TEL_NO3           /*수화인전화번호3*/
+	        ,WD_KX_ORDER.RCVR_CELL_NO1          /*수화인휴대폰번호1*/
+	        ,WD_KX_ORDER.RCVR_CELL_NO2          /*수화인휴대폰번호2*/
+	        ,WD_KX_ORDER.RCVR_CELL_NO3          /*수화인휴대폰번호3*/
+	        ,WD_KX_ORDER.RCVR_SAFE_NO1          /*수화인안심번호1*/
+	        ,WD_KX_ORDER.RCVR_SAFE_NO2          /*수화인안심번호2*/
+	        ,WD_KX_ORDER.RCVR_SAFE_NO3          /*수화인안심번호3*/
+	        ,WD_KX_ORDER.RCVR_ZIP_NO            /*수화인우편번호*/
+	        ,WD_KX_ORDER.RCVR_ADDR              /*수화인주소*/
+	        ,WD_KX_ORDER.RCVR_DETAIL_ADDR       /*수화인상세주소*/
+	        ,WD_KX_ORDER.ORDR_NM                /*주문자명*/             
+	        ,WD_KX_ORDER.ORDR_TEL_NO1           /*주문자전화번호1*/         
+	        ,WD_KX_ORDER.ORDR_TEL_NO2           /*주문자전화번호2*/         
+	        ,WD_KX_ORDER.ORDR_TEL_NO3           /*주문자전화번호3*/         
+	        ,WD_KX_ORDER.ORDR_CELL_NO1          /*주문자휴대폰번호1*/        
+	        ,WD_KX_ORDER.ORDR_CELL_NO2          /*주문자휴대폰번호2*/        
+	        ,WD_KX_ORDER.ORDR_CELL_NO3          /*주문자휴대폰번호3*/        
+	        ,WD_KX_ORDER.ORDR_SAFE_NO1          /*주문자안심번호1*/         
+	        ,WD_KX_ORDER.ORDR_SAFE_NO2          /*주문자안심번호2*/         
+	        ,WD_KX_ORDER.ORDR_SAFE_NO3          /*주문자안심번호3*/         
+	        ,WD_KX_ORDER.ORDR_ZIP_NO            /*주문자우편번호*/          
+	        ,WD_KX_ORDER.ORDR_ADDR              /*주문자주소*/            
+	        ,WD_KX_ORDER.ORDR_DETAIL_ADDR       /*주문자상세주소*/          
+	        ,WD_KX_ORDER.INVOICENO              /*송장번호*/
+	        ,WD_KX_ORDER.ORI_INVOICENO          /*원송장번호*/
+	        ,WD_KX_ORDER.ORI_ORD_NO             /*원주문번호*/
+	        ,WD_KX_ORDER.COLCT_EXPCT_YMD        /*집하예정일*/
+	        ,WD_KX_ORDER.COLCT_EXPCT_HOUR       /*집하예정시간*/
+	        ,WD_KX_ORDER.SHIP_EXPCT_YMD         /*출고예정일*/
+	        ,WD_KX_ORDER.SHIP_EXPCT_HOUR        /*출고예정시간*/
+	        ,WD_KX_ORDER.PRT_ST                 /*출력상태*/
+	        ,WD_KX_ORDER.ARTICLE_AMT            /*상품금액*/
+	        ,WD_KX_ORDER.REMARK_1               /*비고1*/
+	        ,WD_KX_ORDER.REMARK_2               /*비고2*/
+	        ,WD_KX_ORDER.REMARK_3               /*비고3*/
+	        ,WD_KX_ORDER.COD_YN                 /*착불여부*/
+	        ,WD_KX_ORDER.SKU                    /*상품코드*/
+	        ,WD_KX_ORDER.DESCRIPTION            /*상품명*/
+	        ,WD_KX_ORDER.ORDERQTY               /*주문수량*/
+	        ,WD_KX_ORDER.UNIT_CD                /*단위코드*/
+	        ,WD_KX_ORDER.UNIT_NM                /*단위명*/
+	        ,WD_KX_ORDER.GDS_AMT                /*상품금액*/
+	        ,WD_KX_ORDER.ETC_1                  /*기타1*/
+	        ,WD_KX_ORDER.ETC_2                  /*기타2*/
+	        ,WD_KX_ORDER.ETC_3                  /*기타3 - 체적정보*/
+	        ,WD_KX_ORDER.ETC_4                  /*기타4*/
+	        ,WD_KX_ORDER.ETC_5                  /*기타5*/
+	        ,WD_KX_ORDER.DLV_DV                 /*배송구분*/
+	        ,WD_KX_ORDER.RCPT_ERR_YN            /*접수에러여부*/
+	        ,WD_KX_ORDER.RCPT_ERR_MSG           /*접수에러메세지*/
+	        ,'SCM0750'          
+			,'KX'               
+			,'N'                
+	        ,#{gUserId}                      AS ADDWHO    /*등록자*/
+	        ,SYSDATE                         AS ADDDATE   /*등록일*/
+	        ,#{gUserId}                      AS EDITWHO   /*수정자*/
+	        ,SYSDATE                         AS EDITDATE  /*수정일*/
+	        ,WD_KX_ORDER.REQ_DATE            AS REQ_DATE  /*납품요청일자*/
+	        ,WD_KX_ORDER.RCPT_HOUR_TYPE      AS RCPT_HOUR_TYPE    /*접수시간대구분*/
+	        ,WD_KX_ORDER.DELIVERY_SVC_TYPE   AS DELIVERY_SVC_TYPE /*배송서비스구분(01:일반,02:반품,03:N배송)*/
+	        ,WD_KX_ORDER.EXCEPT_REASON_CD    AS EXCEPT_REASON_CD  /*제외사유코드*/
+	        ,SEQ                             AS SEQ               /*순번*/
+			,WD_KX_ORDER.PARCEL_RCPT_DATE    AS PARCEL_RCPT_DATE  /*택배접수일자*/ 
+			,WD_KX_ORDER.PARCEL_RCPT_HOUR    AS PARCEL_RCPT_HOUR  /*택배접수시간*/      
+	   FROM WD_KX_ORDER /*출고검수*/
+	  WHERE SERIALKEY   = #{serialkey} /*시리얼키*/  
+	</insert>
+	
+	
+	<!-- 주소 정제 - API방식 변경으로 인한 현재 미사용 -->
+    <select id="callProcedure" statementType="CALLABLE">
+	{
+	    CALL /* [CmCommonService.sqlx][callProcedure][주소정제 프로시저 호출][sss][2025.05.23] */ PKG_RVAP_ADDRSEARCH.PR_RVAP_SEARCHADDRESS
+	    (
+	         P_CLNTNUM            => #{pClntnum,            mode=IN,    jdbcType=VARCHAR} /*고객번호*/
+	        ,P_CLNTMGMCUSTCD      => #{pClntmgmcustcd,      mode=IN,    jdbcType=VARCHAR} /*관리고객코드*/
+	        ,P_PRNGDIVCD          => #{pPrngdivcd,          mode=IN,    jdbcType=VARCHAR} /*분류구분코드*/
+	        ,P_CGOSTS             => #{pCgosts,             mode=IN,    jdbcType=VARCHAR} /*상태*/
+	        ,P_ADDRESS            => #{pAddress,            mode=IN,    jdbcType=VARCHAR} /*주소*/
+	        ,P_ZIPNUM             => #{pZipnum,             mode=OUT,   jdbcType=VARCHAR} /*우편번호*/
+	        ,P_ZIPID              => #{pZipid,              mode=OUT,   jdbcType=VARCHAR} /*우편ID*/
+	        ,P_OLDADDRESS         => #{pOldaddress,         mode=OUT,   jdbcType=VARCHAR} /*구주소*/
+	        ,P_OLDADDRESSDTL      => #{pOldaddressdtl,      mode=OUT,   jdbcType=VARCHAR} /*구주소상세*/
+	        ,P_NEWADDRESS         => #{pNewaddress,         mode=OUT,   jdbcType=VARCHAR} /*신주소*/
+	        ,P_NESADDRESSDTL      => #{pNesaddressdtl,      mode=OUT,   jdbcType=VARCHAR} /*신주소상세*/
+	        ,P_ETCADDR            => #{pEtcaddr,            mode=OUT,   jdbcType=VARCHAR} /*기타주소*/
+	        ,P_SHORTADDR          => #{pShortaddr,          mode=OUT,   jdbcType=VARCHAR} /*약식주소*/
+	        ,P_CLSFADDR           => #{pClsfaddr,           mode=OUT,   jdbcType=VARCHAR} /*분류주소*/
+	        ,P_CLLDLVBRANCD       => #{pClldlvbrancd,       mode=OUT,   jdbcType=VARCHAR} /*배송지점코드*/
+	        ,P_CLLDLVBRANNM       => #{pClldlvbrannm,       mode=OUT,   jdbcType=VARCHAR} /*배송지점명*/
+	        ,P_CLLDLCBRANSHORTNM  => #{pClldlcbranshortnm,  mode=OUT,   jdbcType=VARCHAR} /*배송지점약식명*/
+	        ,P_CLLDLVEMPNUM       => #{pClldlvempnum,       mode=OUT,   jdbcType=VARCHAR} /*배송직원번호*/
+	        ,P_CLLDLVEMPNM        => #{pClldlvempnm,        mode=OUT,   jdbcType=VARCHAR} /*배송직원명*/
+	        ,P_CLLDLVEMPNICKNM    => #{pClldlvempnicknm,    mode=OUT,   jdbcType=VARCHAR} /*배송직원닉네임*/
+	        ,P_CLSFCD             => #{pClsfcd,             mode=OUT,   jdbcType=VARCHAR} /*분류코드*/
+	        ,P_CLSFNM             => #{pClsfnm,             mode=OUT,   jdbcType=VARCHAR} /*분류명*/
+	        ,P_SUBCLSFCD          => #{pSubclsfcd,          mode=OUT,   jdbcType=VARCHAR} /*하위분류코드*/
+	        ,P_RSPSDIV            => #{pRspsdiv,            mode=OUT,   jdbcType=VARCHAR} /*응답구분*/
+	        ,P_NEWADDRYN          => #{pNewaddryn,          mode=OUT,   jdbcType=VARCHAR} /*신주소여부*/
+	        ,P_ERRORCD            => #{pErrorcd,            mode=OUT,   jdbcType=VARCHAR} /*에러코드*/
+	        ,P_ERRORMSG           => #{pErrormsg,           mode=OUT,   jdbcType=VARCHAR} /*에러메시지*/
+	    )
+	}
+    </select>
+    
+	<!-- 운송장 출력	-->
+	<select id="printMasterList" resultType="cjfw.wms.wd.dto.WdKxDeliveryInvoicePrintResDto">
+		SELECT /* [wdKxDeliveryInvoiceService.sqlx][wdKxDeliveryInvoiceService.printMasterList][운송장 라벨 출력 조회][sss][2026.01.06]*/                                                          
+	           MAX(SUBSTR(WD_KX_ORDER.INVOICENO,0, 4)||'-'||SUBSTR(WD_KX_ORDER.INVOICENO,5,4)||
+	                  '-'||SUBSTR(WD_KX_ORDER.INVOICENO,9,4)                                                          ) AS INVOICENO     /*1.운송장번호(포맷)*/
+	          ,MAX(TO_CHAR(TO_DATE(WD_KX_ORDER.REQ_DATE,'YYYYMMDD'),'YYYY.MM.DD')                                     ) AS DOCDT2        /*2.접수일자 포맷(YYYY.MM.DD)-인쇄용*/
+	          ,MAX(WD_KX_ORDER.CLSFCD                                                                                 ) AS BARCODE1      /*8.도착지코드*/
+	          ,MAX(SUBSTR(WD_KX_ORDER.INVOICENO,0, 4)||'-'||SUBSTR(WD_KX_ORDER.INVOICENO,5,4)||                                          
+	                  '-'||SUBSTR(WD_KX_ORDER.INVOICENO,9,4)                                                          ) AS BARCODE2      /*운송장번호(포맷)-바코드*/            
+	          ,MAX(SUBSTR(WD_KX_ORDER.INVOICENO,0, 4)||'-'||SUBSTR(WD_KX_ORDER.INVOICENO,5,4)||                                          
+	                  '-'||SUBSTR(WD_KX_ORDER.INVOICENO,9,4)                                                          ) AS BARCODE3      /*운송장번호(포맷)-바코드*/                      
+	          ,MAX(WD_KX_ORDER.CLSFCD) CLSFCD        
+	          ,MAX(SUBSTR(WD_KX_ORDER.CLSFCD,1,1))  AS CLSFCD1
+	          ,MAX(SUBSTR(WD_KX_ORDER.SUBCLSFCD,2)) AS CLSFCD2
+	          --
+	          ,MAX(WD_KX_ORDER.RCVR_NM                                                                                ) AS RECEIVER      /*인쇄.수화인명*/
+	          ,MAX(WD_KX_ORDER.RCVR_TEL_NO1||'-'||WD_KX_ORDER.RCVR_TEL_NO2||'-'||DAMO.DEC(WD_KX_ORDER.RCVR_TEL_NO3)   ) AS CALL1         /*인쇄.수화인 전화번호*/
+	          ,MAX(WD_KX_ORDER.RCVR_CELL_NO1||'-'||WD_KX_ORDER.RCVR_CELL_NO2||'-'||DAMO.DEC(WD_KX_ORDER.RCVR_CELL_NO3)) AS CALL2         /*인쇄.수화인 휴대폰번호*/
+	          ,MAX(WD_KX_ORDER.RCVR_ADDR||' '||DAMO.DEC(WD_KX_ORDER.RCVR_DETAIL_ADDR)                                 ) AS ADDRESS1      /*인쇄.수화인 주소*/
+	          ,MAX(DAMO.DEC(WD_KX_ORDER.RCVR_DETAIL_ADDR)                                                             ) AS ORDER1        /*인쇄.수화인 주소-상세*/
+	          ,MAX(WD_KX_ORDER.SENDR_NM                                                                               ) AS SENDER        /*인쇄.발송자명*/          
+	          ,MAX(WD_KX_ORDER.SENDR_NM                                                                               ) AS FROM_CUSTNAME /*인쇄.발송자명*/          
+	          ,MAX(WD_KX_ORDER.SENDR_TEL_NO1||'-'||WD_KX_ORDER.SENDR_TEL_NO2||'-'||DAMO.DEC(WD_KX_ORDER.SENDR_TEL_NO3)) AS CALL3         /*송화인 전화번호*/
+	          ,MAX(WD_KX_ORDER.BOXQTY                                                                                 ) AS BOXQTY        /*박스수량-송장분리 후 수량*/
+	          ,MAX(WD_KX_ORDER.COST                                                                                   ) AS FARE1         /*인쇄.비용*/
+	          ,MAX(WD_KX_ORDER.FEETYPE                                                                                ) AS SETTLEMENT1   /*요금유형(01 선불, 02 착불, 03 신용)*/
+	          ,MAX(WD_KX_ORDER.SENDR_ADDR||' '||DAMO.DEC(WD_KX_ORDER.SENDR_DETAIL_ADDR)                               ) AS SENDR_ADDR    /*송화인 주소*/
+              ,MAX(CASE WHEN WD_KX_ORDER.BOXQTY > 0 THEN '(' || NVL(CD3.BASEDESCR, MS_SKU.STORAGETYPE) || ')'  ELSE ''END)||TRIM(REGEXP_SUBSTR(RTRIM(XMLAGG(XMLELEMENT(E, WD_KX_ORDER.DESCRIPTION || ', ') ORDER BY WD_KX_ORDER.DESCRIPTION).EXTRACT('//text()').GETCLOBVAL(), ', '), '[^,]+', 1, 1)) AS SKUNAME1
+              ,MAX(CASE WHEN WD_KX_ORDER.BOXQTY > 1 THEN '(' || NVL(CD3.BASEDESCR, MS_SKU.STORAGETYPE) || ')'  ELSE ''END)||TRIM(REGEXP_SUBSTR(RTRIM(XMLAGG(XMLELEMENT(E, WD_KX_ORDER.DESCRIPTION || ', ') ORDER BY WD_KX_ORDER.DESCRIPTION).EXTRACT('//text()').GETCLOBVAL(), ', '), '[^,]+', 1, 2)) AS SKUNAME2
+              ,MAX(CASE WHEN WD_KX_ORDER.BOXQTY > 2 THEN '(' || NVL(CD3.BASEDESCR, MS_SKU.STORAGETYPE) || ')'  ELSE ''END)||TRIM(REGEXP_SUBSTR(RTRIM(XMLAGG(XMLELEMENT(E, WD_KX_ORDER.DESCRIPTION || ', ') ORDER BY WD_KX_ORDER.DESCRIPTION).EXTRACT('//text()').GETCLOBVAL(), ', '), '[^,]+', 1, 3)) AS SKUNAME3
+              ,MAX(CASE WHEN WD_KX_ORDER.BOXQTY > 3 THEN '(' || NVL(CD3.BASEDESCR, MS_SKU.STORAGETYPE) || ')'  ELSE ''END)||TRIM(REGEXP_SUBSTR(RTRIM(XMLAGG(XMLELEMENT(E, WD_KX_ORDER.DESCRIPTION || ', ') ORDER BY WD_KX_ORDER.DESCRIPTION).EXTRACT('//text()').GETCLOBVAL(), ', '), '[^,]+', 1, 4)) AS SKUNAME4
+	          ,MAX(DAMO.DEC(WD_KX_ORDER.CLSFADDR)                                                                     ) AS ADDRESS3        /*주소약칭*/
+	          ,MAX(WD_KX_ORDER.ORDERQTY                                                                               ) AS TOTALQTY        /*주문수량*/    
+	          ,MAX(WD_KX_ORDER.ETC_1                                                                                  ) AS ETC_MSG         /*배송 메시지*/
+	          ,MAX(WD_KX_ORDER.CLLDLVBRANNM                                                                           ) AS CLLDLVBRANNM    /*배송집배점명*/
+	          ,MAX(WD_KX_ORDER.CLLDLVEMPNICKNM                                                                        ) AS CLLDLVEMPNICKNM /*SM분류코드*/
+	          ,MAX(WD_KX_ORDER.P2PCD                                                                                  ) AS TMP1            /*P2P코드*/ 
+	          ,MAX(WD_KX_ORDER.P2PCD                                                                                  ) AS TMP2            /*P2P코드*/ 
+	          ,NULL                                                                                                     AS TMP3            /*현재미사용*/ 
+	          ,MAX(WD_KX_ORDER.CLLDLVEMPNM    ) AS CLLDLVEMPNM     /*배송SM명*/
+	          ,MAX(WD_KX_ORDER.RSPSDIV        ) AS RSPSDIV         /*권역구분*/
+	          --기타
+              ,MAX(WD_KX_ORDER.DOCDT                                                                                  ) AS DOCDT           /*접수일자 - 택배접수시각*/
+              ,MAX(WD_KX_ORDER.DOCNO                                                                                  ) AS DOCNO           /*문서번호*/
+              ,MAX(WD_KX_ORDER.REQ_DATE                                                                               ) AS REQ_DATE        /*요청일자 - 접수일자(원: 납품요청일자)*/
+	       FROM WD_KX_ORDER       /*출고검수*/
+	       JOIN DELIVERYINFO_EMP  /*주문 배송지정보*/
+	         ON WD_KX_ORDER.DOCNO_FW     = DELIVERYINFO_EMP.DOCNO
+	        AND WD_KX_ORDER.DOCLINE_FW   = DELIVERYINFO_EMP.DOCLINE
+	       JOIN DM_DOCUMENT_D 
+	         ON DM_DOCUMENT_D.DOCNO        = DELIVERYINFO_EMP.DOCNO
+	        AND DM_DOCUMENT_D.DOCLINE      = DELIVERYINFO_EMP.DOCLINE
+	        AND DM_DOCUMENT_D.DELIVERYDATE = DELIVERYINFO_EMP.REQ_DATE            
+	       JOIN MS_SKU                                                                                                                                                                                               
+	         ON MS_SKU.STORERKEY  = #{gStorerkey}                                                                                                                                                                           
+	        AND MS_SKU.SKU        = WD_KX_ORDER.SKU
+	  LEFT JOIN MS_UOM 
+	         ON MS_SKU.STORERKEY = MS_UOM.STORERKEY
+	        AND MS_SKU.SKU       = MS_UOM.SKU
+	        AND MS_SKU.BASEUOM   = MS_UOM.BASEUOM
+	        AND MS_UOM.UOM       = DM_DOCUMENT_D.STORERUOM                  
+	  LEFT JOIN MS_PARCEL_BOX
+	         ON WD_KX_ORDER.BOXTYPE     = MS_PARCEL_BOX.BOXNO
+	       JOIN (SELECT '씨제이프레시웨이㈜'  AS SENDR_NM
+	                   ,'02-2149-6114'   AS SENDR_TEL_NO
+	                   ,'02-2149-6114'   AS SENDR_CELL_NO
+	                   ,'21074'          AS SENDR_ZIP_NO
+	                   ,'경기도 용인시 기흥구 기곡로 32(하갈동) 씨제이프레시웨이주식회사' AS SENDR_ADDR 
+	              FROM DUAL
+	            ) SENDER_INFO   
+	        ON 1=1          
+	  LEFT JOIN CM_CODE_STORER CD1  ON (CD1.STORERKEY = #{gStorerkey} AND CD1.CODELIST = 'OUTPUT_STATUS'    AND CD1.BASECODE = WD_KX_ORDER.PRT_ST)    /*출력상태*/
+	  LEFT JOIN CM_CODE_STORER CD2  ON (CD2.STORERKEY = #{gStorerkey} AND CD2.CODELIST = 'STATUS_INVOICENO' AND CD2.BASECODE = WD_KX_ORDER.STATUS)    /*상태명*/         
+	  LEFT JOIN CM_CODE_STORER CD3  ON CD3.STORERKEY  = #{gStorerkey} AND CD3.CODELIST = 'STORAGETYPE'      AND CD3.BASECODE = MS_SKU.STORAGETYPE     /*저장조건명*/
+	  LEFT JOIN CM_CODE_STORER CD4  ON (CD4.STORERKEY = #{gStorerkey} AND CD4.CODELIST = 'RECEPTION_DIV'    AND CD4.BASECODE = WD_KX_ORDER.ORDERTYPE) /*접수구분*/         
+	  LEFT JOIN CM_CODE_STORER CD5  ON (CD5.STORERKEY = #{gStorerkey} AND CD5.CODELIST = 'WORK_DIV'         AND CD5.BASECODE = WD_KX_ORDER.WORKTYPE)  /*작업구분명*/
+	  LEFT JOIN FRAMEONE_USER USER1 ON USER1.USER_ID  = WD_KX_ORDER.ADDWHO   /*등록자명*/
+	      WHERE WD_KX_ORDER.DCCODE        = #{fixdccode} 
+	        AND DELIVERYINFO_EMP.REQ_DATE = #{reqDate}
+	        AND DELIVERYINFO_EMP.DELIVERY_SVC_TYPE = #{deliverySvcTypeTab} /*배송서비스구분(01:일반,02:반품,03:N배송)*/   
+	    <!-- START.DOCNO.다중OR검색-->
+        <choose>
+          <when test="docnoMulti != null and docnoMulti != '' ">
+		      <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+		      	<foreach collection="docnoMulti" item="item">
+		      		OR WD_KX_ORDER.DOCNO IN
+		      		<foreach collection="item" item="code" open="(" close=")" separator=",">
+		      			#{code} 	 
+		          		</foreach>
+		        	</foreach>
+		      </trim>			
+          </when>
+          <otherwise>
+              AND 1 = 2                          
+          </otherwise>
+        </choose>
+	    <!-- END.DOCNO.다중OR검색 -->	        
+	      GROUP BY WD_KX_ORDER.DOCNO 
+	</select>    	        
+    
+</mapper>

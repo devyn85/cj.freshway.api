@@ -1,0 +1,192 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="sysLabelService">
+
+	<!-- 라벨 조회(목록) -->
+    <select id="getLabelList" resultType="SysLabelResDto">
+    	SELECT /* [sysLabelService.sqlx][sysLabelService.getLabelList][라벨 조회][JiSooKim][20250821] */
+    		LABEL_CD           	/* 라벨코드 */
+	         , SYSTEM_CL          /* 시스템구분 */
+	         , LABEL_TYPE         /* 라벨유형 */
+	         , LABEL_NM           /* 라벨명 */
+	         , ALIGN_TYPE         /* 정렬유형 */
+	         , ATTRIBUTE4         /* 마이플렛폼 도메인 속성(TYPE) */
+	         , ATTRIBUTE5         /* 마이플렛폼 도메인 속성(LIMIT) */
+	         , ATTRIBUTE3         /* 마이플렛폼 도메인 속성(ENABLE) */
+	         , ATTRIBUTE6         /* 마이플렛폼 도메인 속성(DECIMAL) */
+	         , ATTRIBUTE1         /* 마이플렛폼 도메인 속성(FORMAT) */
+	         , ATTRIBUTE2         /* 마이플렛폼 도메인 속성(VISIBLE) */
+	         , NVL(USE_YN, '0') AS USE_YN
+	      FROM FRAMEONE_LABEL
+	     WHERE 1 = 1
+	       AND SYSTEM_CL = 'LOGISONE'
+	       <if test="labelType != null and labelType != ''">
+	           AND LABEL_TYPE = #{labelType}
+	       </if>
+	       <if test="labelCd != null and labelCd != ''">
+	           AND LABEL_CD LIKE '%' || #{labelCd} || '%'
+	       </if>
+	       <if test="labelNm != null and labelNm != ''">
+	           AND LABEL_NM LIKE '%' || #{labelNm} || '%'
+	       </if>
+	       <if test="useYn != null and useYn != ''">
+	           AND USE_YN = DECODE(#{useYn}, 'Y', '1', '1', '1', '0')
+	       </if>
+    </select>    
+    
+    <!-- 라벨 INSERT -->
+    <insert id="insertLabel">
+		INSERT /* [sysLabelService.sqlx][label.insertLabel][라벨관리 등록][JiSooKim][20250821] */
+	        INTO FRAMEONE_LABEL (
+	            SYSTEM_CL,
+	            LABEL_TYPE,
+	            LABEL_CD,
+	            LABEL_NM,
+	            ALIGN_TYPE,
+	            ATTRIBUTE1,
+	            ATTRIBUTE2,
+	            ATTRIBUTE3,
+	            ATTRIBUTE4,
+	            ATTRIBUTE5,
+	            ATTRIBUTE6,
+	            USE_YN,
+	            REGR_ID,
+	            REG_DATE
+	        )
+	    VALUES ( 
+	        #{systemCl},
+	        #{labelType},
+	        #{labelCd},
+	        #{labelNm},
+	        #{alignType},
+	        #{attribute1},
+	        #{attribute2},
+	        #{attribute3},
+	        #{attribute4},
+	        #{attribute5},
+	        #{attribute6},
+	        NVL(#{useYn}, '0'),
+	        #{regId},
+	        SYSDATE
+	    )
+    </insert>
+
+	<select id="insertAutoLabelMultilingual" statementType="CALLABLE">
+    <![CDATA[
+	    {
+	        CALL /* [SysLabelLangService.sqlx][insertLabelLanguage][라벨 다국어 등록][JGS][2025.08.21] */
+	        DECLARE
+	            V_AFTER      FRAMEONE_LABEL_LANGUAGE%rowtype;
+	            O_SUCCESS    NUMBER := 1;
+	            O_ERRCODE    NUMBER := 0;
+	            O_ERRMSG     VARCHAR2(4000) := '';
+	            SQL_ERROR    EXCEPTION;
+	        BEGIN
+	        	FOR KEY_LIST IN (
+			        SELECT  COMM_CD 
+			        FROM  FRAMEONE_CODE
+			        WHERE   COMM_CL_CD = 'FRAMEONE008'
+			    )
+	        LOOP
+	            BEGIN
+	                V_AFTER.LABEL_CD    := #{labelCd};
+	                V_AFTER.LABEL_NM    := #{labelNm};
+	                V_AFTER.LANG_CL     := KEY_LIST.COMM_CD;
+	                V_AFTER.REGR_ID     := #{regId};
+	                V_AFTER.REG_DATE    := SYSDATE;
+	                V_AFTER.SYSTEM_CL   := #{systemCl};
+	                V_AFTER.SOURCE_CL   := #{sourceCl};
+	                
+	
+	                TRFRAMEONE_LABEL_LANGUAGE.TR_INSERT(
+	                    V_AFTER,
+	                    O_SUCCESS,
+	                    O_ERRCODE,
+	                    O_ERRMSG
+	                );
+	
+	                IF O_ERRCODE = -200001 THEN
+	                    RAISE_APPLICATION_ERROR(-200001, NVL(O_ERRMSG, SQLERRM));
+	                ELSIF O_ERRCODE != 0 THEN
+	                    RAISE SQL_ERROR;
+	                END IF;
+	
+	            EXCEPTION WHEN OTHERS THEN
+	                O_ERRCODE := SQLCODE;
+	                O_ERRMSG := NVL(O_ERRMSG, SQLERRM);
+	            END;
+            END LOOP;
+	
+	            #{success,  mode=OUT, jdbcType=INTEGER, javaType=int}    := O_SUCCESS;
+	            #{errCode,  mode=OUT, jdbcType=INTEGER, javaType=int}    := O_ERRCODE;
+	            #{errMsg,   mode=OUT, jdbcType=VARCHAR, javaType=String} := O_ERRMSG;
+	        END
+		    }
+    ]]>
+	</select>
+    
+    
+    <!-- 라벨 UPDATE -->
+    <select id="updateLabel" statementType="CALLABLE">
+    <![CDATA[
+	    {
+	        CALL /* [SysLabelService.sqlx][updateLabel][라벨정보 수정][JGS][2025.08.21] */
+	        DECLARE
+	            V_AFTER      FRAMEONE_LABEL%rowtype;
+	            O_SUCCESS    NUMBER := 1;
+	            O_ERRCODE    NUMBER := 0;
+	            O_ERRMSG     VARCHAR2(4000) := '';
+	            SQL_ERROR    EXCEPTION;
+	        BEGIN
+	            BEGIN
+	                SELECT *
+	                INTO V_AFTER
+	                FROM FRAMEONE_LABEL
+	                WHERE SYSTEM_CL = #{systemCl}
+	                  AND LABEL_CD = #{labelCd};
+	
+	                V_AFTER.LABEL_NM      := #{labelNm};
+	                V_AFTER.ATTRIBUTE1    := #{attribute1};
+	                V_AFTER.ATTRIBUTE2    := #{attribute2};
+	                V_AFTER.ATTRIBUTE3    := #{attribute3};
+	                V_AFTER.ATTRIBUTE4    := #{attribute4};
+	                V_AFTER.ATTRIBUTE5    := #{attribute5};
+	                V_AFTER.ATTRIBUTE6    := #{attribute6};
+	                V_AFTER.USE_YN        := #{useYn};
+	                V_AFTER.MODR_ID       := #{regId};
+	                V_AFTER.MOD_DATE      := SYSDATE;
+	                V_AFTER.SYSTEM_CL     := #{systemCl};
+	                V_AFTER.SOURCE_CL     := #{sourceCl};
+	                V_AFTER.LABEL_TMPNM   := #{labelTmpnm};
+	                V_AFTER.LABEL_TYPE    := #{labelType};
+	                V_AFTER.ALIGN_TYPE    := #{alignType};
+	
+	                TRFRAMEONE_LABEL.TR_UPDATE(
+	                    V_AFTER,
+	                    O_SUCCESS,
+	                    O_ERRCODE,
+	                    O_ERRMSG
+	                );
+	
+	                IF O_ERRCODE = -20001 THEN
+	                    RAISE_APPLICATION_ERROR(-20001, NVL(O_ERRMSG, SQLERRM));
+	                ELSIF O_ERRCODE != 0 THEN
+	                    RAISE SQL_ERROR;
+	                END IF;
+	
+	            EXCEPTION WHEN OTHERS THEN
+	                O_ERRCODE := SQLCODE;
+	                O_ERRMSG := NVL(O_ERRMSG, SQLERRM);
+	            END;
+	
+	            #{success,  mode=OUT, jdbcType=INTEGER, javaType=int}    := O_SUCCESS;
+	            #{errCode,  mode=OUT, jdbcType=INTEGER, javaType=int}    := O_ERRCODE;
+	            #{errMsg,   mode=OUT, jdbcType=VARCHAR, javaType=String} := O_ERRMSG;
+	        END
+	    }
+    ]]>
+	</select>
+	
+	
+   
+</mapper>

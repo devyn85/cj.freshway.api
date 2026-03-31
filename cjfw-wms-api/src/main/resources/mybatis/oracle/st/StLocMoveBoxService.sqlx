@@ -1,0 +1,362 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+  PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+  "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="stLocMoveBoxService">
+
+    <select id="getTab1MasterList" resultType="cjfw.wms.st.dto.StLocMoveBoxResDto">
+	    SELECT /*[stLocMoveBoxService.sqlx][getTab1MasterList][이동대상조회][Hyeongmin Ju][20150317]*/
+	           ST_STOCK.DCCODE                                       AS DCCODE                  /*센터코드*/
+	         , ST_STOCK.ORGANIZE                                     AS ORGANIZE                /*조직*/
+	         , NVL(CD1.BASEDESCR,ST_STOCK.STOCKTYPE)				 AS STOCKTYPE               /*재고유형*/
+	         , NVL(CD2.BASEDESCR,ST_STOCK.STOCKGRADE)				 AS STOCKGRADE              /*재고등급*/
+	         , ST_STOCK.LOC                                          AS LOC                     /*로케이션*/
+	         , ST_STOCK.SKU                                          AS SKU                     /*상품코드*/
+	         , MS_SKU.DESCRIPTION                                    AS SKUNAME                 /*상품명*/
+	         , ST_STOCK.UOM                                          AS UOM                     /*단위*/
+	         , ST_STOCK.QTY                                          AS QTY                     /*수량*/
+	         , ST_STOCK.QTYEXPECTED                                  AS QTYEXPECTED             /*입고예정수량*/
+	         , ST_STOCK.QTYALLOCATED                                 AS QTYALLOCATED            /*할당수량*/
+	         , ST_STOCK.QTYPICKED                                    AS QTYPICKED               /*피킹수량*/
+	         , ST_STOCK.QTY - ST_STOCK.QTYALLOCATED - ST_STOCK.QTYPICKED - ST_STOCK.QTYRESERVE AS POSBQTY             /*이동가능수량*/
+	         , FN_CONV_UOM(ST_STOCK.STORERKEY,ST_STOCK.SKU,'BOX','EA',1) AS QTYPERBOX            /*박스당수량*/
+	         , TRUNC(FN_CONV_UOM(ST_STOCK.STORERKEY,ST_STOCK.SKU,ST_STOCK.UOM,'BOX', ST_STOCK.QTY - ST_STOCK.QTYALLOCATED - ST_STOCK.QTYPICKED - ST_STOCK.QTYRESERVE)) AS POSBQTY_BOX /*이동가능박스수량*/
+	         , MOD(FN_CONV_UOM(ST_STOCK.STORERKEY,ST_STOCK.SKU,ST_STOCK.UOM,'EA',ST_STOCK.QTY - ST_STOCK.QTYALLOCATED - ST_STOCK.QTYPICKED - ST_STOCK.QTYRESERVE), FN_CONV_UOM(ST_STOCK.STORERKEY,ST_STOCK.SKU,'BOX','EA',1)) AS POSBQTY_EA /*이동가능수량*/
+	         , ''                                                    AS TO_LOC                  /*도착로케이션*/
+	         , ''                                                    AS TO_ORDERQTY             /*도착수량*/
+	         , ''                                                    AS TO_ORDERQTY_BOX         /*도착박스수량*/
+	         , ''                                                    AS TO_ORDERQTY_EA          /*도착낱개수량*/
+	         , NVL(TRIM(FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01, 'Y')),'N') AS NEARDURATIONYN /*유통기한임박여부*/
+	         , CM_LOT.LOTTABLE01                                     AS LOTTABLE01              /*유통기한*/
+              /*START.제조일자/소비일자*/
+              /*
+              * 기준일(제조) ~까지 : DURATIONTYPE =1 일때 , LOTTABLE01 - DURATION 
+              *             DURATIONTYPE =2 일때 LOTTABLE01 
+              * 기준일(소비) ~부터 : DURATIONTYPE =1 일때 LOTTABLE01
+              *             DURATIONTYPE =2일때 LOTTABLE01 + DURATION  -1
+             */
+              ,CASE WHEN VALIDATE_CONVERSION(CM_LOT.LOTTABLE01 AS DATE, 'YYYYMMDD') = 1  
+                    THEN (CASE WHEN MS_SKU.DURATIONTYPE = '1' 
+                               THEN TO_CHAR(TO_DATE(REPLACE(CM_LOT.LOTTABLE01,'-',''),'YYYYMMDD') - MS_SKU.DURATION,'YYYY-MM-DD')
+                               WHEN MS_SKU.DURATIONTYPE = '2'
+                               THEN TO_CHAR(TO_DATE(REPLACE(CM_LOT.LOTTABLE01,'-',''),'YYYYMMDD'),'YYYY-MM-DD')
+                               ELSE CM_LOT.LOTTABLE01 END)
+                    ELSE CM_LOT.LOTTABLE01 END                AS MANUFACTUREDT   /*제조일자*/
+              ,CASE WHEN VALIDATE_CONVERSION(CM_LOT.LOTTABLE01 AS DATE, 'YYYYMMDD') = 1  
+                    THEN (CASE WHEN MS_SKU.DURATIONTYPE = '1' 
+                               THEN TO_CHAR(TO_DATE(REPLACE(CM_LOT.LOTTABLE01,'-',''),'YYYYMMDD'),'YYYY-MM-DD')
+                               WHEN MS_SKU.DURATIONTYPE = '2'
+                               THEN TO_CHAR(TO_DATE(REPLACE(CM_LOT.LOTTABLE01,'-',''),'YYYYMMDD') + MS_SKU.DURATION -1,'YYYY-MM-DD')
+                               ELSE CM_LOT.LOTTABLE01 END)
+                    ELSE CM_LOT.LOTTABLE01 END                AS EXPIREDT          /*소비일자*/              
+	         , CASE WHEN MS_SKU.DURATIONTYPE = 'N' THEN /*요건.소비기한 관리 안하면 빈값으로 처리*/
+	               ''
+	           ELSE 
+	               FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01, 'N0') || '/' || MS_SKU.DURATION 
+	           END AS DURATION_TERM /*유통기한/기간*/
+	         , ST_SERIALINFO.SERIALNO                                AS SERIALNO                /*시리얼번호*/
+	         , NVL(CD3.BASEDESCR,MS_SKU.STORAGETYPE)				 AS STORAGETYPE             /*보관유형*/
+	         , MS_SKU.DURATION                                       AS DURATION                /*유통기한기간*/
+	         , MS_SKU.DURATIONTYPE                                   AS DURATIONTYPE            /*유통기한구분*/
+	         , ST_STOCK.DCCODE                                       AS FROM_DCCODE             /*출발센터코드*/
+	         , ST_STOCK.STORERKEY                                    AS FROM_STORERKEY          /*출발화주코드*/
+	         , ST_STOCK.ORGANIZE                                     AS FROM_ORGANIZE           /*출발조직*/
+	         , ST_STOCK.AREA                                         AS FROM_AREA               /*출발구역*/
+	         , ST_STOCK.SKU                                          AS FROM_SKU                /*출발상품코드*/
+	         , ST_STOCK.LOC                                          AS FROM_LOC                /*출발로케이션*/
+	         , ST_STOCK.LOT                                          AS FROM_LOT                /*출발로트*/
+	         , ST_STOCK.STOCKID                                      AS FROM_STOCKID            /*출발재고ID*/
+	         , ST_STOCK.STOCKGRADE                                   AS FROM_STOCKGRADE         /*출발재고등급*/
+	         , ST_STOCK.STOCKTYPE                                    AS FROM_STOCKTYPE          /*출발재고유형*/
+	         , ST_STOCK.QTY                                          AS FROM_ORDERQTY           /*출발수량*/
+	         , ST_STOCK.UOM                                          AS FROM_UOM                /*출발단위*/
+	         , ST_STOCK.DCCODE                                       AS TO_DCCODE               /*도착센터코드*/
+	         , ST_STOCK.STORERKEY                                    AS TO_STORERKEY            /*도착화주코드*/
+	         , ST_STOCK.ORGANIZE                                     AS TO_ORGANIZE             /*도착조직*/
+	         , ST_STOCK.AREA                                         AS TO_AREA                 /*도착구역*/
+	         , ST_STOCK.SKU                                          AS TO_SKU                  /*도착상품코드*/
+	         , ST_STOCK.LOT                                          AS TO_LOT                  /*도착로트*/
+	         , ST_STOCK.STOCKID                                      AS TO_STOCKID              /*도착재고ID*/
+	         , ST_STOCK.STOCKGRADE                                   AS TO_STOCKGRADE           /*도착재고등급*/
+	         , ST_STOCK.STOCKTYPE                                    AS TO_STOCKTYPE            /*도착재고유형*/
+	         , ST_STOCK.UOM                                          AS TO_UOM                  /*도착단위*/
+	         , ST_STOCK.QTYALLOCATED                                 AS ETCQTY1                 /*기타수량1(할당)*/
+	         , ST_STOCK.QTYPICKED                                    AS ETCQTY2                 /*기타수량2(피킹)*/
+	         , ST_SERIALINFO.FACTORYNAME                             AS FACTORYNAME             /*공장명*/
+	         , ST_SERIALINFO.CONVSERIALNO                            AS CONVSERIALNO            /*변환시리얼번호*/
+	         , ST_SERIALINFO.BUTCHERYDT                              AS BUTCHERYDT              /*도축일자*/
+	         , ST_SERIALINFO.CONTRACTCUSTKEY                         AS CONTRACTCOMPANY         /*계약업체코드*/
+	         , (SELECT DESCRIPTION FROM MS_CUST WHERE MS_CUST.STORERKEY = ST_SERIALINFO.STORERKEY AND MS_CUST.CUSTKEY = ST_SERIALINFO.CONTRACTCUSTKEY AND ROWNUM = 1) AS CONTRACTCOMPANYNAME /*계약업체명*/
+	         , ST_SERIALINFO.FROMVALIDDT                             AS FROMVALIDDT             /*출발유효일자*/
+	         , ST_SERIALINFO.TOVALIDDT                               AS TOVALIDDT               /*도착유효일자*/
+	         , NVL(CD4.BASEDESCR,ST_SERIALINFO.CONTRACTTYPE)	     AS CONTRACTTYPE            /*계약유형*/
+	         , ST_SERIALINFO.STOCKID                                 AS BARCODE                 /*바코드*/
+	         , NVL(MS_SKUDCSET.LOC,' ')                              AS FIXLOC                  /*고정로케이션*/
+	         , #{gDccode} AS G_DCCODE
+	      FROM ST_STOCK
+	      JOIN MS_SKU
+	        ON MS_SKU.STORERKEY = ST_STOCK.STORERKEY
+	       AND MS_SKU.SKU      = ST_STOCK.SKU
+	       AND MS_SKU.DEL_YN   = 'N'
+	       <if test="storagetype != null and storagetype != ''">AND MS_SKU.STORAGETYPE LIKE #{storagetype}</if>
+	       
+	        <!-- START.상품.다중OR검색 -->
+	        <if test="skuMulti != null and skuMulti != '' ">
+				<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+					<foreach collection="skuMulti" item="item">
+						OR MS_SKU.SKU IN
+						<foreach collection="item" item="code" open="(" close=")" separator=",">
+							#{code} 	 
+			      		</foreach>
+			    	</foreach>
+			  	</trim>			                                    
+	        </if>
+	        <!-- END.상품.다중OR검색 -->        
+	                 
+	      JOIN CM_LOT
+	        ON CM_LOT.STORERKEY = ST_STOCK.STORERKEY
+	       AND CM_LOT.LOT      = ST_STOCK.LOT
+	       AND CM_LOT.DEL_YN   = 'N'
+	       <if test="lottable01yn == 'Y'.toString()">AND CM_LOT.LOTTABLE01 <![CDATA[<>]]> 'STD'</if>
+	       <if test="lottable01yn == 'N'.toString()">AND CM_LOT.LOTTABLE01 = 'STD'</if>
+	      JOIN MS_LOCATION
+	        ON MS_LOCATION.DCCODE = ST_STOCK.DCCODE
+	       AND MS_LOCATION.LOC   = ST_STOCK.LOC
+	       <if test="loccategory != null and loccategory != ''">AND MS_LOCATION.LOCCATEGORY = 'AUTO'</if>
+	      <if test="searchserial != null and searchserial != ''">
+	          JOIN ST_SNINFO ST_SERIALINFO
+	            ON ST_STOCK.STORERKEY = ST_SERIALINFO.STORERKEY
+	           AND ST_STOCK.SKU      = ST_SERIALINFO.SKU
+	           AND ST_STOCK.STOCKID  = ST_SERIALINFO.STOCKID
+	      </if>
+	      <if test="searchserial == null or searchserial == ''">
+	          LEFT OUTER JOIN ST_SNINFO ST_SERIALINFO
+	            ON ST_STOCK.STORERKEY = ST_SERIALINFO.STORERKEY
+	           AND ST_STOCK.SKU       = ST_SERIALINFO.SKU
+	           AND ST_STOCK.STOCKID   = ST_SERIALINFO.STOCKID
+	      </if>
+	       LEFT OUTER JOIN MS_SKUDCSET
+	         ON ST_STOCK.DCCODE    = MS_SKUDCSET.DCCODE
+	        AND ST_STOCK.STORERKEY = MS_SKUDCSET.STORERKEY
+	        AND ST_STOCK.SKU       = MS_SKUDCSET.SKU
+      LEFT JOIN CM_CODE_STORER CD1 ON CD1.STORERKEY = ST_STOCK.STORERKEY AND CD1.CODELIST = 'STOCKTYPE'       AND CD1.BASECODE = ST_STOCK.STOCKTYPE         /*재고유형*/
+      LEFT JOIN CM_CODE_STORER CD2 ON CD2.STORERKEY = ST_STOCK.STORERKEY AND CD2.CODELIST = 'STOCKGRADE'      AND CD2.BASECODE = ST_STOCK.STOCKGRADE        /*재고등급*/
+      LEFT JOIN CM_CODE_STORER CD3 ON CD3.STORERKEY = ST_STOCK.STORERKEY AND CD3.CODELIST = 'STORAGETYPE'     AND CD3.BASECODE = MS_SKU.STORAGETYPE         /*보관유형*/
+      LEFT JOIN CM_CODE_STORER CD4 ON CD4.STORERKEY = ST_STOCK.STORERKEY AND CD4.CODELIST = 'CONTRACTTYPE_SN' AND CD4.BASECODE = ST_SERIALINFO.CONTRACTTYPE /*계약유형*/
+	      WHERE ST_STOCK.DCCODE    = #{fixdccode}  /*센터*/
+	        AND ST_STOCK.STORERKEY = #{gStorerkey} /*고객사*/
+	        
+		    <!-- START.권한센터 -->
+		    AND EXISTS (SELECT 1
+	                      FROM CM_USER_AUTHORITY 
+	                     WHERE CM_USER_AUTHORITY.DCCODE    = ST_STOCK.DCCODE       
+	                       AND CM_USER_AUTHORITY.STORERKEY = ST_STOCK.STORERKEY    
+	                       AND CM_USER_AUTHORITY.ORGANIZE  = ST_STOCK.ORGANIZE     
+	                       AND CM_USER_AUTHORITY.AREA      = ST_STOCK.AREA         
+	                       AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey}
+	                       AND CM_USER_AUTHORITY.USERID    = #{gUserId}
+	                       AND CM_USER_AUTHORITY.DCCODE    = #{fixdccode}
+	                       AND CM_USER_AUTHORITY.AREA      = #{gArea}   
+				           <!-- 창고.다중검색 -->
+				           <if test='gOrganizeMulti != null and gOrganizeMulti.length > 0'>
+					           AND CM_USER_AUTHORITY.ORGANIZE IN
+					           <foreach collection="gOrganizeMulti" item="code" open="(" close=")" separator=",">
+					             #{code}
+					           </foreach>
+				           </if>                       
+	                   )
+		    <!-- END.권한센터	-->	
+		    	     
+	       AND ST_STOCK.QTY - ST_STOCK.QTYALLOCATED - ST_STOCK.QTYPICKED > 0 /*이동가능한것만 표출*/
+	       <if test="gStorerkey != null and gStorerkey != ''">AND ST_STOCK.STORERKEY = #{gStorerkey}</if>
+	       <if test="organize != null and organize != ''">AND ST_STOCK.ORGANIZE = #{organize}</if>
+	       <if test="stocktype != null and stocktype != ''">AND ST_STOCK.STOCKTYPE = #{stocktype}</if>
+	       <if test="stockgrade != null and stockgrade != ''">AND ST_STOCK.STOCKGRADE = #{stockgrade}</if>
+	       <if test="fromloc != null and fromloc != ''">AND ST_STOCK.LOC <![CDATA[>=]]> #{fromloc}</if>
+	       <if test="toloc != null and toloc != ''">AND ST_STOCK.LOC <![CDATA[<=]]> #{toloc}</if>
+	       <if test="zone != null and zone != ''">AND MS_LOCATION.ZONE = #{zone}</if>
+	       <if test="serialno != null and serialno != ''">AND ST_SERIALINFO.SERIALNO = #{serialno}</if>
+	       <if test="blno != null and blno != ''">AND ST_SERIALINFO.CONVSERIALNO = #{blno}</if>
+	       
+	       <!-- START.거래처.다중OR검색 -->
+	       <if test="contractcompanyMulti != null and contractcompanyMulti != '' ">
+		  	<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+		  		<foreach collection="contractcompanyMulti" item="item">
+		  			OR ST_SERIALINFO.CONTRACTCUSTKEY IN
+		  			<foreach collection="item" item="code" open="(" close=")" separator=",">
+		  				#{code} 	 
+		        		</foreach>
+		      	</foreach>
+		    	</trim>			                                    
+	       </if>
+	       <!-- END.거래처.다중OR검색 -->		       
+	       
+	    ORDER BY ST_STOCK.DCCODE, ST_STOCK.LOC, ST_STOCK.STORERKEY, ST_STOCK.SKU
+    </select>
+
+
+    <!-- 엑셀업로드 정보을(를) 등록 -->
+    <insert id="insertTempExcel" parameterType="java.util.List" >
+        <!-- 
+        <selectKey resultType="int" keyProperty="seq" order="BEFORE">
+        SELECT '1' AS SEQ FROM DUAL
+        </selectKey>
+        -->    
+        INSERT /*[StLocMoveBoxService.sqlx][insertTempExcel][엑셀데이터임시 Tabele 등록][sss][2025.05.23]*/
+          INTO SY_PROCESSTEMP_ST (PROCESSTYPE,PROCESSCREATOR,SPID,ADDWHO,EDITWHO
+                                  /**/
+						         ,FROM_DCCODE
+						         ,FROM_STORERKEY
+						         ,FROM_ORGANIZE
+						         ,FROM_AREA
+						         ,FROM_SKU
+						         ,FROM_LOC
+						         ,FROM_LOT
+						         ,FROM_STOCKID
+						         ,FROM_STOCKGRADE
+						         ,FROM_STOCKTYPE
+						         /**/
+						         ,FROM_ORDERQTY
+						         ,FROM_UOM
+						         ,TO_DCCODE
+						         ,TO_STORERKEY
+						         ,TO_ORGANIZE
+						         ,TO_AREA
+						         ,TO_SKU
+						         ,TO_LOC
+						         ,TO_LOT
+						         ,TO_STOCKID
+						         /**/
+						         ,TO_STOCKGRADE
+						         ,TO_STOCKTYPE
+						         ,TO_ORDERQTY
+						         ,TO_CONFIRMQTY
+						         ,TO_UOM
+						         ,ETCQTY1
+						         ,ETCQTY2
+						         ,SRCSERIALKEY1
+						         ,TRAFFICCOP
+						         ,MEMO1						         
+                                )
+            <foreach collection="list" item="item" separator="UNION ALL">
+            	SELECT
+                    #{item.processtype},#{item.gUserId},#{item.gSpid},#{item.gUserId},#{item.gUserId}
+                    /**/
+					,#{item.fromDccode}        /*1.출발센터코드   -grid*/
+					,#{item.fromStorerkey}     /*2.출발화주코드   -grid*/
+					,#{item.fromOrganize}      /*3.출발조직      -grid*/
+					,#{item.fromArea}          /*4.출발구역      -grid*/
+					,#{item.fromSku}           /*5.출발상품코드   -grid*/
+					,#{item.fromLoc}           /*6.출발로케이션   -grid*/
+					,#{item.fromLot}           /*7.출발로트      -grid*/
+					,#{item.fromStockid}       /*8.출발재고ID    -grid*/
+					,#{item.fromStockgrade}    /*9.출발재고등급   -grid*/
+					,#{item.fromStocktype}     /*10.출발재고유형   -grid*/
+					/**/
+					,#{item.fromOrderqty}      /*11.출발수량      -grid*/
+					,#{item.fromUom}           /*12.출발단위      -grid*/
+					,#{item.toDccode}          /*13.도착센터코드   -grid*/
+					,#{item.toStorerkey}       /*14.도착화주코드   -grid*/
+					,#{item.toOrganize}        /*15.도착조직      -grid*/
+					,#{item.toArea}            /*16.도착구역      -grid*/
+					,#{item.toSku}             /*17.도착상품코드   -grid*/
+					,#{item.toLoc}             /*18.도착로케이션   -grid*/
+					,#{item.toLot}             /*19.도착로트      -grid*/
+					/**/
+					,#{item.toStockid}         /*20.도착재고ID    -grid*/
+					,#{item.toStockgrade}      /*21.도착재고등급   -grid*/
+					,#{item.toStocktype}       /*22.도착재고유형   -grid*/
+					,#{item.toOrderqtyBox}     /*23.도착수량      -grid*/
+					,#{item.toOrderqtyEa}      /*24.확정수량      -grid*/
+					,#{item.toUom}             /*25.도착단위      -grid*/
+					,#{item.etcqty1}           /*26.기타수량1(할당)-grid*/
+					,#{item.etcqty2}           /*27.기타수량2(피킹)-grid*/
+					,#{item.srcserialkey1}     /*27.기타수량2(입고예정)-grid*/
+					,#{item.trafficcop}        /*28.사유코드         -grid*/
+					,#{item.memo1}             /*29.사유메세지        -grid*/					
+                FROM DUAL
+        </foreach>
+    </insert>
+    
+	<select id="getTab2MasterList" resultType="cjfw.wms.st.dto.StLocMoveBoxResDto">
+	    SELECT /*[StLocMoveBoxService.sqlx][getTab2MasterList][이동결과][Hyeongmin Ju][20150317]*/
+	           '0'                                                                                                                      AS CHECKYN                  /*체크여부*/
+	          ,SY_PROCESSTEMP_ST.FROM_DCCODE                                                                                            AS DCCODE                   /*센터코드*/
+	          ,SY_PROCESSTEMP_ST.FROM_ORGANIZE                                                                                          AS ORGANIZE                 /*조직*/
+	          ,FN_CODEDESCR(SY_PROCESSTEMP_ST.FROM_STORERKEY, 'STOCKTYPE', SY_PROCESSTEMP_ST.FROM_STOCKTYPE)                            AS STOCKTYPE                /*재고유형*/
+	          ,FN_CODEDESCR(SY_PROCESSTEMP_ST.FROM_STORERKEY, 'STOCKGRADE', SY_PROCESSTEMP_ST.FROM_STOCKGRADE)                          AS STOCKGRADE               /*재고등급*/
+	          ,SY_PROCESSTEMP_ST.FROM_LOC                                                                                               AS LOC                      /*로케이션*/
+	          ,SY_PROCESSTEMP_ST.FROM_SKU                                                                                               AS SKU                      /*상품코드*/
+	          ,MS_SKU.DESCRIPTION                                                                                                       AS SKUNAME                  /*상품명*/
+	          ,SY_PROCESSTEMP_ST.FROM_UOM                                                                                               AS UOM                      /*단위*/
+	          ,SY_PROCESSTEMP_ST.FROM_ORDERQTY                                                                                          AS QTY                      /*수량*/
+	          ,SY_PROCESSTEMP_ST.ETCQTY1                                                                                                AS QTYALLOCATED             /*할당수량*/
+	          ,SY_PROCESSTEMP_ST.ETCQTY2                                                                                                AS QTYPICKED                /*피킹수량*/
+	          /*입고예정량 SRCSERIALKEY1는 빼면 안됨*/
+	          ,SY_PROCESSTEMP_ST.FROM_ORDERQTY - SY_PROCESSTEMP_ST.ETCQTY1 - SY_PROCESSTEMP_ST.ETCQTY2                                  AS POSBQTY                  /*이동가능수량*/
+	          ,FN_CONV_UOM(SY_PROCESSTEMP_ST.FROM_STORERKEY,SY_PROCESSTEMP_ST.FROM_SKU,'BOX','EA',1)                                    AS QTYPERBOX                /*박스당수량*/
+	          ,SY_PROCESSTEMP_ST.SRCSERIALKEY1                                                                                          AS QTYEXPECTED              /*입고예정수량*/
+	          ,TRUNC(FN_CONV_UOM(SY_PROCESSTEMP_ST.FROM_STORERKEY,SY_PROCESSTEMP_ST.FROM_SKU,SY_PROCESSTEMP_ST.FROM_UOM,'BOX'
+	                    , SY_PROCESSTEMP_ST.FROM_ORDERQTY - SY_PROCESSTEMP_ST.ETCQTY1 - SY_PROCESSTEMP_ST.ETCQTY2 ))                    AS POSBQTY_BOX              /*이동가능박스수량*/
+	          ,MOD(FN_CONV_UOM(SY_PROCESSTEMP_ST.FROM_STORERKEY,SY_PROCESSTEMP_ST.FROM_SKU,SY_PROCESSTEMP_ST.FROM_UOM,'EA',SY_PROCESSTEMP_ST.FROM_ORDERQTY - SY_PROCESSTEMP_ST.ETCQTY1 - SY_PROCESSTEMP_ST.ETCQTY2)
+	              ,FN_CONV_UOM(SY_PROCESSTEMP_ST.FROM_STORERKEY,SY_PROCESSTEMP_ST.FROM_SKU,'BOX','EA',1)
+	              )                                                                                                                     AS POSBQTY_EA               /*이동수량*/
+              ,SY_PROCESSTEMP_ST.TRAFFICCOP                                                                                             AS REASONCODE               /*사유코드*/            
+              ,SY_PROCESSTEMP_ST.MEMO1                                                                                                  AS REASONMSG                /*사유메시지*/
+	          ,SY_PROCESSTEMP_ST.TO_LOC                                                                                                 AS TO_LOC                   /*도착로케이션*/
+	          ,SY_PROCESSTEMP_ST.TO_ORDERQTY                                                                                            AS TO_ORDERQTY              /*도착수량*/
+	          ,SY_PROCESSTEMP_ST.TO_ORDERQTY                                                                                            AS TO_ORDERQTY_BOX          /*도착박스수량*/
+	          ,SY_PROCESSTEMP_ST.TO_CONFIRMQTY                                                                                          AS TO_ORDERQTY_EA           /*도착낱개수량*/
+	          , NVL(TRIM(FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01, 'Y')),'N') AS NEARDURATIONYN /*유통기한임박여부*/
+	          ,CM_LOT.LOTTABLE01                                                                                                        AS LOTTABLE01               /*유통기한*/
+	          ,FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01, 'N0') ||'/'|| MS_SKU.DURATION   AS DURATION_TERM            /*유통기한/기간*/
+	          ,ST_SERIALINFO.SERIALNO                                                                                                   AS SERIALNO                 /*시리얼번호*/
+	          ,FN_CODEDESCR(MS_SKU.STORERKEY, 'STORAGETYPE', MS_SKU.STORAGETYPE)                                                        AS STORAGETYPE              /*보관유형*/
+	          ,MS_SKU.DURATION                                                                                                          AS DURATION                 /*유통기한기간*/
+	          ,MS_SKU.DURATIONTYPE                                                                                                      AS DURATIONTYPE             /*유통기한구분*/
+	          ,SY_PROCESSTEMP_ST.PROCESSFLAG                                                                                            AS PROCESSFLAG              /*처리상태*/
+	          ,SY_PROCESSTEMP_ST.PROCESSMSG                                                                                             AS PROCESSMSG               /*처리메시지*/
+	          ,ST_SERIALINFO.FACTORYNAME                                                                                                AS FACTORYNAME              /*공장명*/
+	          ,ST_SERIALINFO.CONVSERIALNO                                                                                               AS CONVSERIALNO             /*변환시리얼번호*/
+	          ,ST_SERIALINFO.BUTCHERYDT                                                                                                 AS BUTCHERYDT               /*도축일자*/
+	          ,ST_SERIALINFO.CONTRACTCUSTKEY                                                                                            AS CONTRACTCOMPANY          /*계약업체코드*/
+	          ,(SELECT DESCRIPTION FROM MS_CUST 
+	            WHERE  MS_CUST.STORERKEY = ST_SERIALINFO.STORERKEY
+	            AND    MS_CUST.CUSTKEY   = ST_SERIALINFO.CONTRACTCUSTKEY
+	            AND    ROWNUM = 1 )                                                                                                     AS CONTRACTCOMPANYNAME      /*계약업체명*/
+	          ,ST_SERIALINFO.FROMVALIDDT                                                                                                AS FROMVALIDDT              /*출발유효일자*/
+	          ,ST_SERIALINFO.TOVALIDDT                                                                                                  AS TOVALIDDT                /*도착유효일자*/
+	          ,FN_CODEDESCR(SY_PROCESSTEMP_ST.FROM_STORERKEY,'CONTRACTTYPE_SN', ST_SERIALINFO.CONTRACTTYPE)                             AS CONTRACTTYPE             /*계약유형*/
+	          ,ST_SERIALINFO.STOCKID                                                                                                    AS BARCODE                  /*바코드*/
+	          ,NVL(MS_SKUDCSET.LOC,' ')                                                                                                 AS FIXLOC                   /*고정로케이션*/
+	    FROM   SY_PROCESSTEMP_ST 
+	    JOIN   MS_SKU
+	    ON     MS_SKU.STORERKEY         = SY_PROCESSTEMP_ST.FROM_STORERKEY
+	    AND    MS_SKU.SKU               = SY_PROCESSTEMP_ST.FROM_SKU
+	    AND    MS_SKU.DEL_YN            = 'N'
+	    JOIN   CM_LOT
+	    ON     CM_LOT.STORERKEY            = SY_PROCESSTEMP_ST.FROM_STORERKEY
+	    AND    CM_LOT.LOT                  = SY_PROCESSTEMP_ST.FROM_LOT
+	    AND    CM_LOT.DEL_YN               = 'N'
+	    JOIN   MS_LOCATION
+	    ON     MS_LOCATION.DCCODE          = SY_PROCESSTEMP_ST.FROM_DCCODE
+	    AND    MS_LOCATION.LOC             = SY_PROCESSTEMP_ST.FROM_LOC
+	    LEFT OUTER JOIN ST_SNINFO ST_SERIALINFO
+	    ON     SY_PROCESSTEMP_ST.FROM_STORERKEY  = ST_SERIALINFO.STORERKEY
+	    AND    SY_PROCESSTEMP_ST.FROM_SKU        = ST_SERIALINFO.SKU
+	    AND    SY_PROCESSTEMP_ST.FROM_STOCKID    = ST_SERIALINFO.STOCKID   
+	     LEFT OUTER JOIN MS_SKUDCSET
+	    ON    SY_PROCESSTEMP_ST.FROM_DCCODE          = MS_SKUDCSET.DCCODE
+	    AND   SY_PROCESSTEMP_ST.FROM_STORERKEY       = MS_SKUDCSET.STORERKEY
+	    AND   SY_PROCESSTEMP_ST.FROM_SKU             = MS_SKUDCSET.SKU   
+	            
+	    WHERE  SY_PROCESSTEMP_ST.PROCESSTYPE = #{processtype}
+	    AND    SY_PROCESSTEMP_ST.PROCESSCREATOR = #{gUserId}
+	    AND    SY_PROCESSTEMP_ST.SPID           = #{gSpid}
+	    ORDER BY SY_PROCESSTEMP_ST.FROM_DCCODE
+	            ,SY_PROCESSTEMP_ST.FROM_LOC
+	            ,SY_PROCESSTEMP_ST.FROM_STORERKEY
+	            ,SY_PROCESSTEMP_ST.FROM_SKU
+	</select>
+
+</mapper>

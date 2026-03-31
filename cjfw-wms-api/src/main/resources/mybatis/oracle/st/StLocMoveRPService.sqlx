@@ -1,0 +1,336 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="stLocMoveRPService">
+
+	<select id="getTab1MasterList" resultType="StLocMoveRPResTab1Dto">				
+        SELECT /* [StLocMoveRPService.sqlx][getTab1MasterList][보충생성 목록 조회][공두경][2025.07.16] */
+		        DC1.DCNAME                                                                          					AS DCNAME			/*물류센터*/
+		       ,ST_INPLAN.SKU                                                                                           AS SKU				/*상품코드*/
+		       ,MS_SKU.DESCRIPTION                                                                                      AS SKUNAME			/*상품명칭*/
+		       ,MS_SKUSPEC.SPECDESCR                                                                                    AS MC				/*MC*/
+		       ,NVL(CD1.BASEDESCR,CD1.BASECODE)                                      									AS STORAGETYPENAME	/*저장조건*/
+		       ,ST_INPLAN.UOM                                                                                           AS UOM				/*단위*/
+		       ,ST_INPLAN.TO_STOCKID                                                                                    AS STOCKID			/*재고ID*/
+		       ,NVL(CD5.BASEDESCR,CD5.BASECODE)                                                              			AS LOCCATEGORY		/*로케이션종류*/
+		       ,ST_INPLAN.FROM_LOC                                                                                      AS FROMLOC			/*FROM 로케이션*/
+		       ,ST_INPLAN.TO_LOC                                                                                        AS TOLOC			/*TO 로케이션*/
+		       ,NVL((NVL((1 * UOM11.BUNJA / UOM11.BUNMO),0) * UOM12.BUNMO / UOM12.BUNJA),0)                             AS QTYPERBOX		/*박스입수*/
+		       ,TRUNC(NVL((NVL((ST_INPLAN.OPENQTY * UOM13.BUNJA / UOM13.BUNMO),0) * UOM11.BUNMO / UOM11.BUNJA),0))      AS OPENQTY_BOX		/*BOX*/
+		       ,MOD(NVL((NVL((ST_INPLAN.OPENQTY * UOM13.BUNJA / UOM13.BUNMO),0) * UOM12.BUNMO / UOM12.BUNJA),0)
+		       	   ,NVL((NVL((1 * UOM11.BUNJA / UOM11.BUNMO),0) * UOM12.BUNMO / UOM12.BUNJA),0))                        AS OPENQTY_EA		/*EA*/
+		       ,NVL(CD2.BASEDESCR,CD2.BASECODE)                                                              			AS STOCKGRADENAME	/*재고속성*/
+		       ,TRUNC(NVL((NVL((ST_INPLAN.CONFIRMQTY * UOM13.BUNJA / UOM13.BUNMO),0) * UOM11.BUNMO / UOM11.BUNJA),0))   AS CONFIRMQTY_BOX	/*BOX*/
+		       ,MOD(NVL((NVL((ST_INPLAN.CONFIRMQTY * UOM13.BUNJA / UOM13.BUNMO),0) * UOM12.BUNMO / UOM12.BUNJA),0)	
+		       	   ,NVL((NVL((1 * UOM11.BUNJA / UOM11.BUNMO),0) * UOM12.BUNMO / UOM12.BUNJA),0))       					AS CONFIRMQTY_EA	/*EA*/
+		       ,CM_LOT.LOTTABLE01         																				AS LOTTABLE01		/*기준일(소비,제조)*/
+		       ,FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01, 'N') 
+		       		||'/'|| MS_SKU.DURATION 	                                                                        AS DURATION_TERM	/*소비기간(잔여/전체)*/
+		       ,NVL(CD3.BASEDESCR,CD3.BASECODE)                                                              			AS PRINTYNNAME		/*발행여부*/
+		       ,ST_INPLAN.STATUS                                                                                        AS STATUS			/*작업상태*/
+		       ,ST_INPLAN.IF_FLAG                                                                                       AS IF_FLAG			/*ASRS지시여부*/
+		       ,ST_INPLAN.IF_SEND_FILE                                                                                  AS IF_SEND_FILE		/*ASRS처리결과*/
+		       ,ST_INPLAN.IF_DATE                                                                                       AS IF_DATE			/*전송시간*/
+		       ,ST_INPLAN.SLIPNO                                                                                        AS SUPPLNO			/*보충번호*/
+		       ,ST_INPLAN.SLIPLINE                                                                                      AS SUPPLLINE 		/*보충라인*/ 
+			   ,ST_INPLAN.STORERKEY                                                                                    	AS STORERKEY		/**/
+		       ,ST_INPLAN.DCCODE                                                                                        AS DCCODE			/**/
+		       ,ST_INPLAN.ORGANIZE                                                                                      AS ORGANIZE			/**/
+		       ,MS_SKU.STORAGETYPE                                                                                      AS STORAGETYPE		/**/
+		       ,ST_INPLAN.OPENQTY                                                                                       AS OPENQTY			/**/
+		       ,ST_INPLAN.CONFIRMQTY                                                                                    AS CONFIRMQTY		/**/
+		       ,ST_INPLAN.FROM_STOCKGRADE                                                                               AS STOCKGRADE		/**/
+		       ,MS_SKU.DURATIONTYPE																					    AS DURATIONTYPE   	/**/
+		       ,ST_INPLAN.PRINT_YN                                                                                      AS PRINTYN          /**/    	                                                                                                  
+		       ,NVL(CD4.BASEDESCR,CD4.BASECODE)                                                              			AS STATUSNAME		/**/
+		       ,ST_INPLAN.ORDERTYPE  																					AS ORDERTYPE		/**/
+		       ,ST_INPLAN.SLIPDT																						AS SLIPDT			/**/	       
+		       ,ST_INPLAN.SLIPNO                                                                                        AS SLIPNO			/**/
+		       ,ST_INPLAN.SLIPLINE                                                                                      AS SLIPLINE  		/**/                                                                                                             		       
+		       ,CASE WHEN FROMLOC.LOCCATEGORY = 'AUTO' OR TOLOC.LOCCATEGORY = 'AUTO' THEN 'Y' ELSE 'N' END        		AS ASRSYN			/**/
+        FROM   ST_INPLAN 
+		JOIN MS_SKU
+		ON   MS_SKU.STORERKEY = ST_INPLAN.STORERKEY
+		AND  MS_SKU.SKU       = ST_INPLAN.SKU
+		<!-- 상품 다중선택 -->
+		<if test="sku != null and sku != '' ">
+				<if test="skuMulti != null and skuMulti.size() > 0">
+					<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+						<foreach collection="skuMulti" item="item">
+							OR MS_SKU.SKU IN
+							<foreach collection="item" item="code" open="(" close=")" separator=",">
+								#{code} 	 
+				      		</foreach>
+				    	</foreach>
+				  	</trim>			                                    
+		    	</if>
+	        </if>
+		AND  MS_SKU.DEL_YN    = 'N'
+		LEFT JOIN MS_SKUSPEC
+		ON   MS_SKUSPEC.STORERKEY = MS_SKU.STORERKEY
+		AND  MS_SKUSPEC.SPECCODE  = MS_SKU.SKUGROUP
+		AND  MS_SKUSPEC.SPECCLASS = 'MC'
+		AND  MS_SKUSPEC.DEL_YN    = 'N'
+		JOIN CM_LOT
+		ON   CM_LOT.STORERKEY     = ST_INPLAN.STORERKEY
+		AND  CM_LOT.LOT           = ST_INPLAN.TO_LOT
+		AND  CM_LOT.DEL_YN        = 'N'
+        JOIN MS_LOCATION FROMLOC
+        ON   FROMLOC.DCCODE  = ST_INPLAN.DCCODE
+        AND  FROMLOC.LOC     = ST_INPLAN.FROM_LOC
+		JOIN MS_LOCATION TOLOC
+		ON   TOLOC.DCCODE   = ST_INPLAN.DCCODE
+		AND  TOLOC.LOC      = ST_INPLAN.TO_LOC		
+		<if test="fromzone != null and fromzone != ''">		AND TOLOC.ZONE <![CDATA[>=]]>	#{fromzone}	</if>        
+		<if test="tozone != null and tozone != ''">			AND TOLOC.ZONE <![CDATA[<=]]>	#{tozone}	</if>
+        AND  TOLOC.DEL_YN   = 'N'
+        LEFT JOIN CM_CODE_STORER CD1 ON (CD1.STORERKEY = MS_SKU.STORERKEY	 AND CD1.CODELIST = 'STORAGETYPE' 	AND CD1.BASECODE  = MS_SKU.STORAGETYPE)
+        LEFT JOIN CM_CODE_STORER CD2 ON (CD2.STORERKEY = ST_INPLAN.STORERKEY AND CD2.CODELIST = 'STOCKGRADE' 	AND CD2.BASECODE  = ST_INPLAN.FROM_STOCKGRADE)
+        LEFT JOIN CM_CODE_STORER CD3 ON (CD3.STORERKEY = ST_INPLAN.STORERKEY AND CD3.CODELIST = 'YN' 			AND CD3.BASECODE  = ST_INPLAN.PRINT_YN)
+		LEFT JOIN CM_CODE_STORER CD4 ON (CD4.STORERKEY = ST_INPLAN.STORERKEY AND CD4.CODELIST = 'STATUS_ASRS' 	AND CD4.BASECODE  = ST_INPLAN.STATUS)
+		LEFT JOIN CM_CODE_STORER CD5 ON (CD5.STORERKEY = ST_INPLAN.STORERKEY AND CD5.CODELIST = 'LOCCATEGORY' 	AND CD5.BASECODE  = FROMLOC.LOCCATEGORY)
+        LEFT JOIN CM_DC DC1 ON DC1.DCCODE = ST_INPLAN.DCCODE
+        LEFT JOIN MS_UOM UOM11  	  ON UOM11.STORERKEY = ST_INPLAN.STORERKEY AND UOM11.SKU  = ST_INPLAN.SKU AND UOM11.UOM = 'BOX'
+	    LEFT JOIN MS_UOM UOM12	  	  ON UOM12.STORERKEY = ST_INPLAN.STORERKEY AND UOM12.SKU  = ST_INPLAN.SKU AND UOM12.UOM = 'EA'
+	    LEFT JOIN MS_UOM UOM13	  	  ON UOM13.STORERKEY = ST_INPLAN.STORERKEY AND UOM13.SKU  = ST_INPLAN.SKU AND UOM13.UOM = ST_INPLAN.UOM
+		WHERE ST_INPLAN.STORERKEY = #{gStorerkey}
+		AND   ST_INPLAN.DCCODE    = #{fixdccode}
+		AND   ST_INPLAN.SLIPDT    = #{docdt}
+		AND   ST_INPLAN.TASKTYPE  = 'RP'
+		<if test="status != null and status != ''">			AND ST_INPLAN.STATUS 	=	#{status}	</if>
+		<if test="printyn != null and printyn != ''">		AND ST_INPLAN.PRINT_YN 	=	#{printyn}	</if> 
+		<if test="supplno != null and supplno != ''">		AND ST_INPLAN.SLIPNO 	=	#{supplno}	</if>		
+        <!-- START.권한센터 -->
+		    AND EXISTS (SELECT 1
+	                      FROM CM_USER_AUTHORITY 
+	                     WHERE CM_USER_AUTHORITY.DCCODE    = ST_INPLAN.DCCODE       
+	                       AND CM_USER_AUTHORITY.STORERKEY = ST_INPLAN.STORERKEY    
+	                       AND CM_USER_AUTHORITY.ORGANIZE  = ST_INPLAN.ORGANIZE     
+	                       AND CM_USER_AUTHORITY.AREA      = ST_INPLAN.AREA         
+	                       AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey}
+	                       AND CM_USER_AUTHORITY.USERID    = #{gUserId}
+	                       AND CM_USER_AUTHORITY.DCCODE    = #{fixdccode}
+	                       AND CM_USER_AUTHORITY.AREA      = #{gArea}   
+				           <!-- 창고.다중검색 -->
+				           <if test="gOrganizeMulti != null and gOrganizeMulti != ''">
+					           AND CM_USER_AUTHORITY.ORGANIZE IN
+					           <foreach collection="gOrganizeMulti" item="code" open="(" close=")" separator=",">
+					             #{code}
+					           </foreach>
+				           </if>                       
+	                   )
+		    <!-- END.권한센터	-->
+    </select>
+    
+    <select id="getTab2MasterList" resultType="StLocMoveRPResTab2Dto">				
+        SELECT /* [StLocMoveRPService.sqlx][getTab2MasterList][ASRS결과 목록 조회][공두경][2025.07.16] */
+		        ST_INPLAN.DOCNO																							AS DOCNO           /*요청번호*/
+			   ,ST_INPLAN.STORERKEY                                                                                     AS STORERKEY       /*회사*/
+		       ,ST_INPLAN.SKU                                                                                           AS SKU             /*상품코드*/
+		       ,MS_SKU.DESCRIPTION                                                                                      AS SKUNAME         /*상품명칭*/
+		       ,NVL(CD5.BASEDESCR,CD5.BASECODE)                                                              			AS LOCCATEGORY     /*로케이션종류*/
+		       ,ST_INPLAN.FROM_LOC                                                                                      AS FROMLOC         /*FROM 로케이션*/
+		       ,ST_INPLAN.TO_LOC                                                                                        AS TOLOC           /*TO 로케이션*/
+		       ,''																								        AS PLTID		   /*팔레트ID*/	
+		       ,TRUNC(NVL((NVL((ST_INPLAN.CONFIRMQTY * UOM13.BUNJA / UOM13.BUNMO),0) * UOM11.BUNMO / UOM11.BUNJA),0))   AS CONFIRMQTY_BOX  /*BOX*/
+		       ,MOD(NVL((NVL((ST_INPLAN.CONFIRMQTY * UOM13.BUNJA / UOM13.BUNMO),0) * UOM12.BUNMO / UOM12.BUNJA),0)                         
+		       	   ,NVL((NVL((1 * UOM11.BUNJA / UOM11.BUNMO),0) * UOM12.BUNMO / UOM12.BUNJA),0))       					AS CONFIRMQTY_EA   /*EA*/
+		       ,ST_INPLAN.DOCLINE																						AS DOCLINE         /*처리소스키*/
+		       ,NVL(CD4.BASEDESCR,CD4.BASECODE)                                                              			AS STATUSNAME      /*진행상태*/
+		       ,ST_INPLAN.IF_FLAG                                                                                       AS IF_FLAG         /*ASRS지시여부*/
+		       ,ST_INPLAN.IF_SEND_FILE                                                                                  AS IF_SEND_FILE    /*ASRS처리결과*/
+		       ,ST_INPLAN.IF_DATE                                                                                       AS IF_DATE         /*전송시간*/                                                                                                            
+		       ,TO_CHAR(ST_INPLAN.ADDDATE,'YYYY-MM-DD HH24:MI:SS')														AS ADDDATE         /*등록일자*/
+		       ,TO_CHAR(ST_INPLAN.EDITDATE,'YYYY-MM-DD HH24:MI:SS')														AS EDITDATE        /*최종변경시간*/
+		       ,USER1.USER_NM																							AS ADDWHO          /*생성인*/
+		       ,USER2.USER_NM																							AS EDITWHO         /*최종변경자*/
+		       ,ST_INPLAN.DCCODE                                                                                        AS DCCODE          /**/
+		       ,DC1.DCNAME                                                                          					AS DCNAME          /**/
+		       ,ST_INPLAN.ORGANIZE                                                                                      AS ORGANIZE        /**/
+		       ,MS_SKU.STORAGETYPE                                                                                      AS STORAGETYPE     /**/
+		       ,NVL(CD1.BASEDESCR,CD1.BASECODE)                                      									AS STORAGETYPENAME /**/
+		       ,ST_INPLAN.UOM                                                                                           AS UOM             /**/
+		       ,ST_INPLAN.TO_STOCKID                                                                                    AS STOCKID         /**/
+		       ,ST_INPLAN.OPENQTY                                                                                       AS OPENQTY         /**/
+		       ,ST_INPLAN.CONFIRMQTY                                                                                    AS CONFIRMQTY      /**/
+		       ,NVL((NVL((1 * UOM11.BUNJA / UOM11.BUNMO),0) * UOM12.BUNMO / UOM12.BUNJA),0)                             AS QTYPERBOX       /**/
+		       ,TRUNC(NVL((NVL((ST_INPLAN.OPENQTY * UOM13.BUNJA / UOM13.BUNMO),0) * UOM11.BUNMO / UOM11.BUNJA),0))      AS OPENQTY_BOX     /**/
+		       ,MOD(NVL((NVL((ST_INPLAN.OPENQTY * UOM13.BUNJA / UOM13.BUNMO),0) * UOM12.BUNMO / UOM12.BUNJA),0)                            /**/
+		       	   ,NVL((NVL((1 * UOM11.BUNJA / UOM11.BUNMO),0) * UOM12.BUNMO / UOM12.BUNJA),0))                        AS OPENQTY_EA      /**/
+		       ,ST_INPLAN.FROM_STOCKGRADE                                                                               AS STOCKGRADE      /**/
+		       ,NVL(CD2.BASEDESCR,CD2.BASECODE)                                                              			AS STOCKGRADENAME  /**/
+		       ,CM_LOT.LOTTABLE01         																				AS LOTTABLE01      /**/
+		       ,FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01, 'N0') ||'/'|| MS_SKU.DURATION 	   /**/
+		                                                                                                                AS DURATION_TERM   /**/
+		       ,ST_INPLAN.PRINT_YN                                                                                      AS PRINTYN         /**/                                                                                                       
+		       ,NVL(CD3.BASEDESCR,CD3.BASECODE)                                                              			AS PRINTYNNAME     /**/
+		       ,ST_INPLAN.STATUS                                                                                        AS STATUS          /**/
+		       ,ST_INPLAN.SLIPNO                                                                                        AS SUPPLNO         /**/
+		       ,ST_INPLAN.SLIPLINE                                                                                      AS SUPPLLINE       /**/
+		FROM ST_INPLAN
+        JOIN   MS_LOCATION
+        ON     MS_LOCATION.DCCODE  = ST_INPLAN.DCCODE
+        AND    MS_LOCATION.LOC     = ST_INPLAN.FROM_LOC
+        AND    MS_LOCATION.LOCCATEGORY = 'AUTO'        		
+		JOIN MS_SKU
+		ON   MS_SKU.STORERKEY = ST_INPLAN.STORERKEY
+		AND  MS_SKU.SKU       = ST_INPLAN.SKU
+		<!-- 상품 다중선택 -->
+		<if test="sku != null and sku != '' ">
+			<if test="skuMulti != null and skuMulti.size() > 0">
+				<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+					<foreach collection="skuMulti" item="item">
+						OR MS_SKU.SKU IN
+						<foreach collection="item" item="code" open="(" close=")" separator=",">
+							#{code} 	 
+			      		</foreach>
+			    	</foreach>
+			  	</trim>			                                    
+	    	</if>
+        </if>
+		AND  MS_SKU.DEL_YN    = 'N'
+		JOIN CM_LOT
+		ON   CM_LOT.STORERKEY     = ST_INPLAN.STORERKEY
+		AND  CM_LOT.LOT           = ST_INPLAN.TO_LOT
+		AND  CM_LOT.DEL_YN        = 'N'
+		JOIN MS_LOCATION
+		ON   MS_LOCATION.DCCODE   = ST_INPLAN.DCCODE
+		AND  MS_LOCATION.LOC      = ST_INPLAN.TO_LOC
+		<if test="fromzone != null and fromzone != ''">		AND MS_LOCATION.ZONE <![CDATA[>=]]>	#{fromzone}	</if>        
+		<if test="tozone != null and tozone != ''">			AND MS_LOCATION.ZONE <![CDATA[<=]]>	#{tozone}	</if>
+        AND  MS_LOCATION.DEL_YN   = 'N'
+        LEFT JOIN FRAMEONE_USER USER1
+        ON   USER1.USER_ID        = ST_INPLAN.ADDWHO
+        LEFT JOIN FRAMEONE_USER USER2
+        ON   USER2.USER_ID        = ST_INPLAN.EDITWHO
+        LEFT JOIN CM_CODE_STORER CD1 ON (CD1.STORERKEY = MS_SKU.STORERKEY	 AND CD1.CODELIST = 'STORAGETYPE' 	AND CD1.BASECODE  = MS_SKU.STORAGETYPE)
+        LEFT JOIN CM_CODE_STORER CD2 ON (CD2.STORERKEY = ST_INPLAN.STORERKEY AND CD2.CODELIST = 'STOCKGRADE' 	AND CD2.BASECODE  = ST_INPLAN.FROM_STOCKGRADE)
+        LEFT JOIN CM_CODE_STORER CD3 ON (CD3.STORERKEY = ST_INPLAN.STORERKEY AND CD3.CODELIST = 'YN' 			AND CD3.BASECODE  = ST_INPLAN.PRINT_YN)
+		LEFT JOIN CM_CODE_STORER CD4 ON (CD4.STORERKEY = ST_INPLAN.STORERKEY AND CD4.CODELIST = 'STATUS_ASRS' 	AND CD4.BASECODE  = ST_INPLAN.STATUS)
+		LEFT JOIN CM_CODE_STORER CD5 ON (CD5.STORERKEY = ST_INPLAN.STORERKEY AND CD5.CODELIST = 'LOCCATEGORY' 	AND CD5.BASECODE  = MS_LOCATION.LOCCATEGORY)
+        LEFT JOIN CM_DC DC1 ON DC1.DCCODE = ST_INPLAN.DCCODE
+        LEFT JOIN MS_UOM UOM11  	  ON UOM11.STORERKEY = ST_INPLAN.STORERKEY AND UOM11.SKU  = ST_INPLAN.SKU AND UOM11.UOM = 'BOX'
+	    LEFT JOIN MS_UOM UOM12	  	  ON UOM12.STORERKEY = ST_INPLAN.STORERKEY AND UOM12.SKU  = ST_INPLAN.SKU AND UOM12.UOM = 'EA'
+	    LEFT JOIN MS_UOM UOM13	  	  ON UOM13.STORERKEY = ST_INPLAN.STORERKEY AND UOM13.SKU  = ST_INPLAN.SKU AND UOM13.UOM = ST_INPLAN.UOM
+		WHERE ST_INPLAN.STORERKEY = #{gStorerkey}
+		AND   ST_INPLAN.DCCODE    = #{fixdccode}
+		AND   ST_INPLAN.SLIPDT    = #{docdt}
+		AND   ST_INPLAN.TASKTYPE  = 'RP'
+		AND   ST_INPLAN.IF_FLAG   = 'Y'
+		<if test="status != null and status != ''">			AND ST_INPLAN.STATUS 	=	#{status}	</if>
+		<if test="printyn != null and printyn != ''">		AND ST_INPLAN.PRINT_YN 	=	#{printyn}	</if>
+		<if test="supplno != null and supplno != ''">		AND ST_INPLAN.SLIPNO 	=	#{supplno}	</if>
+		 <!-- START.권한센터 -->
+		    AND EXISTS (SELECT 1
+	                      FROM CM_USER_AUTHORITY 
+	                     WHERE CM_USER_AUTHORITY.DCCODE    = ST_INPLAN.DCCODE       
+	                       AND CM_USER_AUTHORITY.STORERKEY = ST_INPLAN.STORERKEY    
+	                       AND CM_USER_AUTHORITY.ORGANIZE  = ST_INPLAN.ORGANIZE     
+	                       AND CM_USER_AUTHORITY.AREA      = ST_INPLAN.AREA         
+	                       AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey}
+	                       AND CM_USER_AUTHORITY.USERID    = #{gUserId}
+	                       AND CM_USER_AUTHORITY.DCCODE    = #{fixdccode}
+	                       AND CM_USER_AUTHORITY.AREA      = #{gArea}   
+				           <!-- 창고.다중검색 -->
+				           <if test='gOrganizeMulti != null and gOrganizeMulti.length > 0'>
+					           AND CM_USER_AUTHORITY.ORGANIZE IN
+					           <foreach collection="gOrganizeMulti" item="code" open="(" close=")" separator=",">
+					             #{code}
+					           </foreach>
+				           </if>                       
+	                   )
+		    <!-- END.권한센터	-->
+    </select>
+    
+    <select id="getTab1MasterList_temp" resultType="StLocMoveRPResTab1Dto">				
+        SELECT /* [StLocMoveRPService.sqlx][getTab1MasterList][단위테스트용(버튼테스트 필수값 조회) -보충생성 목록 조회][공두경][2025.07.16] */
+		        ST_INPLAN.SLIPNO                                                                                        AS SUPPLNO			/*보충번호*/
+		       ,ST_INPLAN.STORERKEY                                                                                    	AS STORERKEY		/**/
+		       ,ST_INPLAN.DCCODE                                                                                        AS DCCODE			/**/
+		       ,ST_INPLAN.SLIPDT																						AS SLIPDT			/**/
+		       ,ST_INPLAN.SLIPNO                                                                                        AS SLIPNO			/**/
+		       ,ST_INPLAN.SLIPLINE                                                                                      AS SLIPLINE  		/**/
+		       ,ST_INPLAN.SLIPLINE                                                                                      AS SUPPLLINE 		/*보충라인*/	       
+        FROM   ST_INPLAN
+		WHERE ST_INPLAN.STORERKEY = #{gStorerkey}
+		AND   ST_INPLAN.DCCODE    = #{fixdccode}
+		AND   ST_INPLAN.SLIPDT    = #{docdt}
+    </select>
+    
+    <select id="getPrintList" resultType="StLocMoveRPResPrintDto">				
+        SELECT /* [StLocMoveRPService.sqlx][getPrintList][출력 데이터 조회][공두경][2025.09.10] */
+		        SY_PROCESSTEMP_ST.FROM_DCCODE                         AS DCCODE
+		       ,SY_PROCESSTEMP_ST.FROM_STORERKEY                      AS STORERKEY
+		       ,SY_PROCESSTEMP_ST.FROM_ORGANIZE                       AS ORGANIZE
+		       ,FN_FORMAT_MASK(SY_PROCESSTEMP_ST.WORK_NO ,'####/##/##')      AS SLIPDT
+		       ,SY_PROCESSTEMP_ST.BATCH_NO                            AS SLIPNO
+		       ,SY_PROCESSTEMP_ST.LIST_NO                             AS SLIPLINE
+		       ,SY_PROCESSTEMP_ST.FROM_SKU                            AS SKU
+		       ,MS_SKU.DESCRIPTION                                    AS SKUNAME 
+		       ,NVL(CD1.BASEDESCR,CD1.BASECODE)  					  AS STORAGETYPE
+		       ,NVL(CD2.BASEDESCR,CD2.BASECODE)  					  AS ORDERTYPE
+		       ,SY_PROCESSTEMP_ST.FROM_UOM                            AS UOM
+		       ,SY_PROCESSTEMP_ST.FROM_STOCKID                        AS STOCKID
+		       ,SY_PROCESSTEMP_ST.FROM_LOT                            AS LOT
+		       ,SY_PROCESSTEMP_ST.FROM_LOC                            AS FROMLOC
+		       ,SY_PROCESSTEMP_ST.TO_LOC                              AS TOLOC
+		       ,SY_PROCESSTEMP_ST.ETCQTY1                             AS BOXQTY
+		       ,SY_PROCESSTEMP_ST.ETCQTY2                             AS EAQTY
+		FROM SY_PROCESSTEMP_ST 
+		JOIN MS_SKU
+		ON   MS_SKU.STORERKEY = SY_PROCESSTEMP_ST.FROM_STORERKEY  
+		AND  MS_SKU.SKU       = SY_PROCESSTEMP_ST.FROM_SKU
+		LEFT JOIN CM_CODE_STORER CD1 ON (CD1.STORERKEY = MS_SKU.STORERKEY	 AND CD1.CODELIST = 'STORAGETYPE' 	AND CD1.BASECODE  = MS_SKU.STORAGETYPE)
+        LEFT JOIN CM_CODE_STORER CD2 ON (CD2.STORERKEY = SY_PROCESSTEMP_ST.FROM_STORERKEY AND CD2.CODELIST = 'ORDERTYP_RP' 	AND CD2.BASECODE  = SY_PROCESSTEMP_ST.FROM_ZONE)
+		WHERE 1=1
+		AND  SY_PROCESSTEMP_ST.PROCESSTYPE    = #{processtype}
+		AND  SY_PROCESSTEMP_ST.PROCESSCREATOR = #{gUserId}
+        AND  SY_PROCESSTEMP_ST.SPID	          = #{gSpid}
+		ORDER BY  SY_PROCESSTEMP_ST.BATCH_NO
+		         ,SY_PROCESSTEMP_ST.LIST_NO
+    </select>
+    
+    <!-- 엑셀업로드 정보을(를) 등록 -->
+    <insert id="insertTempExcel" parameterType="java.util.List" >
+        <foreach collection="list" index="index" item="item" separator=" " open="INSERT ALL" close="SELECT * FROM DUAL">
+              /* [StLocMoveRPService.sqlx][insertTempExcel][엑셀데이터임시 Tabele 등록][공두경][2025.07.17] */
+              INTO SY_PROCESSTEMP_ST (PROCESSTYPE,PROCESSCREATOR,SPID,ADDWHO,EDITWHO
+                                      /**/
+                                     ,FROM_DCCODE
+                                     ,FROM_STORERKEY
+                                     ,FROM_ORGANIZE
+                                     ,WORK_NO
+                                     ,BATCH_NO
+                                     ,LIST_NO
+                                     ,FROM_SKU
+                                     ,FROM_ZONE
+                                     ,FROM_UOM
+                                     ,FROM_STOCKID
+                                     ,FROM_LOT
+                                     ,FROM_LOC
+                                     ,TO_LOC
+                                     ,ETCQTY1
+                                     ,ETCQTY2
+                                    )
+            VALUES (
+                    #{item.processtype},#{item.gUserId},#{item.gSpid},#{item.gUserId},#{item.gUserId}
+                    /**/
+                    ,#{item.fromDccode}    
+                    ,#{item.fromStorerkey} 
+                    ,#{item.fromOrganize} 
+                    ,#{item.workNo}        
+                    ,#{item.batchNo}       
+                    ,#{item.listNo}    		
+                    ,#{item.fromSku}    	
+                    ,#{item.fromZone}    	                    
+                    ,#{item.fromUom}    	                    
+                    ,#{item.fromStockid}    	                    
+                    ,#{item.fromLot}    	                    
+                    ,#{item.fromLoc}    	                    
+                    ,#{item.toLoc}    	                    
+                    ,#{item.etcqty1}    	                    
+                    ,#{item.etcqty2}    	                    
+                   )
+        </foreach>
+    </insert>
+    
+</mapper>

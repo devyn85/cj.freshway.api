@@ -1,0 +1,318 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ibCloseStoragefeeService">
+	  <select id="getDataStatusHeaderlist" resultType="IbCloseStoragefeeStatusResDto">
+		SELECT    /* [ibStoragefeeStatusService.sqlx][getDataHeaderlist][보관료처리현황 목록 조회][박진우][20250827] */
+		           S.ORGANIZE                                  AS ORGANIZE         /* 창고코드 */
+		        ,  S.YYYYMM                                    AS YYYYMM           /* 재고월 */
+		        ,  S.ORGANIZE_NM                               AS ORGANIZE_NM      /* 창고명 */
+		        ,  NVL(T.TOTAL_AMOUNT, 0)                      AS TOTAL_AMOUNT     /* 보관료 */
+		        ,  T.KEY_NO                                    AS KEY_NO           /* 문서관리번호 */
+		        ,  T.INV_NO                                    AS INV_NO           /* 송장번호 */
+		        ,  T.IF_STATUS                                 AS IF_STATUS        /* 인터페이스상태 */
+		        ,  T.STATUS                                    AS STATUS           /* 상태 */
+		        ,  T.SLIP_NO                                   AS SLIP_NO          /* 전표번호 */
+		        , CASE WHEN T.SLIP_NO IS NOT NULL THEN 'Y' ELSE 'N' END                  AS EXPENSE_RESULT   /* 정산여부 */
+		        ,  NVL(T.EXPENSE_RESULT, 'N')                  AS TEST   /* 정산여부 */
+		        ,  SUBSTR( S.ORGANIZE, INSTR( S.ORGANIZE, '-') + 1) AS STORAGELOCATION   
+		        ,  S.DCCODE                                    AS DCCODE           /* 센터코드 */		
+		FROM
+		(
+			SELECT
+			           ORGANIZE                                /* 창고코드 */
+			        ,  YYYYMM                                  /* 재고월 */
+			        ,  FN_DESCR_ORGANIZE(DCCODE, ORGANIZE)     AS ORGANIZE_NM      /* 창고명 */
+			        ,  DCCODE
+			FROM ST_EXDCSTORAGE
+			WHERE 1 = 1
+			<if test="stockMonth != null and stockMonth != ''">
+				AND <![CDATA[ YYYYMM = #{stockMonth} ]]>
+			</if>
+			<if test="organize != null and organize != ''">
+				AND <![CDATA[ ORGANIZE = #{organize} ]]>
+			</if>
+			GROUP BY ORGANIZE, YYYYMM, DCCODE
+		) S
+		LEFT OUTER JOIN
+		(
+			SELECT
+			           A.ORGANIZE                               /* 창고코드 */
+			        ,  A.YYYYMM                                 /* 재고월 */
+			        ,  A.ORGANIZE_NM                            /* 창고명 */
+			        ,  A.TOTAL_AMOUNT                           /* 보관료 */
+			        ,  A.KEY_NO                                 /* 문서관리번호 */
+			        ,  A.INV_NO                                 /* 송장번호 */
+			        ,  A.IF_STATUS                              /* 인터페이스상태 */
+			        ,  A.STATUS                                 /* 상태 */
+			        ,  A.SLIP_NO                                /* 전표번호 */
+			        ,  CASE WHEN A.SLIP_NO IS NOT NULL
+			                THEN 'Y'
+			                ELSE 'N'
+			           END                                       AS EXPENSE_RESULT  /* 정산여부 */
+			FROM
+			(
+				SELECT
+				           ST_EXDCSTORAGE.ORGANIZE                                  AS ORGANIZE        /* 창고코드 */
+				        ,  ST_EXDCSTORAGE.YYYYMM                                    AS YYYYMM          /* 재고월 */
+				        ,  FN_DESCR_ORGANIZE(ST_EXDCSTORAGE.DCCODE, ST_EXDCSTORAGE.ORGANIZE)
+				                                                             AS ORGANIZE_NM         /* 창고명 */
+				        ,  NVL(
+				             MAX(IB_EXPENSE.AMOUNT)
+				           , ROUND(SUM( NVL(ST_EXDCSTORAGE.GR_AMOUNT, 0)
+				                        + NVL(ST_EXDCSTORAGE.GI_AMOUNT, 0)
+				                        + NVL(ST_EXDCSTORAGE.STOCK_AMOUNT, 0)
+				               ), 2)
+				           )                                                   AS TOTAL_AMOUNT      /* 보관료 */
+				        ,  IB_EXPENSE.KEY_NO                                      AS KEY_NO           /* 문서관리번호 */
+				        ,  (
+				             SELECT SUBSTR(XMLAGG(XMLELEMENT(COL, ',', ZRETURN) ORDER BY ZRETURN)
+				                            .EXTRACT('//text()').GETSTRINGVAL(), 2)
+				               FROM (
+				               			SELECT DISTINCT ZINVOICE, ZRETURN
+				               			  FROM IF_IB_STOCKETC_H
+				               			 WHERE <![CDATA[ FI_IF_STATUS = 'CNF' ]]>
+				               			UNION ALL
+				               			SELECT DISTINCT ZINVOICE, ZRETURN
+				               			  FROM IF_IB_STOCKSKU_H
+				               			 WHERE <![CDATA[ FI_IF_STATUS = 'CNF' ]]>
+				               		) AA
+				              WHERE <![CDATA[ AA.ZINVOICE = IB_EXPENSE.IF_DOC_NO ]]>
+				            )                                                    AS INV_NO            /* 송장번호 */
+				        ,  IB_EXPENSE.IF_STATUS                                   AS IF_STATUS        /* 인터페이스상태 */
+				        ,  IB_EXPENSE.STATUS                                      AS STATUS           /* 상태 */
+				        ,  (
+				             SELECT SUBSTR(XMLAGG(XMLELEMENT(COL, ',', ZRE_BELNR) ORDER BY ZRE_BELNR)
+				                            .EXTRACT('//text()').GETSTRINGVAL(), 2)
+				               FROM (
+				               			SELECT DISTINCT ZINVOICE, ZRE_BELNR
+				               			  FROM IF_IB_STOCKETC_H
+				               			 WHERE <![CDATA[ FI_IF_STATUS = 'CNF' ]]>
+				               			UNION ALL
+				               			SELECT DISTINCT ZINVOICE, ZRE_BELNR
+				               			  FROM IF_IB_STOCKSKU_H
+				               			 WHERE <![CDATA[ FI_IF_STATUS = 'CNF' ]]>
+				               		) AA
+				              WHERE <![CDATA[ AA.ZINVOICE = IB_EXPENSE.IF_DOC_NO ]]>
+				            )                                                    AS SLIP_NO          /* 전표번호 */
+				FROM ST_EXDCSTORAGE
+				LEFT JOIN IB_EXPENSE
+				  ON <![CDATA[ IB_EXPENSE.KEY_NO = ST_EXDCSTORAGE.MONTH_EXP_NO ]]>
+				GROUP BY
+				           ST_EXDCSTORAGE.ORGANIZE
+				        ,  ST_EXDCSTORAGE.DCCODE
+				        ,  ST_EXDCSTORAGE.YYYYMM
+				        ,  IB_EXPENSE.KEY_NO
+				        ,  IB_EXPENSE.IF_STATUS
+				        ,  IB_EXPENSE.STATUS
+				        ,  IB_EXPENSE.IF_DOC_NO
+			) A
+			WHERE 1 = 1
+			<if test="stockMonth != null and stockMonth != ''">
+				AND <![CDATA[ YYYYMM = #{stockMonth} ]]>
+			</if>
+			<if test="organize != null and organize != ''">
+				AND <![CDATA[ ORGANIZE = #{organize} ]]>
+			</if>
+	<!-- 		AND  (
+                A.SLIP_NO IS NOT NULL         
+                OR A.TOTAL_AMOUNT > 0
+            ) 
+		 -->
+			AND DECODE(A.SLIP_NO, NULL, 0, 1) + A.TOTAL_AMOUNT > 0
+		) T
+		  ON <![CDATA[ S.ORGANIZE = T.ORGANIZE ]]> AND <![CDATA[ S.YYYYMM = T.YYYYMM ]]>
+		 WHERE 1=1
+		  <if test="accountsYn != null and accountsYn != ''">
+			    <choose>
+			        <when test="accountsYn.equalsIgnoreCase('Y')">
+			            AND <![CDATA[ NVL(T.EXPENSE_RESULT, 'N') = 'Y'   ]]>
+			        </when>
+			        <when test="accountsYn.equalsIgnoreCase('N')">
+			            AND <![CDATA[ NVL(T.EXPENSE_RESULT, 'N') = 'N'   ]]>
+			        </when>
+			    </choose>
+			</if>
+		ORDER BY
+		          T.ORGANIZE
+		       ,  T.KEY_NO
+	</select>
+	
+	<select id="getDataHeaderlist" resultType="IbCloseStoragefeeReSDto">
+	    SELECT    /* [ibCloseStoragefeeService.sqlx][getDataHeaderlist][외부창고 보관료 마감현황 조회][박진우][20250827] */
+               #{dcCode}                                                AS DCCODE           /* 물류센터 */
+            ,  MAX(IB_EXDCCLOSE.SERIALKEY)                              AS SERIALKEY        /* 데이터번호 */
+            ,  ST_EXDCSTORAGE.YYYYMM                                    AS YYYYMM           /* 재고월 */
+            ,  SUBSTR(ST_EXDCSTORAGE.ORGANIZE, -4)                      AS STORAGELOCATION  /* 보관장소(ORGANIZE 뒤 4자리) */
+            ,  ST_EXDCSTORAGE.ORGANIZE                                  AS ORGANIZE         /* 창고 */
+            ,  NVL(CM_DCXORGANIZE.DESCRIPTION, ST_EXDCSTORAGE.ORGANIZE) AS STORAGELOC_NAME  /* 보관장소명 */
+            ,  NVL(MAX(IB_EXDCCLOSE.CLOSEYN), 'N')                      AS CLOSEYN          /* 마감여부 */
+            ,  NVL(MAX(IB_EXDCCLOSE.SENDCNT), 0)                        AS SENDCNT          /* 전송건수 */
+            ,  MAX(IB_EXDCCLOSE.EDITWHO)                                AS EDITWHO          /* 수정자 */
+            ,  NVL(USER2.USER_NM,MAX(IB_EXDCCLOSE.EDITWHO))             AS EDITWHO_NAME     /* 수정자명 */
+            ,  MAX(IB_EXDCCLOSE.EDITDATE)                               AS EDITDATE         /* 수정일시 */
+            ,  CASE
+                  WHEN (SELECT COUNT(1) AS CNT
+                          FROM IB_CLOSE
+                         WHERE <![CDATA[ IB_CLOSE.DCCODE = #{dcCode} ]]>
+                           AND <![CDATA[ IB_CLOSE.PLANT  = #{dcCode} ]]>
+                           AND <![CDATA[ IB_CLOSE.CLOSEDT = #{closeMonth} ]]>
+                           AND <![CDATA[ IB_CLOSE.CLOSETYPE = 'EXDCCLOSE' ]]>
+                       ) > 0
+                  THEN 'N'
+                  ELSE 'Y'
+               END                                                      AS BTNFLAG          /* 버튼활성플래그 */
+		FROM       IB_EXPENSE
+		JOIN       IB_EXPENSE_DISTRIBUTION
+		           ON  <![CDATA[ IB_EXPENSE_DISTRIBUTION.EXPENSE_SN = IB_EXPENSE.SERIALKEY ]]>
+		JOIN       ST_EXDCSTORAGE
+		           ON  <![CDATA[ ST_EXDCSTORAGE.SERIALKEY = IB_EXPENSE_DISTRIBUTION.DOCUMENT_SN ]]>
+		LEFT JOIN  IB_EXDCCLOSE
+		           ON  <![CDATA[ IB_EXDCCLOSE.YYYYMM = ST_EXDCSTORAGE.YYYYMM ]]>
+		          AND  <![CDATA[ IB_EXDCCLOSE.STORAGELOCATION = SUBSTR(ST_EXDCSTORAGE.ORGANIZE, -4) ]]>
+		
+		<!-- 보관장소명 조인 (FN_DESCR_ORGANIZE 대체) -->
+		LEFT JOIN  CM_DCXORGANIZE 
+		           ON  <![CDATA[ CM_DCXORGANIZE.DCCODE   = #{dcCode} ]]>
+		          AND  <![CDATA[ CM_DCXORGANIZE.ORGANIZE = ST_EXDCSTORAGE.ORGANIZE ]]>
+		
+		<!-- 수정자명 조인 -->
+		LEFT JOIN  FRAMEONE_USER USER2
+		           ON  <![CDATA[ USER2.USER_ID = IB_EXDCCLOSE.EDITWHO ]]>
+		
+		WHERE     1 = 1
+		          AND  <![CDATA[ ST_EXDCSTORAGE.DCCODE = #{dcCode} ]]>
+		          AND  <![CDATA[ ST_EXDCSTORAGE.YYYYMM = #{closeMonth} ]]>
+		
+		    <if test="organize != null and organize != ''">
+		          AND  <![CDATA[ ST_EXDCSTORAGE.ORGANIZE = #{organize} ]]>
+		    </if>
+		
+		    <if test="closeYn != null and closeYn != ''">
+		          AND  <![CDATA[ NVL(IB_EXDCCLOSE.CLOSEYN,'N') = #{closeYn} ]]>
+		    </if>
+		
+		GROUP BY
+		           ST_EXDCSTORAGE.YYYYMM
+		        ,  ST_EXDCSTORAGE.ORGANIZE
+		        ,  CM_DCXORGANIZE.DESCRIPTION
+		        ,  USER2.USER_NM
+		ORDER BY
+		           ST_EXDCSTORAGE.ORGANIZE
+	</select>
+
+    <select id="getCheckIbClose" resultType="IbCloseStoragefeeResDto">
+		SELECT COUNT(1) AS CNT    /* [ibCloseStoragefeeService.sqlx][ibCloseStoragefeeService.getCheckIbClose][재무마감체크][박진우][20250827] */
+		FROM   IB_CLOSE
+		WHERE  IB_CLOSE.DCCODE  = #{plant} 
+		AND    IB_CLOSE.PLANT   = #{plant} 
+		AND    IB_CLOSE.CLOSEDT = #{closedt}
+		AND    IB_CLOSE.CLOSETYPE = 'EXDCCLOSE' 
+    </select>
+
+    <insert id="insertIbClose">
+		INSERT INTO IB_CLOSE  /* [ibCloseStoragefeeService.sqlx][insertIbClose][재무마감등록][AhnKihyeong][20250827] */
+		      ( SERIALKEY    /* 일련번호 */
+		      , CLOSEDT      /* 마감일자 */
+		      , DCCODE       /* 센터코드 */
+		      , DOCTYPE      /* 문서유형 */
+		      , CLOSETYPE    /* 마감유형 */
+		      , CLOSEKEY     /* 마감키 */
+		      , STORERKEY    /* 적치처 */
+		      , PLANT        /* 플랜트 */
+		      , ADDWHO       /* 최초등록자 */
+		      , EDITWHO      /* 최종수정자 */
+		      )
+		SELECT SEQ_IB_CLOSE.NEXTVAL                      AS SERIALKEY    /* 일련번호 */
+		     , #{closedt}                                AS CLOSEDT      /* 마감일자 */
+		     , #{plant}                                  AS DCCODE       /* 센터코드 */
+		     , 'STD'                                     AS DOCTYPE      /* 문서유형 */
+		     , 'EXDCCLOSE'                               AS CLOSETYPE    /* 마감유형 */
+		     , 'EXDCCLOSE'                               AS CLOSEKEY     /* 마감키 */
+		     , #{gStorerkey}                             AS STORERKEY    /* 적치처 */
+		     , #{plant}                                  AS PLANT        /* 플랜트 */
+		     , #{gUserId}                                AS ADDWHO       /* 최초등록자 */
+		     , #{gUserId}                                AS EDITWHO      /* 최종수정자 */
+		FROM DUAL
+
+	</insert> 
+
+    <select id="getIF_IB_STOCKSKU_BILL" resultType="IfIbStockSkuBillResDto">
+		SELECT *  /* [ibCloseStoragefeeService.sqlx][ibCloseStoragefeeService.getIF_IB_STOCKSKU_BILL][I/F 데이터 조회(IF_IB_STOCKSKU_BILL)][박진우][20250827] */ 
+		FROM   IF_IB_STOCKSKU_BILL_CLOSE
+		WHERE  ZMONTH = #{yyyymm}
+		AND    LGORT  = #{storageLocation}
+		AND    SEQ    = (SELECT TO_CHAR(SENDCNT)
+		                 FROM   IB_EXDCCLOSE
+		                 WHERE  YYYYMM          = #{yyyymm}
+		                 AND    STORAGELOCATION =  #{storageLocation})
+		ORDER BY
+		       SERIALKEY
+    </select>
+    
+     <select id="getCheckIbCloseWms" resultType="IbCloseStoragefeeResDto">
+        SELECT COUNT(1) AS CNT    /* [ibCloseStoragefeeService.sqlx][ibCloseStoragefeeService.getCheckIbCloseWms][정산 마감체크][박진우][20250827] */
+        FROM   IB_EXDCCLOSE
+        WHERE  YYYYMM          = #{yyyymm}
+        AND    STORAGELOCATION = #{storageLocation}
+        AND    CLOSEYN         = 'Y' 
+    </select>
+    
+    <select id="getDataHeaderCloselist" resultType="IbCloseStockSkuBillPopupResDto">
+        SELECT	/* [ibCloseStoragefeeService.sqlx][getDataHeaderCloselist][외부창고 마감 재고 내역 조회][박진우][20250827] */
+              WERKS                                  AS DC_CODE        /* 센터코드 */
+           ,  LGORT                                  AS STORAGE_LOC    /* 저장위치 */
+           ,  MATNR                                  AS SKU            /* 상품코드 */
+           ,  MENGE                                  AS ORDER_QTY      /* 수량 */
+           ,  BSTME                                  AS UOM            /* 단위 */
+           ,  FRBNR                                  AS CONV_SERIAL_NO /* 참조문서번호(FRBNR) */
+           ,  HISTNO                                 AS SERIAL_NO      /* 이력번호 */
+           ,  ZEBELN                                 AS ZEBELN         /* 구매문서번호 */
+           ,  ZEBELP                                 AS PO_LINE        /* 구매문서품목 */
+           ,  BUDAT                                  AS SLIP_DT        /* 전기일자 */
+           ,  ROWID                                  AS SLIP_NO        /* 전표번호(ROWID) */
+           ,  '00000'                                AS SLIP_LINE      /* 전표라인 */
+           ,  ZWRBTR_OUT                             AS ZWRBTR_OUT     /* 출고금액 */
+           ,  ZWRBTR_IN                              AS ZWRBTR_IN      /* 입고금액 */
+           ,  WRBTR                                  AS WRBTR          /* 금액 */
+           ,  '0'                                    AS STOCK_AMT      /* 재고금액 */
+           ,  '0'                                    AS PRICE          /* 단가 */
+           ,  ''                                     AS STOCK_AMT_MSG  /* 재고금액메시지 */
+           ,  '0'                                    AS STOCK_QTY      /* 재고수량 */
+        FROM IF_IB_STOCKSKU_BILL_CLOSE
+        WHERE ZMONTH                  <![CDATA[=]]>  #{zmonth}  /* 마감월(YYYYMM) */
+            AND LGORT                   <![CDATA[=]]>  #{lgort}   /* 저장위치 */
+            AND SEQ                     <![CDATA[=]]>  (
+                SELECT TO_CHAR(SENDCNT)
+                FROM IB_EXDCCLOSE
+                 WHERE YYYYMM            <![CDATA[=]]>  #{zmonth}  /* 마감월(YYYYMM) */
+                AND STORAGELOCATION   <![CDATA[=]]>  #{lgort}   /* 저장위치 */
+            )
+        ORDER BY SERIALKEY
+    </select>
+       
+    <update id="updateIbExdcClose">
+        /* [ibCloseStoragefeeService.sqlx][ibCloseStoragefeeService.updateIbExdcClose][외부창고 보관료 월별 마감정보 강제 마감][박진우][20250827] */
+        UPDATE IB_EXDCCLOSE 
+        SET  CLOSEYN  = 'Y'
+            ,EDITWHO  = #{gUserId}
+            ,EDITDATE = SYSDATE
+        WHERE YYYYMM          = #{yyyymm}
+          AND STORAGELOCATION = #{storageLocation}
+    </update>
+    
+    <select id="getIbexpenseComplete" resultType="IbCloseStoragefeeResDto">
+        SELECT COUNT(1) AS CNT    /* [ibCloseStoragefeeService.sqlx][ibCloseStoragefeeService.getCheckIbCloseWms][비용기표 완료체크][박진우][20250827] */
+        FROM   IB_EXPENSE EX
+        WHERE  1 = 1
+          AND  EX.DCCODE         = #{dcCode}
+          AND  EX.STORERKEY      = #{gStorerkey} 
+          AND  EX.ATTRIBUTES1    = #{yyyymm} 
+          AND  EX.IF_STATUS <![CDATA[ <> ]]> 'SCO'
+          AND  EXISTS (SELECT 1    
+                       FROM  IB_EXPENSE_DISTRIBUTION 
+                       WHERE IB_EXPENSE_DISTRIBUTION.EXPENSE_SN = EX.SERIALKEY 
+                         AND IB_EXPENSE_DISTRIBUTION.ORGANIZE  = #{organize}
+                      )
+    </select>
+    
+</mapper>

@@ -1,0 +1,208 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cmSearchPartnerPopup">
+  	<!-- 협력처 목록 조회 -->
+	<select id="getPartnerList" parameterType="cjfw.wms.cm.dto.CmSearchPartnerPopupReqDto" resultType="cjfw.wms.cm.dto.CmSearchPartnerPopupResDto">
+		SELECT /* [CmSearchPartnerPopupService.sqlx][getPartnerList][협력사 목록 조회][YeoSeungCheol][2025.05.14] */
+			'0'                    AS CHECKYN
+        	,MS_CUST.CUSTKEY       AS CODE
+        	,MS_CUST.DESCRIPTION   AS NAME
+        	,MS_CUST.ADDRESS1      AS ADDRESS1
+        	,MS_CUST.CUSTKEY       AS DLVCUSTKEY
+        	,MS_CUST.DESCRIPTION   AS DLVDESCRIPTION
+        	,MS_CUST.ADDRESS1      AS DLVADDRESS1
+        	,MS_CUST.CUSTTYPE      AS CUSTTYPE
+		FROM
+        	MS_CUST
+    	WHERE
+        	MS_CUST.STORERKEY = #{gStorerkey}
+        AND MS_CUST.CUSTTYPE IN ('P', 'D')
+        
+		<!-- 멀티선택: 999 청크 OR-IN -->
+		<if test="codeGroups != null and codeGroups.size() &gt; 0">
+			<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+				<foreach collection="codeGroups" item="grp">
+					OR MS_CUST.CUSTKEY IN
+					<foreach collection="grp" item="code" open="(" close=")" separator=",">
+						#{code}
+		      		</foreach>
+		    	</foreach>
+		  	</trim>
+		</if>
+        <choose>
+        <when test='multiSelect != null and multiSelect != ""'>
+	        AND MS_CUST.CUSTKEY IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+			                     FROM (SELECT #{multiSelect} AS VAL FROM DUAL) A
+			                  CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+        </when>		
+        
+        <otherwise>
+	        <choose>
+		        <when test="isEnter == 'Y'.toString()"> <!-- 엔터검색.input/돋보기 =검색(성능) -->
+			          AND (MS_CUST.CUSTKEY = TRIM(#{name})  OR MS_CUST.DESCRIPTION = TRIM(#{name})) /*엔터검색*/
+		        </when>
+	        <otherwise>
+		        <if test='name != null and name != ""'>
+			        <choose>
+			        	<when test="fixedSearchYn == '' and fixedSearchYn == null"> <!-- FIX검색.%1개일 때(3/4) -->
+					     AND (MS_CUST.CUSTKEY     LIKE '%'||TRIM(#{name})||'%'
+                           OR MS_CUST.DESCRIPTION LIKE '%'||TRIM(#{name})||'%')
+				        </when>
+			        
+				        <when test="fixedSearchYn == 'Y'.toString()"> <!-- FIX검색.%1개일 때(3/4) -->
+					          AND (MS_CUST.CUSTKEY LIKE TRIM(#{name}) OR MS_CUST.DESCRIPTION LIKE TRIM(#{name}) )
+				        </when>
+			        <otherwise><!-- 2.단일검색,5.%다중검색  -->
+				        AND (MS_CUST.CUSTKEY LIKE '%'||TRIM(#{name})||'%' OR MS_CUST.DESCRIPTION LIKE '%'||TRIM(#{name})||'%' )
+			        </otherwise>
+			        </choose>		            
+		                
+	                <!-- START.검색요건 -->
+                       <if test= 'name != null and name.indexOf(" ") gt 0 '>
+                           OR REGEXP_LIKE (UPPER(MS_CUST.DESCRIPTION), REGEXP_REPLACE (TRIM(UPPER(#{keywordRegexp})), '[ ]+', '|'))
+                       </if>
+                    <!-- END.검색요건 -->     
+		        </if>
+	        </otherwise>
+	        </choose>
+
+        </otherwise>
+        </choose>
+        
+        <!-- START.검색요건 -->
+        <choose>
+            <when test='name != null and name.indexOf(" ") gt 0 '>
+                ORDER BY
+                        REGEXP_COUNT(UPPER(MS_CUST.DESCRIPTION), REGEXP_REPLACE (TRIM(UPPER(#{keywordRegexp})), '[ ]+', '|')) DESC, /*매치 검색 count*/
+                        UTL_MATCH.JARO_WINKLER_SIMILARITY(MS_CUST.DESCRIPTION , TRIM(#{name})) DESC
+                            
+            </when>
+            <otherwise>
+               /*ASIS처럼 정열 없음*/
+            </otherwise>
+        </choose>     
+        <!-- END.검색요건 -->         
+  </select>
+
+  <!-- 협력사 조회(단건) : 원본 유지 -->
+  <select id="getPartner"
+          parameterType="cjfw.wms.cm.dto.CmSearchPartnerPopupDetailReqDto"
+          resultType="cjfw.wms.cm.dto.CmSearchPartnerPopupDetailResDto">
+    SELECT /* [CmSearchPartnerPopupService.sqlx][cmPartnerService.getPartner][협력사 조회(단건)][YeoSeungCheol][2025.07.24] */
+          NVL(CODE_CT.BASEDESCR, CODE_CT.BASECODE) AS CUSTTYPEDESCR
+        , NVL(CODE_CG.BASEDESCR, CODE_CG.BASECODE) AS CUSTGROUPDESCR
+        , MS_CUST.SERIALKEY                AS SERIALKEY
+        , MS_CUST.STORERKEY                AS STORERKEY
+        , MS_CUST.CUSTKEY                  AS CUSTKEY
+        , MS_CUST.CUSTTYPE                 AS CUSTTYPE
+        , MS_CUST.CUSTGRADE                AS CUSTGRADE
+        , MS_CUST.STORERCUSTKEY            AS STORERCUSTKEY
+        , MS_CUST.PARENTCUSTKEY            AS PARENTCUSTKEY
+        , MS_CUST.SALEGROUP                AS SALEGROUP
+        , MS_CUST.SALEDEPARTMENT           AS SALEDEPARTMENT
+        , MS_CUST.BILLTOCUSTKEY            AS BILLTOCUSTKEY
+        , MS_CUST.DESCRIPTION              AS DESCRIPTION
+        , MS_CUST.CUSTGROUP                AS CUSTGROUP
+        , MS_CUST.PRIORITY                 AS PRIORITY
+        , MS_CUST.DISTRICTTYPE             AS DISTRICTTYPE
+        , MS_CUST.DISTRICTCODE             AS DISTRICTCODE
+        , MS_CUST.ROUTE                    AS ROUTE
+        , MS_CUST.COURIER                  AS COURIER
+        , MS_CUST.INVOICETYPE              AS INVOICETYPE
+        , MS_CUST.DLV_DCCODE               AS DLV_DCCODE
+        , MS_CUST.OWNER                    AS OWNER
+        , MS_CUST.TIMEZONE                 AS TIMEZONE
+        , MS_CUST.COUNTRY                  AS COUNTRY
+        , MS_CUST.STATE                    AS STATE
+        , MS_CUST.CITY                     AS CITY
+        , MS_CUST.ZIPCODE                  AS ZIPCODE
+        , MS_CUST.ADDRESS1                 AS ADDRESS1
+        , MS_CUST.ADDRESS2                 AS ADDRESS2
+        , MS_CUST.ADDRESS3                 AS ADDRESS3
+        , MS_CUST.ADDRESS4                 AS ADDRESS4
+        , DAMO.DEC(MS_CUST.PHONE1)         AS PHONE1
+        , DAMO.DEC(MS_CUST.PHONE2)         AS PHONE2
+        , MS_CUST.FAX                      AS FAX
+        , MS_CUST.EMAIL                    AS EMAIL
+        , MS_CUST.VATNO                    AS VATNO
+        , MS_CUST.VATOWNER                 AS VATOWNER
+        , MS_CUST.VATTYPE                  AS VATTYPE
+        , MS_CUST.VATNAME                  AS VATNAME
+        , MS_CUST.VATCATEGORY              AS VATCATEGORY
+        , MS_CUST.VATADDRESS1              AS VATADDRESS1
+        , MS_CUST.VATADDRESS2              AS VATADDRESS2
+        , MS_CUST.VATADDRESS3              AS VATADDRESS3
+        , MS_CUST.VATADDRESS4              AS VATADDRESS4
+        , MS_CUST.VATPHONE                 AS VATPHONE
+        , MS_CUST.VATFAX                   AS VATFAX
+        , MS_CUST.EMPNAME1                 AS EMPNAME1
+        , MS_CUST.EMPNAME2                 AS EMPNAME2
+        , MS_CUST.EMPNAME3                 AS EMPNAME3
+        , MS_CUST.EMPNAME4                 AS EMPNAME4
+        , MS_CUST.EMPNAME5                 AS EMPNAME5
+        , DAMO.DEC(MS_CUST.EMPPHONE1)      AS EMPPHONE1
+        , DAMO.DEC(MS_CUST.EMPPHONE2)      AS EMPPHONE2
+        , MS_CUST.EMPPHONE3                AS EMPPHONE3
+        , MS_CUST.EMPPHONE4                AS EMPPHONE4
+        , MS_CUST.EMPPHONE5                AS EMPPHONE5
+        , MS_CUST.STARTDATE                AS STARTDATE
+        , MS_CUST.ENDDATE                  AS ENDDATE
+        , MS_CUST.OPENTIME                 AS OPENTIME
+        , MS_CUST.CLOSINGTIME              AS CLOSINGTIME
+        , MS_CUST.ENTRYCONDITION           AS ENTRYCONDITION
+        , MS_CUST.LIMITCAR                 AS LIMITCAR
+        , MS_CUST.LOADBOXPERMIN            AS LOADBOXPERMIN
+        , MS_CUST.LOADTOOLTYPE             AS LOADTOOLTYPE
+        , MS_CUST.LATITUDE                 AS LATITUDE
+        , MS_CUST.LONGITUDE                AS LONGITUDE
+        , MS_CUST.POTYPE                   AS POTYPE
+        , MS_CUST.SOTYPE                   AS SOTYPE
+        , MS_CUST.INSTRATEGY               AS INSTRATEGY
+        , MS_CUST.OUTSTRATEGY              AS OUTSTRATEGY
+        , MS_CUST.QCTYPE                   AS QCTYPE
+        , MS_CUST.INSPECTTYPE              AS INSPECTTYPE
+        , MS_CUST.CUSTSTRATEGY1            AS CUSTSTRATEGY1
+        , MS_CUST.CUSTSTRATEGY2            AS CUSTSTRATEGY2
+        , MS_CUST.CUSTSTRATEGY3            AS CUSTSTRATEGY3
+        , MS_CUST.CUSTSTRATEGY4            AS CUSTSTRATEGY4
+        , MS_CUST.CUSTSTRATEGY5            AS CUSTSTRATEGY5
+        , MS_CUST.FLOATMASK                AS FLOATMASK
+        , MS_CUST.CURRENCY                 AS CURRENCY
+        , MS_CUST.OTHER01                  AS OTHER01
+        , MS_CUST.OTHER02                  AS OTHER02
+        , MS_CUST.OTHER03                  AS OTHER03
+        , MS_CUST.OTHER04                  AS OTHER04
+        , MS_CUST.OTHER05                  AS OTHER05
+        , MS_CUST.MEMO                     AS MEMO
+        , MS_CUST.IFFILENAME               AS IFFILENAME
+        , MS_CUST.STATUS                   AS STATUS
+        , MS_CUST.DEL_YN                   AS DEL_YN
+        , MS_CUST.TRAFFICCOP               AS TRAFFICCOP
+        , MS_CUST.ARCHIVECOP               AS ARCHIVECOP
+        , TO_CHAR(MS_CUST.ADDDATE,'YYYYMMDDHH24MISS') AS ADDDATE
+        , TO_CHAR(MS_CUST.EDITDATE,'YYYYMMDDHH24MISS') AS EDITDATE
+        , MS_CUST.ADDWHO                   AS ADDWHO
+        , MS_CUST.EDITWHO                  AS EDITWHO
+    FROM MS_CUST
+
+    LEFT JOIN CM_CODE CODE_CT
+      ON CODE_CT.STORERKEY = 'STD'
+     AND CODE_CT.CODELIST  = 'CUSTTYPE'
+     AND CODE_CT.BASECODE  = MS_CUST.CUSTTYPE
+
+    LEFT JOIN CM_CODE CODE_CG
+      ON CODE_CG.STORERKEY = 'STD'
+     AND CODE_CG.CODELIST  = 'CUSTGROUP'
+     AND CODE_CG.BASECODE  = MS_CUST.CUSTGROUP
+
+    WHERE 1=1
+      <if test="gStorerkey != null and gStorerkey != ''">
+        AND MS_CUST.STORERKEY = #{gStorerkey}
+      </if>
+      <if test="custKey != null and custKey != ''">
+        AND MS_CUST.CUSTKEY = #{custKey}
+      </if>
+      AND MS_CUST.CUSTTYPE = 'P'
+  </select>
+
+</mapper>

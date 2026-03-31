@@ -1,0 +1,392 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="tmMonitoringCustomerService">
+
+    <select id="getMonitoringCustomerGroupList" resultType="TmMonitoringCustomerResDto">
+        SELECT /* [TmMonitoringCustomerService.sqlx][tmMonitoringCustomerService.getMonitoringCustomerGroupList][배송고객모니터링 - 모니터링 그룹 목록 조회][JiHoPark][2025.11.25] */
+               DCCODE     AS DCCODE     /*물류센터*/
+             , GROUP_CD   AS GROUP_CD   /*모티터링그룹코드*/
+             , GROUP_NAME AS GROUP_NAME /*모니터링그룹명*/
+             , USE_YN     AS USE_YN     /*사용여부*/
+             , RMK        AS RMK        /*비고*/
+          FROM TM_MONITOR_GROUP
+         WHERE 1=1
+       <if test="dccode != null and dccode != ''">
+           AND DCCODE = #{dccode}
+       </if>
+       <if test="groupCdName != null and groupCdName != ''">
+           AND (    REGEXP_LIKE(TM_MONITOR_GROUP.GROUP_CD, REPLACE(#{groupCdName}, ',', '|'))
+                 OR REGEXP_LIKE(TM_MONITOR_GROUP.GROUP_NAME, REPLACE(#{groupCdName}, ',', '|')))
+       </if>
+       <if test="useYn != null and useYn != ''">
+           AND USE_YN = #{useYn}
+       </if>
+           ORDER BY GROUP_CD
+    </select>
+
+    <select id="getMonitoringCustomerGroupDetailList" resultType="TmMonitoringCustomerResDto">
+        SELECT /* [TmMonitoringCustomerService.sqlx][tmMonitoringCustomerService.getMonitoringCustomerGroupDetailList][배송고객모니터링 - 모니터링 그룹 상세 목록 조회][JiHoPark][2025.11.24] */
+               GROUP_CD                                                  AS GROUP_CD    /*모티터링그룹코드*/
+             , MNGPLC_ID                                                 AS MNGPLC_ID   /*관리처코드*/
+             , FN_DESCR_CUST(#{gStorerkey}, TM_MONITOR_MNGPLC.MNGPLC_ID) AS MNGPLCNAME
+             , USE_YN                                                    AS USE_YN      /*사용여부*/
+             , 'N'                                                       AS MODIFY_FLAG /*수정가능여부*/
+         FROM TM_MONITOR_MNGPLC
+        WHERE GROUP_CD = #{groupCd}
+        ORDER BY MNGPLC_ID
+    </select>
+
+    <select id="getMasterList" resultType="TmMonitoringCustomerResDto">
+        SELECT /* [TmMonitoringCustomerService.sqlx][tmMonitoringCustomerService.getMasterList][배송고객모니터링 - 배송고객모니터링 목록 조회][JiHoPark][2025.11.24] */
+               RSLT.DCCODE                                                     AS DCCODE        /*센터코드*/
+             , RSLT.CARNO                                                      AS CARNO         /*차량번호*/
+             , NVL(CM_DRIVER.DRIVERNAME, CM_CAR.DRIVER1)                       AS DRIVER        /*배송기사*/
+             , RSLT.STORERKEY                                                  AS STORERKEY     /*고객사코드*/
+             , RSLT.CUSTTYPE                                                   AS CUSTTYPE      /*거래처유형*/
+             , RSLT.CUSTKEY                                                    AS CUSTKEY       /*거래처코드*/
+             , FN_DESCR_CUST(RSLT.STORERKEY, RSLT.CUSTKEY)                     AS CUSTNAME      /*관리처명*/
+             , ROUND(RSLT.WEIGHT, 3)                                           AS WEIGHT        /*중량*/
+             , RSLT.PHOTO_YN                                                   AS PHOTO_YN      /*사진촬영 유/무*/
+             , RSLT.LOADTYPE_YN                                                AS LOADTYPE_YN   /*적온적재 유/무*/
+             , RSLT.ISSUE_YN                                                   AS ISSUE_YN      /*배송이슈 등재*/
+             , MS_CUST.MA                                                      AS MA            /*MA코드*/
+             , NVL(MS_CUST.MANAME, MS_CUST.MA)                                 AS MANAME        /*MA명*/
+             , RSLT.CANCELQTY                                                  AS CANCELQTY     /*결품건수*/
+             <!-- , TO_CHAR(RSLT.DELIVERYREQDT, 'HH24:MI')                          AS DELIVERYREQDT /*도착요구시간*/ -->
+             <!-- , NVL2(TM_EXPCT_ARRIVALTIME.EXPCT_ARRIVALTIME, TM_EXPCT_ARRIVALTIME.EXPCT_ARRIVALTIME, TO_CHAR(RSLT.CUSTARRIVALDT, 'HH24:MI')) AS CUSTARRIVALDT /*거래처도착시간*/ -->
+             , TO_CHAR(RSLT.FROM_DELIVERYREQDT, 'HH24:MI')                     AS FROM_DELIVERYREQDT /*OTD시작*/
+             , TO_CHAR(RSLT.DELIVERYREQDT, 'HH24:MI')                          AS DELIVERYREQDT /*OTD종료*/
+             , NVL(TO_CHAR(RSLT.CUSTARRIVALDT, 'HH24:MI'),'')                  AS CUSTARRIVALDT /*거래처도착시간*/
+             , TM_EXPCT_ARRIVALTIME.MEMO                                       AS MEMO          /*특이사항*/
+             , RSLT.DELIVERYDT                                                 AS DELIVERYDT    /*배송일자*/
+          FROM ( SELECT BASE_RSLT.DCCODE            AS DCCODE         /*센터코드*/
+                      , BASE_RSLT.CARNO             AS CARNO          /*차량번호*/
+                      , BASE_RSLT.STORERKEY         AS STORERKEY      /*고객사코드*/
+                      , BASE_RSLT.CUSTTYPE          AS CUSTTYPE       /*거래처유형*/
+                      , BASE_RSLT.CUSTKEY           AS CUSTKEY        /*거래처코드*/
+                      , SUM(BASE_RSLT.WEIGHT)       AS WEIGHT         /*중량*/
+                      , CASE WHEN SUM(DECODE(RESL_YN.PHOTO_CNT, 1, 1)) > 0
+                             THEN 'Y'
+                             ELSE 'N'
+                         END                         AS PHOTO_YN      /*사진촬영 유/무*/
+                      , CASE WHEN SUM(DECODE(RESL_YN.LOADTYPE_CNT, 1, 1)) > 0
+                             THEN 'Y'
+                             ELSE 'N'
+                         END                         AS LOADTYPE_YN   /*적온적재 유/무*/
+                      , CASE WHEN SUM(DECODE(RESL_YN.ISSUE_CNT, 1, 1)) > 0
+                             THEN 'Y'
+                             ELSE 'N'
+                         END                              AS ISSUE_YN      /*배송이슈 등재*/
+                      , MAX(BASE_RSLT.DELIVERYREQDT)      AS DELIVERYREQDT /*OTD종료*/
+                      , MAX(BASE_RSLT.FROM_DELIVERYREQDT) AS FROM_DELIVERYREQDT  /**OTD시작*/
+                      , MAX(BASE_RSLT.CUSTARRIVALDT)      AS CUSTARRIVALDT /*거래처도착시간*/
+                      , BASE_RSLT.DELIVERYDT              AS DELIVERYDT    /*배송일자*/
+                      , SUM(BASE_RSLT.CANCELQTY)          AS CANCELQTY     /*결품건수*/
+                  FROM ( SELECT UNION_TM_INPLAN.DCCODE             AS DCCODE        /*센터코드*/
+                              , UNION_TM_INPLAN.DOCTYPE            AS DOCTYPE
+                              , UNION_TM_INPLAN.SLIPDT             AS SLIPDT
+                              , UNION_TM_INPLAN.DOCNO              AS DOCNO
+                              , UNION_TM_INPLAN.CARNO              AS CARNO         /*차량번호*/
+                              , UNION_TM_INPLAN.STORERKEY          AS STORERKEY     /*고객사코드*/
+                              , UNION_TM_INPLAN.CUSTTYPE           AS CUSTTYPE      /*거래처유형*/
+                              , UNION_TM_INPLAN.CUSTKEY            AS CUSTKEY       /*거래처코드*/
+                              , UNION_TM_INPLAN.WEIGHT             AS WEIGHT        /*중량*/
+                              , UNION_TM_INPLAN.DELIVERYREQDT      AS DELIVERYREQDT /*도착요구시간*/
+                              , UNION_TM_INPLAN.FROM_DELIVERYREQDT AS FROM_DELIVERYREQDT /*도착요구시간*/
+                              , UNION_TM_INPLAN.CUSTARRIVALDT      AS CUSTARRIVALDT /*거래처도착시간*/
+                              , UNION_TM_INPLAN.DELIVERYDT         AS DELIVERYDT    /*배송일자*/
+                              , DM_DOCUMENT_D.CANCELQTY            AS CANCELQTY     /*결품건수*/
+                           FROM ( SELECT TM_INPLAN.DCCODE             AS DCCODE        /*센터코드*/
+                                       , TM_INPLAN.DOCTYPE            AS DOCTYPE
+                                       , TM_INPLAN.SLIPDT             AS SLIPDT
+                                       , TM_INPLAN.DOCNO              AS DOCNO
+                                       , TM_INPLAN.CARNO              AS CARNO         /*차량번호*/
+                                       , TM_INPLAN.STORERKEY          AS STORERKEY     /*고객사코드*/
+                                       , TM_INPLAN.CUSTTYPE           AS CUSTTYPE      /*거래처유형*/
+                                       , TM_INPLAN.CUSTKEY            AS CUSTKEY       /*거래처코드*/
+                                       , CASE WHEN TM_INPLAN.TM_DELIVERYTYPE = '1'
+                                              THEN TM_INPLAN.WEIGHT
+                                              ELSE 0
+                                          END                          AS WEIGHT        /*중량*/
+                                       , TM_INPLAN.DELIVERYREQDT       AS DELIVERYREQDT /*도착요구시간*/
+                                       , TM_INPLAN.FROM_DELIVERYREQDT  AS FROM_DELIVERYREQDT /*거래처도착시간*/
+                                       , TM_INPLAN.CUSTARRIVALDT       AS CUSTARRIVALDT /*거래처도착시간*/
+                                       , TM_INPLAN.DELIVERYDT          AS DELIVERYDT    /*배송일자*/
+                                    FROM TM_INPLAN
+                                   WHERE 1=1
+                                     --AND TM_INPLAN.STATUS            = '90'
+                                     AND TM_INPLAN.CUSTTYPE          = 'C'
+                                     AND TM_INPLAN.STORERKEY         = #{gStorerkey}
+                                 <if test="dccode != null and dccode != ''">
+                                     AND TM_INPLAN.DCCODE            = #{dccode}
+                                 </if>
+                                 <if test="deliverydt != null and deliverydt != ''">
+                                     AND TM_INPLAN.DELIVERYDT        = #{deliverydt}
+                                 </if>
+                                     AND TM_INPLAN.DEL_YN            = 'N'
+                                     AND TM_INPLAN.SPLIT_DELIVERY_YN = 'N'
+                                     AND TM_INPLAN.TM_DELIVERYTYPE IN ('1', '2')
+                                   UNION ALL
+                                  SELECT TM_INPLAN_SPLIT.DCCODE             AS DCCODE        /*센터코드*/
+                                       , TM_INPLAN_SPLIT.DOCTYPE            AS DOCTYPE
+                                       , TM_INPLAN_SPLIT.SLIPDT             AS SLIPDT
+                                       , TM_INPLAN_SPLIT.DOCNO              AS DOCNO
+                                       , TM_INPLAN_SPLIT.CARNO              AS CARNO         /*차량번호*/
+                                       , TM_INPLAN_SPLIT.STORERKEY          AS STORERKEY     /*고객사코드*/
+                                       , TM_INPLAN_SPLIT.CUSTTYPE           AS CUSTTYPE      /*거래처유형*/
+                                       , TM_INPLAN_SPLIT.CUSTKEY            AS CUSTKEY       /*거래처코드*/
+                                       , CASE WHEN TM_INPLAN_SPLIT.TM_DELIVERYTYPE = '1'
+                                              THEN TM_INPLAN_SPLIT.WEIGHT
+                                              ELSE 0
+                                          END                               AS WEIGHT        /*중량*/
+                                       , TM_INPLAN_SPLIT.DELIVERYREQDT      AS DELIVERYREQDT /*도착요구시간*/
+                                       , TM_INPLAN_SPLIT.CUSTARRIVALDT      AS CUSTARRIVALDT /*거래처도착시간*/
+                                       , TM_INPLAN_SPLIT.FROM_DELIVERYREQDT AS FROM_DELIVERYREQDT /*거래처도착시간*/
+                                       , TM_INPLAN_SPLIT.DELIVERYDT         AS DELIVERYDT    /*배송일자*/
+                                    FROM TM_INPLAN_SPLIT
+                                   WHERE 1=1
+                                     --AND TM_INPLAN_SPLIT.STATUS     = '90'
+                                     AND TM_INPLAN_SPLIT.CUSTTYPE   = 'C'
+                                     AND TM_INPLAN_SPLIT.STORERKEY  = #{gStorerkey}
+                                 <if test="dccode != null and dccode != ''">
+                                     AND TM_INPLAN_SPLIT.DCCODE     = #{dccode}
+                                 </if>
+                                 <if test="deliverydt != null and deliverydt != ''">
+                                     AND TM_INPLAN_SPLIT.DELIVERYDT = #{deliverydt}
+                                 </if>
+                                     AND TM_INPLAN_SPLIT.DEL_YN     = 'N'
+                                     AND TM_INPLAN_SPLIT.TM_DELIVERYTYPE IN ('1', '2')
+                              ) UNION_TM_INPLAN
+                          INNER JOIN CM_USER_AUTHORITY_DCXSTORER ON 1=1
+                                                                AND CM_USER_AUTHORITY_DCXSTORER.DCCODE    = UNION_TM_INPLAN.DCCODE
+                                                                AND CM_USER_AUTHORITY_DCXSTORER.STORERKEY = UNION_TM_INPLAN.STORERKEY
+                                                                AND CM_USER_AUTHORITY_DCXSTORER.USERID    = #{gUserId}
+                                                            <if test="dccode != null and dccode != ''">
+                                                                AND CM_USER_AUTHORITY_DCXSTORER.DCCODE    = #{dccode}
+                                                            </if>
+                                                            <if test="gStorerkey != null and gStorerkey != ''">
+                                                                AND CM_USER_AUTHORITY_DCXSTORER.STORERKEY = #{gStorerkey}
+                                                            </if>
+                           LEFT OUTER JOIN DM_DOCUMENT_H ON DM_DOCUMENT_H.DCCODE       = UNION_TM_INPLAN.DCCODE
+                                             AND DM_DOCUMENT_H.DELIVERYDATE = UNION_TM_INPLAN.SLIPDT
+                                             AND DM_DOCUMENT_H.DOCNO        = UNION_TM_INPLAN.DOCNO
+                                             AND DM_DOCUMENT_H.DOCTYPE      = UNION_TM_INPLAN.DOCTYPE
+                                             AND DM_DOCUMENT_H.STORERKEY    = UNION_TM_INPLAN.STORERKEY
+                           LEFT OUTER JOIN DM_DOCUMENT_D ON DM_DOCUMENT_D.DCCODE       = DM_DOCUMENT_H.DCCODE
+                                             AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+                                             AND DM_DOCUMENT_D.DOCNO        = DM_DOCUMENT_H.DOCNO
+                                             AND DM_DOCUMENT_D.DOCTYPE      = DM_DOCUMENT_H.DOCTYPE
+                                             AND DM_DOCUMENT_D.STORERKEY    = DM_DOCUMENT_H.STORERKEY
+                                             AND DM_DOCUMENT_D.DEL_YN       = 'N'
+                          WHERE 1 = 1
+                          GROUP BY UNION_TM_INPLAN.DCCODE
+                                 , UNION_TM_INPLAN.DOCTYPE
+                                 , UNION_TM_INPLAN.SLIPDT
+                                 , UNION_TM_INPLAN.DOCNO
+                                 , UNION_TM_INPLAN.CARNO
+                                 , UNION_TM_INPLAN.STORERKEY
+                                 , UNION_TM_INPLAN.CUSTTYPE
+                                 , UNION_TM_INPLAN.CUSTKEY
+                                 , UNION_TM_INPLAN.WEIGHT
+                                 , UNION_TM_INPLAN.DELIVERYREQDT
+                                 , UNION_TM_INPLAN.FROM_DELIVERYREQDT
+                                 , UNION_TM_INPLAN.CUSTARRIVALDT
+                                 , UNION_TM_INPLAN.DELIVERYDT
+                                 , DM_DOCUMENT_D.CANCELQTY
+                     ) BASE_RSLT
+                  LEFT OUTER JOIN ( SELECT TM_ISSUE.STORERKEY  AS STORERKEY
+                                         , TM_ISSUE.DCCODE     AS DCCODE
+                                         , TM_ISSUE.CUSTKEY    AS CUSTKEY
+                                         , TM_ISSUE.DELIVERYDT AS DELIVERYDT
+                                         , CASE WHEN TM_ISSUE.STATUS = '90'
+                                                THEN 1
+                                                ELSE 0
+                                            END                AS ISSUE_CNT
+                                         , CASE WHEN TM_ISSUE.LOADTYPE = '01' OR TM_ISSUE.LOADTYPE = '02'
+                                                THEN 1
+                                                ELSE 0
+                                            END                AS LOADTYPE_CNT
+                                         , CASE WHEN CRM_CUSTDLVINFO_FILE.SERIALKEY IS NOT NULL
+                                                THEN 1
+                                                ELSE 0
+                                            END                AS PHOTO_CNT
+                                      FROM TM_ISSUE
+                                      LEFT OUTER JOIN CRM_CUSTDLVINFO_FILE ON TM_ISSUE.ISSUENO            = CRM_CUSTDLVINFO_FILE.ISSUENO
+                                                                          AND CRM_CUSTDLVINFO_FILE.DEL_YN = 'N'
+                                     WHERE TM_ISSUE.DEL_YN     = 'N'
+                                   <if test="dccode != null and dccode != ''">
+                                       AND TM_ISSUE.DCCODE     = #{dccode}
+                                   </if>
+                                   <if test="deliverydt != null and deliverydt != ''">
+                                       AND TM_ISSUE.DELIVERYDT = #{deliverydt}
+                                   </if>
+                                ) RESL_YN ON RESL_YN.STORERKEY  = BASE_RSLT.STORERKEY
+                                         AND RESL_YN.DCCODE     = BASE_RSLT.DCCODE
+                                         AND RESL_YN.CUSTKEY    = BASE_RSLT.CUSTKEY
+                                         AND RESL_YN.DELIVERYDT = BASE_RSLT.DELIVERYDT
+                 GROUP BY BASE_RSLT.DCCODE
+                        , BASE_RSLT.CARNO
+                        , BASE_RSLT.STORERKEY
+                        , BASE_RSLT.CUSTTYPE
+                        , BASE_RSLT.CUSTKEY
+                        , BASE_RSLT.DELIVERYDT
+             ) RSLT
+         INNER JOIN CM_CAR ON RSLT.CARNO       = CM_CAR.CARNO
+          LEFT OUTER JOIN CM_DRIVER ON CM_DRIVER.DRIVERID = CM_CAR.DRIVER1
+         INNER JOIN MS_CUST ON RSLT.STORERKEY = MS_CUST.STORERKEY
+                           AND RSLT.CUSTKEY   = MS_CUST.CUSTKEY
+                           AND RSLT.CUSTTYPE  = MS_CUST.CUSTTYPE
+          LEFT OUTER JOIN TM_EXPCT_ARRIVALTIME ON RSLT.DELIVERYDT = TM_EXPCT_ARRIVALTIME.DELIVERYDATE
+                                              AND RSLT.CARNO      = TM_EXPCT_ARRIVALTIME.CARNO
+                                              AND RSLT.CUSTKEY    = TM_EXPCT_ARRIVALTIME.CUSTKEY
+         WHERE 1 = 1
+       <if test="custkey != null and custkey != ''">
+           AND RSLT.CUSTKEY IN (SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS VAL
+                                  FROM (SELECT #{custkey} AS VAL FROM DUAL) A
+                               CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+       </if>
+       <if test="groupCd != null and groupCd != ''">
+           AND RSLT.CUSTKEY IN ( SELECT TM_MONITOR_MNGPLC.MNGPLC_ID AS CUSTKEY
+                                   FROM TM_MONITOR_GROUP
+                                  INNER JOIN TM_MONITOR_MNGPLC ON TM_MONITOR_MNGPLC.GROUP_CD = TM_MONITOR_GROUP.GROUP_CD
+                                  WHERE TM_MONITOR_GROUP.GROUP_CD IN (SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS VAL
+                                                                        FROM (SELECT #{groupCd} AS VAL FROM DUAL) A
+                                                                      CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0) )
+       </if>
+       <if test="diffAddDate != null and diffAddDate != ''">
+           AND EXISTS ( SELECT 1
+                          FROM MS_CUSTXPOP
+                         WHERE MS_CUSTXPOP.CUSTKEY   = RSLT.CUSTKEY
+                           AND MS_CUSTXPOP.CUSTTYPE  = RSLT.CUSTTYPE
+                           AND MS_CUSTXPOP.DCCODE    = RSLT.DCCODE
+                           AND MS_CUSTXPOP.STORERKEY = RSLT.STORERKEY
+                           AND MS_CUSTXPOP.DEL_YN    = 'N'
+                           AND (TO_DATE(TO_CHAR(SYSDATE, 'YYYYMMDD'), 'YYYYMMDD') - TO_DATE(TO_CHAR(MS_CUSTXPOP.ADDDATE, 'YYYYMMDD'), 'YYYYMMDD')) <![CDATA[<=]]> #{diffAddDate} )
+       </if>
+         ORDER BY RSLT.CARNO
+    </select>
+
+    <select id="getEmailTitle" resultType="TmMonitoringCustomerResDto">
+        SELECT /* [TmMonitoringCustomerService.sqlx][tmMonitoringCustomerService.getEmailTitle][배송고객모니터링 - 이메일 발송 제목 조회][JiHoPark][2025.11.28] */
+               FRAMEONE_USER.USER_ID                                       AS USER_ID
+             , FRAMEONE_USER.USER_NM                                       AS USER_NM
+             , FRAMEONE_EMP.MAIL_ID                                        AS MAIL_ID
+             , ( SELECT LISTAGG(TM_MONITOR_GROUP.GROUP_NAME, ',') WITHIN GROUP(ORDER BY TM_MONITOR_MNGPLC.MNGPLC_ID )
+                   FROM TM_MONITOR_GROUP
+                  INNER JOIN TM_MONITOR_MNGPLC ON TM_MONITOR_MNGPLC.GROUP_CD = TM_MONITOR_GROUP.GROUP_CD
+                  WHERE TM_MONITOR_GROUP.USE_YN <![CDATA[<>]]> 'N'
+                    AND TM_MONITOR_MNGPLC.USE_YN <![CDATA[<>]]> 'N'
+                    AND TM_MONITOR_MNGPLC.MNGPLC_ID = #{custkey} )         AS GROUP_NAME
+             , #{custname}                                                 AS CUSTNAME
+             , TO_CHAR(TO_DATE(#{deliverydt}, 'YYYY-MM-DD'), 'YYYY-MM-DD') AS DELIVERYDT
+             , FN_DESCR_DC(#{dccode})                                      AS DCCODENAME
+          FROM FRAMEONE_USER
+          LEFT JOIN FRAMEONE_EMP ON FRAMEONE_EMP.EMP_NO = FRAMEONE_USER.EMP_NO
+	                            AND FRAMEONE_EMP.COM_CD = FRAMEONE_USER.COM_CD
+	     WHERE FRAMEONE_USER.USER_ID = #{ma}
+    </select>
+
+    <update id="updateMasterList">
+        MERGE /* [TmMonitoringCustomerService.sqlx][tmMonitoringCustomerService.updateMasterList][배송고객모니터링 update][JiHoPark][2028.11.26] */
+         INTO TM_EXPCT_ARRIVALTIME
+        USING DUAL
+           ON (     TM_EXPCT_ARRIVALTIME.DELIVERYDATE = #{deliverydt}
+                AND TM_EXPCT_ARRIVALTIME.CARNO        = #{carno}
+                AND TM_EXPCT_ARRIVALTIME.CUSTKEY      = #{custkey} )
+         WHEN MATCHED THEN
+               UPDATE
+                  SET EXPCT_ARRIVALTIME = #{custarrivaldt}
+                    , MEMO              = #{memo}
+                    , EDITDATE          = SYSDATE
+                    , EDITWHO           = #{gUserId}
+         WHEN NOT MATCHED THEN
+                   INSERT ( DELIVERYDATE
+                          , CARNO
+                          , CUSTKEY
+                          , EXPCT_ARRIVALTIME
+                          , MEMO
+                          , ADDDATE
+                          , EDITDATE
+                          , ADDWHO
+                          , EDITWHO )
+                   VALUES ( #{deliverydt}
+                          , #{carno}
+                          , #{custkey}
+                          , #{custarrivaldt}
+                          , #{memo}
+                          , SYSDATE
+                          , SYSDATE
+                          , #{gUserId}
+                          , #{gUserId} )
+    </update>
+
+    <insert id="insertMonitoringCustomerGroup">
+        INSERT /* [TmMonitoringCustomerService.sqlx][tmMonitoringCustomerService.insertMonitoringCustomerGroup][모니터링그룹 master insert][JiHoPark][2025.11.27] */
+          INTO TM_MONITOR_GROUP
+             ( DCCODE
+             , GROUP_CD
+             , GROUP_NAME
+             , USE_YN
+             , RMK
+             , ADDDATE
+             , EDITDATE
+             , ADDWHO
+             , EDITWHO )
+        VALUES
+             ( #{dccode}
+             , (SELECT #{dccode} || LPAD(TO_NUMBER(NVL(MAX(SUBSTR(GROUP_CD, -3)), '000') +1), 3, '0')
+                 FROM TM_MONITOR_GROUP
+                WHERE DCCODE = #{dccode}
+               )
+             , #{groupName}
+             , #{useYn}
+             , #{rmk}
+             , SYSDATE
+             , SYSDATE
+             , #{gUserId}
+             , #{gUserId} )
+    </insert>
+
+    <update id="updateMonitoringCustomerGroup">
+        UPDATE /* [TmMonitoringCustomerService.sqlx][tmMonitoringCustomerService.updateMonitoringCustomerGroup][모니터링그룹 master update][JiHoPark][2028.11.27] */
+               TM_MONITOR_GROUP
+           SET GROUP_NAME = #{groupName}
+             , USE_YN     = #{useYn}
+             , RMK        = #{rmk}
+             , EDITDATE   = SYSDATE
+             , EDITWHO    = #{gUserId}
+         WHERE DCCODE     = #{dccode}
+           AND GROUP_CD   = #{groupCd}
+    </update>
+
+    <insert id="insertMonitoringCustomerGroupDetail">
+        INSERT /* [TmMonitoringCustomerService.sqlx][tmMonitoringCustomerService.insertMonitoringCustomerGroupDetail][모니터링그룹 detail insert][JiHoPark][2025.11.27] */
+          INTO TM_MONITOR_MNGPLC
+             ( GROUP_CD
+             , MNGPLC_ID
+             , USE_YN
+             , ADDDATE
+             , EDITDATE
+             , ADDWHO
+             , EDITWHO )
+        VALUES
+             ( #{groupCd}
+             , #{mngplcId}
+             , #{useYn}
+             , SYSDATE
+             , SYSDATE
+             , #{gUserId}
+             , #{gUserId} )
+    </insert>
+
+    <update id="updateMonitoringCustomerGroupDetail">
+        UPDATE /* [TmMonitoringCustomerService.sqlx][tmMonitoringCustomerService.updateMonitoringCustomerGroupDetail][모니터링그룹 detail update][JiHoPark][2028.11.27] */
+               TM_MONITOR_MNGPLC
+           SET USE_YN   = #{useYn}
+             , EDITDATE = SYSDATE
+             , EDITWHO  = #{gUserId}
+         WHERE GROUP_CD  = #{groupCd}
+           AND MNGPLC_ID = #{mngplcId}
+    </update>
+
+</mapper>

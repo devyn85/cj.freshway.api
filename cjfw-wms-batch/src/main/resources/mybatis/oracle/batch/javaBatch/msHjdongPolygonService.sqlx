@@ -1,0 +1,1093 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="msHjdongPolygonService">
+
+    <select id="getHjdongByMvmnResCd" resultType="cjfw.batch.dto.MsHjdongDto">
+    <![CDATA[
+        /* [msHjdongPolygonService.xml][getHjdongByMvmnResCd][이동사유코드별 행정동 조회] */
+         WITH HJDONG AS (
+            SELECT DISTINCT SUBSTR(HJDONG_CD,1,2)||'00000000' HJDONG_CD,
+                   CTP_KOR_NM,
+                   NULL SIG_KOR_NM,
+                   NULL HJDONG_NM,
+                   MVMN_RES_CD
+            FROM CM_HJDONG
+            UNION ALL
+            SELECT DISTINCT SUBSTR(HJDONG_CD,1,5)||'00000',
+                   CTP_KOR_NM,
+                   SIG_KOR_NM,
+                   NULL,
+                   MVMN_RES_CD
+            FROM CM_HJDONG
+            WHERE CTP_KOR_NM <> '세종특별자치시'
+            UNION ALL
+            SELECT DISTINCT HJDONG_CD,
+                   CTP_KOR_NM,
+                   SIG_KOR_NM,
+                   HJDONG_NM,
+                   MVMN_RES_CD
+            FROM CM_HJDONG
+        ),
+        POLIGON AS (
+            SELECT H.HJDONG_CD,
+	            H.CTP_KOR_NM,
+	            H.SIG_KOR_NM,
+	            H.HJDONG_NM,
+	            H.SPATIAL_GEOM,
+	            H.FROMDATE,
+	            H.TODATE
+            FROM MS_HJDONG_POLYGON H
+        )
+        SELECT
+            H.HJDONG_CD,
+            H.CTP_KOR_NM,
+            H.SIG_KOR_NM,
+            H.HJDONG_NM,
+            H.MVMN_RES_CD,
+            HP.SPATIAL_GEOM
+        FROM HJDONG H
+        LEFT JOIN POLIGON HP ON HP.HJDONG_CD = H.HJDONG_CD
+        	AND HP.FROMDATE <= TO_CHAR(SYSDATE+3,'YYYYMMDD') AND HP.TODATE >= TO_CHAR(SYSDATE+4,'YYYYMMDD')
+        WHERE (HP.HJDONG_CD IS NULL AND NVL(H.MVMN_RES_CD, '#') <> '63')
+           OR (NVL(H.MVMN_RES_CD, '#') = '63' AND HP.SPATIAL_GEOM IS NOT NULL)
+           OR (NVL(H.MVMN_RES_CD, '#') <> '63' AND HP.SPATIAL_GEOM IS NULL)
+        UNION ALL
+        SELECT
+            HP.HJDONG_CD,
+            HP.CTP_KOR_NM,
+            HP.SIG_KOR_NM,
+            HP.HJDONG_NM,
+            H.MVMN_RES_CD,
+            HP.SPATIAL_GEOM
+        FROM POLIGON HP
+        LEFT JOIN HJDONG H ON HP.HJDONG_CD = H.HJDONG_CD
+        WHERE HP.FROMDATE <= TO_CHAR(SYSDATE+3,'YYYYMMDD') AND HP.TODATE >= TO_CHAR(SYSDATE+4,'YYYYMMDD')
+           AND HP.SPATIAL_GEOM IS NULL
+        ]]>
+    </select>
+
+    <!-- 행정동 폴리곤 정보 조회 (기존 데이터 확인용) - IF_MS_HJDONG_POLYGON 테이블에서 조회 (최신 1건만) -->
+    <select id="getHjdongPolygonByHjdongCd" resultType="cjfw.batch.dto.IfMsHjdongPolygonDto">
+        /* [msHjdongPolygonService.xml][getHjdongPolygonByHjdongCd][행정동코드로 폴리곤 정보 조회(IF 테이블, 최신 1건)][SYSTEM][2025.01.17] */
+        SELECT
+               SERIALKEY
+             , HJDONG_CD               /* 행정동코드 */
+             , HJDONG_NM               /* 행정동명 */
+             , SDO_UTIL.TO_WKTGEOMETRY(SPATIAL_GEOM) AS SPATIAL_GEOM_STR  /* 공간지오메트리(WKT) */
+             , CTP_KOR_NM              /* 시도 한글명 */
+             , SIG_KOR_NM              /* 시군구 한글명 */
+             , REGIONID
+             , PARENTID
+             , IF_ID
+             , IF_FLAG
+             , IF_DATE
+             , IF_TIMESTAMP
+        FROM   IF_MS_HJDONG_POLYGON
+        WHERE  HJDONG_CD = #{hjdongCd}
+        ORDER BY SERIALKEY DESC
+        FETCH FIRST 1 ROW ONLY
+    </select>
+
+    <!-- DB 저장한 방식으로 폴리곤 조회 -->
+    <select id="getHjdongPolygonByGeom" resultType="string">
+        /* [msHjdongPolygonService.xml][getHjdongPolygonByGeom][DB 저장한 방식으로 폴리곤 조회][SYSTEM][2025.10.22] */
+        SELECT
+            SDO_UTIL.TO_WKTGEOMETRY(SDO_GEOMETRY(#{spatialGeom}, 4326)) AS SPATIAL_GEOM_STR  /* 공간지오메트리(WKT) */
+        FROM DUAL
+    </select>
+
+    <!-- 행정동 폴리곤 정보 삽입 -->
+    <insert id="insertHjdongPolygon" parameterType="cjfw.batch.dto.MsHjdongPolygonDto">
+        /* [msHjdongPolygonService.xml][insertHjdongPolygon][행정동 폴리곤 정보 삽입][SYSTEM][2025.10.22] */
+        INSERT INTO MS_HJDONG_POLYGON (
+               HJDONG_CD
+             , HJDONG_NM
+             , SPATIAL_GEOM
+             , CTP_KOR_NM
+             , SIG_KOR_NM
+             , DEL_YN
+             , FROMDATE
+             , TODATE
+             , ADDDATE
+             , EDITDATE
+             , ADDWHO
+             , EDITWHO
+        ) VALUES (
+               #{hjdongCd}
+             , #{hjdongNm}
+             <choose>
+                 <when test="spatialGeom != null">
+                     , SDO_GEOMETRY(#{spatialGeom}, 4326)
+                 </when>
+                 <otherwise>
+                     , NULL
+                 </otherwise>
+             </choose>
+             , #{ctpKorNm}
+             , #{sigKorNm}
+             , #{delYn}
+             , #{fromDate}
+             , #{toDate}
+             , SYSDATE
+             , SYSDATE
+             , #{addWho}
+             , #{editWho}
+        )
+    </insert>
+
+    <!-- 행정동 폴리곤 정보 업데이트 (FROMDATE는 유니크 키이므로 변경하지 않음) -->
+    <update id="updateHjdongPolygon" parameterType="cjfw.batch.dto.MsHjdongPolygonDto">
+        /* [msHjdongPolygonService.xml][updateHjdongPolygon][행정동 폴리곤 정보 업데이트][SYSTEM][2025.10.22] */
+        UPDATE MS_HJDONG_POLYGON
+           SET HJDONG_NM = #{hjdongNm}
+             <choose>
+                 <when test="spatialGeom != null">
+                     , SPATIAL_GEOM = SDO_GEOMETRY(#{spatialGeom}, 4326)
+                 </when>
+                 <otherwise>
+                     , SPATIAL_GEOM = NULL
+                 </otherwise>
+             </choose>
+             , CTP_KOR_NM = #{ctpKorNm}
+             , SIG_KOR_NM = #{sigKorNm}
+             , DEL_YN = #{delYn}
+             , TODATE = #{toDate}
+             , EDITDATE = SYSDATE
+             , EDITWHO = #{editWho}
+        WHERE HJDONG_CD = #{hjdongCd}
+          AND FROMDATE = #{fromDate}
+    </update>
+
+    <!-- 행정동 폴리곤 정보 존재 여부 확인 -->
+    <select id="countHjdongPolygonByHjdongCd" resultType="java.lang.Integer">
+        /* [msHjdongPolygonService.xml][countHjdongPolygonByHjdongCd][행정동 폴리곤 정보 존재 여부 확인][SYSTEM][2025.10.22] */
+        SELECT COUNT(*)
+        FROM   MS_HJDONG_POLYGON
+        WHERE  HJDONG_CD = #{hjdongCd}
+    </select>
+
+    <!-- 행정동 폴리곤 정보 존재 여부 확인 -->
+    <select id="countHjdongPolygonByHjdongCdAndFromDate" resultType="java.lang.Integer">
+        /* [msHjdongPolygonService.xml][countHjdongPolygonByHjdongCd][행정동 폴리곤 정보 존재 여부 확인][SYSTEM][2025.10.22] */
+        SELECT COUNT(*)
+        FROM   MS_HJDONG_POLYGON
+        WHERE  HJDONG_CD = #{hjdongCd}
+        AND FROMDATE = #{fromDate}
+    </select>
+
+    <!-- 기존 행정동 폴리곤 정보의 종료일을 변경일 기준 +3일로 업데이트 -->
+    <update id="updateHjdongPolygonEndDate">
+        /* [msHjdongPolygonService.xml][updateHjdongPolygonEndDate][기존 폴리곤 정보 종료일 업데이트][SYSTEM][2025.10.22] */
+        UPDATE MS_HJDONG_POLYGON
+           SET TODATE = TO_CHAR(SYSDATE + 2, 'YYYYMMDD')
+         <if test="spatialGeom == null or spatialGeom == ''">
+             , SPATIAL_GEOM = NULL
+         </if>
+             , EDITDATE = SYSDATE
+             , EDITWHO = 'BATCH_SYSTEM'
+             , DEL_YN = 'Y'
+        WHERE HJDONG_CD = #{hjdongCd}
+          AND TODATE = '99991231'  -- 현재 유효한 레코드만 업데이트
+    </update>
+
+    <select id="getHjdongPolygonList" parameterType="string" resultType="MsHjdongPolygonDto" fetchSize="20" resultSetType="FORWARD_ONLY">
+        WITH /* [msHjdongPolygonService.sqlx][updateHjdongPolygonEndDate][권역 유형별 폴리곤 조회(목록)] */
+            HJDONG_LIST AS (
+            SELECT
+                MS_HJDONG_POLYGON.HJDONG_CD
+              , MS_HJDONG_POLYGON.CTP_KOR_NM
+              , CASE WHEN #{districtType} = 'CTP' THEN NULL
+                     ELSE NVL(MS_HJDONG_POLYGON.SIG_KOR_NM, MS_HJDONG_POLYGON.CTP_KOR_NM)
+                     END AS SIG_KOR_NM
+              , MS_HJDONG_POLYGON.HJDONG_NM
+              , SDO_UTIL.TO_GEOJSON(MS_HJDONG_POLYGON.SPATIAL_GEOM) AS GEOJSON
+              , MS_HJDONG_POLYGON.FROMDATE
+              , MS_HJDONG_POLYGON.TODATE
+              , ROW_NUMBER() OVER (PARTITION BY MS_HJDONG_POLYGON.HJDONG_CD ORDER BY MS_HJDONG_POLYGON.FROMDATE DESC) AS RN
+              , CM_HJDONG.MVMN_RES_CD
+            FROM MS_HJDONG_POLYGON
+            LEFT JOIN CM_HJDONG ON CM_HJDONG.HJDONG_CD = MS_HJDONG_POLYGON.HJDONG_CD
+            WHERE ( TO_CHAR(SYSDATE, 'YYYYMMDD') BETWEEN MS_HJDONG_POLYGON.FROMDATE AND MS_HJDONG_POLYGON.TODATE
+               OR MS_HJDONG_POLYGON.TODATE > TO_CHAR(SYSDATE, 'YYYYMMDD')
+            )
+            AND NOT EXISTS (
+                SELECT 1
+                FROM CM_HJDONG CH
+                WHERE CH.HJDONG_CD = MS_HJDONG_POLYGON.HJDONG_CD AND (CH.MVMN_RES_CD IS NOT NULL AND CH.MVMN_RES_CD = '63')
+            )
+            AND 1 = CASE WHEN #{districtType} = 'CTP'    AND MS_HJDONG_POLYGON.HJDONG_NM IS     NULL AND  MS_HJDONG_POLYGON.SIG_KOR_NM IS NULL                                                          THEN 1
+                         WHEN #{districtType} = 'SIG'    AND MS_HJDONG_POLYGON.HJDONG_NM IS     NULL AND (MS_HJDONG_POLYGON.SIG_KOR_NM IS NOT NULL OR SUBSTR(MS_HJDONG_POLYGON.HJDONG_CD, 1, 2) = '36') THEN 1
+                         WHEN #{districtType} = 'HJDONG' AND MS_HJDONG_POLYGON.HJDONG_NM IS NOT NULL                                                                                                    THEN 1
+                         ELSE 0 END
+        )
+        SELECT
+            HJDONG_CD
+          , CTP_KOR_NM
+          , SIG_KOR_NM
+          , HJDONG_NM
+          , GEOJSON
+          , FROMDATE AS FROM_DATE
+          , TODATE   AS TO_DATE
+          , MVMN_RES_CD
+        FROM HJDONG_LIST
+        WHERE RN = 1
+    </select>
+
+    <!-- IF_MS_HJDONG_POLYGON 테이블 삽입 -->
+    <insert id="insertIfHjdongPolygon" parameterType="cjfw.batch.dto.IfMsHjdongPolygonDto">
+        /* [msHjdongPolygonService.xml][insertIfHjdongPolygon][IF_MS_HJDONG_POLYGON 테이블 삽입][SYSTEM][2025.01.17] */
+        INSERT INTO IF_MS_HJDONG_POLYGON (
+               HJDONG_CD
+             , HJDONG_NM
+             , SIG_KOR_NM
+             , CTP_KOR_NM
+             , SPATIAL_GEOM
+             , REGIONID
+             , PARENTID
+             , IF_ID
+             , IF_FLAG
+             , IF_DATE
+             , IF_TIMESTAMP
+        ) VALUES (
+               #{hjdongCd}
+             , #{hjdongNm}
+             , #{sigKorNm}
+             , #{ctpKorNm}
+             <choose>
+                 <when test="spatialGeom != null">
+                     , SDO_GEOMETRY(#{spatialGeom}, 4326)
+                 </when>
+                 <otherwise>
+                     , NULL
+                 </otherwise>
+             </choose>
+             , #{regionId}
+             , #{parentId}
+             , #{ifId}
+             , NVL(#{ifFlag}, 'N')
+             , NVL(#{ifDate}, SYSDATE)
+             , #{ifTimestamp}
+        )
+    </insert>
+
+    <!-- IF_MS_HJDONG_POLYGON 테이블에서 IF_FLAG = 'N'인 데이터 조회 (행정동 코드별 최신 데이터만) -->
+    <select id="selectIfHjdongPolygonByIfFlag" resultType="cjfw.batch.dto.IfMsHjdongPolygonDto">
+        /* [msHjdongPolygonService.xml][selectIfHjdongPolygonByIfFlag][IF_FLAG = 'N'인 데이터 조회(행정동 코드별 최신)][SYSTEM][2025.01.17] */
+        WITH IF_POLYGON_LIST AS (
+            SELECT
+                   SERIALKEY
+                 , HJDONG_CD
+                 , HJDONG_NM
+                 , SIG_KOR_NM
+                 , CTP_KOR_NM
+                 , SDO_UTIL.TO_WKTGEOMETRY(SPATIAL_GEOM) AS SPATIAL_GEOM_STR
+                 , REGIONID
+                 , PARENTID
+                 , IF_ID
+                 , IF_FLAG
+                 , IF_DATE
+                 , IF_TIMESTAMP
+                 , ROW_NUMBER() OVER (PARTITION BY HJDONG_CD ORDER BY SERIALKEY DESC) AS RN
+            FROM   IF_MS_HJDONG_POLYGON
+            WHERE  IF_FLAG = 'N'
+        )
+        SELECT
+               SERIALKEY
+             , HJDONG_CD
+             , HJDONG_NM
+             , SIG_KOR_NM
+             , CTP_KOR_NM
+             , SPATIAL_GEOM_STR
+             , REGIONID
+             , PARENTID
+             , IF_ID
+             , IF_FLAG
+             , IF_DATE
+             , IF_TIMESTAMP
+        FROM   IF_POLYGON_LIST
+        WHERE  RN = 1
+        ORDER BY SERIALKEY
+    </select>
+
+    <!-- IF_MS_HJDONG_POLYGON 테이블의 IF_FLAG 업데이트 (행정동 코드 기준) -->
+    <update id="updateIfHjdongPolygonFlag" parameterType="cjfw.batch.dto.IfMsHjdongPolygonDto">
+        /* [msHjdongPolygonService.xml][updateIfHjdongPolygonFlag][IF_FLAG 업데이트(행정동 코드 기준)][SYSTEM][2025.01.17] */
+        UPDATE IF_MS_HJDONG_POLYGON
+           SET IF_FLAG = #{ifFlag}
+             , IF_TIMESTAMP = SYSTIMESTAMP
+        WHERE HJDONG_CD = #{hjdongCd}
+          AND IF_FLAG = 'N'
+    </update>
+
+    <insert id="saveIfMsDcHjdongHis">
+		INSERT /* [msHjdongPolygonService.xml][saveIfMsDcHjdongHis][거래처 주출고센터 변경 MDM 연계 배치][이현성][2026.03.05] */
+		    INTO LOGISONE.IF_MS_DC_HJDONG_HIS(
+		    STORERKEY, DCCODE, HJDONG_CD, CTP_KOR_NM, SIG_KOR_NM, HJDONG_NM, FROMDATE, TODATE,
+		    CUSTTYPE, CUSTKEY, DEL_YN, ADDDATE, EDITDATE, IF_ID
+		)
+        WITH DC_GROUP AS (
+            SELECT
+                  BASECODE AS DCCODE
+                , CONVCODE AS DCGROUP
+            FROM CM_CODE
+            WHERE CODELIST  = 'WMS_MNG_DC'
+              AND STORERKEY = 'FW00'
+              AND CONVCODE IS NOT NULL
+        )
+        SELECT
+              MS_CUST.STORERKEY
+            , MS_DC_DISTRICT_HJDONG.DCCODE
+            , MS_DC_DISTRICT_HJDONG.HJDONG_CD
+            , MS_HJDONG_POLYGON.CTP_KOR_NM
+            , MS_HJDONG_POLYGON.SIG_KOR_NM
+            , MS_HJDONG_POLYGON.HJDONG_NM
+            , TO_DATE(MS_DC_DISTRICT_HJDONG.FROMDATE, 'YYYYMMDD') AS FROMDATE
+            , TO_DATE(MS_DC_DISTRICT_HJDONG.TODATE  , 'YYYYMMDD') AS TODATE
+            , MS_CUST.CUSTTYPE
+            , MS_CUST.CUSTKEY
+            , 'N' AS DEL_YN
+            , MS_DC_DISTRICT_HJDONG.ADDDATE
+            , MS_DC_DISTRICT_HJDONG.EDITDATE
+            , 'WMS_MDM_0001' AS IF_ID
+        FROM MS_DC_DISTRICT_HJDONG
+        JOIN MS_CUST
+            ON  MS_CUST.HJDONG_CD   = MS_DC_DISTRICT_HJDONG.HJDONG_CD
+            AND MS_CUST.DLV_DCCODE != MS_DC_DISTRICT_HJDONG.DCCODE
+            AND MS_CUST.DEL_YN      = 'N'
+            -- 추출고센터 미설정 거래처 제외(20260305)
+            AND MS_CUST.DLV_DCCODE IS NOT NULL
+        JOIN (
+            SELECT
+                  BASECODE AS DCCODE
+                , CONVCODE AS DCGROUP
+            FROM CM_CODE
+            WHERE CODELIST  = 'WMS_MNG_DC'
+              AND STORERKEY = 'FW00'
+              AND CONVCODE IS NOT NULL
+        ) DC_GROUP_HJDONG
+            ON  DC_GROUP_HJDONG.DCCODE = MS_DC_DISTRICT_HJDONG.DCCODE
+        JOIN (
+             SELECT
+                   BASECODE AS DCCODE
+                 , CONVCODE AS DCGROUP
+             FROM CM_CODE
+             WHERE CODELIST  = 'WMS_MNG_DC'
+               AND STORERKEY = 'FW00'
+               AND CONVCODE IS NOT NULL
+         ) DC_GROUP_CUST
+            ON  DC_GROUP_CUST.DCCODE = MS_CUST.DLV_DCCODE
+            -- 하나의 행정동에 FW, FO 배송 설정이 가능해서 동일한 물류센터 그룹인 경우 IF 처리
+            AND DC_GROUP_CUST.DCGROUP = DC_GROUP_HJDONG.DCGROUP
+        LEFT JOIN MS_HJDONG_POLYGON
+            ON  MS_HJDONG_POLYGON.HJDONG_CD = MS_DC_DISTRICT_HJDONG.HJDONG_CD
+            -- 전일 변경이 발생한 경우 IF 하기 때문에 전일 기준으로 반영
+            AND TO_CHAR(SYSDATE -1, 'YYYYMMDD') BETWEEN MS_HJDONG_POLYGON.FROMDATE AND MS_HJDONG_POLYGON.TODATE
+        WHERE MS_DC_DISTRICT_HJDONG.FROMDATE BETWEEN TO_CHAR(SYSDATE, 'YYYYMMDD') AND '99991231'
+          -- 전일 변경이 발생한 경우 IF 처리
+          AND MS_DC_DISTRICT_HJDONG.EDITDATE <![CDATA[>=]]> TRUNC(SYSDATE - 1)
+          AND MS_DC_DISTRICT_HJDONG.EDITDATE <![CDATA[< ]]> TRUNC(SYSDATE)
+    </insert>
+
+	<select id="getEditdate" resultType="string">
+		SELECT
+			TO_CHAR(SYSTIMESTAMP, 'YYYYMMDDHH24MISS')
+		FROM DUAL
+	</select>
+
+    <insert id="saveMsDcOrdgrp" parameterType="cjfw.batch.dto.MsBatchDto">
+        <![CDATA[
+        INSERT INTO MS_DC_ORDGRP (
+            ORDGRP, PR1_DCCODE, PR2_DCCODE, FROMDATE, TODATE, DEL_YN, ADDWHO, EDITWHO, EDITDATE, DELIVERY_DCCODE
+        )
+        WITH DC_TYPE AS (
+            SELECT
+                CONVCODE,
+                BASECODE
+            FROM CM_CODE
+            WHERE CM_CODE.CODELIST = 'WMS_MNG_DC' AND CM_CODE.STORERKEY  = 'FW00' AND CONVCODE IN ('0', '1')
+        ),
+        DC AS (
+            SELECT
+                A.DCCODE,
+                A.DCNAME,
+                CASE WHEN B.CONVCODE = '0' THEN 'FW'
+                     WHEN B.CONVCODE = '1' THEN 'FO'
+                END AS DCGROUP
+            FROM CM_DC A
+            JOIN DC_TYPE B ON B.BASECODE = A.DCCODE
+            WHERE B.CONVCODE IS NOT NULL
+        ),
+        CM_CODE_ORDGRP AS (
+            SELECT
+                BASECODE, BASEDESCR, DEL_YN, DATA1
+            FROM CM_CODE C
+            WHERE CODELIST = 'ORDR_GROUP' AND STORERKEY = 'FW00' AND DEL_YN = 'N'
+            AND (C.DATA1 IS NULL OR C.DATA1 <> 'Y')
+        )
+        SELECT C.BASECODE, FW.DCCODE AS PR1_DCCODE, FO.DCCODE AS PR2_DCCODE,
+            TO_CHAR(SYSDATE, 'YYYYMMDD') AS FROMDATE, '29991231' AS TODATE, 'N' AS DEL_YN,
+            'BATCH' AS ADDWHO, 'BATCH' AS EDITWHO, TO_DATE(#{editDate}, 'YYYYMMDDHH24MISS') AS EDITDATE, FW.DCCODE AS DELIVERY_DCCODE
+        FROM DC FW
+        CROSS JOIN DC FO
+        CROSS JOIN CM_CODE_ORDGRP C
+        LEFT JOIN MS_DC_ORDGRP G ON G.PR1_DCCODE = FW.DCCODE AND G.PR2_DCCODE = FO.DCCODE AND G.ORDGRP = C.BASECODE
+        LEFT JOIN DC_TYPE T ON T.BASECODE = G.DELIVERY_DCCODE
+        WHERE FW.DCGROUP = 'FW' AND FO.DCGROUP = 'FO' AND G.DELIVERY_DCCODE IS NULL
+        ORDER BY FW.DCCODE, FO.DCCODE
+        ]]>
+    </insert>
+
+    <insert id="saveMsDcDistrictOrdgrp" parameterType="cjfw.batch.dto.MsBatchDto">
+        <![CDATA[
+		INSERT INTO MS_DC_DISTRICT_ORDGRP (
+		    DCCODE, HJDONG_CD, ORDGRP, FROMDATE, TODATE, DEL_YN, ADDDATE, EDITDATE, ADDWHO, EDITWHO
+        )
+        WITH CM_CODE_ORDGRP AS (
+            SELECT
+                BASECODE, BASEDESCR, DEL_YN, DATA1
+            FROM CM_CODE C
+            WHERE CODELIST = 'ORDR_GROUP' AND STORERKEY = 'FW00' AND DEL_YN = 'N'
+            AND NOT EXISTS (
+            	SELECT 1
+            	FROM MS_DC_DISTRICT_ORDGRP G
+            	WHERE G.ORDGRP = C.BASECODE
+            )
+        ),
+		DC_TYPE AS (
+            SELECT
+                CONVCODE, BASECODE
+            FROM CM_CODE
+            WHERE CM_CODE.CODELIST = 'WMS_MNG_DC' AND CM_CODE.STORERKEY  = 'FW00'
+        ),
+        ORDGRP_DETAIL AS (
+            SELECT DISTINCT
+                H.DCCODE, H.HJDONG_CD, O.ORDGRP, O.FROMDATE, O.TODATE
+            FROM MS_DC_ORDGRP O
+            JOIN CM_CODE_ORDGRP C ON C.BASECODE = O.ORDGRP
+            JOIN MS_DC_DISTRICT_HJDONG H
+                ON H.DCCODE = O.DELIVERY_DCCODE
+               AND H.DCCODE IN (O.PR1_DCCODE, O.PR2_DCCODE)
+               AND O.FROMDATE <= H.TODATE
+               AND H.FROMDATE <= O.TODATE
+            JOIN DC_TYPE DT ON DT.BASECODE = H.DCCODE
+            WHERE (C.DATA1 IS NULL OR C.DATA1 <> 'Y')
+              AND (
+                    (DT.CONVCODE = '0' AND H.DCCODE = O.PR1_DCCODE)
+                 OR (DT.CONVCODE = '1' AND H.DCCODE = O.PR2_DCCODE)
+              )
+        )
+        SELECT D.DCCODE, D.HJDONG_CD, D.ORDGRP, D.FROMDATE, D.TODATE, 'N', SYSDATE, TO_DATE(#{editDate}, 'YYYYMMDDHH24MISS'), 'BATCH', 'BATCH'
+        FROM ORDGRP_DETAIL D
+        ]]>
+    </insert>
+
+    <insert id="batchIfMsHjdongPopByDcOrdgrpBatchKey" parameterType="cjfw.batch.dto.MsBatchDto">
+        <![CDATA[
+		INSERT INTO IF_MS_HJDONG_POP (
+		     DCCODE, STORERKEY, DISTRICTGROUP,
+		     HJDONG_CD,
+		     FROMDATE, TODATE, POPNO,
+		     FROMHOUR, TOHOUR,
+		     ORDGRP, DEL_YN, ADDDATE, EDITDATE, ADDWHO, EDITWHO,
+		     IF_ID, IF_FLAG, IF_TIMESTAMP,
+		     RMK, BASE_YN
+		)
+        WITH IF_POP AS (
+            SELECT *
+            FROM (
+                SELECT
+                    P.*,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY DCCODE, DISTRICTGROUP, HJDONG_CD, ORDGRP, IF_ID
+                        ORDER BY P.SERIALKEY DESC
+                    ) AS NUM
+                FROM IF_MS_HJDONG_POP P
+            ) POP
+            WHERE POP.NUM = 1
+        ),
+        DC_TYPE AS (
+            SELECT
+                CONVCODE,
+                BASECODE
+            FROM CM_CODE
+            WHERE CM_CODE.CODELIST = 'WMS_MNG_DC' AND CM_CODE.STORERKEY  = 'FW00' AND CONVCODE IN ('0', '1')
+        ),
+        CM_CODE_ORDGRP AS (
+            SELECT BASECODE, DATA1
+            FROM CM_CODE
+            WHERE CODELIST  = 'ORDR_GROUP'
+              AND STORERKEY = 'FW00'
+              AND DEL_YN    = 'N'
+        ),
+        HJDONG AS (
+            SELECT H.SERIALKEY, H.DCCODE, H.HJDONG_CD, H.FROMDATE, H.TODATE, H.EDITWHO, H.EDITDATE, H.RMK,
+                CASE WHEN D1.CONVCODE = '0' THEN 'FW' WHEN D1.CONVCODE = '1' THEN 'FO' END AS PR_ROLE,
+                CASE WHEN D1.CONVCODE = '0' AND D2.CONVCODE = '1' THEN DUP.DCCODE
+                    WHEN D1.CONVCODE = '1' AND D2.CONVCODE = '0' THEN DUP.DCCODE
+                END AS MATCH_DCCODE,
+                CASE WHEN H.FROMDATE >= TO_CHAR(SYSDATE+3, 'YYYYMMDD') AND H.DEL_YN = 'Y' THEN 'Y' ELSE H.DEL_YN END AS DEL_YN
+            FROM MS_DC_DISTRICT_HJDONG H
+            JOIN DC_TYPE D1 ON D1.BASECODE = H.DCCODE
+            LEFT JOIN MS_DC_DISTRICT_HJDONG DUP ON DUP.HJDONG_CD = H.HJDONG_CD AND DUP.FROMDATE <= H.TODATE AND DUP.TODATE >= H.FROMDATE
+                AND H.SERIALKEY <> DUP.SERIALKEY
+            LEFT JOIN DC_TYPE D2 ON D2.BASECODE = DUP.DCCODE
+        ),
+        ORDGRP_MATCH AS (
+            --FO/FW 중복 발생 경우
+            SELECT DISTINCT
+                O.ORDGRP, O.DELIVERY_DCCODE AS DCCODE, H.HJDONG_CD, GREATEST(O.FROMDATE, H.FROMDATE) AS FROMDATE, LEAST(O.TODATE, H.TODATE) AS TODATE, H.RMK,
+                H.DEL_YN
+            FROM MS_DC_ORDGRP O
+            JOIN CM_CODE_ORDGRP C ON C.BASECODE = O.ORDGRP AND C.DATA1 IS NULL OR C.DATA1 <> 'Y'
+            JOIN HJDONG H ON (
+                ( H.PR_ROLE = 'FW' AND H.DCCODE = O.PR1_DCCODE AND H.MATCH_DCCODE = O.PR2_DCCODE) OR
+                ( H.PR_ROLE = 'FO' AND H.DCCODE = O.PR2_DCCODE AND H.MATCH_DCCODE = O.PR1_DCCODE))
+                AND H.MATCH_DCCODE IS NOT NULL AND O.FROMDATE <= H.TODATE AND H.FROMDATE <= O.TODATE
+            WHERE O.EDITWHO = 'BATCH' AND O.EDITDATE = TO_DATE(#{editDate}, 'YYYYMMDDHH24MISS')
+
+            UNION ALL
+            --FO/FW 중복 없는 경우
+            SELECT DISTINCT
+                C.BASECODE AS ORDGRP, H.DCCODE, H.HJDONG_CD, H.FROMDATE, H.TODATE, H.RMK,
+                H.DEL_YN
+            FROM HJDONG H
+            JOIN CM_CODE_ORDGRP C ON C.DATA1 IS NULL OR C.DATA1 <> 'Y'
+            LEFT JOIN MS_DC_ORDGRP O ON O.ORDGRP = C.BASECODE AND O.FROMDATE <= H.TODATE AND O.TODATE >= H.FROMDATE
+            WHERE H.MATCH_DCCODE IS NULL AND H.DCCODE IN (O.PR1_DCCODE, O.PR2_DCCODE)
+              AND O.EDITWHO = 'BATCH' AND O.EDITDATE = TO_DATE(#{editDate}, 'YYYYMMDDHH24MISS')
+        ),
+        --센터권역 관계
+        BASE AS (
+            SELECT ORD.ORDGRP, ORD.DCCODE, ORD.HJDONG_CD, GREATEST(ORD.FROMDATE, BASE_POP.FROMDATE) AS FROMDATE, LEAST(ORD.TODATE, BASE_POP.TODATE) AS TODATE, BASE_POP.POPNO, ORD.DEL_YN
+            FROM ORDGRP_MATCH ORD
+            JOIN MS_DISTRICTGROUP_POP BASE_POP ON BASE_POP.DCCODE = ORD.DCCODE AND BASE_POP.BASE_YN = 'Y' AND ORD.FROMDATE <= BASE_POP.TODATE AND ORD.TODATE >= BASE_POP.FROMDATE
+        ),
+        --배송권역 관계
+        DLV AS (
+            SELECT DLV_HJDONG.DCCODE, DLV_HJDONG.HJDONG_CD, GREATEST(DLV_HJDONG.FROMDATE, DLV.FROMDATE, DLV_GROUP.FROMDATE, DLV_POP.FROMDATE) AS FROMDATE,
+                LEAST(DLV_HJDONG.TODATE, DLV.TODATE, DLV_GROUP.TODATE, DLV_POP.TODATE) AS TODATE, DLV_POP.POPNO, DLV.DLVGROUP_ID, DLV.DLVDISTRICT_ID,
+                DLV_HJDONG.DEL_YN
+            FROM MS_DLV_DISTRICT_HJDONG DLV_HJDONG
+            JOIN MS_DLV_DISTRICT DLV ON DLV.DLVDISTRICT_ID = DLV_HJDONG.DLVDISTRICT_ID
+            JOIN MS_DLV_DISTRICTGROUP DLV_GROUP
+                ON  DLV_GROUP.DCCODE = DLV.DCCODE
+                AND DLV_GROUP.DLVGROUP_ID = DLV.DLVGROUP_ID
+                AND DLV_GROUP.FROMDATE <= DLV.TODATE
+                AND DLV_GROUP.TODATE >= DLV.FROMDATE
+            JOIN MS_DLV_DISTRICTGROUP_POP DLV_POP
+                ON  DLV_POP.DCCODE = DLV_GROUP.DCCODE
+                AND DLV_POP.DLVGROUP_ID = DLV_GROUP.DLVGROUP_ID
+                AND DLV_POP.FROMDATE <= DLV_GROUP.TODATE
+                AND DLV_POP.TODATE >= DLV_GROUP.FROMDATE
+        )
+        SELECT DCCODE, STORERKEY, DISTRICTGROUP,
+             HJDONG_CD,
+             FROMDATE, TODATE, POPNO,
+             FROMHOUR, TOHOUR,
+             ORDGRP, DEL_YN, ADDDATE, EDITDATE, ADDWHO, EDITWHO,
+             IF_ID, IF_FLAG, IF_TIMESTAMP,
+             RMK, BASE_YN
+        FROM (
+            SELECT DISTINCT
+                 BASE.DCCODE, 'FW00' AS STORERKEY, DLV.DLVGROUP_ID AS DISTRICTGROUP,
+                 BASE.HJDONG_CD,
+                 GREATEST(BASE.FROMDATE, NVL(DLV.FROMDATE, BASE.FROMDATE)) AS FROMDATE, LEAST(BASE.TODATE, NVL(DLV.TODATE, BASE.TODATE)) AS TODATE,
+                 CASE WHEN IF_ID_LIST.IF_ID = 'SCM0880' THEN 'STD' ELSE NVL(DLV.POPNO, BASE.POPNO) END AS POPNO,
+                 '0000' AS FROMHOUR, '2359' AS TOHOUR,
+                 BASE.ORDGRP, BASE.DEL_YN,
+                 SYSDATE AS ADDDATE, SYSDATE AS EDITDATE, 'BATCH' AS ADDWHO, 'BATCH' AS EDITWHO,
+                 IF_ID_LIST.IF_ID, 'N' AS IF_FLAG, NULL AS IF_TIMESTAMP,
+                 '' RMK, CASE WHEN IF_ID_LIST.IF_ID = 'SCM0880' THEN 'N' ELSE 'Y' END AS BASE_YN
+            FROM BASE
+            LEFT JOIN DLV ON DLV.DCCODE = BASE.DCCODE AND DLV.HJDONG_CD = BASE.HJDONG_CD
+                AND DLV.FROMDATE <= BASE.TODATE AND DLV.TODATE >= BASE.FROMDATE
+            CROSS JOIN (
+                SELECT 'SCM0880' AS IF_ID FROM DUAL
+                UNION ALL
+                SELECT 'SCM0900' AS IF_ID FROM DUAL
+                UNION ALL
+                SELECT 'SCM0950' AS IF_ID FROM DUAL
+            ) IF_ID_LIST
+        ) MAPPING
+        --중복체크
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM IF_POP P
+            WHERE P.DCCODE = MAPPING.DCCODE AND P.HJDONG_CD = MAPPING.HJDONG_CD AND P.FROMDATE = MAPPING.FROMDATE AND P.TODATE = MAPPING.TODATE
+              AND (P.DISTRICTGROUP = MAPPING.DISTRICTGROUP OR (P.DISTRICTGROUP IS NULL AND MAPPING.DISTRICTGROUP IS NULL)) AND P.POPNO = MAPPING.POPNO AND P.IF_ID = MAPPING.IF_ID AND P.DEL_YN = MAPPING.DEL_YN
+              AND P.ORDGRP = MAPPING.ORDGRP AND P.BASE_YN = MAPPING.BASE_YN
+        )
+        ]]>
+    </insert>
+
+    <!-- ============================================================
+         신규 오더그룹 전용: API hjdongPopCalcCte 기반 CTE + IF/MERGE
+         ============================================================ -->
+
+    <sql id="batchHjdongPopCalcCte">
+        <![CDATA[
+            WITH DC_TYPE AS (
+                SELECT CONVCODE, BASECODE
+                FROM CM_CODE
+                WHERE CODELIST = 'WMS_MNG_DC' AND STORERKEY = 'FW00' AND CONVCODE IN ('0', '1')
+            ),
+            CM_CODE_ORDGRP AS (
+                SELECT BASECODE, DATA1
+                FROM CM_CODE C
+                WHERE CODELIST = 'ORDR_GROUP' AND STORERKEY = 'FW00' AND DEL_YN = 'N'
+                AND NOT EXISTS (
+                    SELECT 1 FROM MS_HJDONG_POP P WHERE P.ORDGRP = C.BASECODE AND P.DEL_YN = 'N'
+                )
+            ),
+            /* 상대편(FW↔FO) 유효 기간 — Gaps-and-Islands로 인접/중첩만 병합, gap 보존 (D+3 삭제 제외) */
+            DUP_RANGE AS (
+                SELECT HJDONG_CD, DCCODE, CONVCODE,
+                    MIN(FROMDATE) AS FROMDATE, MAX(TODATE) AS TODATE
+                FROM (
+                    SELECT R.*,
+                        SUM(NEW_GRP) OVER (PARTITION BY HJDONG_CD, DCCODE, CONVCODE ORDER BY FROMDATE) AS GRP
+                    FROM (
+                        SELECT DR_H.HJDONG_CD, DR_H.DCCODE, DR_D.CONVCODE,
+                            DR_H.FROMDATE, DR_H.TODATE,
+                            CASE WHEN TO_DATE(DR_H.FROMDATE, 'YYYYMMDD') <=
+                                TO_DATE(LAG(DR_H.TODATE) OVER (
+                                    PARTITION BY DR_H.HJDONG_CD, DR_H.DCCODE, DR_D.CONVCODE ORDER BY DR_H.FROMDATE
+                                ), 'YYYYMMDD') + 1
+                            THEN 0 ELSE 1 END AS NEW_GRP
+                        FROM MS_DC_DISTRICT_HJDONG DR_H
+                        JOIN DC_TYPE DR_D ON DR_D.BASECODE = DR_H.DCCODE
+                        WHERE NOT (DR_H.FROMDATE >= TO_CHAR(SYSDATE+3, 'YYYYMMDD') AND DR_H.DEL_YN = 'Y')
+                    ) R
+                )
+                GROUP BY HJDONG_CD, DCCODE, CONVCODE, GRP
+            ),
+            /* 상대편 gap 구간 (DUP_RANGE 행들의 전/중간/후) */
+            DUP_RANGE_GAP AS (
+                SELECT HJDONG_CD, CONVCODE,
+                    '00000101' AS GAP_FROM,
+                    TO_CHAR(TO_DATE(MIN(FROMDATE), 'YYYYMMDD') - 1, 'YYYYMMDD') AS GAP_TO
+                FROM DUP_RANGE
+                GROUP BY HJDONG_CD, CONVCODE
+                UNION ALL
+                SELECT HJDONG_CD, CONVCODE,
+                    TO_CHAR(TO_DATE(TODATE, 'YYYYMMDD')+1, 'YYYYMMDD') AS GAP_FROM,
+                    NVL(
+                        TO_CHAR(TO_DATE(LEAD(FROMDATE) OVER (
+                            PARTITION BY HJDONG_CD, CONVCODE ORDER BY FROMDATE
+                        ), 'YYYYMMDD')-1, 'YYYYMMDD'),
+                        '99991231'
+                    ) AS GAP_TO
+                FROM DUP_RANGE
+            ),
+            HJDONG AS (
+                /* Part 1: 상대편(cross-type) 없음 → MATCH_DCCODE = NULL */
+                SELECT H.SERIALKEY, H.DCCODE, H.HJDONG_CD, H.FROMDATE, H.TODATE,
+                    CASE WHEN D1.CONVCODE = '0' THEN 'FW' ELSE 'FO' END AS PR_ROLE,
+                    NULL AS MATCH_DCCODE,
+                    CASE WHEN H.FROMDATE >= TO_CHAR(SYSDATE+3, 'YYYYMMDD') AND H.DEL_YN = 'Y' THEN 'Y' ELSE 'N' END AS DEL_YN,
+                    H.RMK
+                FROM MS_DC_DISTRICT_HJDONG H
+                JOIN DC_TYPE D1 ON D1.BASECODE = H.DCCODE
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM DUP_RANGE DR
+                    WHERE DR.HJDONG_CD = H.HJDONG_CD
+                      AND DR.CONVCODE <> D1.CONVCODE
+                      AND DR.FROMDATE <= H.TODATE AND DR.TODATE >= H.FROMDATE
+                )
+                UNION ALL
+                /* Part 2: 상대편 겹침 구간 → MATCH_DCCODE 설정 */
+                SELECT H.SERIALKEY, H.DCCODE, H.HJDONG_CD,
+                    GREATEST(H.FROMDATE, DR.FROMDATE) AS FROMDATE,
+                    LEAST(H.TODATE, DR.TODATE) AS TODATE,
+                    CASE WHEN D1.CONVCODE = '0' THEN 'FW' ELSE 'FO' END AS PR_ROLE,
+                    DR.DCCODE AS MATCH_DCCODE,
+                    CASE WHEN H.FROMDATE >= TO_CHAR(SYSDATE+3, 'YYYYMMDD') AND H.DEL_YN = 'Y' THEN 'Y' ELSE 'N' END AS DEL_YN,
+                    H.RMK
+                FROM MS_DC_DISTRICT_HJDONG H
+                JOIN DC_TYPE D1 ON D1.BASECODE = H.DCCODE
+                JOIN DUP_RANGE DR ON DR.HJDONG_CD = H.HJDONG_CD
+                    AND DR.CONVCODE <> D1.CONVCODE
+                    AND DR.FROMDATE <= H.TODATE AND DR.TODATE >= H.FROMDATE
+                UNION ALL
+                /* Part 3+4 (통합): 상대편 gap 구간 → MATCH_DCCODE = NULL */
+                SELECT H.SERIALKEY, H.DCCODE, H.HJDONG_CD,
+                    GREATEST(H.FROMDATE, DG.GAP_FROM) AS FROMDATE,
+                    LEAST(H.TODATE, DG.GAP_TO) AS TODATE,
+                    CASE WHEN D1.CONVCODE = '0' THEN 'FW' ELSE 'FO' END AS PR_ROLE,
+                    NULL AS MATCH_DCCODE,
+                    CASE WHEN H.FROMDATE >= TO_CHAR(SYSDATE+3, 'YYYYMMDD') AND H.DEL_YN = 'Y' THEN 'Y' ELSE 'N' END AS DEL_YN,
+                    H.RMK
+                FROM MS_DC_DISTRICT_HJDONG H
+                JOIN DC_TYPE D1 ON D1.BASECODE = H.DCCODE
+                JOIN DUP_RANGE_GAP DG ON DG.HJDONG_CD = H.HJDONG_CD
+                    AND DG.CONVCODE <> D1.CONVCODE
+                    AND DG.GAP_FROM <= H.TODATE AND DG.GAP_TO >= H.FROMDATE
+                WHERE EXISTS (
+                    SELECT 1 FROM DUP_RANGE DR
+                    WHERE DR.HJDONG_CD = H.HJDONG_CD AND DR.CONVCODE <> D1.CONVCODE
+                      AND DR.FROMDATE <= H.TODATE AND DR.TODATE >= H.FROMDATE
+                )
+            ),
+            ORDGRP_MATCH_RAW AS (
+                /* UNION 1: FW-FO 양쪽 모두 행정동 보유 → DELIVERY_DCCODE 사용 */
+                SELECT DISTINCT
+                    O.ORDGRP, O.DELIVERY_DCCODE AS DCCODE, H.HJDONG_CD,
+                    GREATEST(O.FROMDATE, H.FROMDATE) AS FROMDATE, LEAST(O.TODATE, H.TODATE) AS TODATE,
+                    CASE WHEN H.DEL_YN = 'Y'
+                        OR (O.FROMDATE >= TO_CHAR(SYSDATE+3, 'YYYYMMDD') AND NVL(O.DEL_YN, 'N') = 'Y')
+                    THEN 'Y' ELSE 'N' END AS DEL_YN,
+                    H.RMK
+                FROM MS_DC_ORDGRP O
+                JOIN CM_CODE_ORDGRP C ON C.BASECODE = O.ORDGRP AND NVL(C.DATA1, 'N') <> 'Y'
+                JOIN HJDONG H ON (
+                    (H.PR_ROLE = 'FW' AND H.DCCODE = O.PR1_DCCODE AND H.MATCH_DCCODE = O.PR2_DCCODE) OR
+                    (H.PR_ROLE = 'FO' AND H.DCCODE = O.PR2_DCCODE AND H.MATCH_DCCODE = O.PR1_DCCODE))
+                    AND H.DCCODE = O.DELIVERY_DCCODE
+                    AND H.MATCH_DCCODE IS NOT NULL AND O.FROMDATE <= H.TODATE AND H.FROMDATE <= O.TODATE
+                UNION ALL
+                /* UNION 2: 한쪽만 행정동 보유 → 해당 DC 사용 */
+                SELECT DISTINCT
+                    C.BASECODE AS ORDGRP, H.DCCODE, H.HJDONG_CD,
+                    GREATEST(H.FROMDATE, O.FROMDATE) AS FROMDATE, LEAST(H.TODATE, O.TODATE) AS TODATE,
+                    CASE WHEN H.DEL_YN = 'Y'
+                        OR (O.FROMDATE >= TO_CHAR(SYSDATE+3, 'YYYYMMDD') AND NVL(O.DEL_YN, 'N') = 'Y')
+                    THEN 'Y' ELSE 'N' END AS DEL_YN,
+                    H.RMK
+                FROM HJDONG H
+                JOIN CM_CODE_ORDGRP C ON NVL(C.DATA1, 'N') <> 'Y'
+                JOIN MS_DC_ORDGRP O ON O.ORDGRP = C.BASECODE AND O.FROMDATE <= H.TODATE AND O.TODATE >= H.FROMDATE
+                WHERE H.MATCH_DCCODE IS NULL AND H.DCCODE IN (O.PR1_DCCODE, O.PR2_DCCODE)
+                UNION ALL
+                /* UNION 3: DUP_SEND_YN='Y' → 모든 DC 포함 (원본 기간 사용, HJDONG 분할 무관) */
+                SELECT DISTINCT
+                    C.BASECODE AS ORDGRP, H.DCCODE, H.HJDONG_CD,
+                    H.FROMDATE, H.TODATE,
+                    CASE WHEN H.FROMDATE >= TO_CHAR(SYSDATE+3, 'YYYYMMDD') AND H.DEL_YN = 'Y' THEN 'Y' ELSE 'N' END AS DEL_YN,
+                    H.RMK
+                FROM MS_DC_DISTRICT_HJDONG H
+                JOIN DC_TYPE D1 ON D1.BASECODE = H.DCCODE
+                JOIN CM_CODE_ORDGRP C ON C.DATA1 = 'Y'
+            ),
+            /* 인접/중첩 동일키 행 병합 (Gaps-and-Islands) */
+            ORDGRP_MATCH AS (
+                SELECT DCCODE, ORDGRP, HJDONG_CD,
+                    MIN(FROMDATE) AS FROMDATE, MAX(TODATE) AS TODATE,
+                    DEL_YN,
+                    MAX(RMK) AS RMK
+                FROM (
+                    SELECT R.*,
+                        SUM(NEW_GRP) OVER (PARTITION BY DCCODE, ORDGRP, HJDONG_CD, DEL_YN ORDER BY FROMDATE) AS GRP
+                    FROM (
+                        SELECT R.*,
+                            CASE WHEN TO_DATE(FROMDATE, 'YYYYMMDD') <=
+                                TO_DATE(LAG(TODATE) OVER (PARTITION BY DCCODE, ORDGRP, HJDONG_CD, DEL_YN ORDER BY FROMDATE), 'YYYYMMDD') + 1
+                            THEN 0 ELSE 1 END AS NEW_GRP
+                        FROM ORDGRP_MATCH_RAW R
+                    ) R
+                )
+                GROUP BY DCCODE, ORDGRP, HJDONG_CD, DEL_YN, GRP
+            ),
+            BASE AS (
+                SELECT ORD.ORDGRP, ORD.DCCODE, ORD.HJDONG_CD,
+                    GREATEST(ORD.FROMDATE, BASE_POP.FROMDATE) AS FROMDATE, LEAST(ORD.TODATE, BASE_POP.TODATE) AS TODATE,
+                    BASE_POP.POPNO,
+                    CASE WHEN ORD.DEL_YN = 'Y'
+                        OR (BASE_POP.FROMDATE >= TO_CHAR(SYSDATE+3, 'YYYYMMDD') AND BASE_POP.DEL_YN = 'Y')
+                    THEN 'Y' ELSE 'N' END AS DEL_YN,
+                    ORD.RMK
+                FROM ORDGRP_MATCH ORD
+                JOIN MS_DISTRICTGROUP_POP BASE_POP ON BASE_POP.DCCODE = ORD.DCCODE AND BASE_POP.BASE_YN = 'Y'
+                    AND ORD.FROMDATE <= BASE_POP.TODATE AND ORD.TODATE >= BASE_POP.FROMDATE
+            ),
+            DLV AS (
+                SELECT DLV_HJDONG.DCCODE, DLV_HJDONG.HJDONG_CD,
+                    GREATEST(DLV_HJDONG.FROMDATE,
+                        NVL(DLV.FROMDATE, DLV_HJDONG.FROMDATE),
+                        NVL(DLV_GROUP.FROMDATE, DLV_HJDONG.FROMDATE),
+                        NVL(DLV_POP.FROMDATE, DLV_HJDONG.FROMDATE)
+                    ) AS FROMDATE,
+                    LEAST(DLV_HJDONG.TODATE,
+                        NVL(DLV.TODATE, DLV_HJDONG.TODATE),
+                        NVL(DLV_GROUP.TODATE, DLV_HJDONG.TODATE),
+                        NVL(DLV_POP.TODATE, DLV_HJDONG.TODATE)
+                    ) AS TODATE,
+                    DLV_POP.POPNO,
+                    NVL(DLV_POP.FROMHOUR, '0000') AS FROMHOUR,
+                    NVL(DLV_POP.TOHOUR, '2359') AS TOHOUR,
+                    NVL(POP_MST.BASE_YN, 'N') AS BASE_YN,
+                    CASE WHEN (
+                        (DLV_HJDONG.FROMDATE >= TO_CHAR(SYSDATE+3, 'YYYYMMDD') AND DLV_HJDONG.DEL_YN = 'Y' AND DLV_HJDONG.FROMDATE >= DLV_HJDONG.TODATE)
+                        OR (DLV.FROMDATE >= TO_CHAR(SYSDATE+3, 'YYYYMMDD') AND DLV.DEL_YN = 'Y')
+                        OR (DLV_GROUP.FROMDATE >= TO_CHAR(SYSDATE+3, 'YYYYMMDD') AND DLV_GROUP.DEL_YN = 'Y')
+                        OR (DLV_POP.FROMDATE >= TO_CHAR(SYSDATE+3, 'YYYYMMDD') AND DLV_POP.DEL_YN = 'Y')
+                    ) THEN 'Y' ELSE 'N' END AS DEL_YN
+                FROM MS_DLV_DISTRICT_HJDONG DLV_HJDONG
+                LEFT JOIN MS_DLV_DISTRICT DLV
+                    ON DLV.DLVDISTRICT_ID = DLV_HJDONG.DLVDISTRICT_ID
+                    AND DLV.FROMDATE <= DLV_HJDONG.TODATE AND DLV.TODATE >= DLV_HJDONG.FROMDATE
+                LEFT JOIN MS_DLV_DISTRICTGROUP DLV_GROUP
+                    ON DLV_GROUP.DCCODE = DLV.DCCODE
+                    AND DLV_GROUP.DLVGROUP_ID = DLV.DLVGROUP_ID
+                    AND DLV_GROUP.FROMDATE <= DLV.TODATE AND DLV_GROUP.TODATE >= DLV.FROMDATE
+                LEFT JOIN MS_DLV_DISTRICTGROUP_POP DLV_POP
+                    ON DLV_POP.DCCODE = DLV_GROUP.DCCODE
+                    AND DLV_POP.DLVGROUP_ID = DLV_GROUP.DLVGROUP_ID
+                    AND DLV_POP.FROMDATE <= DLV_GROUP.TODATE AND DLV_POP.TODATE >= DLV_GROUP.FROMDATE
+                LEFT JOIN MS_DISTRICTGROUP_POP POP_MST
+                    ON POP_MST.DCCODE = DLV_POP.DCCODE
+                    AND POP_MST.POPNO = DLV_POP.POPNO
+                    AND POP_MST.FROMDATE <= DLV_POP.TODATE AND POP_MST.TODATE >= DLV_POP.FROMDATE
+                WHERE DLV_POP.POPNO IS NOT NULL
+            ),
+            SAMPLE_RAW AS (
+                SELECT DCCODE, ORDGRP, HJDONG_CD,
+                    POPNO,
+                    FROMHOUR,
+                    MAX(TOHOUR) AS TOHOUR,
+                    BASE_YN,
+                    FROMDATE,
+                    MAX(TODATE) AS TODATE,
+                    MIN(DEL_YN) AS DEL_YN,
+                    MAX(RMK) AS RMK
+                FROM (
+                    /* Part A: DLV가 있는 구간 (배송 POP 적용) */
+                    SELECT BASE.DCCODE, BASE.ORDGRP, BASE.HJDONG_CD,
+                        NVL(DLV.POPNO, BASE.POPNO) AS POPNO,
+                        DLV.FROMHOUR, DLV.TOHOUR,
+                        NVL(DLV.BASE_YN, 'Y') AS BASE_YN,
+                        GREATEST(BASE.FROMDATE, DLV.FROMDATE) AS FROMDATE,
+                        LEAST(BASE.TODATE, DLV.TODATE) AS TODATE,
+                        CASE WHEN BASE.DEL_YN = 'Y'
+                            OR (DLV.DEL_YN = 'Y' AND (
+                                NVL(DLV.POPNO, BASE.POPNO) <> BASE.POPNO
+                                OR DLV.FROMHOUR <> '0000'
+                                OR DLV.BASE_YN <> 'Y'
+                            ))
+                        THEN 'Y' ELSE 'N' END AS DEL_YN,
+                        BASE.RMK
+                    FROM BASE
+                    JOIN DLV ON DLV.DCCODE = BASE.DCCODE
+                        AND DLV.HJDONG_CD = BASE.HJDONG_CD
+                        AND DLV.FROMDATE <= BASE.TODATE AND DLV.TODATE >= BASE.FROMDATE
+
+                    UNION ALL
+
+                    /* Part B: DLV가 없는 구간 (기본대표POP만 적용) */
+                    SELECT BASE.DCCODE, BASE.ORDGRP, BASE.HJDONG_CD,
+                        BASE.POPNO,
+                        '0000' AS FROMHOUR, '2359' AS TOHOUR,
+                        'Y' AS BASE_YN,
+                        BASE.FROMDATE, BASE.TODATE,
+                        BASE.DEL_YN,
+                        BASE.RMK
+                    FROM BASE
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM DLV
+                        WHERE DLV.DCCODE = BASE.DCCODE
+                            AND DLV.HJDONG_CD = BASE.HJDONG_CD
+                            AND DLV.FROMDATE <= BASE.TODATE AND DLV.TODATE >= BASE.FROMDATE
+                    )
+
+                    UNION ALL
+
+                    /* Part C: Gap fill (DLV 시작 전 빈 구간) */
+                    SELECT BASE.DCCODE, BASE.ORDGRP, BASE.HJDONG_CD,
+                        BASE.POPNO,
+                        '0000' AS FROMHOUR, '2359' AS TOHOUR,
+                        'Y' AS BASE_YN,
+                        BASE.FROMDATE,
+                        LEAST(BASE.TODATE, TO_CHAR(TO_DATE(MIN_DLV.MIN_FROMDATE, 'YYYYMMDD')-1, 'YYYYMMDD')) AS TODATE,
+                        BASE.DEL_YN,
+                        BASE.RMK
+                    FROM BASE
+                    JOIN (
+                        SELECT DCCODE, HJDONG_CD, MIN(FROMDATE) AS MIN_FROMDATE
+                        FROM DLV GROUP BY DCCODE, HJDONG_CD
+                    ) MIN_DLV ON MIN_DLV.DCCODE = BASE.DCCODE
+                        AND MIN_DLV.HJDONG_CD = BASE.HJDONG_CD
+                    WHERE MIN_DLV.MIN_FROMDATE > BASE.FROMDATE
+
+                    UNION ALL
+
+                    /* Part D: Gap fill (DLV 사이 및 DLV 이후 빈 구간) */
+                    SELECT BASE.DCCODE, BASE.ORDGRP, BASE.HJDONG_CD,
+                        BASE.POPNO,
+                        '0000' AS FROMHOUR, '2359' AS TOHOUR,
+                        'Y' AS BASE_YN,
+                        GREATEST(BASE.FROMDATE, DLV_GAP.GAP_FROM) AS FROMDATE,
+                        LEAST(BASE.TODATE, DLV_GAP.GAP_TO) AS TODATE,
+                        BASE.DEL_YN,
+                        BASE.RMK
+                    FROM BASE
+                    JOIN (
+                        SELECT DCCODE, HJDONG_CD,
+                            TO_CHAR(TO_DATE(TODATE, 'YYYYMMDD')+1, 'YYYYMMDD') AS GAP_FROM,
+                            NVL(
+                                TO_CHAR(TO_DATE(LEAD(FROMDATE) OVER (
+                                    PARTITION BY DCCODE, HJDONG_CD ORDER BY FROMDATE
+                                ), 'YYYYMMDD')-1, 'YYYYMMDD'),
+                                '99991231'
+                            ) AS GAP_TO
+                        FROM (
+                            SELECT DCCODE, HJDONG_CD,
+                                MIN(FROMDATE) AS FROMDATE, MAX(TODATE) AS TODATE
+                            FROM (
+                                SELECT D.*,
+                                    SUM(NEW_GRP) OVER (PARTITION BY DCCODE, HJDONG_CD ORDER BY FROMDATE) AS GRP
+                                FROM (
+                                    SELECT DCCODE, HJDONG_CD, FROMDATE, TODATE,
+                                        CASE WHEN TO_DATE(FROMDATE, 'YYYYMMDD') <=
+                                            TO_DATE(LAG(TODATE) OVER (
+                                                PARTITION BY DCCODE, HJDONG_CD ORDER BY FROMDATE
+                                            ), 'YYYYMMDD') + 1
+                                        THEN 0 ELSE 1 END AS NEW_GRP
+                                    FROM (SELECT DISTINCT DCCODE, HJDONG_CD, FROMDATE, TODATE FROM DLV)
+                                ) D
+                            )
+                            GROUP BY DCCODE, HJDONG_CD, GRP
+                        )
+                    ) DLV_GAP ON DLV_GAP.DCCODE = BASE.DCCODE
+                        AND DLV_GAP.HJDONG_CD = BASE.HJDONG_CD
+                        AND DLV_GAP.GAP_FROM <= BASE.TODATE AND DLV_GAP.GAP_TO >= BASE.FROMDATE
+                )
+                WHERE FROMDATE <= TODATE
+                GROUP BY DCCODE, ORDGRP, HJDONG_CD, POPNO, FROMHOUR, BASE_YN, FROMDATE
+            ),
+            /* 동일 POP 속성의 인접/중첩 기간 병합 */
+            SAMPLE AS (
+                SELECT DCCODE, ORDGRP, HJDONG_CD, POPNO, FROMHOUR,
+                    MAX(TOHOUR) AS TOHOUR,
+                    BASE_YN,
+                    MIN(FROMDATE) AS FROMDATE,
+                    MAX(TODATE) AS TODATE,
+                    DEL_YN,
+                    MAX(RMK) AS RMK
+                FROM (
+                    SELECT R.*,
+                        SUM(NEW_GRP) OVER (PARTITION BY DCCODE, ORDGRP, HJDONG_CD, POPNO, FROMHOUR, BASE_YN, DEL_YN ORDER BY FROMDATE) AS GRP
+                    FROM (
+                        SELECT R.*,
+                            CASE WHEN TO_DATE(FROMDATE, 'YYYYMMDD') <=
+                                TO_DATE(LAG(TODATE) OVER (
+                                    PARTITION BY DCCODE, ORDGRP, HJDONG_CD, POPNO, FROMHOUR, BASE_YN, DEL_YN ORDER BY FROMDATE
+                                ), 'YYYYMMDD') + 1
+                            THEN 0 ELSE 1 END AS NEW_GRP
+                        FROM SAMPLE_RAW R
+                    ) R
+                )
+                GROUP BY DCCODE, ORDGRP, HJDONG_CD, POPNO, FROMHOUR, BASE_YN, DEL_YN, GRP
+            )
+        ]]>
+    </sql>
+
+    <!-- 신규 오더그룹: SAMPLE × 3 IF_ID → IF_MS_HJDONG_POP INSERT -->
+    <insert id="batchInsertIfFromSample" parameterType="cjfw.batch.dto.MsBatchDto">
+        <![CDATA[
+        INSERT INTO IF_MS_HJDONG_POP (
+            DCCODE, STORERKEY,
+            HJDONG_CD,
+            FROMDATE, TODATE, POPNO,
+            FROMHOUR, TOHOUR,
+            ORDGRP, DEL_YN, ADDDATE, EDITDATE, ADDWHO, EDITWHO,
+            IF_ID,
+            RMK, BASE_YN, SEQ
+        )
+        ]]>
+        <include refid="batchHjdongPopCalcCte"/>
+        <![CDATA[
+        , IF_POP AS (
+            SELECT *
+            FROM (
+                SELECT P.*,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY DCCODE, DISTRICTGROUP, HJDONG_CD, ORDGRP, IF_ID
+                        ORDER BY P.SERIALKEY DESC
+                    ) AS NUM
+                FROM IF_MS_HJDONG_POP P
+            ) POP
+            WHERE POP.NUM = 1
+        )
+        SELECT MAPPING.DCCODE, 'FW00' AS STORERKEY,
+            MAPPING.HJDONG_CD,
+            MAPPING.FROMDATE, MAPPING.TODATE, MAPPING.POPNO,
+            MAPPING.FROMHOUR, MAPPING.TOHOUR,
+            MAPPING.ORDGRP, MAPPING.DEL_YN,
+            #{batchDate} AS ADDDATE, #{batchDate} AS EDITDATE, 'BATCH' AS ADDWHO, 'BATCH' AS EDITWHO,
+            MAPPING.IF_ID,
+            MAPPING.RMK, MAPPING.BASE_YN,
+            ROW_NUMBER() OVER (ORDER BY MAPPING.DEL_YN DESC, MAPPING.DCCODE, MAPPING.ORDGRP, MAPPING.HJDONG_CD, MAPPING.FROMDATE, MAPPING.POPNO, MAPPING.FROMHOUR, MAPPING.BASE_YN) AS SEQ
+        FROM (
+            SELECT DISTINCT
+                S.DCCODE,
+                S.HJDONG_CD,
+                S.FROMDATE, S.TODATE,
+                CASE WHEN IF_ID_LIST.IF_ID = 'SCM0880' THEN 'STD' ELSE S.POPNO END AS POPNO,
+                S.FROMHOUR, S.TOHOUR,
+                S.ORDGRP, S.DEL_YN,
+                IF_ID_LIST.IF_ID,
+                S.RMK,
+                CASE WHEN IF_ID_LIST.IF_ID = 'SCM0880' THEN 'N' ELSE S.BASE_YN END AS BASE_YN
+            FROM SAMPLE S
+            CROSS JOIN (
+                SELECT 'SCM0880' AS IF_ID FROM DUAL
+                UNION ALL
+                SELECT 'SCM0900' AS IF_ID FROM DUAL
+                UNION ALL
+                SELECT 'SCM0950' AS IF_ID FROM DUAL
+            ) IF_ID_LIST
+        ) MAPPING
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM IF_POP P
+            WHERE P.DCCODE = MAPPING.DCCODE AND P.HJDONG_CD = MAPPING.HJDONG_CD
+              AND P.FROMDATE = MAPPING.FROMDATE AND P.TODATE = MAPPING.TODATE
+              AND (P.DISTRICTGROUP IS NULL)
+              AND P.POPNO = MAPPING.POPNO AND P.IF_ID = MAPPING.IF_ID AND P.DEL_YN = MAPPING.DEL_YN
+              AND P.ORDGRP = MAPPING.ORDGRP AND P.BASE_YN = MAPPING.BASE_YN
+        )
+        ]]>
+    </insert>
+
+    <!-- 신규 오더그룹: SAMPLE → MS_HJDONG_POP MERGE -->
+    <update id="batchMergeMsHjdongPop" parameterType="cjfw.batch.dto.MsBatchDto">
+        <![CDATA[
+        MERGE INTO MS_HJDONG_POP TGT
+        USING (
+        ]]>
+        <include refid="batchHjdongPopCalcCte"/>
+        <![CDATA[
+            SELECT * FROM SAMPLE
+        ) SRC
+        ON (
+            TGT.DCCODE = SRC.DCCODE AND TGT.ORDGRP = SRC.ORDGRP
+            AND TGT.HJDONG_CD = SRC.HJDONG_CD AND TGT.POPNO = SRC.POPNO
+            AND TGT.FROMHOUR = SRC.FROMHOUR AND TGT.BASE_YN = SRC.BASE_YN
+            AND TGT.FROMDATE = SRC.FROMDATE
+        )
+        WHEN MATCHED THEN UPDATE SET
+            TGT.STORERKEY = 'FW00',
+            TGT.TOHOUR = SRC.TOHOUR,
+            TGT.TODATE = SRC.TODATE,
+            TGT.DEL_YN = SRC.DEL_YN,
+            TGT.RMK = SRC.RMK,
+            TGT.EDITDATE = SYSDATE,
+            TGT.EDITWHO = 'BATCH'
+        WHERE TGT.TODATE <> SRC.TODATE
+           OR TGT.DEL_YN <> SRC.DEL_YN
+           OR TGT.TOHOUR <> SRC.TOHOUR
+        WHEN NOT MATCHED THEN INSERT (
+            SERIALKEY, STORERKEY, DCCODE, ORDGRP, HJDONG_CD,
+            POPNO, FROMHOUR, TOHOUR, BASE_YN, FROMDATE, TODATE,
+            DEL_YN, RMK, ADDDATE, EDITDATE, ADDWHO, EDITWHO
+        ) VALUES (
+            SEQ_MS_HJDONG_POP_01.NEXTVAL, 'FW00', SRC.DCCODE, SRC.ORDGRP,
+            SRC.HJDONG_CD, SRC.POPNO, SRC.FROMHOUR, SRC.TOHOUR,
+            SRC.BASE_YN, SRC.FROMDATE, SRC.TODATE,
+            SRC.DEL_YN, SRC.RMK, SYSDATE, SYSDATE,
+            'BATCH', 'BATCH'
+        )
+        ]]>
+    </update>
+
+</mapper>

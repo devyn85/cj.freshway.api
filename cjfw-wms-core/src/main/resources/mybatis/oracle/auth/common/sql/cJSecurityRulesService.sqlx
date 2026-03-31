@@ -1,0 +1,273 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cJSecurityRulesService">
+
+    <select id="getUser" resultType="HMap">
+        SELECT /* [cJSecurityRulesService.sqlx][getUser][20230921][sungyeon.lee] */
+        	   A.USER_ID
+        	 , A.USER_NM
+        	 , A.EMP_NO
+        	 , A.COM_CD AS UNIT_CD
+			 , A.USER_PWD			/* SHA-256 n회 */
+			 , A.USER_STATUS
+        	 , B.PWD_CHG_DT
+        	 , B.FAIL_IN_CNT
+        	 , B.TMP_PWD_YN
+             , B.ALLOW_ALL_IP_YN
+          FROM TB_CF_USERS A
+          JOIN TB_CF_SECURITY_RULES B ON A.USER_ID = B.USER_ID
+         WHERE A.USER_ID = #{userId}
+           AND A.USER_ENABLE = '1'
+    </select>
+    
+    <select id="getUserAllowedIpList" resultType="HMap">
+        SELECT /* [cJSecurityRulesService.sqlx][getUserAllowedIpList][20230921][sungyeon.lee] */
+        	   USER_ID,
+			   IP_ADDR
+          FROM TB_CF_ALLOWED_IP
+         WHERE USER_ID = #{userId}
+    </select>
+    
+    <select id="getUserById" resultType="HMap">
+    	SELECT /* [cJSecurityRulesService.sqlx][getUserById][20230921][sungyeon.lee] */
+    		   USER_ID
+    	  FROM TB_CF_USERS
+    	 WHERE USER_ID = #{userId}
+    	   AND USER_ENABLE = '1'
+    </select>
+
+    <select id="getUserRolesList" resultType="HMap">
+        SELECT /* [cJSecurityRulesService.sqlx][getUserRolesList][20230921][sungyeon.lee] */
+			   A.AUTHORITY
+          FROM TB_CF_AUTH A 
+          JOIN TB_CF_USERS B ON A.USER_ID = B.USER_ID
+         WHERE A.USER_ID = 'devadmin01' /* TO-DO(GS) : 추후 확인 */
+    </select>
+
+    <insert id="insertLogin">
+        INSERT	/* [cJSecurityRulesService.sqlx][insertLogin][20250616][jh.jang] */
+		INTO FRAMEONE_USERLOGIN_LOG
+        (
+            USER_ID,
+            LOGIN_DTM,
+            LOGIN_IP_NO,
+            LOGIN_SUCC_YN,
+            REG_ID,
+            REG_DTM
+        )
+        VALUES
+        (
+            #{userId}
+            , SYSDATE
+            , #{IP_ADDR}
+            , '1'
+            , #{userId}
+            , SYSDATE
+        )
+    </insert>
+    
+    <insert id="insertLogOut">
+    	INSERT	/* [cJSecurityRulesService.sqlx][insertLogOut][20250616][jh.jang] */
+		INTO FRAMEONE_USERLOGIN_LOG
+        (
+            USER_ID,
+            LOGOUT_DTM,
+            LOGIN_IP_NO,
+            LOGIN_SUCC_YN,
+            REG_ID,
+            REG_DTM
+        )
+        VALUES
+        (
+            #{userId}
+            , SYSDATE
+            , #{IP_ADDR}
+            , '1'
+            , #{userId}
+            , SYSDATE
+        )
+    </insert>
+    
+    <insert id="insertUsersLog">
+        INSERT /* [cJSecurityRulesService.sqlx][insertUsersLog][20230921][sungyeon.lee] */
+          INTO TB_CF_USER_LOG 
+        (
+        	   USER_ID,
+        	   LOG_MSG,
+			   USER_PWD,
+			   IP_ADDR,
+			   REG_ID
+        )
+        VALUES 
+        (
+        	   #{USER_ID},
+			   #{LOG_MSG},
+			   #{USER_PWD},
+			   #{IP_ADDR},
+			   #{USER_ID}
+        )
+    </insert>
+    
+    <insert id="insertLoggingError2DB">
+    	INSERT /* [cJSecurityRulesService.sqlx][insertLoggingError2DB][20230921][sungyeon.lee] */
+          INTO TB_CF_EXN_LOG 
+       (
+        	   EXN_NO,
+        	   EXCPT_CNTS,
+			   OCCR_DY,
+			   CLNT_ADDR,
+			   SVR_ADDR,
+			   CALL_URI
+        )
+        VALUES 
+        (
+        	   SEQ_CF_EXN_LOG_EXN_NO.NEXTVAL,
+        	   #{excptCnts},
+        	   TO_CHAR(SYSDATE, 'YYYY-MM-DD HH24:MI:SS'),
+        	   #{clntAddr},
+        	   #{svrAddr},
+        	   #{callUri}
+        )
+    </insert>
+    
+    <update id="updateSecurityRules">
+    	UPDATE /* [cJSecurityRulesService.sqlx][updateSecurityRules][20230921][sungyeon.lee] */
+        	   TB_CF_SECURITY_RULES 
+        <if test='SUCCESS_YN == "1"'>	/*로그인 성공 시*/
+		   SET FINAL_IN_DTM = SYSDATE
+			 , FINAL_IP_ADDR = #{IP_ADDR}
+			 , FAIL_IN_CNT = 0
+		 WHERE USER_ID = #{userId}
+		</if>
+		<if test='SUCCESS_YN == "2"'>	/*로그아웃 시*/
+		   SET FINAL_OUT_DTM = SYSDATE
+		 WHERE USER_ID = #{userId}
+		</if>
+		<if test='SUCCESS_YN == "0"'>	/*로그인 실패 시*/
+		   SET FAIL_IN_CNT = DECODE(FAIL_IN_CNT, NULL, 1, FAIL_IN_CNT+1) 
+			 , FAIL_TOT_CNT = DECODE(FAIL_TOT_CNT, NULL, 1, FAIL_TOT_CNT+1)
+			 , FINAL_FAIL_IN_DTM  = SYSDATE
+		 WHERE USER_ID = #{userId}
+		</if>
+    </update>
+
+    <select id="getAuthenticatedMenuList" resultType="HMap">
+        SELECT /* [cJSecurityRulesService.sqlx][getAuthenticatedMenuList][20230921][sungyeon.lee] */
+	           C.MENU_NM,
+	           B.MENU_URL,
+	           B.MENU_ID,
+	           MAX(NVL(A.USE_YN,'0')) AS USE_YN,
+	           MAX(NVL(A.SEARCH_YN,'0')) AS SEARCH_YN,
+	           MAX(NVL(A.NEW_YN,'0')) AS NEW_YN,
+	           MAX(NVL(A.DELETE_YN,'0')) AS DELETE_YN,
+	           MAX(NVL(A.SAVE_YN,'0')) AS SAVE_YN,
+	           MAX(NVL(A.PRINT_YN,'0')) AS PRINT_YN,
+	           MAX(NVL(A.EXCEL_YN,'0')) AS EXCEL_YN,
+	           MAX(NVL(A.BTN1_YN,'0')) AS BTN1_YN,
+	           MAX(NVL(A.BTN2_YN,'0')) AS BTN2_YN,
+	           MAX(NVL(A.BTN3_YN,'0')) AS BTN3_YN,
+	           MAX(NVL(A.BTN4_YN,'0')) AS BTN4_YN,
+	           MAX(NVL(A.BTN5_YN,'0')) AS BTN5_YN,
+	           MAX(NVL(A.BTN6_YN,'0')) AS BTN6_YN,
+	           MAX(NVL(A.BTN7_YN,'0')) AS BTN7_YN,
+	           MAX(NVL(A.BTN8_YN,'0')) AS BTN8_YN,
+	           MAX(NVL(A.BTN9_YN,'0')) AS BTN9_YN,
+	           MAX(NVL(A.BTN10_YN,'0')) AS BTN10_YN,
+	           MAX(NVL(B.IS_POPUP,'0')) AS IS_POPUP
+          FROM TB_CF_MENU_ROLE A
+          JOIN TB_CF_MENU B ON A.MENU_ID = B.MENU_ID
+          JOIN TB_CF_MENU_I18N C ON B.MENU_ID = C.MENU_ID
+    <choose>
+        <when test='uri !=null and uri !=""'>
+           AND B.MENU_URL = #{uri}
+        </when>
+        <otherwise>
+           AND B.MENU_URL IS NOT NULL
+        </otherwise>
+    </choose>
+         WHERE A.AUTHORITY IN
+            <foreach collection="roles" item="item" index="index" open="(" close=")" separator=",">
+            #{item}
+            </foreach>
+           AND A.USE_YN = '1'
+           AND B.USE_YN = '1'
+           AND C.LANGUAGE_CD IN
+            <foreach collection="locale" item="item" index="index" open="(" close=")" separator=",">
+            #{item}
+            </foreach>
+      GROUP BY B.MENU_ID,
+               C.MENU_NM,
+               B.MENU_URL
+    </select>
+    
+    <select id="getAuthenticatedMenu" resultType="HMap">
+        SELECT /* [cJSecurityRulesService.sqlx][getAuthenticatedMenu][사용자별 허용된 메뉴 조회][JangGwangSeok][2025.05.15] */
+		    FRAMEONE_AUTH_PROG.PROG_CD
+		FROM FRAMEONE_AUTHORITY
+		JOIN FRAMEONE_AUTH_PROG
+		    ON FRAMEONE_AUTHORITY.AUTH_CD = FRAMEONE_AUTH_PROG.AUTH_CD
+		JOIN FRAMEONE_PROGRAM
+		    ON FRAMEONE_AUTH_PROG.PROG_CD = FRAMEONE_PROGRAM.PROG_CD
+		    <choose>
+		    	<when test='uri != null and uri != ""'>
+		        	AND FRAMEONE_PROGRAM.PROG_URL = #{uri}
+		        </when>
+		        <otherwise>
+		        	AND FRAMEONE_PROGRAM.PROG_URL IS NOT NULL
+		        </otherwise>
+		    </choose>
+		WHERE 1 = 1
+		    AND FRAMEONE_AUTHORITY.AUTH_CD IN
+			    <foreach collection="roles" item="item" index="index" open="(" close=")" separator=",">
+	            	#{item}
+	            </foreach>
+		    AND FRAMEONE_AUTHORITY.USE_YN = '1' 
+		    AND FRAMEONE_AUTHORITY.AUTH_CL = '1'
+		    AND FRAMEONE_AUTH_PROG.USE_YN = '1'
+    </select>
+
+    <update id="updateUserRefreshToken">
+        UPDATE /* [cJSecurityRulesService.sqlx][updateUserRefreshToken][20230921][sungyeon.lee] */
+               FRAMEONE_USER
+           SET REFRESH_TOKEN = #{refreshToken}
+         WHERE USER_ID = #{userId}
+    </update>
+
+    <select id="getUserRefreshToken" resultType="HMap">
+        SELECT /* [cJSecurityRulesService.sqlx][getUserRefreshToken][refreshToken DB 조회][JangGwangSeok][2025.11.15] */
+        	USER_ID,
+        	REFRESH_TOKEN
+        FROM FRAMEONE_USER
+        WHERE 1 = 1
+        <if test='userId !=null and userId !=""'>
+           AND USER_ID = #{userId}
+        </if>
+        <if test='refreshToken !=null and refreshToken !=""'>
+           AND REFRESH_TOKEN = #{refreshToken}
+        </if>
+    </select>
+    
+    <update id="updateLockUserId">
+    	UPDATE /* [cJSecurityRulesService.sqlx][updateLockUserId][20230921][sungyeon.lee] */
+        		TB_CF_USERS 
+			SET USER_STATUS = '02' /*계정잠금처리*/
+		  WHERE USER_ID = #{userId}
+    </update>
+
+    <update id="updateUnlockUserId">
+        UPDATE /* [cJSecurityRulesService.sqlx][updateUnlockUserId][20241128][LJH] */
+            TB_CF_USERS
+            SET USER_STATUS = '01' /*사용*/
+        WHERE USER_ID = #{userId}
+    </update>
+    
+    <select id="getSpid" resultType="HMap">
+        SELECT /* [cJSecurityRulesService.sqlx][getSpid][SPID 값 조회][JangGwangSeok][2025.11.25] */
+        	SPID
+        FROM FRAMEONE_USER
+        WHERE 1 = 1
+	        AND USER_ID = #{userId}
+	        AND SPID = #{spid}
+    </select>
+
+</mapper>

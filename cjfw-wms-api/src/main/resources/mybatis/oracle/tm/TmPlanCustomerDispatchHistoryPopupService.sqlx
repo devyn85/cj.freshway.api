@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cjfw.wms.tm.mapper.TmPlanCustomerDispatchHistoryPopupMapper">
+
+    <select id="getPlanCustomerDispatchHistoryPopup" resultType="TmPlanCustomerDispatchHistoryPopupResDto">
+        SELECT /* [TmPlanCustomerDispatchHistoryPopupService.sqlx][getPlanCustomerDispatchHistoryPopup][배차이력 조회][이현성][2026.02.02] */
+              TM_INPLAN_HIST.DELIVERYDT
+            , TM_INPLAN_HIST.CARNO
+            , CM_CAR.CARCAPACITY
+            , FN_CODEDESCR('STD', 'CARCAPACITY', CM_CAR.CARCAPACITY) AS CARCAPACITYNAME
+            , TM_INPLAN_HIST.CONTRACTTYPE
+            , FN_CODEDESCR('STD', 'CONTRACTTYPE', TM_INPLAN_HIST.CONTRACTTYPE) AS CONTRACTTYPENAME
+            , TM_INPLAN_HIST.COURIER
+            , MC_COURIER.DESCRIPTION AS COURIERNAME
+            , TM_INPLAN_HIST.CARAGENTKEY
+            , MC_CARRIER.DESCRIPTION AS CARRIERNAME
+            , CM_DRIVER.DRIVERNAME
+            , TM_INPLAN_HIST.WEIGHT
+            , TM_INPLAN_HIST.CUBE
+            , TO_CHAR(TM_INPLAN_HIST.CUSTARRIVALDT, 'HH24:MI') AS CUSTARRIVALDT
+        FROM (
+            SELECT
+                  TM_INPLAN.STORERKEY
+                , TM_INPLAN.DELIVERYDT
+                , TM_INPLAN.CARNO
+                , TM_INPLAN.CONTRACTTYPE
+                , TM_INPLAN.COURIER
+                , TM_INPLAN.CARAGENTKEY
+                , TM_INPLAN.TM_DELIVERYTYPE
+                , MAX(TM_INPLAN.CUSTARRIVALDT) AS CUSTARRIVALDT
+                , SUM(CASE WHEN TM_INPLAN.DOCTYPE = 'RT' THEN 0 ELSE TM_INPLAN.WEIGHT END) AS WEIGHT
+                , SUM(CASE WHEN TM_INPLAN.DOCTYPE = 'RT' THEN 0 ELSE TM_INPLAN.CUBE   END) AS CUBE
+            FROM (
+                SELECT STORERKEY, DCCODE, DELIVERYDT, DOCTYPE, SLIPDT, CARNO, CONTRACTTYPE, WEIGHT, CUBE, STATUS, TRUTHCUSTKEY, COURIER, CARAGENTKEY, CUSTARRIVALDT, TM_DELIVERYTYPE
+                FROM TM_INPLAN
+                WHERE DEL_YN = 'N'
+                  AND SPLIT_DELIVERY_YN = 'N'
+                UNION ALL
+                SELECT STORERKEY, DCCODE, DELIVERYDT, DOCTYPE, SLIPDT, CARNO, CONTRACTTYPE, WEIGHT, CUBE, STATUS, TRUTHCUSTKEY, COURIER, CARAGENTKEY, CUSTARRIVALDT, TM_DELIVERYTYPE
+                FROM TM_INPLAN_SPLIT
+                WHERE DEL_YN = 'N'
+            ) TM_INPLAN
+            WHERE TM_INPLAN.DELIVERYDT BETWEEN #{deliverydtFrom} AND #{deliverydtTo}
+              AND TM_INPLAN.SLIPDT BETWEEN TO_CHAR(TRUNC(ADD_MONTHS(TO_DATE(#{deliverydtFrom}, 'YYYYMMDD'), -1), 'MM'), 'YYYYMMDD') AND #{deliverydtTo}
+              AND TM_INPLAN.DCCODE = #{dccode}
+              AND TM_INPLAN.STATUS = '90'
+            <choose>
+                <when test='tmDeliverytype == "1"'>
+                    AND TM_INPLAN.DOCTYPE IN ('WD', 'RT')
+                    AND TM_INPLAN.TM_DELIVERYTYPE IN ('1', '2')
+                </when>
+                <when test='tmDeliverytype == "3"'>
+                    AND TM_INPLAN.DOCTYPE = 'DP'
+                    AND TM_INPLAN.TM_DELIVERYTYPE = '3'
+                </when>
+                <when test='tmDeliverytype == "4"'>
+                    AND TM_INPLAN.DOCTYPE = 'DP'
+                    AND TM_INPLAN.TM_DELIVERYTYPE = '4'
+                </when>
+                <when test='tmDeliverytype == "6"'>
+                    AND TM_INPLAN.DOCTYPE = 'WD'
+                    AND TM_INPLAN.TM_DELIVERYTYPE = '6'
+                </when>
+                <otherwise>
+                    AND TM_INPLAN.DOCTYPE IN ('WD', 'RT', 'DP')
+                    AND TM_INPLAN.TM_DELIVERYTYPE IN ('1', '2', '3', '4', '6')
+                </otherwise>
+            </choose>
+            <if test="custkey != null and custkey != ''">
+              AND TM_INPLAN.TRUTHCUSTKEY = #{custkey}
+            </if>
+            GROUP BY
+                  TM_INPLAN.STORERKEY
+                , TM_INPLAN.DELIVERYDT
+                , TM_INPLAN.CARNO
+                , TM_INPLAN.CONTRACTTYPE
+                , TM_INPLAN.COURIER
+                , TM_INPLAN.CARAGENTKEY
+                , TM_INPLAN.TM_DELIVERYTYPE
+        ) TM_INPLAN_HIST
+        LEFT JOIN CM_CAR
+            ON  CM_CAR.CARNO = TM_INPLAN_HIST.CARNO
+        LEFT JOIN CM_DRIVER
+            ON  CM_DRIVER.DRIVERID = CM_CAR.DRIVER1
+        LEFT JOIN MS_CARRIER MC_COURIER
+            ON  MC_COURIER.STORERKEY   = TM_INPLAN_HIST.STORERKEY
+            AND MC_COURIER.CARRIERKEY  = TM_INPLAN_HIST.COURIER
+            AND MC_COURIER.CARRIERTYPE = 'LOCAL'
+        LEFT JOIN MS_CARRIER MC_CARRIER
+            ON  MC_CARRIER.STORERKEY   = TM_INPLAN_HIST.STORERKEY
+            AND MC_CARRIER.CARRIERKEY  = TM_INPLAN_HIST.CARAGENTKEY
+            AND MC_CARRIER.CARRIERTYPE = 'SUBC'
+        ORDER BY
+              TM_INPLAN_HIST.DELIVERYDT DESC
+            , TM_INPLAN_HIST.CARNO
+    </select>
+
+</mapper>

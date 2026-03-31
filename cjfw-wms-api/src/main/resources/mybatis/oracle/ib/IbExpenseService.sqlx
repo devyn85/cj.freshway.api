@@ -1,0 +1,1866 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ibExpenseService">
+
+    <select id="getDataRead" resultType="IbExpenseResDto">
+        WITH ZR_CTE AS (
+             SELECT DISTINCT ZINVOICE, ZRETURN
+                       FROM   IF_IB_STOCKETC_H
+                       WHERE  FI_IF_STATUS = 'CNF'
+             UNION ALL
+             SELECT DISTINCT ZINVOICE, ZRETURN
+                       FROM   IF_IB_STOCKSKU_H
+                       WHERE  FI_IF_STATUS = 'CNF'
+          )
+        , ZRE_CTE AS (
+               SELECT DISTINCT ZINVOICE, ZRE_BELNR
+                       FROM   IF_IB_STOCKETC_H
+                       WHERE  FI_IF_STATUS = 'CNF'
+               UNION ALL
+               SELECT DISTINCT ZINVOICE, ZRE_BELNR
+                       FROM   IF_IB_STOCKSKU_H
+                       WHERE  FI_IF_STATUS = 'CNF'
+             )
+        , OD AS (
+            SELECT A.EXPENSE_SN
+                  ,LISTAGG(DISTINCT RIGHT(A.ORGANIZE,4), ',') WITHIN GROUP (ORDER BY A.ORGANIZE) AS ORGANIZE_AGG
+                  ,LISTAGG(DISTINCT FN_DESCR_ORGANIZE(A.DCCODE, A.ORGANIZE),',') WITHIN GROUP (ORDER BY A.ORGANIZE) AS ORGANIZE_NAME_AGG
+            FROM IB_EXPENSE_DISTRIBUTION A 
+            INNER JOIN IB_EXPENSE B 
+                ON A.EXPENSE_SN = B.SERIALKEY
+            WHERE    1=1
+            AND    B.DCCODE                 = #{fixdccode}
+            AND    B.STORERKEY              = #{gStorerkey}
+        <if test="adddateFrom != null and adddateFrom != ''">                     
+            AND    B.ADDDATE        <![CDATA[>=]]> TO_DATE(#{adddateFrom}      , 'yyyyMMdd')            
+        </if>              
+        <if test="adddateTo != null and adddateTo != ''">                       
+            AND    B.ADDDATE        <![CDATA[<]]> TO_DATE(#{adddateTo}        , 'yyyyMMdd')+1          
+        </if>              
+        <if test="editdateFrom != null and editdateFrom != ''">                    
+            AND    B.EDITDATE       <![CDATA[>=]]> TO_DATE(#{editdateFrom}     , 'yyyyMMdd')            
+        </if>              
+        <if test="editdateTo != null and editdateTo != ''">                      
+            AND    B.EDITDATE       <![CDATA[<]]> TO_DATE(#{editdateTo}       , 'yyyyMMdd')+1          
+        </if>              
+        <if test="docdtFrom != null and docdtFrom != ''">                       
+            AND    B.ISSUE_DATE     <![CDATA[>=]]> TO_DATE(#{docdtFrom}        , 'yyyyMMdd')            
+        </if>              
+        <if test="docdtTo != null and docdtTo != ''">                         
+            AND    B.ISSUE_DATE     <![CDATA[<]]> TO_DATE(#{docdtTo}          , 'yyyyMMdd')+1          
+        </if>              
+        <if test="taxdateFrom != null and taxdateFrom != ''">                     
+            AND    B.TAX_YMD        <![CDATA[>=]]> TO_DATE(#{taxdateFrom}      , 'yyyyMMdd')            
+        </if>              
+        <if test="taxdateTo != null and taxdateTo != ''">                       
+            AND    B,TAX_YMD        <![CDATA[<]]> TO_DATE(#{taxdateTo}        , 'yyyyMMdd')+1          
+        </if>              
+        <if test="baselinedateFrom != null and baselinedateFrom != ''">                
+            AND    B.DUE_DATE       <![CDATA[>=]]> TO_DATE(#{baselinedateFrom} , 'yyyyMMdd')            
+        </if>              
+        <if test="baselinedateTo != null and baselinedateTo != ''">                  
+            AND    B.DUE_DATE       <![CDATA[<]]> TO_DATE(#{baselinedateTo}   , 'yyyyMMdd')+1          
+        </if>              
+        <if test="postingdateFrom != null and postingdateFrom != ''">                 
+            AND    B.POSTING_DATE   <![CDATA[>=]]> TO_DATE(#{postingdateFrom}  , 'yyyyMMdd')            
+        </if>              
+        <if test="postingdateTo != null and postingdateTo != ''">                   
+            AND    B.POSTING_DATE   <![CDATA[<]]> TO_DATE(#{postingdateTo}    , 'yyyyMMdd')+1          
+        </if>              
+        <if test="yyyymm != null and yyyymm != ''">                           
+            AND    B.ATTRIBUTES1              =    #{yyyymm}                                             
+        </if>              
+        <if test="status != null and status != ''">                           
+            AND    B.STATUS                   =    #{status}                                             
+        </if>              
+        <if test="ifStatus != null and ifStatus != ''">                        
+            AND    B.IF_STATUS                =    #{ifStatus}                                          
+        </if>              
+        <if test="attributes2 != null and attributes2 != ''">                      
+            AND    B.ATTRIBUTES2              =    #{attributes2}                                        
+        </if>              
+        <if test="keynoMulti != null and keynoMulti != ''">
+            AND    B.KEY_NO      IN                                                                                    /* Document No */
+            <foreach collection="keynoMulti" item="item" open="(" separator="," close=")">
+                 #{item}
+            </foreach> 
+        </if>
+        <if test="erpponoMulti != null and erpponoMulti != ''">
+            AND    B.ERP_PO_NO      IN                                                                                  /* ERP 발주번호 */
+            <foreach collection="erpponoMulti" item="item" open="(" separator="," close=")">
+                 #{item}
+            </foreach> 
+        </if>
+        <if test="addwho != null and addwho != ''">                           
+            AND    EXISTS (SELECT 1                                               
+                           FROM   FRAMEONE_USER                                              
+                           WHERE  USER_ID = B.ADDWHO                                        
+                           AND   (USER_ID LIKE '%' || #{addwho} || '%' 
+                               OR USER_NM LIKE '%' || #{addwho} || '%'
+                                 )
+                           )                                                                          
+        </if>
+        <if test="editwho != null and editwho != ''">                          
+            AND    EXISTS (SELECT 1                                               
+                           FROM   FRAMEONE_USER                                              
+                           WHERE  USER_ID = B.EDITWHO                                        
+                           AND   (USER_ID LIKE '%' || #{editwho} || '%'
+                               OR USER_NM LIKE '%' || #{editwho} || '%'
+                                 )
+                           )                                                                          
+        </if>
+        <if test="adjustmentsuppliercode != null and adjustmentsuppliercode != ''">         
+            AND    B.ADJUSTMENT_SUPPLIER_CODE IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL                /* Supplier 코드 */  
+                                                FROM (SELECT #{adjustmentsuppliercode} AS VAL FROM DUAL) A
+                                                CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)                  
+        </if> 
+        <if test="adjustmentsuppliername != null and adjustmentsuppliername != ''">         
+            AND    B.ADJUSTMENT_SUPPLIER_NAME IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL                /* Supplier 명 */  
+                                                FROM (SELECT #{adjustmentsuppliername} AS VAL FROM DUAL) A
+                                                CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0) )                     
+        </if>  
+        <if test="organizeMulti != null and organizeMulti != ''">
+            AND    EXISTS (SELECT 1                                                                                          /* 창고 */          
+                            FROM   IB_EXPENSE_DISTRIBUTION                                                              
+                            WHERE  IB_EXPENSE_DISTRIBUTION.EXPENSE_SN = B.SERIALKEY 
+                          <if test="organizeMulti != null and organizeMulti != ''">
+                              AND  IB_EXPENSE_DISTRIBUTION.ORGANIZE      IN
+                                <foreach collection="organizeMulti" item="item" open="(" separator="," close=")">
+                                    #{item}
+                                </foreach> 
+                          </if>
+                          )
+        </if>
+        
+        <if test="supplierCode != null and supplierCode != ''">         
+            AND    B.ADJUSTMENT_SUPPLIER_CODE IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL                /* Supplier 코드 */  
+                                                FROM (SELECT #{supplierCode} AS VAL FROM DUAL) A
+                                                CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)                  
+        </if>
+           GROUP BY A.EXPENSE_SN
+            ) 
+        
+        SELECT    /* [ibExpenseService.sqlx][getDataRead][비용기표 목록 조회][sunho.kim][2025.08.04] */  
+                EX.DCCODE                                                                AS DCCODE                                                  /* 물류센터 */       
+              , EX.STATUS                                                                AS STATUS_CODE                                             /* 상태코드 */
+              , CD1.BASEDESCR                                                            AS STATUS                                                  /* 상태코드명 */ 
+              , (SELECT APPROVALSTATUS
+                 FROM   AJ_APPRREQUEST APR
+                 WHERE  APR.SLIPNO  = EX.SERIALKEY
+                   AND  APR.DCCODE  = EX.DCCODE
+                   AND  APR.DOCTYPE = 'IBEXPENSE'
+                   AND  APR.APPROVALNO != 'STD'
+                 ORDER BY ADDDATE DESC
+                 FETCH FIRST 1 ROWS ONLY )                                               AS INTERNAL_APPR_STATUS                                    /* 내부결재상태 */
+              , CD2.BASEDESCR                                                            AS IF_STATUS                                               /* IF Status */ 
+              , EX.APPR_STATUS                                                           AS APPR_STATUS                                             /* Appr Status */   
+              , DECODE(BUSINESS_TYPE_ID, 3, 'Direct'
+                                       , 4, 'Local'
+                                       , 'Not Defined')                                  AS BUSINESS_TYPE_ID                                        /* Business Type ID */   
+              , EX.KEY_NO                                                                AS KEY_NO                                                  /* Document No */  
+              , TO_CHAR(ISSUE_DATE, 'YYYYMMDD')                                          AS ISSUE_DATE                                              /* Document Date*/
+              , DUE_DATE                                                                 AS DUE_DATE                                                /* Due Date */
+              , ADJUSTMENT_SUPPLIER_CODE                                                 AS ADJUSTMENT_SUPPLIER_CODE                                /* Supplier Code */   
+              , ADJUSTMENT_SUPPLIER_NAME                                                 AS ADJUSTMENT_SUPPLIER_NAME                                /* Supplier Name */
+              , ACTUAL_SUPPLIER_CODE                                                     AS ACTUAL_SUPPLIER_CODE                                    /* ACTUAL SUPPLIER CODE */
+              , ACTUAL_SUPPLIER_NAME                                                     AS ACTUAL_SUPPLIER_NAME                                    /* ACTUAL SUPPLIER NAME */
+              , ADJUSTMENT_SITE_CODE                                                     AS ADJUSTMENT_SITE_CODE                                    /* ADJUSTMENT SITE CODE */
+              , ADJUSTMENT_SITE_NAME                                                     AS ADJUSTMENT_SITE_NAME                                    /* ADJUSTMENT SITE NAME */ 
+              , ACCOUNT_CR_CODE                                                          AS ACCOUNT_CR_CODE                                         /* 차변계정코드 */
+              , ACCOUNT_CR_NAME                                                          AS ACCOUNT_CR_NAME                                         /* 차변계정명 */ 
+              , NVL(EXCHANGE_RATE, 0)                                                    AS EXCHANGE_RATE                                           /* EXCHANGE RATE */
+              , NVL(SUPPLY_PRICE_KRW, 0)                                                 AS SUPPLY_PRICE_KRW                                        /* SUPPLY PRICE KRW */   
+              , NVL(TAX_AMOUNT_KRW, 0)                                                   AS TAX_AMOUNT_KRW                                          /* TAX AMOUNT KRW */
+              , NVL(AMOUNT_KRW, 0)                                                       AS AMOUNT_KRW                                              /* AMOUN _KRW */ 
+              , AMOUNT_UNIT                                                              AS AMOUNT_UNIT                                             /* 통화 */   
+              , NVL(SUPPLY_PRICE, 0)                                                     AS SUPPLY_PRICE                                            /* Supply Price */
+              , NVL(TAX_AMOUNT, 0)                                                       AS TAX_AMOUNT                                              /* Tax Amount */
+              , EX.TAX_TYPE_CODE                                                         AS TAX_TYPE_CODE                                           /* Tax Type Code */    
+              , NVL(AMOUNT, 0)                                                           AS AMOUNT                                                  /* Amount */       
+              , SUMMARY                                                                  AS SUMMARY                                                 /* Summary */
+              , EX.ADDWHO                                                                AS ADDWHO                                                  /* 등록자 */ 
+              , USER1.USER_NM                                                            AS ADDWHO_NM                                               /* 등록자명 */
+              , EX.EDITWHO                                                               AS EDITWHO                                                 /* 최종변경자 */ 
+              , USER2.USER_NM                                                            AS EDITWHO_NM                                              /* 최종변경자명 */
+              , TO_CHAR(EX.ADDDATE,'YYYYMMDDHH24MISS')                                   AS ADDDATE                                                 /* 등록일자 */   
+              , TO_CHAR(EX.EDITDATE,'YYYYMMDDHH24MISS')                                  AS EDITDATE                                                /* 최종변경시간 */
+              , EX.SERIALKEY                                                             AS SERIALKEY                                               /* 데이터번호 */   
+              , MEMBER_ID                                                                AS MEMBER_ID                                               /* Member ID */
+              , PURCHASING_GROUP_CODE                                                    AS PURCHASING_GROUP_CODE                                   /* PURCHASING GROUP CODE*/
+              , EX.STORERKEY                                                             AS STORERKEY                                               /* 고객사코드 */
+              , CMS.DESCRIPTION                                                          AS STORERNAME                                              /* 고객사명 */
+              , X.ACCOUNT_DETAIL_NAME                                                    AS ACCOUNT_DETAIL                                          /* Account Detail */   
+              , ED.CNT                                                                   AS LOV_ITEM                                                /* Item */
+              , NVL(FILECNT.CNT, 0)                                                      AS FILE_CNT                                                /* 파일 */
+              , FISCAL_YEAR                                                              AS FISCAL_YEAR                                             /* Fiscal Year */
+              , TO_CHAR(POSTING_DATE, 'YYYYMMDD')                                        AS POSTING_DATE                                            /* Posting Date */
+              , DECODE(EX.TRANSACTION_CD, 'FI', 'FI', 'OB', 'MIRO')                      AS TRANSACTION_CD                                          /* Transaction CD  */    
+              , TRANSACTION_CD                                                           AS TRANSACTION_CD_VALUE                                    /* Transaction 명 */
+              , 0                                                                        AS INTERFACE_CNT                                           /* Interface Count */   
+              , ZR.ZRETURN_AGG                                                           AS INV_NO                                                  /* MM송장번호 */
+              , IF_DOC_NO                                                                AS IF_DOC_NO                                               /* IF No */
+              , ''                                                                       AS PO_NO                                                   /* 발주번호 */
+              , ZRE.ZRE_BELNR_AGG                                                        AS SLIP_NO                                                 /* Slip No */ 
+              , CD3.BASEDESCR                                                            AS ATTRIBUTES2                                             /* 비용종류 */
+              , CASE WHEN IF_ID IN ('SCM0480') 
+                     THEN (SELECT FI_IF_STATUS                                                
+                           FROM   IF_IB_STOCKETC_H
+                           WHERE  ZINVOICE = EX.IF_DOC_NO
+                           AND    ROWNUM   = 1)
+                     WHEN IF_ID = 'SCM0470' 
+                     THEN (SELECT FI_IF_STATUS                                                
+                           FROM   IF_IB_STOCKSKU_H
+                           WHERE  ZINVOICE = EX.IF_DOC_NO
+                           AND    ROWNUM   = 1)
+                     ELSE ''
+                END                                                                      AS FI_IF_STATUS                                            /* Posting Status */
+              , ATTRIBUTES1                                                              AS YYYYMM                                                  /* 재고년월 */ 
+              , OD.ORGANIZE_AGG                                                          AS ORGANIZE                                                /* 창고코드 */
+              , OD.ORGANIZE_NAME_AGG                                                     AS ORGANIZE_NAME                                           /* 창고명 */
+              , '['|| EX.TAX_TYPE_CODE||']'|| EX.TAX_TYPE_NAME                           AS TAX_TYPE_NAME                                           /* 세금코드 */
+              , CD4.BASEDESCR                                                            AS TAX_TAG                                                 /* Tax Invoice */
+              , EX.TAX_NO                                                                AS TAX_NO                                                  /* Tax No */
+              , TO_CHAR(EX.TAX_YMD, 'YYYYMMDD')                                          AS TAX_YMD                                                 /* 증빙일 */  
+              , (SELECT H.TPL_TYPE
+                 FROM IB_EXPENSE  A
+                 INNER JOIN ST_EXDCSTORAGE_EXPENSE B  
+                    ON B.WORK_EXP_NO = A.KEY_NO
+                 INNER JOIN ST_EXDCSTORAGE C 
+                    ON C.SERIALKEY   = B.EXDCSTORAGEKEY   
+                 INNER JOIN DM_DOCUMENT_H H 
+                    ON H.DCCODE      = C.DCCODE
+                   AND H.ORGANIZE    = C.ORGANIZE    
+                   AND H.DOCNO       = C.DOCNO
+                   AND H.DEL_YN      = 'N'
+                 WHERE A.SERIALKEY   = EX.SERIALKEY
+                 FETCH FIRST 1 ROWS ONLY)                                                AS TPL_TYPE                                                /* 3자물류유형코드 */
+        FROM    IB_EXPENSE EX
+
+        LEFT JOIN OD
+            ON OD.EXPENSE_SN = EX.SERIALKEY
+
+        LEFT JOIN (
+             SELECT ZINVOICE
+                   ,LISTAGG(DISTINCT ZRETURN, ',') WITHIN GROUP (ORDER BY ZRETURN) AS ZRETURN_AGG
+             FROM  ZR_CTE
+             GROUP BY ZINVOICE
+            ) ZR
+            ON ZR.ZINVOICE = EX.IF_DOC_NO        
+        
+         LEFT JOIN (
+             SELECT ZINVOICE
+                   ,LISTAGG(DISTINCT ZRE_BELNR, ',') WITHIN GROUP (ORDER BY ZRE_BELNR) AS ZRE_BELNR_AGG
+             FROM  ZRE_CTE
+             GROUP BY ZINVOICE
+            ) ZRE
+            ON ZRE.ZINVOICE = EX.IF_DOC_NO 
+        
+        LEFT JOIN   (  
+             SELECT S.DOC_ID, COUNT(S.SERIALKEY) AS CNT                                          
+             FROM   IB_EXPENSE_HTTP_DOC_ATTACH S                               
+             WHERE  S.DOC_NAME = 'IMP_EXPENSE'
+             GROUP BY S.DOC_ID        
+            ) FILECNT 
+            ON FILECNT.DOC_ID = EX.SERIALKEY 
+        
+        LEFT JOIN   (  
+             SELECT ED.EXPENSE_SN, COUNT(ED.SERIALKEY) AS CNT     
+             FROM   IB_EXPENSE_DISTRIBUTION ED    
+             GROUP BY ED.EXPENSE_SN        
+            ) ED 
+            ON ED.EXPENSE_SN = EX.SERIALKEY
+        
+        LEFT JOIN   (  
+             SELECT 
+                  X.EXPENSE_SN
+                 ,CASE WHEN MAX(ACCOUNT_DETAIL_CODE) IN ('K10', 'K11', 'W01', 'W02', 'W03')
+                       THEN '보관료'
+                       WHEN MAX(ACCOUNT_DETAIL_CODE) IN ('K09')
+                       THEN '보관료(PLT)'
+                       ELSE MAX(ACCOUNT_DETAIL_NAME)
+                  END                                AS ACCOUNT_DETAIL_NAME
+             FROM   IB_EXPENSE_DISTRIBUTION X
+             LEFT OUTER JOIN CM_CODE CD
+               ON CD.CODELIST  = 'JOURNALCODE'
+              AND CD.BASECODE  = X.ACCOUNT_DETAIL_CODE  
+             GROUP BY X.EXPENSE_SN        
+            ) X 
+            ON X.EXPENSE_SN = EX.SERIALKEY
+        
+        LEFT JOIN   (  
+             SELECT CMS.STORERKEY, MAX(CMS.DESCRIPTION) AS DESCRIPTION
+             FROM   CM_STORER CMS                              
+             GROUP BY CMS.STORERKEY        
+            ) CMS
+            ON CMS.STORERKEY = EX.STORERKEY
+        
+        LEFT OUTER JOIN CM_CODE_STORER CD1
+                    ON CD1.STORERKEY = EX.STORERKEY
+                   AND CD1.CODELIST  = 'STATUS_EXPENSE'   
+                   AND CD1.BASECODE  = EX.STATUS
+        LEFT OUTER JOIN CM_CODE_STORER CD2
+                    ON CD2.STORERKEY = EX.STORERKEY
+                   AND CD2.CODELIST  = 'STATUS_EXPENSE_IF'   
+                   AND CD2.BASECODE  = EX.IF_STATUS           
+        LEFT OUTER JOIN CM_CODE_STORER CD3
+                    ON CD3.STORERKEY = EX.STORERKEY
+                   AND CD3.CODELIST  = 'EXPENSEGUBUN'   
+                   AND CD3.BASECODE  = EX.ATTRIBUTES2
+        LEFT OUTER JOIN CM_CODE_STORER CD4
+                    ON CD4.STORERKEY = EX.STORERKEY
+                   AND CD4.CODELIST  = 'TAX_TAG'   
+                   AND CD4.BASECODE  = EX.TAX_TAG
+        LEFT OUTER JOIN FRAMEONE_USER USER1
+                    ON USER1.USER_ID = EX.ADDWHO
+        LEFT OUTER JOIN FRAMEONE_USER USER2
+                    ON USER2.USER_ID = EX.EDITWHO
+        
+        WHERE   1 = 1
+            AND    EX.DCCODE                 = #{fixdccode}
+            AND    EX.STORERKEY              = #{gStorerkey}
+        <if test="adddateFrom != null and adddateFrom != ''">                     
+            AND    EX.ADDDATE        <![CDATA[>=]]> TO_DATE(#{adddateFrom}      , 'yyyyMMdd')            
+        </if>              
+        <if test="adddateTo != null and adddateTo != ''">                       
+            AND    EX.ADDDATE        <![CDATA[<]]> TO_DATE(#{adddateTo}        , 'yyyyMMdd')+1          
+        </if>              
+        <if test="editdateFrom != null and editdateFrom != ''">                    
+            AND    EX.EDITDATE       <![CDATA[>=]]> TO_DATE(#{editdateFrom}     , 'yyyyMMdd')            
+        </if>              
+        <if test="editdateTo != null and editdateTo != ''">                      
+            AND    EX.EDITDATE       <![CDATA[<]]> TO_DATE(#{editdateTo}       , 'yyyyMMdd')+1          
+        </if>              
+        <if test="docdtFrom != null and docdtFrom != ''">                       
+            AND    EX.ISSUE_DATE     <![CDATA[>=]]> TO_DATE(#{docdtFrom}        , 'yyyyMMdd')            
+        </if>              
+        <if test="docdtTo != null and docdtTo != ''">                         
+            AND    EX.ISSUE_DATE     <![CDATA[<]]> TO_DATE(#{docdtTo}          , 'yyyyMMdd')+1          
+        </if>              
+        <if test="taxdateFrom != null and taxdateFrom != ''">                     
+            AND    EX.TAX_YMD        <![CDATA[>=]]> TO_DATE(#{taxdateFrom}      , 'yyyyMMdd')            
+        </if>              
+        <if test="taxdateTo != null and taxdateTo != ''">                       
+            AND    EX.TAX_YMD        <![CDATA[<]]> TO_DATE(#{taxdateTo}        , 'yyyyMMdd')+1          
+        </if>              
+        <if test="baselinedateFrom != null and baselinedateFrom != ''">                
+            AND    EX.DUE_DATE       <![CDATA[>=]]> TO_DATE(#{baselinedateFrom} , 'yyyyMMdd')            
+        </if>              
+        <if test="baselinedateTo != null and baselinedateTo != ''">                  
+            AND    EX.DUE_DATE       <![CDATA[<]]> TO_DATE(#{baselinedateTo}   , 'yyyyMMdd')+1          
+        </if>              
+        <if test="postingdateFrom != null and postingdateFrom != ''">                 
+            AND    EX.POSTING_DATE   <![CDATA[>=]]> TO_DATE(#{postingdateFrom}  , 'yyyyMMdd')            
+        </if>              
+        <if test="postingdateTo != null and postingdateTo != ''">                   
+            AND    EX.POSTING_DATE   <![CDATA[<]]> TO_DATE(#{postingdateTo}    , 'yyyyMMdd')+1          
+        </if>              
+        <if test="yyyymm != null and yyyymm != ''">                           
+            AND    EX.ATTRIBUTES1              =    #{yyyymm}                                             
+        </if>              
+        <if test="status != null and status != ''">                           
+            AND    EX.STATUS                   =    #{status}                                             
+        </if>              
+        <if test="ifStatus != null and ifStatus != ''">                        
+            AND    EX.IF_STATUS                =    #{ifStatus}                                          
+        </if>              
+        <if test="attributes2 != null and attributes2 != ''">                      
+            AND    EX.ATTRIBUTES2              =    #{attributes2}                                        
+        </if>              
+        <if test="keynoMulti != null and keynoMulti != ''">
+            AND    EX.KEY_NO      IN
+            <foreach collection="keynoMulti" item="item" open="(" separator="," close=")">
+                 #{item}
+            </foreach> 
+        </if>
+        <if test="erpponoMulti != null and erpponoMulti != ''">
+            AND    EX.ERP_PO_NO      IN                                                                                  /* ERP 발주번호 */
+            <foreach collection="erpponoMulti" item="item" open="(" separator="," close=")">
+                 #{item}
+            </foreach> 
+        </if>
+        <if test="addwho != null and addwho != ''">                           
+            AND    EXISTS (SELECT 1                                               
+                           FROM   FRAMEONE_USER                                              
+                           WHERE  USER_ID = EX.ADDWHO                                        
+                           AND   (USER_ID LIKE '%' || #{addwho} || '%'
+                               OR USER_NM LIKE '%' || #{addwho} || '%'
+                                 )
+                           )                                                                          </if>
+        <if test="editwho != null and editwho != ''">                          
+            AND    EXISTS (SELECT 1                                               
+                           FROM   FRAMEONE_USER                                              
+                           WHERE  USER_ID = EX.EDITWHO                                        
+                           AND   (USER_ID LIKE '%' || #{editwho} || '%'
+                               OR USER_NM LIKE '%' || #{editwho} || '%'
+                                 )
+                           )                                                                          </if>
+        <if test="adjustmentsuppliercode != null and adjustmentsuppliercode != ''">         
+            AND    EX.ADJUSTMENT_SUPPLIER_CODE IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL                /* Supplier 코드 */  
+                                                FROM (SELECT #{adjustmentsuppliercode} AS VAL FROM DUAL) A
+                                                CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)                  
+        </if> 
+        <if test="adjustmentsuppliername != null and adjustmentsuppliername != ''">         
+            AND    EX.ADJUSTMENT_SUPPLIER_NAME IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL                /* Supplier 명 */  
+                                                FROM (SELECT #{adjustmentsuppliername} AS VAL FROM DUAL) A
+                                                CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0) )                     
+        </if>  
+        <if test="organizeMulti != null and organizeMulti != ''">
+            AND    EXISTS (SELECT 1                                                               
+                            FROM   IB_EXPENSE_DISTRIBUTION                                                              
+                            WHERE  IB_EXPENSE_DISTRIBUTION.EXPENSE_SN = EX.SERIALKEY                                                               
+                            <if test="organizeMulti != null and organizeMulti != ''">
+                               AND IB_EXPENSE_DISTRIBUTION.ORGANIZE      IN
+                                <foreach collection="organizeMulti" item="item" open="(" separator="," close=")">
+                                    #{item}
+                                </foreach> 
+                            </if>
+                          ) 
+        </if>
+        <if test="supplierCodeMulti != null and supplierCodeMulti != ''">
+            AND    EX.ADJUSTMENT_SUPPLIER_CODE      IN                                                              /* Supplier 코드 */
+            <foreach collection="supplierCodeMulti" item="item" open="(" separator="," close=")">
+                 #{item}
+            </foreach> 
+        </if>
+            AND    EXISTS (SELECT 1                                                               
+                            FROM   CM_USER_AUTHORITY                                                              
+                            WHERE  CM_USER_AUTHORITY.DCCODE = #{fixdccode} 
+                            AND    CM_USER_AUTHORITY.USERID = #{gUserId}
+                            FETCH FIRST 1 ROWS ONLY  )
+        
+        ORDER BY 
+                EX.KEY_NO DESC
+    </select>
+    
+    <sql id="popupDocumentInfoHeaderColumnList">
+          EX.SERIALKEY                      /* 일련번호 */
+		, EX.DCCODE                         /* 센터코드 */
+		, EX.STORERKEY                      /* 고객사코드 */
+		, EX.MEMBER_ID                      /* 법인식별번호 */
+		, EX.DIVISION_ID                    /* 사업장식별번호 */
+		, EX.ORGANIZATION_ID                /* 조직식별번호 */
+		, EX.BUSINESS_TYPE_ID               /* 업무유형식별번호 */
+		, EX.BUSINESS_TYPE_CODE             /* 업무유형코드 */
+		, EX.BUSINESS_TYPE_NAME             /* 업무유형명칭 */
+		, EX.KEY_NO                         /* 문서 관리번호 */
+		, EX.REVISION_NO                    /* 수정횟수 */
+		, TO_CHAR(EX.ISSUE_DATE, 'YYYYMMDD') AS ISSUE_DATE    /* 비용 발생일자 */
+		, TO_CHAR(EX.DUE_DATE, 'YYYYMMDD')   AS DUE_DATE      /* 비용 지급 예정일 */
+		, EX.ADJUSTMENT_SUPPLIER_CODE       /* 비용 발생업체 코드 */
+		, EX.ADJUSTMENT_SUPPLIER_NAME       /* 비용 발생 업체 명칭 */
+		, EX.ADJUSTMENT_SITE_CODE           /* 정산업체코드 */
+		, EX.ADJUSTMENT_SITE_NAME           /* 정산업체명 */
+		, EX.ACTUAL_SUPPLIER_CODE           /* 대체 지급처 코드 */
+		, EX.ACTUAL_SUPPLIER_NAME           /* 대체 지급처 명칭 */
+		, EX.PAYMENT_TERMS_ID               /* 대금 지급 방법 ID */
+		, EX.PAYMENT_TERMS_CODE             /* 대금 지급 방법 코드(2AA, 2AL.. ) */
+		, EX.PAYMENT_TERMS_NAME             /* 대금 지급 방법 명칭 */
+		, EX.PURCHASE_PERSON_ID             /* 구매 담당장 ID */
+		, EX.PURCHASE_PERSON_CODE           /* 구매 담당자 코드 */
+		, EX.PURCHASE_PERSON                /* 구매 담당자 */
+		, EX.ACCOUNT_KIND_ID                /* 계정분류식별자 */
+		, EX.ACCOUNT_KIND_CODE              /* 계정분류코드 */
+		, EX.ACCOUNT_KIND_NAME              /* 계정분류명 */
+		, EX.ACCOUNT_CR_ID                  /* 대변 계정 ID */
+		, EX.ACCOUNT_CR_CODE                /* 대변 계정 코드 */
+		, EX.ACCOUNT_CR_NAME                /* 대변 계정 명칭 */
+		, EX.ACCOUNT_DETAIL_ID              /* 계정 상세 ID */
+		, EX.ACCOUNT_DETAIL_CODE            /* 계정 상세 코드 */
+		----, EX.ACCOUNT_DETAIL_NAME            /* 계정 상세 명칭 */
+		, EX.SUPPLY_PRICE                   /* 공급가격 */
+		, EX.SUPPLY_PRICE_KRW               /* 공급원화가격 */
+		, EX.AMOUNT_UNIT                    /* 금액 단위 */
+		, EX.AMOUNT_UNIT_ID                 /* 금액단위 ID */
+		, EX.EXCHANGE_TYPE_ID               /* 환율타입 ID */
+		, EX.EXCHANGE_TYPE                  /* 환율 타입 */
+		, EX.EXCHANGE_TYPE_NAME             /* 환율타입 명칭 */
+		, EX.EXCHANGE_DATE                  /* 환율일자 */
+		, EX.EXCHANGE_RATE                  /* 환율 */
+		, EX.TAX_TYPE_ID                    /* 세금 타입 ID */
+		, EX.TAX_TYPE_CODE                  /* 세금 타입 코드 */
+		, EX.TAX_TYPE_NAME                  /* 세금 타입 명칭 */
+		, EX.TAX_RATE                       /* Tax Rate */
+		, EX.TAX_AMOUNT                     /* 세금 금액 */
+		, EX.TAX_AMOUNT_KRW                 /* 원화 세금 금액 */
+		, EX.AMOUNT                         /* 금액 */
+		, EX.AMOUNT_KRW                     /* 원화금액 */
+		, EX.SUMMARY                        /* 적요 사항 */
+		, EX.SOURCE                         /* 소스 */
+		, EX.STATUS                         /* ENT : 작성 / CFM : 결재승인 / SCO : 완료(인터페이스성공) */
+		, EX.ATTRIBUTES1                    /* 예비필드(Attributes1) - Excel Upload SN */
+		, EX.ATTRIBUTES2                    /* 비용발생 프로그램 구분 CH,NULL=수기등록 SM=STOCK MONTHLY SC=STOCK CASE PC=PURCHASE CLAIM */
+		, EX.ATTRIBUTES3                    /* 예비필드(Attributes3) */
+		, EX.ATTRIBUTES4                    /* 예비필드(Attributes4) */
+		, EX.ATTRIBUTES5                    /* 예비필드(Attributes5) */
+		, EX.ATTRIBUTES6                    /* 예비필드(Attributes6) */
+		, EX.ATTRIBUTES7                    /* 예비필드(Attributes7) */
+		, EX.ATTRIBUTES8                    /* 예비필드(Attributes8) */
+		, EX.ATTRIBUTES9                    /* 예비필드(Attributes9) */
+		, EX.ATTRIBUTES10                   /* 예비필드(Attributes10) */
+		, EX.ATTRIBUTES11                   /* 예비필드(Attributes11) */
+		, EX.ATTRIBUTES12                   /* 예비필드(Attributes12) */
+		, EX.ATTRIBUTES13                   /* 예비필드(Attributes13) */
+		, EX.ATTRIBUTES14                   /* 예비필드(Attributes14) */
+		, EX.ATTRIBUTES15                   /* 예비필드(Attributes15) */
+		, EX.ATTRIBUTES_DATE1               /* 예비필드(Attributes_Date1) */
+		, EX.ATTRIBUTES_DATE2               /* 예비필드(Attributes_Date2) */
+		, EX.ATTRIBUTES_DATE3               /* 예비필드(Attributes_Date3) */
+		, EX.ATTRIBUTES_DATE4               /* 예비필드(Attributes_Date4) */
+		, EX.ATTRIBUTES_DATE5               /* 예비필드(Attributes_Date5) */
+		, EX.IP_STATUS                      /* 파트터사  문서 상태 N:작성상태 Y:Request 상태 */
+		, EX.CUSTOMS_CODE                   /* 관세사 코드 */
+		, EX.CUSTOMS_NAME                   /* 관세사 명 */
+		, EX.BUSINESSPLACE_CD               /* 사업장 */
+		, EX.IF_USER_ID                     /* 인터페이스 사용자 */
+		, EX.IF_DATE                        /* 인터페이스 일자 */
+		, EX.FISCAL_YEAR                    /* 회계년도 */
+		-- , EX.SLIP_NO                        /* 전표번호 */
+		, EX.POSTING_DATE                   /* Posting Date */
+		, EX.ACCT_CLS                       /* 전표유형(T : 정상,  M :마이너스) */
+		, TO_CHAR(EX.TAX_YMD, 'YYYYMMDD') AS TAX_YMD   /* 증빙일 */
+		, EX.TAX_STTL_CLS                   /* 정산유형 */
+		, EX.INV_DEPT_CD                    /* 기표부서코드 */
+		, EX.COSTCD                         /* 코스트 센터(운영팀) */
+		, EX.INV_USER_ID                    /* 정산담당자 (기본) */
+		, EX.PAYMENT_TERM                   /* 지불조건 */
+		, EX.PAYMENT_METHOD                 /* 지불방법 */
+		, EX.PAYMENT_DLY                    /* 보류여부 */
+		, EX.INV_NO                         /* 송장번호 - MM */
+		, EX.TAX_NO                         /* 세금계산서번호 */
+		, EX.JOURNAL_TYPE_CODE              /* 분개코드 */
+		, EX.JOURNAL_TYPE_NAME              /* 분개 */
+		, EX.IF_ID                          /* 인터페이스ID */
+		, EX.IF_STATUS                      /* SCO : 요청성공 / CCO : 요청취소성공 / ERR : 인터페이스(요청/요청취소) 실패 */
+		, EX.TAX_TAG                        /* T : 세금계산서, I : 거래명세서, A:계산서,  E : 기타 계산서 */
+		, EX.PURCHASING_GROUP_CODE          /* 구매그룹코드 */
+		, EX.ETAX_COM_CD                    /* 전자세금계산서 업체구분 (E:미연동, G:Gtax, S:SmartBill, T:KT-NET,L:KL-NET) */
+		, EX.DIRE_TAG                       /* Y:정발행, N:역발행 */
+		, EX.VAT_CLS                        /* 세액구분(F:면세, Y:과세, Z:영세) */
+		, EX.SALE_CD                        /* 매출타입 */
+		, EX.TRANSACTION_CD                 /* 트랜잭션코드(OB/FI) */
+		, EX.COMPANY_ID                     /* 회사(신생법인/계열사) ID */
+		, EX.APPR_STATUS                    /* 품의상태 STB(StandBy) : 품의 대기, REQ(Request) : 품의 요청 , REJ(Reject) : 품의 반려, APP(Approval) : 품의 확정 */
+		, EX.APPR_DATE                      /* 품의요청/반려/승인 일자 */
+		, EX.RCV_NO                         /* STOCK_IO_ITEM.DOCUMENT_NO */
+		, EX.IF_DOC_NO                      /* 전표처리 인터페이스 번호 CH-YYMM-00000 => 'CH-'||TO_CHAR(SYSDATE,'YYMM')||'-'||SUBSTRB(TO_CHAR(LPAD(IB_EXPENSE_IF_S.NEXTVAL,20,0)),-5) */
+		, EX.TAX_AUTO_FLAG                  /* Y=아이템에 의한 자동 설정, N=매뉴얼 선택 */
+		, EX.INV_SIGN                       /* 세금계산서 역발행 여부 */
+		, EX.ADDDATE                        /* 최초등록시간 */
+		, EX.EDITDATE                       /* 최종변경시간 */
+		, EX.ADDWHO                         /* 최초등록자 */
+		, EX.EDITWHO                        /* 최종변경자 */
+	</sql>
+    
+    <select id="getPopupDocumentInfoHeader" resultType="IbExpenseDoucmentHeaderPopupResDto">
+        SELECT    /* [ibExpenseService.sqlx][getPopupDocumentInfoHeader][비용기표 Popup 헤더 조회][sunho.kim][2025.08.04] */
+              <include refid="popupDocumentInfoHeaderColumnList"/>
+             ,(SELECT  DESCRIPTION
+               FROM    CM_STORER
+               WHERE   CM_STORER.STORERKEY = EX.STORERKEY)    AS COMPANY_NAME                                                   /* 고객사명  */            
+             ,(SELECT  DESCRIPTION
+               FROM    CM_STORER
+               WHERE   CM_STORER.STORERKEY = EX.STORERKEY)    AS BUSINESSPLACE_NAME                                             /* 고객사명 */
+             ,(SELECT  DCNAME
+               FROM    CM_DC
+               WHERE   CM_DC.DCCODE = EX.DCCODE)              AS DCNAME                                                         /* 물류센터명  */
+             , CD1.BASEDESCR                                  AS PAYMENT_METHOD_NAME                                            /* 지불방법명 */
+             , CD2.BASEDESCR                                  AS PAYMENT_TERM_NAME                                              /* 지불조건명 */
+             , ''                                             AS COSTCT_NM                                                      /* COSTCT_NM */
+             , ''                                             AS PURCHASING_GROUP_NAME                                          /* PURCHASING_GROUP_NAME */
+             , EX.TRANSACTION_CD                              AS TRANSACTION_NM                                                 /* 트랜잭션코드(OB/FI) */
+             ,(SELECT  VATNO
+               FROM    MS_CUST
+               WHERE   MS_CUST.STORERKEY = EX.STORERKEY
+               AND     MS_CUST.CUSTKEY   = EX.ADJUSTMENT_SUPPLIER_CODE
+               AND     MS_CUST.CUSTTYPE  = 'P')               AS CB_REGISNO                                                     /* 사업자등록번호 */    
+             , CD3.BASEDESCR                                  AS TAX_TAG_NM                                                     /* TAX_TAG_NM */
+             , (SELECT SUBSTR(XMLAGG(XMLELEMENT(COL ,',', ZRE_BELNR) ORDER BY ZRE_BELNR).EXTRACT('//text()').GETSTRINGVAL(), 2)
+                FROM  (SELECT DISTINCT ZINVOICE, ZRE_BELNR
+                       FROM   IF_IB_STOCKETC_H
+                       WHERE  FI_IF_STATUS = 'CNF'
+                       UNION ALL
+                       SELECT DISTINCT ZINVOICE, ZRE_BELNR
+                       FROM   IF_IB_STOCKSKU_H
+                       WHERE  FI_IF_STATUS = 'CNF'
+                      ) AA
+                WHERE  AA.ZINVOICE = EX.IF_DOC_NO)            AS SLIP_NO                                                        /* 전표번호 */     
+             , (SELECT ACCOUNT_DETAIL_NAME 
+                FROM IB_EXPENSE_DISTRIBUTION
+                WHERE IB_EXPENSE_DISTRIBUTION.DCCODE = EX.DCCODE
+                  AND IB_EXPENSE_DISTRIBUTION.KEY_NO = EX.KEY_NO
+                  AND ROWNUM = 1)                             AS ACCOUNT_DETAIL_NAME                                           /* ACCOUNT_DETAIL */  
+        FROM   IB_EXPENSE EX
+        
+        LEFT OUTER JOIN CM_CODE_STORER CD1
+                    ON CD1.STORERKEY = EX.STORERKEY
+                   AND CD1.CODELIST  = 'PAYMENT_METHOD'   
+                   AND CD1.BASECODE  = EX.PAYMENT_METHOD
+        LEFT OUTER JOIN CM_CODE_STORER CD2
+                    ON CD2.STORERKEY = EX.STORERKEY
+                   AND CD2.CODELIST  = 'PAYMENT_TERM'   
+                   AND CD2.BASECODE  = EX.PAYMENT_TERM           
+        LEFT OUTER JOIN CM_CODE_STORER CD3
+                    ON CD3.STORERKEY = EX.STORERKEY
+                   AND CD3.CODELIST  = 'TAX_TAG'   
+                   AND CD3.BASECODE  = EX.TAX_TAG
+        
+        WHERE EX.SERIALKEY = #{serialkey}
+    </select>
+    
+    <sql id="popupDocumentInfoDetailColumnList">
+			  ED.SERIALKEY                         /* 일련번호 */
+			, ED.DCCODE                            /* 센터코드 */
+			, ED.STORERKEY                         /* 고객사코드 */ 
+			, ED.ORGANIZE                          /* 조직코드 */
+			, ED.EXPENSE_SN                        /* Header SN */
+			, ED.MEMBER_ID                         /* 멤버아이디 */
+			, ED.DIVISION_ID                       /* 사업장 */
+			, ED.ORGANIZATION_ID                   /* 부서 */
+			, ED.BUSINESS_TYPE_ID                  /* 비지니스타입 */
+			, ED.BUSINESS_TYPE_CODE                /* 비지니스타입 코드 */
+			, ED.BUSINESS_TYPE_NAME                /* 비지니스타입 명 */
+			, ED.KEY_NO                            /* 문서번호 */
+			, ED.REVISION_NO                       /* 리비젼 */
+			, ED.CREDIT_KIND                       /* ITEM/TAX */
+			, ED.DOCUMENT_TYPE_ID                  /* 문서 타입 */
+			, ED.DOCUMENT_TYPE_CODE                /* Doc Type */
+			, ED.DOCUMENT_TYPE_NAME                /* 문서타입 명 */
+			, ED.DOCUMENT_SN                       /* 참조문서의 일련번호 */
+			, ED.DOCUMENT_NUMBER                   /* 참조문서의 문서번호 */
+			, ED.ACCOUNT_KIND_ID                   /* 계정종류 */
+			, ED.ACCOUNT_KIND_CODE                 /* 계정종류 코드 */
+			, ED.ACCOUNT_KIND_NAME                 /* 계정종류 명 */
+			, ED.ACCOUNT_DR_ID                     /* 차변계정 */
+			, ED.ACCOUNT_DR_CODE                   /* Account Code */
+			, ED.ACCOUNT_DR_NAME                   /* 차변계정명 */
+			, ED.ACCOUNT_DETAIL_ID                 /* 비용 */
+			, ED.ACCOUNT_DETAIL_CODE               /* Cost Code */
+			, ED.ACCOUNT_DETAIL_NAME               /* 비용명 */
+			, ED.SUPPLY_PRICE                      /* 공급가 */
+			, ED.SUPPLY_PRICE_KRW                  /* 공급가(원화) */
+			, ED.TAX_TYPE_ID                       /* 과세타입 */
+			, ED.TAX_TYPE_CODE                     /* Tax code */
+			, ED.TAX_TYPE_NAME                     /* 과세타입 명 */
+			, ED.TAX_RATE                          /* Tax Rate */
+			, ED.TAX_AMOUNT                        /* 세금 */
+			, ED.TAX_AMOUNT_KRW                    /* 세금(원화) */
+			, ED.AMOUNT                            /* 총금액 */
+			, ED.AMOUNT_KRW                        /* 총금액(원화) */
+			, ED.SUMMARY                           /* 비고 */
+			, ED.SOURCE                            /* 참조문서 종류 */
+			, ED.STATUS                            /* 상태 */
+			, ED.PO_NO                             /* PO번호 */
+			, ED.DIST_SUPPLY_PRICE                 /* 배부누적 금액 */
+			, ED.EXCHANGE_TYPE_ID                  /* 환율 */
+			, ED.EXCHANGE_TYPE                     /* 환율타입 */
+			, ED.EXCHANGE_TYPE_NAME                /* 환율타입명 */
+			, ED.EXCHANGE_DATE                     /* 환율일자 */
+			, ED.EXCHANGE_RATE                     /* 환율 */
+			, ED.EPA_SN                            /* EAP 식별번호 */
+			, ED.IP_SN                             /* IP 식별번호 */
+			, ED.II_SN                             /* II 식별번호 */
+			, ED.CL_SN                             /* CL 식별번호 */
+			, ED.REMARK                            /* 참고 */
+			, ED.ATTRIBUTE1                        /* 실제 사용 Po No */
+			, ED.ATTRIBUTE2                        /* Attribute2 */
+			, ED.ATTRIBUTE3                        /* Attribute3 */
+			, ED.ATTRIBUTE4                        /* Attribute4 */
+			, ED.ATTRIBUTE5                        /* 사업장 */
+			, ED.ATTRIBUTE6                        /* 팀코드 */
+			, ED.ATTRIBUTE7                        /* 팀명 */
+			, ED.ATTRIBUTE8                        /* 공정코드 */
+			, ED.ATTRIBUTE9                        /* 공정명 */
+			, ED.ATTRIBUTE10                       /* 증빙유형 */
+			, ED.ATTRIBUTE11                       /* 세금계산서 건수 */
+			, ED.ATTRIBUTE12                       /* 세금계산서 발행 거래처 */
+			, ED.ATTRIBUTE13                       /* EXCEL TABLE */
+			, ED.ATTRIBUTE14                       /* EXCEL TABLE.SN */
+			, ED.ATTRIBUTE15                       /* TYPE */
+			, ED.ATTRIBUTE_DATE1                   /* Attribute Date1 */
+			, ED.ATTRIBUTE_DATE2                   /* Attribute Date2 */
+			, ED.ATTRIBUTE_DATE3                   /* Attribute Date3 */
+			, ED.ATTRIBUTE_DATE4                   /* Attribute Date4 */
+			, ED.ATTRIBUTE_DATE5                   /* Attribute Date5 */
+			, ED.PO_SN                             /* PURCHASE_ORDER.SN */
+			, ED.COSTCD                            /* 코스트센터코드 */
+			, ED.ITEM_CODE                         /* 상품코드 */
+			, ED.SALE_CUSTOMER_CODE                /* 고객코드 */
+			, ED.TAX_FLAG                          /* 부가세자동계산 (N=계산금지, Y=계산허용) */
+			, ED.ADDDATE                           /* 최초등록시간 */
+			, ED.EDITDATE                          /* 최종변경시간 */
+			, ED.ADDWHO                            /* 최초등록자 */
+			, ED.EDITWHO                           /* 최종변경자 */
+    </sql>
+    
+    <select id="getPopupDocumentInfoDetail" resultType="IbExpenseDoucmentDetailPopupResDto">
+        SELECT     /* [ibExpenseService.sqlx][getPopupDocumentInfoDetail][비용기표 Popup 상세 조회][sunho.kim][2025.08.04] */
+              T.*
+            , ROUND(T.KG_CAL / SUM(T.KG_CAL) OVER() * 100,2)                         AS RATE_QTY                    /* KG비중 */
+            , ROUND(SUM(T.SUPPLY_PRICE) OVER() * (T.KG_CAL / SUM(T.KG_CAL) OVER()))  AS DIS_COST                    /* KG 비용분배 */           
+        FROM( 
+            SELECT 
+                  <include refid="popupDocumentInfoDetailColumnList"/>
+                 , SK.QTYPERBOX                                                                                  AS QTYPERBOX               /* 박스당수량 */                                  
+                 , SK.NETWEIGHT                                                                                  AS NETWEIGHT               /* 순중량 */
+                 , SK.BASEUOM                                                                                    AS BASEUOM                 /* 기본단위 */  
+                 , SK.PURCHASEUOM                                                                                AS PURCHASEUOM             /* 구매단위 */ 
+                 , SK.RETURNUOM                                                                                  AS RETURNUOM               /* 반품단위 */
+                 , ES.QUANTITY                                                                                   AS QUANTITY                /* 직송수량 */
+                 , ROUND((SELECT FN_CONV_UOM(SK.STORERKEY, SK.SKU, SK.BASEUOM, 'KG', ES.QUANTITY) FROM DUAL),2)  AS KG_CAL                  /* 직송단위 환산 [KG] */
+                 , '10000'                                                                                       AS SUPPLY_PRICE_NEW        /* SUPPLY_PRICE_NEW */
+                 , TRUNC(10000 * ED.TAX_RATE/100)                                                                AS TAX_AMOUNT_NEW          /* TAX_AMOUNT_NEW */
+                 , CASE WHEN ED.TAX_FLAG='Y' THEN 10000 + TRUNC( 10000 * ED.TAX_RATE /100) ELSE 0 END            AS AMOUNT_NEW              /* AMOUNT_NEW */
+                 , CASE WHEN SK.BASEUOM='EA' THEN ( 1 * SK.NETWEIGHT )
+                        WHEN SK.BASEUOM='BOX' THEN ( 1 * SK.QTYPERBOX * SK.NETWEIGHT ) ELSE 1 END KG_CH
+                 , FN_DESCR_ORGANIZE(ED.DCCODE, ED.ORGANIZE)                                                     AS ORGANIZENAME            /* 창고명 */
+                 , SK.DESCRIPTION                                                                                AS SKUNAME                 /* 품목명 */
+                 , CD1.BASEDESCR                                                                                 AS STORAGETYPENAME         /* 저장조건명 */                 
+                 , ''                                                                                            AS ORDERTYPENAME           /* 주문유형명 */            
+                 , DM_DOCUMENT_H.TO_CUSTKEY                                                                      AS TO_CUSTKEY              /* 관리처코드 */   
+                 , DM_DOCUMENT_H.TO_CUSTNAME                                                                     AS TO_CUSTNAME             /* 관리처명 */
+                 , ES.CONVSERIALNO                                                                               AS CONVSERIALNO            /* B/L번호 */
+            FROM IB_EXPENSE_DISTRIBUTION ED
+            LEFT OUTER JOIN MS_SKU SK 
+                ON  ED.ITEM_CODE = SK.SKU 
+                AND ED.STORERKEY = SK.STORERKEY
+            LEFT OUTER JOIN ST_EXDCSTORAGE ES 
+                ON  ED.DOCUMENT_SN = ES.SERIALKEY 
+                AND ES.YYYYMM      = ED.ATTRIBUTE3 
+                AND ES.ORGANIZE    = ED.ORGANIZE
+            LEFT OUTER JOIN DM_DOCUMENT_H DM_DOCUMENT_H
+                ON  DM_DOCUMENT_H.STORERKEY  = ES.STORERKEY
+                AND DM_DOCUMENT_H.DCCODE     = ES.DCCODE
+                AND DM_DOCUMENT_H.ORGANIZE   = ES.ORGANIZE
+                AND DM_DOCUMENT_H.DOCNO      = ES.DOCNO
+                AND DM_DOCUMENT_H.DOCTYPE    = 'WD'
+                
+            LEFT OUTER JOIN CM_CODE_STORER CD1
+                ON  CD1.STORERKEY = SK.STORERKEY
+                AND CD1.CODELIST  = 'STORAGETYPE'   
+                AND CD1.BASECODE  = SK.STORAGETYPE        
+                
+            WHERE  EXPENSE_SN = #{serialkey}
+         ) T
+        ORDER BY T.DOCUMENT_TYPE_CODE
+               , T.ACCOUNT_DETAIL_CODE
+               , T.SERIALKEY 
+    </select>
+    
+    <select id="getPopupApprovalExpenseInfo" resultType="IbExpenseDoucmentHeaderPopupResDto">
+        SELECT    /* [ibExpenseService.sqlx][getPopupApprovalExpenseInfo][비용기표 Popup 내부결재 Expense 조회][sunho.kim][2025.08.04] */
+               SERIALKEY                                                            /* 데이터번호 */
+              ,KEY_NO                                                               /* 문서번호 */         
+              ,ADJUSTMENT_SUPPLIER_CODE                                             /* 비용 발생업체 코드 */      
+              ,ADJUSTMENT_SUPPLIER_NAME                                             /* 비용 발생 업체 명칭 */    
+              ,LTRIM(TO_CHAR(NVL(AMOUNT,0),'9,999,999,999,990.99')) AS AMOUNT       /* 금액 */
+              ,AMOUNT_UNIT                                                          /* 금액 단위 */
+              ,SUMMARY                                                              /* 적요 사항 */    
+              ,TRANSACTION_CD                                                       /* 트랜잭션코드(OB/FI)  */ 
+        FROM   IB_EXPENSE EX
+        WHERE  SERIALKEY = #{serialkey}
+    </select>
+    
+    <select id="getPopupSupplierInfo" resultType="Hmap">
+        SELECT    /* [ibExpenseService.sqlx][getPopupSupplierInfo][비용기표 Popup SUPPLILER 조회][sunho.kim][2025.08.04] */
+               CUSTKEY                   AS CODE                                    /* 고객사코드 */ 
+             , DESCRIPTION               AS NAME                                    /* 고객사명 */
+             , VATNO                     AS VATNO                                   /* 사업자등록번호 */
+             , OTHER01                   AS PAYMENT_TERM                            /* 결제조건 */  
+             , CD1.BASEDESCR             AS PAYMENT_TERM_NAME                       /* 결제조건명 */
+        FROM   MS_CUST 
+        
+        LEFT OUTER JOIN CM_CODE_STORER CD1
+                    ON CD1.STORERKEY = MS_CUST.STORERKEY
+                   AND CD1.CODELIST  = 'PAYMENT_TERM'   
+                   AND CD1.BASECODE  = MS_CUST.OTHER01
+                   
+        WHERE  STORERKEY = #{gStorerkey}
+            AND    CUSTTYPE  = 'P'
+            AND    DEL_YN    = 'N'
+        <if test="codenm != null and codenm != ''">
+            AND   (CUSTKEY     LIKE #{codenm}||'%'
+                OR DESCRIPTION LIKE #{codenm}||'%')
+        </if>
+        <if test="code != null and code != ''">
+            AND    CUSTKEY     LIKE #{code}||'%'
+        </if>
+        <if test="name != null and name != ''">
+            AND    DESCRIPTION LIKE #{name}||'%'
+        </if>
+    </select>
+    
+    <select id="getApprStatus" resultType="IbExpenseDoucmentHeaderPopupResDto">
+        SELECT   /* [ibExpenseService.sqlx][getApprStatus][비용기표 내부결재 상태 조회][sunho.kim][2025.08.04] */
+               STATUS                         AS STATUS                         /* 상태코드 */
+             , (SELECT APPROVALSTATUS
+                 FROM   AJ_APPRREQUEST APR
+                 WHERE  APR.SLIPNO  = IB_EXPENSE.SERIALKEY
+                   AND  APR.DCCODE  = IB_EXPENSE.DCCODE
+                   AND  APR.DOCTYPE = 'IBEXPENSE'
+                   AND  APR.APPROVALNO != 'STD'  
+                 ORDER BY ADDDATE DESC
+                 FETCH FIRST 1 ROWS ONLY )    AS INTERNAL_APPR_STATUS           /* 내부결재상태 */
+             , IF_STATUS                      AS IF_STATUS                      /* IF 상태 */
+             , APPR_STATUS                    AS APPR_STATUS                    /* 결재상태 */
+             , KEY_NO                         AS KEY_NO                         /* 문서번호 */
+             , IF_DOC_NO                      AS IF_DOC_NO                      /* IF 문서번호 */
+             , CASE WHEN IF_ID IN ('SCM0480') 
+                     THEN (SELECT FI_IF_STATUS                                                
+                           FROM   IF_IB_STOCKETC_H
+                           WHERE  ZINVOICE = IB_EXPENSE.IF_DOC_NO
+                           AND    ROWNUM   = 1)
+                     WHEN IF_ID = 'SCM0470' 
+                     THEN (SELECT FI_IF_STATUS                                                
+                           FROM   IF_IB_STOCKSKU_H
+                           WHERE  ZINVOICE = IB_EXPENSE.IF_DOC_NO
+                           AND    ROWNUM   = 1)
+                     ELSE ''
+                END                           AS FI_IF_STATUS                   /* Posting 상태 */
+             , IF_ID                          AS IF_ID                          /* IF ID */
+             , (SELECT H.TPL_TYPE
+                 FROM IB_EXPENSE  A
+                 INNER JOIN ST_EXDCSTORAGE_EXPENSE B  
+                    ON B.WORK_EXP_NO = A.KEY_NO
+                 INNER JOIN ST_EXDCSTORAGE C 
+                    ON C.SERIALKEY   = B.EXDCSTORAGEKEY   
+                 INNER JOIN DM_DOCUMENT_H H 
+                    ON H.DCCODE      = C.DCCODE
+                   AND H.ORGANIZE    = C.ORGANIZE    
+                   AND H.DOCNO       = C.DOCNO
+                   AND H.DEL_YN      = 'N'
+                 WHERE A.SERIALKEY   = IB_EXPENSE.SERIALKEY
+                 FETCH FIRST 1 ROWS ONLY)     AS TPL_TYPE                       /* 3자물류유형코드 */
+        FROM   IB_EXPENSE 
+        WHERE  SERIALKEY = #{serialkey}
+    </select>
+    
+    <select id="getExdcClose" resultType="String">
+        SELECT   /* [ibExpenseService.sqlx][getExdcClose][비용기표 정산마감 상태 조회][sunho.kim][2025.08.04] */
+               NVL(MAX(IB_EXDCCLOSE.CLOSEYN),'N')   AS CLOSEYN                  /* 정산마감여부 */
+        FROM   IB_EXPENSE
+        JOIN   IB_EXPENSE_DISTRIBUTION
+        ON     IB_EXPENSE_DISTRIBUTION.EXPENSE_SN = IB_EXPENSE.SERIALKEY
+        JOIN   ST_EXDCSTORAGE
+        ON     ST_EXDCSTORAGE.SERIALKEY           = IB_EXPENSE_DISTRIBUTION.DOCUMENT_SN
+        JOIN   IB_EXDCCLOSE
+        ON     IB_EXDCCLOSE.YYYYMM                = ST_EXDCSTORAGE.YYYYMM
+        AND    IB_EXDCCLOSE.STORAGELOCATION       = RIGHT(ST_EXDCSTORAGE.ORGANIZE,4)
+        AND    IB_EXDCCLOSE.CLOSEYN               = 'Y'
+        WHERE  IB_EXPENSE.SERIALKEY               = #{serialkey}
+    </select>
+    
+    <select id="getIbClose" resultType="String">
+        SELECT   /* [ibExpenseService.sqlx][getIbClose][마감 상태 조회][sunho.kim][2025.08.04] */
+            CASE WHEN COUNT(1) = 1 THEN 'Y' ELSE 'N' END  AS CLOSEYN                  /* 정산마감여부 */
+        FROM   IB_CLOSE
+        WHERE CLOSEDT = #{yyyymm}
+          AND DCCODE  = '2170'
+          AND DEL_YN  = 'N'
+    </select>
+    
+    <select id="getDummyLineNo" resultType="long">
+        SELECT  /* [ibExpenseService.sqlx][getDummyLineNo][비용기표 내부결재 DummyLineNo 채번][sunho.kim][2025.08.04] */
+               SEQ_IB_APPROVAL_DUMMY_LINE_NO.NEXTVAL AS DUMMY_LINE_NO
+        FROM   DUAL
+    </select>
+    
+    <select id="getPopupApprovalUserInfo" resultType="IbExpenseApprovalUserPopupResDto">
+        SELECT  /* [ibExpenseService.sqlx][getPopupApprovalUserInfo][비용기표 Popup ApprovalRequest UserInfo 조회][sunho.kim][2025.08.04] */        
+            A.*
+            ,DECODE(REQUESTTYPE, '0', '기안', '2', '결재', REQUESTTYPE) REQUESTTYPENAME
+            ,
+                    DECODE(REQUESTTYPE, '0', '기안', '2', '결재', REQUESTTYPE) || ' / ' ||
+                    USER_ID || ' / ' ||
+                    USER_NM || ' ' ||
+                    STORERNM || '/' ||
+                    DEPTNM                                             AS DESCRIPTION               /* 결재선 */
+        FROM (    
+            SELECT  /* [ibExpenseService.sqlx][getPopupApprovalUserInfo][비용기표 Popup ApprovalRequest UserInfo 조회][sunho.kim][2025.08.04] */
+                   '0'                                                 AS REQUESTTYPE               /* 0 : 기안, 2 : 결재 */
+                 , USER_ID                                             AS USER_ID                   /* 사용자ID */
+                 , USER_NM                                             AS USER_NM                   /* 사용자명 */
+                 , ''                                                  AS DUTY                      /* 직책 */
+                 , NVL((SELECT CM_STORER.DESCRIPTION 
+                        FROM   CM_STORER
+                        WHERE  CM_STORER.STORERKEY = #{gStorerkey})
+                       ,FRAMEONE_USER.DEF_STORERKEY
+                      )                                                AS STORERNM                  /* 고객사명 */
+                 , NVL((SELECT FRAMEONE_EMP.DEPTHR_NM
+                        FROM   FRAMEONE_EMP
+                        WHERE  FRAMEONE_EMP.COM_CD = FRAMEONE_EMP.COM_CD
+                        AND    FRAMEONE_EMP.EMP_NO = FRAMEONE_USER.EMP_NO
+                        AND    ROWNUM = 1)
+                       ,NVL((SELECT CM_STORER.DESCRIPTION 
+                             FROM   CM_STORER
+                             WHERE  CM_STORER.STORERKEY = #{gStorerkey})
+                            ,FRAMEONE_USER.DEF_STORERKEY)
+                      )                                                AS DEPTNM                    /* 부서명 */
+                 ,(SELECT MAIL_ID
+                   FROM   FRAMEONE_EMP
+                   WHERE  FRAMEONE_EMP.COM_CD = FRAMEONE_EMP.COM_CD
+                   AND    FRAMEONE_EMP.EMP_NO = FRAMEONE_USER.EMP_NO
+                   AND    ROWNUM = 1)                                  AS EMAIL                     /* 이메일 */             
+            FROM   FRAMEONE_USER
+            WHERE  USER_ID = #{gUserId}
+        <if test="requesttype != 0"> 
+                AND 1=2 
+        </if>
+        <if test="requesttype == 0"> 
+            UNION ALL
+            SELECT 
+                   '2'                                                  AS REQUESTTYPE              /* 0 : 기안, 2 : 결재 */
+                  ,PERSON_LIST.USER_ID                                  AS USER_ID                  /* 사용자ID */
+                  ,PERSON_LIST.USER_NM                                  AS USER_NM                  /* 사용자명 */
+                  ,''                                                   AS DUTY                     /* 직책 */
+                  ,NVL((SELECT CM_STORER.DESCRIPTION
+                       FROM   CM_STORER
+                       WHERE  cm_storer.storerkey = #{gStorerkey}
+                       )
+                      ,PERSON_LIST.DEF_STORERKEY)                       AS STORERNM                 /* 고객사명 */
+                  ,NVL((SELECT FRAMEONE_EMP.DEPTHR_NM
+                       FROM   FRAMEONE_EMP
+                       WHERE  FRAMEONE_EMP.COM_CD = FRAMEONE_EMP.COM_CD
+                       AND    FRAMEONE_EMP.EMP_NO = PERSON_LIST.EMP_NO
+                       AND    ROWNUM = 1)
+                      ,NVL((SELECT CM_STORER.DESCRIPTION
+                           FROM   CM_STORER
+                           WHERE  CM_STORER.STORERKEY = #{gStorerkey}
+                           )
+                          ,PERSON_LIST.DEF_STORERKEY))                  AS DEPTNM                   /* 부서명 */
+                  ,(SELECT MAIL_ID
+                    FROM   FRAMEONE_EMP
+                    WHERE  FRAMEONE_EMP.COM_CD = FRAMEONE_EMP.COM_CD
+                    AND    FRAMEONE_EMP.EMP_NO = PERSON_LIST.EMP_NO
+                    AND    ROWNUM = 1)                                  AS EMAIL                    /* 이메일 */ 
+            FROM   (SELECT TG_LIST.USER_ID
+                      ,TG_LIST.USER_NM
+                      ,TG_LIST.EMP_NO  
+                      ,TG_LIST.DEF_STORERKEY
+                    FROM  ( SELECT USER_ID
+                              ,USER_NM
+                              ,EMP_NO   
+                              ,DEF_STORERKEY   
+                        FROM  FRAMEONE_USER 
+                        WHERE FRAMEONE_USER.USER_ID IN (SELECT MAX(IB_APPROVAL_LINE.PERSON_ID) KEEP(DENSE_RANK FIRST ORDER BY IB_APPROVAL_LINE.APPR_SN DESC) AS PERSON_ID
+                                                        FROM   IB_APPROVAL_LINE 
+                                                        WHERE  IB_APPROVAL_LINE.ADDWHO = #{gUserId}
+                                                        AND    IB_APPROVAL_LINE.LINE_TYPE = '2')
+                        AND   FRAMEONE_USER.DEL_YN = 'N'
+                        UNION ALL
+                        SELECT USER_ID
+                              ,USER_NM
+                              ,EMP_NO  
+                              ,DEF_STORERKEY    
+                        FROM   FRAMEONE_USER
+                        WHERE  1 = 1
+                        AND    USER_ID IN (SELECT BASECODE
+                                           FROM   CM_CODE
+                                           WHERE  STORERKEY = #{gStorerkey}
+                                           AND    CODELIST  = 'APPROVALUSER'
+                                           AND    DEL_YN    = 'N')
+                        AND    USER_ID = (SELECT MAX(BASECODE) KEEP(DENSE_RANK FIRST ORDER BY SEQNO)
+                                          FROM   CM_CODE
+                                          WHERE  storerkey = #{gStorerkey}
+                                          AND    CODELIST  = 'APPROVALUSER'
+                                          AND    DEL_YN    = 'N')) TG_LIST
+                WHERE ROWNUM = 1) PERSON_LIST
+        </if>
+        <if test="requesttype == 1"> 
+            UNION ALL
+            SELECT 
+                   '2'                                                 AS REQUESTTYPE               /* 0 : 기안, 2 : 결재 */
+                 , USER_ID                                             AS USER_ID                   /* 사용자ID */
+                 , USER_NM                                             AS USER_NM                   /* 사용자명 */
+                 , ''                                                  AS DUTY                      /* 직책 */
+                 , NVL((SELECT CM_STORER.DESCRIPTION 
+                        FROM   CM_STORER
+                        WHERE  CM_STORER.STORERKEY = #{gStorerkey})
+                       ,FRAMEONE_USER.DEF_STORERKEY
+                      )                                                AS STORERNM                  /* 고객사명 */
+                 , NVL((SELECT FRAMEONE_EMP.DEPTHR_NM
+                        FROM   FRAMEONE_EMP
+                        WHERE  FRAMEONE_EMP.COM_CD = FRAMEONE_EMP.COM_CD
+                        AND    FRAMEONE_EMP.EMP_NO = FRAMEONE_USER.EMP_NO
+                        AND    ROWNUM = 1)
+                       ,NVL((SELECT CM_STORER.DESCRIPTION 
+                             FROM   CM_STORER
+                             WHERE  CM_STORER.STORERKEY = #{gStorerkey})
+                            ,FRAMEONE_USER.DEF_STORERKEY)
+                      )                                                AS DEPTNM                    /* 부서명 */
+                 ,(SELECT MAIL_ID
+                   FROM   FRAMEONE_EMP
+                   WHERE  FRAMEONE_EMP.COM_CD = FRAMEONE_EMP.COM_CD
+                   AND    FRAMEONE_EMP.EMP_NO = FRAMEONE_USER.EMP_NO
+                   AND    ROWNUM = 1)                                  AS EMAIL                     /* 이메일 */
+            FROM   FRAMEONE_USER
+            WHERE  1=1
+                AND    USER_ID IN (SELECT BASECODE
+                               FROM   CM_CODE
+                               WHERE  STORERKEY = #{gStorerkey}
+                               AND    CODELIST  = 'APPROVALUSER'
+                               AND    DEL_YN    = 'N'
+                              )
+            <if test="useridnm != null and useridnm != ''">
+                AND   (USER_ID LIKE #{useridnm}||'%'
+                    OR USER_NM LIKE #{useridnm}||'%')
+            </if>
+            <if test="userid != null and userid != ''">
+                AND    USER_ID LIKE #{userid}||'%'
+            </if>
+            <if test="usernm != null and usernm != ''">
+                AND    USER_NM LIKE #{usernm}||'%'
+            </if>
+            <if test="userdept != null and userdept != ''">
+                AND    EXISTS (SELECT 1 
+                               FROM   FRAMEONE_EMP
+                               WHERE  DEPTHR_NM LIKE #{userdept}||'%'
+                               AND    COM_CD = COM_CD
+                               AND    EMP_NO = FRAMEONE_USER.EMP_NO)
+            </if>
+        </if>
+        ) A
+        
+    </select>
+    
+    <select id="getPopupUploadFileList" resultType="IbExpenseFilePopupResDto">
+        SELECT  /* [ibExpenseService.sqlx][getPopupUploadFileList][비용기표 Popup Upload File List 조회][sunho.kim][2025.08.04] */
+                SERIALKEY              AS SERIALKEY             /* 일련번호 */
+               ,DOC_ID                 AS DOC_ID                /* 문서ID */             
+               ,DOC_TYPE               AS DOC_TYPE              /* 문문서유형코드서타입 */       
+               ,DOC_NAME               AS DOC_NAME              /* 문서구분명 */          
+               ,FILE_NAME              AS FILE_NM               /* 파일명 */         
+               ,FILE_EXTENSION         AS ATTCH_FILE_EXT_NM     /* 파일확장자 */                   
+               ,FILE_LOCATION          AS FILE_LOCATION         /* 업로드 대상 파일 경로 */    
+               ,FILE_SIZE_BYTES        AS ATTCH_FILE_SZ         /* 파일크기(byte) */                  
+               ,TRANS_FILE_NAME        AS ATTCH_FILE_NM         /* 채번 변환된 파일명 */
+               ,UPLOAD_HASH_ID         AS UPLOAD_HASH_ID        /* 서버전송 후 리턴받은 HASH_ID(2015.4.21 기준 미사용) */    
+               ,UPLOAD_RES_DOC_ID      AS UPLOAD_RES_DOC_ID     /* 서버전송 후 리턴받은 고유파일ID(HASH_ID + TRNAS_FILE_NAME) */
+               ,UPLOAD_FILE_NAME       AS UPLOAD_FILE_NAME      /* 변환 후 업로드된 파일명 */
+               ,UPLOAD_WORKPLACE_ID    AS UPLOAD_WORKPLACE_ID   /* 업무모듈별 WORKPLACE ID */
+               ,UPLOAD_LOCATION        AS UPLOAD_LOCATION       /* 업로드된 서버 위치(2015.04.21 기준 미사용) */ 
+               ,DOWNLOAD_COUNT         AS DOWNLOAD_COUNT        /* 다운로드 횟수 */  
+               ,FILE_TYPE              AS FILE_TYPE             /* FILE_TYPE */  
+               ,STATUS                 AS STATUS                /* 상태 */       
+               ,ADDWHO                 AS ADDWHO                /* 최초등록자 */       
+               ,ADDDATE                AS ADDDATE               /* 최초등록시간 */           
+               ,EDITWHO                AS EDITWHO               /* 최종변경자 */  
+               ,EDITDATE               AS EDITDATE              /* 최종변경시간 */
+        FROM    IB_EXPENSE_HTTP_DOC_ATTACH
+        WHERE   DOC_NAME = 'IMP_EXPENSE'
+        AND     DOC_ID   = #{serialkey}
+        AND     STATUS   = 'Y'
+    </select>
+    
+    <select id="getPopupIFStatus" resultType="IbExpenseIfStatusPopupResDto">
+        SELECT  /* [ibExpenseService.sqlx][getPopupIFStatus][비용기표 Popup IFStatus 조회][sunho.kim][2025.08.04] */
+               'Purchase Expense'                                           AS TRANSACTION_CD          /* 트랜잭션코드 */
+              ,IF_IB_STOCKETC_H.ZINVOICE                                    AS ZINVOICE                /* 송장관리번호 */
+              ,TO_NUMBER(IF_IB_STOCKETC_H.ZSEQ)                             AS ZSEQ                    /* 순번(처리횟수) */
+              ,IF_IB_STOCKETC_H.ZRETURN                                     AS ZRETURN                 /* 생성문서번호 */
+              ,IB_EXPENSE.IF_ID                                             AS IF_ID                   /* 인터페이스ID */
+              ,CD1.BASEDESCR                                                AS FI_IF_STATUS            /* 전송상태 */
+              ,IF_IB_STOCKETC_H.XMSGS                                       AS XMSGS                   /* 에러메세지 */
+              ,TO_CHAR(IF_IB_STOCKETC_H.EDITDATE,'YYYY-MM-DD HH24:MI:SS')   AS EDITDATE                /* 최종변경시간 */              
+              ,(SELECT MAX(USER_NM)                                               
+                FROM   FRAMEONE_USER                                              
+                WHERE  USER_ID = IF_IB_STOCKETC_H.EDITWHO)                  AS EDITWHO                 /* 최종변경자 */
+        FROM   IB_EXPENSE
+        JOIN   IF_IB_STOCKETC_H
+            ON IF_IB_STOCKETC_H.EXPENSE_SN = IB_EXPENSE.SERIALKEY
+        LEFT OUTER JOIN CM_CODE_STORER CD1
+            ON CD1.STORERKEY               = IB_EXPENSE.STORERKEY
+           AND CD1.CODELIST                = 'STATUS_FI_IF'   
+           AND CD1.BASECODE                = IF_IB_STOCKETC_H.FI_IF_STATUS        
+        WHERE  IB_EXPENSE.SERIALKEY        = #{serialkey}
+        UNION ALL
+        SELECT 'Purchase Expense'                                           AS TRANSACTION_CD          /* 트랜잭션코드 */
+              ,IF_IB_STOCKSKU_H.ZINVOICE                                    AS ZINVOICE                /* 송장관리번호 */
+              ,IF_IB_STOCKSKU_H.ZSEQ                                        AS ZSEQ                    /* 순번(처리횟수) */
+              ,IF_IB_STOCKSKU_H.ZRETURN                                     AS ZRETURN                 /* 생성문서번호 */
+              ,IB_EXPENSE.IF_ID                                             AS IF_ID                   /* 인터페이스ID */
+              ,CD1.BASEDESCR                                                AS FI_IF_STATUS            /* 전송상태 */  
+              ,IF_IB_STOCKSKU_H.XMSGS                                       AS XMSGS                   /* 에러메세지 */
+              ,TO_CHAR(IF_IB_STOCKSKU_H.EDITDATE,'YYYY-MM-DD HH24:MI:SS')   AS EDITDATE                /* 최종변경시간 */ 
+              ,(SELECT MAX(USER_NM)                                               
+                FROM   FRAMEONE_USER                                              
+                WHERE  USER_ID = IF_IB_STOCKSKU_H.EDITWHO)                  AS EDITWHO                 /* 최종변경자 */
+        FROM   IB_EXPENSE
+        JOIN   IF_IB_STOCKSKU_H
+            ON IF_IB_STOCKSKU_H.EXPENSE_SN = IB_EXPENSE.SERIALKEY
+        LEFT OUTER JOIN CM_CODE_STORER CD1
+            ON CD1.STORERKEY               = IB_EXPENSE.STORERKEY
+           AND CD1.CODELIST                = 'STATUS_FI_IF'   
+           AND CD1.BASECODE                = IF_IB_STOCKSKU_H.FI_IF_STATUS
+        WHERE  IB_EXPENSE.SERIALKEY        = #{serialkey}
+        ORDER BY 
+               ZINVOICE
+             , ZSEQ
+    </select>
+    
+    <select id="getElecTaxRead" resultType="IbExpenseElecTaxPopupResDto">
+    <!-- deprecated -->>
+        SELECT  /* [ibExpenseService.sqlx][getElecTaxRead][전자세금계산서 dataset정보 조회][sunho.kim][2025.08.04] */
+                '0'                    AS CHECKYN
+               ,''                     AS BUKRS             /* 회사코드 */
+               ,''                     AS ISSUE_ID          /* 세금계산서 승인번호 */  
+               ,''                     AS INV_SEQ           /* 세금계산서 일련번호(년월일+회사코드+12) 내부사용 */   
+               ,''                     AS CHARGETOTAL       /* 총 공급가 */
+               ,''                     AS TAXTOTAL          /* 총 세액 */
+               ,''                     AS GRANDTOTAL        /* 총액(공급가액+세액) */ 
+               ,''                     AS BP_ADDR           /* 수탁사업자 주소 */
+               ,''                     AS BP_REPRES         /* 수탁사업자 대표자명 */
+               ,''                     AS BP_DEPTNAME       /* 수탁사업자 담당부서 */
+               ,''                     AS BP_PERSNAME       /* 수탁사업자 담당자명 */
+               ,''                     AS ISSUE_DT          /* 전자세금계산서 발행일시 */
+               ,''                     AS ISSUE_DATE        /* 전자세금계산서 작성일자 */
+               ,''                     AS AEDAT             /* 변경일 */
+               ,''                     AS INV_SIGN          /* 역발행여부 */
+        FROM    DUAL
+    </select>
+    
+    <select id="getIF_IB_STOCKETC_H" resultType="IfIbStocketcHDto">
+        SELECT  /* [ibExpenseService.sqlx][getIF_IB_STOCKETC_H][I/F 데이터 조회(IF_IB_STOCKETC_H)][sunho.kim][2025.08.04] */
+                SERIALKEY
+              , ZINVOICE
+              , ZSEQ
+              , XRECH
+              , ZLAST
+              , BUKRS
+              , LIFNR
+              , EMPFB
+              , TO_CHAR(BLDAT, 'YYYYMMDD') AS BLDAT
+              , TO_CHAR(BUDAT, 'YYYYMMDD') AS BUDAT
+              , WAERS
+              , MWSKZ1
+              , ZTERM
+              , TO_CHAR(ZFBDT, 'YYYYMMDD') AS ZFBDT
+              , TO_CHAR(RMWWR ) AS RMWWR 
+              , TO_CHAR(WMWST1) AS WMWST1
+              , KIDNO
+              , BKTXT
+              , ZGUBUN
+              , ZBILLNO
+              , CARD_NO
+              , APPR_DATE
+              , APPR_DOCU
+              , CNCL_FLAG
+              , SELL_DOCU
+              , ZTEXT1
+              , ZTEXT2
+              , ZTEXT3
+              , ZTEXT4
+              , ZTEXT5
+              , XDATS
+              , XTIMS
+              , XUSER
+              , XSTAT
+              , XMSGS
+              , ZRETURN
+              , ZRE_BELNR
+              , EXPENSE_SN
+              , ADDDATE
+              , EDITDATE
+              , ADDWHO
+              , EDITWHO
+              , FI_IF_STATUS
+              , (SELECT IF_ID
+                 FROM   IB_EXPENSE
+                 WHERE  SERIALKEY = IF_IB_STOCKETC_H.EXPENSE_SN) AS IF_ID
+        FROM    IF_IB_STOCKETC_H
+        WHERE   EXPENSE_SN   = #{serialkey}
+        AND     ZINVOICE     = (SELECT IF_DOC_NO 
+                                FROM   IB_EXPENSE
+                                WHERE  SERIALKEY = #{serialkey})
+        AND     FI_IF_STATUS = DECODE(#{ifType},'POSTING','SND','POSTING_CANCEL','CNF','X')
+        ORDER BY
+                TO_NUMBER(ZSEQ)             
+    </select>
+    
+    <select id="getIF_IB_STOCKSKU_H" resultType="IfIbStocketcHDto">
+        SELECT  /* [ibExpenseService.sqlx][getIF_IB_STOCKSKU_H][I/F 데이터 조회(IF_IB_STOCKSKU_H)][sunho.kim][2025.08.04] */
+                SERIALKEY
+              , ZINVOICE
+              , ZCAT
+              , TO_CHAR(ZSEQ)  AS ZSEQ
+              , ZLAST
+              , XRECH
+              , BUKRS
+              , LIFNR
+              , EMPFB
+              , TO_CHAR(BLDAT, 'YYYYMMDD') AS BLDAT 
+              , TO_CHAR(BUDAT, 'YYYYMMDD') AS BUDAT 
+              , WAERS
+              , MWSKZ1
+              , ZTERM
+              , TO_CHAR(ZFBDT, 'YYYYMMDD') AS TO_CHAR 
+              , TO_CHAR(RMWWR)  AS RMWWR
+              , TO_CHAR(WMWST1) AS WMWST1
+              , KIDNO
+              , BKTXT
+              , ZGUBUN
+              , ZBILLNO
+              , CARD_NO
+              , APPR_DATE
+              , APPR_DOCU
+              , CNCL_FLAG
+              , SELL_DOCU
+              , ZTEXT1
+              , ZTEXT2
+              , ZTEXT3
+              , ZTEXT4
+              , ZTEXT5
+              , XDATS
+              , XTIMS
+              , XUSER
+              , XSTAT
+              , XMSGS
+              , ZRETURN
+              , ZRE_BELNR
+              , EXPENSE_SN
+              , ADDDATE
+              , EDITDATE
+              , ADDWHO
+              , EDITWHO
+              , FI_IF_STATUS
+              ,(SELECT IF_ID
+                FROM   IB_EXPENSE
+                WHERE  SERIALKEY = IF_IB_STOCKSKU_H.EXPENSE_SN) AS IF_ID
+        FROM    IF_IB_STOCKSKU_H
+        WHERE   EXPENSE_SN   = #{serialkey}
+        AND     ZINVOICE     = (SELECT IF_DOC_NO 
+                                FROM   IB_EXPENSE
+                                WHERE  SERIALKEY = #{serialkey})
+        AND     FI_IF_STATUS = DECODE(#{ifType},'POSTING','SND','POSTING_CANCEL','CNF','X')
+        ORDER BY
+                ZSEQ
+    </select>
+
+    <select id="getIF_IB_STOCKETC_D" resultType="IfIbStocketcDDto">
+        SELECT   /* [ibExpenseService.sqlx][getIF_IB_STOCKETC_D][I/F 데이터 조회(IF_IB_STOCKETC_D)][sunho.kim][2025.08.04] */
+                SERIALKEY
+              , ZINVOICE
+              , BUZEI
+              , ZSEQ
+              , MWSKZ
+              , TO_CHAR(WRBTR) AS WRBTR
+              , WERKS
+              , MATNR
+              , FRBNR
+              , HISTNO
+              , ZEBELN
+              , ZEBELP
+              , TO_CHAR(MENGE) AS MENGE
+              , BSTME
+              , ZTEXT1
+              , ZTEXT2
+              , ZTEXT3
+              , ZTEXT4
+              , ZTEXT5
+              , ADDDATE
+              , EDITDATE
+              , ADDWHO
+              , EDITWHO
+        FROM    IF_IB_STOCKETC_D
+        WHERE   ZINVOICE   = #{zinvoice}
+        ORDER BY
+                TO_NUMBER(ZSEQ)
+              , TO_NUMBER(BUZEI)
+    </select>
+
+    <select id="getIF_IB_STOCKSKU_D" resultType="IfIbStockskuDDto">
+        SELECT   /* [ibExpenseService.sqlx][getIF_IB_STOCKSKU_D][I/F 데이터 조회(IF_IB_STOCKSKU_D)][sunho.kim][2025.08.04] */
+                SERIALKEY
+              , ZINVOICE
+              , ZCAT
+              , TO_CHAR(ZSEQ) AS ZSEQ
+              , BUZEI
+              , GL_ACCOUNT
+              , MWSKZ
+              , PROFIT_CTR
+              , SHKZG
+              , TO_CHAR(WRBTR) AS WRBTR
+              , MATNR
+              , TO_CHAR(MENGE) AS MENGE
+              , BSTME
+              , ZEBELN
+              , ZEBELP
+              , ZTEXT1
+              , ZTEXT2
+              , ZTEXT3
+              , ZTEXT4
+              , ZTEXT5
+              , ADDDATE
+              , EDITDATE
+              , ADDWHO
+              , EDITWHO
+        FROM    IF_IB_STOCKSKU_D
+        WHERE   ZINVOICE   = #{zinvoice}
+        ORDER BY
+                ZSEQ
+              , TO_NUMBER(BUZEI)
+    </select>
+
+    <select id="getIF_IB_STOCKSKU_BILL" resultType="IfIbStockskuBillDto">
+        SELECT   /* [ibExpenseService.sqlx][getIF_IB_STOCKSKU_BILL][I/F 데이터 조회(IF_IB_STOCKSKU_BILL)][sunho.kim][2025.08.04] */
+                SERIALKEY
+              , ZINVOICE
+              , ZCAT
+              , LGORT
+              , WERKS
+              , MATNR
+              , FRBNR
+              , HISTNO
+              , ZEBELN
+              , ZEBELP
+              , TO_CHAR(ZWRBTR_OUT) AS ZWRBTR_OUT
+              , TO_CHAR(ZWRBTR_IN ) AS ZWRBTR_IN 
+              , TO_CHAR(WRBTR     ) AS WRBTR     
+              , TO_CHAR(MENGE     ) AS MENGE     
+              , BSTME
+              , ADDDATE
+              , EDITDATE
+              , ADDWHO
+              , EDITWHO
+        FROM    IF_IB_STOCKSKU_BILL
+        WHERE   ZINVOICE   = #{zinvoice}
+    </select>
+
+    <select id="getIF_IB_STOCKETC_FILE" resultType="IfIbStocketcFileDto">
+        SELECT  /* [ibExpenseService.sqlx][getIF_IB_STOCKETC_FILE][I/F 데이터 조회(IF_IB_STOCKETC_FILE)][sunho.kim][2025.08.04] */
+                SERIALKEY
+              , BUKRS
+              , ZSYST
+              , IF_NO
+              , SEQ
+              , ZDOCNO
+              , ZEVID1
+              , ZDOCTYPE
+              , ZATTID
+              , ZREQUESTNO
+              , ZCATEGORY
+              , ADDDATE
+              , EDITDATE
+              , ADDWHO
+              , EDITWHO
+        FROM    IF_IB_STOCKETC_FILE
+        WHERE   IF_NO   = #{zinvoice}
+        ORDER BY
+                TO_NUMBER(seq)
+    </select>
+    
+    <select id="getIF_IB_STOCKSKU_FILE" resultType="IfIbStockskuFileDto">
+        SELECT   /* [ibExpenseService.sqlx][getIF_IB_STOCKSKU_FILE][I/F 데이터 조회(IF_IB_STOCKSKU_FILE)][sunho.kim][2025.08.04] */
+                SERIALKEY
+              , BUKRS
+              , ZSYST
+              , IF_NO
+              , SEQ
+              , ZDOCNO
+              , ZEVID1
+              , ZDOCTYPE
+              , ZATTID
+              , ZREQUESTNO
+              , ZCATEGORY
+              , ADDDATE
+              , EDITDATE
+              , ADDWHO
+              , EDITWHO
+        FROM    IF_IB_STOCKSKU_FILE
+        WHERE   IF_NO   = #{zinvoice}
+        ORDER BY
+                TO_NUMBER(seq)
+    </select>
+
+    <update id="savePopupDocumentInfoHeader">
+        UPDATE  /* [ibExpenseService.sqlx][savePopupDocumentInfoHeader][비용기표 DocumentInfo Header 저장][sunho.kim][2025.08.04] */
+        IB_EXPENSE
+        SET    ISSUE_DATE               = TO_DATE(LEFT(#{issueDate},8),'YYYYMMDD')
+             , ADJUSTMENT_SUPPLIER_CODE = #{adjustmentSupplierCode}
+             , ADJUSTMENT_SUPPLIER_NAME = NVL((SELECT DESCRIPTION 
+                                            FROM MS_CUST 
+                                            WHERE MS_CUST.CUSTTYPE  = 'P'
+                                             AND  MS_CUST.DEL_YN    = 'N'
+                                             AND  MS_CUST.STORERKEY = #{gStorerkey}
+                                             AND  MS_CUST.CUSTKEY   = #{adjustmentSupplierCode}
+                                             AND  ROWNUM            = 1), NULL) 
+             , ACTUAL_SUPPLIER_CODE     = #{actualSupplierCode}
+             , ACTUAL_SUPPLIER_NAME     = NVL((SELECT DESCRIPTION 
+                                            FROM MS_CUST 
+                                            WHERE MS_CUST.CUSTTYPE  = 'P'
+                                             AND  MS_CUST.DEL_YN    = 'N'
+                                             AND  MS_CUST.STORERKEY = #{gStorerkey}
+                                             AND  MS_CUST.CUSTKEY   = #{actualSupplierCode}
+                                             AND  ROWNUM            = 1), NULL) 
+             , ACCOUNT_CR_CODE          = #{accountCrCode}
+             , ACCOUNT_CR_NAME          = #{accountCrName}
+             , TAX_TYPE_CODE            = #{taxTypeCode}
+             , TAX_TYPE_NAME            = (SELECT BASEDESCR
+                                           FROM CM_CODE_STORER        
+                                           WHERE CODELIST  = 'TAX_CLASS'
+                                            AND  STORERKEY = #{gStorerkey}
+                                            AND  BASECODE  = #{taxTypeCode}
+                                            )
+             , TAX_RATE                 = #{taxRate}
+             , SUMMARY                  = #{summary}
+             , FISCAL_YEAR              = #{fiscalYear}
+             , POSTING_DATE             = TO_DATE(LEFT(#{postingDate},8),'YYYYMMDD')
+             , TAX_YMD                  = TO_DATE(LEFT(#{taxYmd},8),'YYYYMMDD')
+             , PAYMENT_TERM             = #{paymentTerm}
+             , TAX_NO                   = #{taxNo}
+             , JOURNAL_TYPE_CODE        = #{journalTypeCode}
+             , JOURNAL_TYPE_NAME        = #{journalTypeName}
+             , TAX_TAG                  = #{taxTag}
+             , TAX_AUTO_FLAG            = #{taxAutoFlag}
+             , INV_SIGN                 = #{invSign}
+             , EDITWHO                  = #{gUserId}
+             , EDITDATE                 = SYSDATE
+        WHERE  SERIALKEY                = #{serialkey}  
+    </update>
+
+    <update id="savePopupDocumentInfoDetail">
+        UPDATE  /* [ibExpenseService.sqlx][savePopupDocumentInfoDetail][비용기표 DocumentInfo Detail 저장][sunho.kim][2025.08.04] */
+        IB_EXPENSE_DISTRIBUTION
+        SET    CREDIT_KIND          = #{creditKind}
+             , DOCUMENT_TYPE_CODE   = #{documentTypeCode}
+             , ACCOUNT_DR_CODE      = #{accountDrCode}
+             , ACCOUNT_DR_NAME      = #{accountDrName}
+             , ACCOUNT_DETAIL_CODE  = #{accountDetailCode}
+             , ACCOUNT_DETAIL_NAME  = #{accountDetailName}
+             , SUPPLY_PRICE         = #{supplyPrice}
+             , TAX_RATE             = #{taxRate}
+             , TAX_AMOUNT           = #{taxAmount}
+             , AMOUNT               = #{amount}
+             , SUMMARY              = #{summary}
+             , TAX_FLAG             = #{taxFlag}
+             , EDITWHO              = #{gUserId}
+             , EDITDATE             = SYSDATE
+        WHERE  SERIALKEY            = #{serialkey}  
+    </update>
+
+    <update id="saveKGPopupDocumentInfoDetail">
+        UPDATE  /* [ibExpenseService.sqlx][saveKGPopupDocumentInfoDetail][비용기표  DocumentInfo Detail 저장(KG비용분배)][sunho.kim][2025.08.04] */
+        IB_EXPENSE_DISTRIBUTION
+        SET    SUPPLY_PRICE         = #{disCost}
+             , TAX_AMOUNT           = ROUND((#{disCost})*(#{taxRate})/100)
+             , AMOUNT               = (#{disCost}) + ROUND((#{disCost})*(#{taxRate})/100)
+             , EDITWHO              = #{gUserId}
+             , EDITDATE             = SYSDATE
+        WHERE  SERIALKEY            = #{serialkey}
+    </update>
+
+    <update id="saveKGPopupDocumentInfoHeader">
+        UPDATE  /* [ibExpenseService.sqlx][saveKGPopupDocumentInfoHeader][비용기표  DocumentInfo Header 저장(KG비용분배)][sunho.kim][2025.08.04] */
+        IB_EXPENSE
+        SET    SUPPLY_PRICE         = (SELECT SUM(SUPPLY_PRICE) FROM IB_EXPENSE_DISTRIBUTION WHERE EXPENSE_SN = #{expenseSn})
+             , TAX_AMOUNT           = (SELECT SUM(TAX_AMOUNT) FROM IB_EXPENSE_DISTRIBUTION WHERE EXPENSE_SN = #{expenseSn})
+             , AMOUNT               = (SELECT SUM(AMOUNT) FROM IB_EXPENSE_DISTRIBUTION WHERE EXPENSE_SN = #{expenseSn})
+             , EDITWHO              = #{gUserId}
+             , EDITDATE             = SYSDATE
+        WHERE  SERIALKEY            = #{expenseSn}
+    </update>
+    
+    <update id="saveKGPopupDocumentInfoDetailAdjust">
+        MERGE   /* [ibExpenseService.sqlx][saveKGPopupDocumentInfoDetailAdjust][비용기표  DocumentInfo Detail 조정(KG비용분배)][sunho.kim][2025.08.04] */
+        INTO IB_EXPENSE_DISTRIBUTION
+                USING (
+                        SELECT SERIALKEY
+                          FROM (SELECT RANK() OVER(ORDER BY AMOUNT DESC, SERIALKEY) AS RANK_NUM
+                                      ,SERIALKEY
+                                  FROM IB_EXPENSE_DISTRIBUTION
+                                 WHERE 1 = 1
+                                   AND EXPENSE_SN = #{expenseSn}
+                                   AND TAX_RATE <![CDATA[>]]> 0)
+                         WHERE RANK_NUM = 1
+                      ) SN_TB
+                ON (IB_EXPENSE_DISTRIBUTION.SERIALKEY = SN_TB.SERIALKEY)
+                WHEN MATCHED THEN
+                     UPDATE
+                     SET   SUPPLY_PRICE = SUPPLY_PRICE + (#{supplyPriceDiff})
+                         , TAX_AMOUNT   = TAX_AMOUNT + (#{taxDiff})
+                         , AMOUNT       = (SUPPLY_PRICE + (#{supplyPriceDiff})) + (TAX_AMOUNT + (#{taxDiff}))
+    </update>
+    
+    <insert id="insertIbApprovalLineDummy">
+        INSERT  /* [ibExpenseService.sqlx][insertIbApprovalLineDummy][비용기표 IbApprovalLineDummy 저장][sunho.kim][2025.08.04] */ 
+        INTO IB_APPROVAL_LINE_DUMMY 
+               ( SERIALKEY
+               , DUMMY_LINE_NO
+               , LINE_SEQ
+               , LINE_TYPE
+               , PERSON_ID
+               , PERSON_NAME
+               , PERSON_POSITION
+               , PERSON_DEPT
+               , PERSON_COMPANY
+               , APPR_STATUS
+               , STATUS
+               , ATTRIBUTES1
+               ) 
+        VALUES ( SEQ_IB_APPROVAL_LINE_DUMMY.NEXTVAL
+               , #{dummyLineNo}
+               , #{seq}
+               , #{requesttype}
+               , #{userId}
+               , #{userNm}
+               , ''
+               , #{deptnm}
+               , #{storernm}
+               , DECODE(#{requesttype},'0','2','1')
+               , 'Y'
+               , 'N'
+               )
+
+    </insert>   
+    
+    <update id="updateIfIbStockEtcHeader">
+        UPDATE  /* [ibExpenseService.sqlx][updateIfIbStockEtcHeader][I/F 테이블 UPDATE(IF_IB_STOCKETC_H.FI_IF_STATUS)][sunho.kim][2025.08.04] */
+        IF_IB_STOCKETC_H
+        SET    FI_IF_STATUS         = 'SND' ,
+              EDITDATE = sysdate
+        WHERE  ZINVOICE             = #{ifDocNo}  
+    </update>
+
+    <update id="updateIfIbStockSkuHeader">
+        UPDATE  /* [ibExpenseService.sqlx][updateIfIbStockSkuHeader][I/F 테이블 UPDATE(IF_IB_STOCKSKU_H.FI_IF_STATUS)][sunho.kim][2025.08.04] */ 
+        IF_IB_STOCKSKU_H
+        SET    FI_IF_STATUS         = 'SND'
+        WHERE  ZINVOICE             = #{ifDocNo}  
+    </update>
+
+    <insert id="insertIbExpenseHttpDocAttach">
+        INSERT  /* [ibExpenseService.sqlx][insertIbExpenseHttpDocAttach][비용기표 IbExpenseHttpDocAttach 저장][sunho.kim][2025.08.04] */ 
+        INTO IB_EXPENSE_HTTP_DOC_ATTACH 
+               ( SERIALKEY                           
+               , DOC_ID  
+               , DOC_TYPE  
+               , DOC_NAME  
+               , FILE_NAME  
+               , FILE_EXTENSION  
+               , FILE_LOCATION  
+               , FILE_SIZE_BYTES  
+               , TRANS_FILE_NAME  
+               , UPLOAD_HASH_ID  
+               , UPLOAD_RES_DOC_ID  
+               , UPLOAD_FILE_NAME  
+               , UPLOAD_WORKPLACE_ID  
+               , UPLOAD_LOCATION  
+               , DOWNLOAD_COUNT  
+               , FILE_CONTENT  
+               , FILE_TYPE  
+               , STATUS  
+               , ADDWHO
+               , ADDDATE
+               , EDITWHO
+               , EDITDATE
+               )
+        VALUES (                                         
+                 SEQ_IB_EXPENSE_HTTP_DOC_ATTACH.NEXTVAL              
+               , #{serialkey}
+               , #{docType}
+               , 'IMP_EXPENSE' 
+               , #{fileName} 
+               , #{fileExtension}
+               , #{fileLocation}
+               , #{fileSizeBytes} 
+               , #{transFileName}
+               , ''
+               , #{uploadResDocId}
+               , #{uploadFileName}
+               , #{uploadWorkplaceId}
+               , ''                                          
+               , '0'                                         
+               , ''                                      
+               , 'HTTP'                                  
+               , 'Y'                                         
+               , #{gUserNo}
+               , SYSDATE                                 
+               , #{gUserNo} 
+               , SYSDATE                                 
+             )                            
+    </insert>   
+    
+    <update id="updateDownloadCnt">
+        UPDATE  /* [ibExpenseService.sqlx][updateDownloadCnt][파일 다운로드 카운트(IB_EXPENSE_HTTP_DOC_ATTACH UPDATE) 변경][sunho.kim][2025.08.04] */  
+        IB_EXPENSE_HTTP_DOC_ATTACH
+        SET    DOWNLOAD_COUNT       = NVL(DOWNLOAD_COUNT,0) + 1
+             , EDITDATE             = SYSDATE
+             , EDITWHO              = #{gUserNo}
+        WHERE  SERIALKEY            = #{serialkey}  
+    </update>
+
+    <update id="saveFileDelete">
+        DELETE  /* [ibExpenseService.sqlx][saveFileDelete][파일 다운로드 (IB_EXPENSE_HTTP_DOC_ATTACH UPDATE) 삭제][sunho.kim][2025.08.04] */ 
+        IB_EXPENSE_HTTP_DOC_ATTACH
+        WHERE  SERIALKEY            = #{serialkey}  
+    </update>
+    
+     <update id="updateIfResultIfIbStockEtcHPosting">
+        UPDATE  /* [ibExpenseService.sqlx][updateIfResultIfIbStockEtcHPosting][I/F 결과 UPDATE][sunho.kim][2025.08.04] */
+        IF_IB_STOCKETC_H
+        SET    FI_IF_STATUS   = 'SND'
+        WHERE  EXPENSE_SN     = #{serialkey} 
+        AND    ZINVOICE       = (SELECT IB_EXPENSE.IF_DOC_NO
+                                 FROM   IB_EXPENSE
+                                 WHERE  IB_EXPENSE.SERIALKEY = #{serialkey}
+                                )
+    </update>
+    
+    <update id="updateIfResultIfIbStockSkuHPosting">
+        UPDATE  /* [ibExpenseService.sqlx][updateIfResultIfIbStockSkuHPosting][I/F 결과 UPDATE][sunho.kim][2025.08.04] */ 
+        IF_IB_STOCKSKU_H
+        SET    FI_IF_STATUS   = 'SND'
+        WHERE  EXPENSE_SN     = #{serialkey} 
+        AND    ZINVOICE       = (SELECT IB_EXPENSE.IF_DOC_NO
+                                 FROM   IB_EXPENSE
+                                 WHERE  IB_EXPENSE.SERIALKEY = #{serialkey}
+                                )
+    </update>
+
+    <update id="updateIfResultIfIbStockEtcH">
+        UPDATE  /* [ibExpenseService.sqlx][updateIfResultIfIbStockEtcH][I/F 결과 UPDATE][sunho.kim][2025.08.04] */
+        IF_IB_STOCKETC_H
+        SET    FI_IF_STATUS         = CASE WHEN #{ifType} IN ('POSTING_CANCEL') 
+                                           THEN DECODE(#{xstat},'S','CCO',FI_IF_STATUS)
+                                           ELSE DECODE(#{xstat},'S','CNF','ERR')
+                                      END
+             , XSTAT                = #{xstat}
+             , XMSGS                = #{xmsgs}
+             , ZRETURN              = CASE WHEN #{ifType} IN ('POSTING_CANCEL') 
+                                           THEN ZRETURN
+                                           ELSE #{zreturn}
+                                      END
+             , ZRE_BELNR            = CASE WHEN #{ifType} IN ('POSTING_CANCEL') 
+                                           THEN ZRE_BELNR
+                                           ELSE #{zreBelnr}
+                                      END
+             , EDITDATE             = SYSDATE
+             , EDITWHO              = #{gUserId}
+        WHERE  ZINVOICE             = #{zinvoice}
+        AND    ZSEQ                 = NVL(#{zseq},ZSEQ)
+    </update>
+    
+    <update id="updateIfResultIfIbStockSkuH">
+        UPDATE  /* [ibExpenseService.sqlx][updateIfResultIfIbStockSkuH][I/F 결과 UPDATE][sunho.kim][2025.08.04] */ 
+        IF_IB_STOCKSKU_H
+        SET    FI_IF_STATUS         = CASE WHEN #{ifType} IN ('POSTING_CANCEL') 
+                                           THEN DECODE(#{xstat},'S','CCO',FI_IF_STATUS)
+                                           ELSE DECODE(#{xstat},'S','CNF','ERR')
+                                      END
+             , XSTAT                = #{xstat}
+             , XMSGS                = #{xmsgs}
+             , ZRETURN              = CASE WHEN #{ifType} IN ('POSTING_CANCEL') 
+                                           THEN ZRETURN
+                                           ELSE #{zreturn}
+                                      END
+             , ZRE_BELNR            = CASE WHEN #{ifType} IN ('POSTING_CANCEL') 
+                                           THEN ZRE_BELNR
+                                           ELSE #{zreBelnr}
+                                      END
+             , EDITDATE             = SYSDATE
+             , EDITWHO              = #{gUserId}
+        WHERE  ZINVOICE             = #{zinvoice}
+        AND    ZSEQ                 = NVL(#{zseq},ZSEQ)
+    </update>
+    
+    <update id="updateIfResultIbExpense">
+        UPDATE  /* [ibExpenseService.sqlx][updateIfResultIbExpense][I/F 결과 UPDATE][sunho.kim][2025.08.04] */ 
+        IB_EXPENSE
+        SET    IF_STATUS = CASE WHEN #{ifType} IN ('POSTING_CANCEL') 
+                                THEN DECODE(#{xstat},'S','CCO','POE','POE',IF_STATUS)
+                                ELSE DECODE(#{xstat},'S','SCO','POE','POE','ERR')
+                           END
+             , STATUS    = CASE WHEN #{ifType} IN ('POSTING_CANCEL') 
+                                THEN DECODE(#{xstat},'S','CFM','POE','POE',STATUS)
+                                ELSE DECODE(#{xstat},'S','SCO','POE','POE',STATUS)
+                           END
+             , IF_DOC_NO = CASE WHEN #{ifType} IN ('POSTING_CANCEL') 
+                                 AND #{xstat}  IN ('S')
+                                THEN ''
+                                ELSE IF_DOC_NO
+                           END
+             , EDITDATE  = SYSDATE
+             , EDITWHO   = #{gUserId}
+        WHERE  SERIALKEY = #{serialkey}
+    </update>
+    
+    <select id="getCostCodeList" resultType="CmSearchCostCodePopupResDto">
+        SELECT /* [ibExpenseService.sqlx][getCostCodeList][코스트코드 목록 조회][KimSunHo][2025.08.09] */
+             CM_CODE.BASECODE          AS CODE                 /* 코드 */
+            ,CM_CODE.BASEDESCR         AS NAME                 /* 명 */    
+            ,DATA1                     AS DATA1                /* DATA1 */
+            ,DATA2                     AS DATA2                /* DATA2 */
+            ,DATA3                     AS DATA3                /* DATA3 */
+            ,DATA4                     AS DATA4                /* DATA4 */
+        FROM CM_CODE_STORER  CM_CODE                    
+        WHERE 1=1    
+            AND  CM_CODE.CODELIST  = 'JOURNALCODE'
+            AND  CM_CODE.DEL_YN    = 'N'
+        <if test='gStorerkey != null and gStorerkey != ""'>
+            AND  CM_CODE.STORERKEY = #{gStorerkey}
+        </if>
+        
+        <choose>
+            <when test='codeList != null and codeList !=""'>
+               AND CM_CODE.BASECODE IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                                        FROM (SELECT #{codeList} AS VAL FROM DUAL) A
+                                        CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+            </when>
+            <otherwise>
+               <if test='name != null and name !=""'>
+                AND   (
+                    CM_CODE.BASECODE         LIKE  #{name}||'%'
+                    OR CM_CODE.BASEDESCR     LIKE  #{name}||'%' 
+                )
+                </if>
+            </otherwise>
+        </choose>   
+
+        ORDER BY CM_CODE.SEQNO
+    </select>
+    
+    <insert id="insertEmailLog">
+        INSERT  /* [ibExpenseService.sqlx][insertEmailLog][이메일 로그 저장][KimSunHo][2025.08.09] */
+        INTO FRAMEONE_EMAIL_LOG 
+            ( EMAIL_NO
+            , TITLE
+            , CNTS 
+            , SENDR_EMAIL_ADDR
+            , RCVR_NM
+            , RCVR_EMAIL_ADDR
+            , REF_EMAIL_ADD
+            , SEND_RES_CNTS
+            , SEND_DY
+            , SENDR_ID
+            , REG_ID
+            , REG_DTM
+            , UPD_ID
+            , UPD_DTM  )
+        VALUES ( SEQ_FRAMEONE_EMAIL_LOG.NEXTVAL
+            , #{title}
+            , #{cnts}
+            , #{sendrEmailAddr}
+            , #{rcvrNm}
+            , #{rcvrEmailAddr}
+            , #{refEmailAddr}
+            , '00'
+            , SYSDATE
+            , '00'
+            , #{gUserId}
+            , SYSDATE
+            , #{gUserId}
+            , SYSDATE  )
+    </insert>    
+    
+    <update id="test">
+        UPDATE  /* [ibExpenseService.sqlx][test][test UPDATE][sunho.kim][2025.08.04] */ 
+        IB_EXPENSE
+        SET    
+               EDITDATE  = SYSDATE
+             , EDITWHO   = #{gUserId}
+        WHERE  SERIALKEY = #{ifDocNo}
+    </update>    
+    
+    <select id="getKeynoList" resultType="IbExpenseResDto">
+        SELECT SERIALKEY
+             , KEY_NO 
+        FROM  IB_EXPENSE
+        WHERE SERIALKEY IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL 
+                            FROM (SELECT #{serialkeys} AS VAL FROM DUAL) A
+                            CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+        ORDER BY KEY_NO DESC
+    </select>
+    
+    <insert id="insertSyProcessTempAJ" parameterType="java.util.List">
+        INSERT    /* [ibExpenseService.sqlx][insertSyProcessTempAJ][임시저장 정보 AJ 저장][sunho.kim][2025.10.26] */
+            INTO SY_PROCESSTEMP_AJ (
+                PROCESSTYPE
+              , PROCESSCREATOR
+              , SPID
+              , PROCESSFLAG
+              , DCCODE
+              , STORERKEY
+              , DOCNO
+              , LIST_NO
+              , ADDDATE
+              , EDITDATE 
+              , ADDWHO
+              , EDITWHO
+        )
+        <foreach collection="list" item="item" separator="UNION ALL">
+            SELECT
+                #{item.processtype}             AS PROCESSTYPE
+              , #{item.gUserId}                 AS PROCESSCREATOR
+              , #{item.gSpid}                   AS SPID
+              , 'N'                             AS PROCESSFLAG
+              , #{item.dccode}                  AS DCCODE
+              , #{item.storerkey}               AS STORERKEY
+              , #{item.docno}                   AS DOCNO
+              , #{item.listno}                  AS LIST_NO
+              , SYSDATE                         AS ADDDATE
+              , SYSDATE                         AS EDITDATE
+              , #{item.gUserId}                 AS ADDWHO
+              , #{item.gUserId}                 AS EDITWHO
+            FROM DUAL
+        </foreach>
+    </insert>
+    
+    <select id="selectElecApprDoctype" resultType="map">
+        SELECT /* [ibExpenseService.sqlx][selectElecApprDoctype][전자결재 유형 조회][sunho.kim][2025.10.28] */
+              AJ_APPRREQUEST.DOCTYPE
+             ,AJ_APPRREQUEST.SLIPNO 
+             ,AJ_APPRREQUEST.DOCNO
+             ,AJ_APPRREQUEST.APPROVALSTATUS
+             ,AJ_APPRREQUEST.ADDWHO
+        FROM AJ_APPRREQUEST
+        WHERE 1 = 1
+            AND AJ_APPRREQUEST.DEL_YN = 'N'
+            AND AJ_APPRREQUEST.APPROVALREQNO = #{approvalReauestNo}
+    </select>
+    
+    <select id="getTaxDiff" resultType="StExDCStorageResDto">
+        SELECT     /* [ibExpenseService.sqlx][getTaxDiff][비용 조회][sunho.kim][2025.07.17] */
+            IB_EXPENSE.SERIALKEY AS EXPENSE_SN
+           ,NVL(( CASE WHEN MAX(IB_EXPENSE.TAX_RATE) = 0 THEN 0
+                 ELSE CASE WHEN TRUNC(MAX(IB_EXPENSE.SUPPLY_PRICE) / MAX(IB_EXPENSE.TAX_RATE)) <![CDATA[<>]]> SUM(IB_EXPENSE_DISTRIBUTION.TAX_AMOUNT) 
+                           THEN TRUNC(MAX(IB_EXPENSE.SUPPLY_PRICE - (NVL((SELECT SUM(SUPPLY_PRICE)
+                                                                     FROM IB_EXPENSE_DISTRIBUTION D
+                                                                     WHERE D.EXPENSE_SN = IB_EXPENSE.SERIALKEY
+                                                                       AND D.TAX_RATE = 0), 0))) / MAX(IB_EXPENSE.TAX_RATE)) 
+                               - SUM(IB_EXPENSE_DISTRIBUTION.TAX_AMOUNT)   
+                           ELSE 0
+                      END
+                 END), 0)  AS TAX_DIFF  
+           ,NVL(( CASE WHEN MAX(IB_EXPENSE.TAX_RATE) = 0 THEN 0
+                 ELSE CASE WHEN TRUNC(MAX(IB_EXPENSE.SUPPLY_PRICE)) <![CDATA[<>]]> SUM(IB_EXPENSE_DISTRIBUTION.SUPPLY_PRICE) 
+                           THEN TRUNC(
+                                MAX(IB_EXPENSE.SUPPLY_PRICE) - SUM(IB_EXPENSE_DISTRIBUTION.SUPPLY_PRICE)   
+                                     )
+                           ELSE 0
+                      END
+                 END), 0)  AS SUPPLY_PRICE_DIFF 
+        FROM    IB_EXPENSE 
+        JOIN    IB_EXPENSE_DISTRIBUTION
+          ON    IB_EXPENSE.SERIALKEY = IB_EXPENSE_DISTRIBUTION.EXPENSE_SN
+        WHERE   IB_EXPENSE.SERIALKEY = #{expenseSn}
+        GROUP BY IB_EXPENSE.SERIALKEY
+    </select>
+    
+    <select id="getSupplyPriceDiff" resultType="StExDCStorageResDto">
+        SELECT     /* [ibExpenseService.sqlx][getTaxDiff][비용 조회][sunho.kim][2025.07.17] */
+            IB_EXPENSE.SERIALKEY AS EXPENSE_SN
+           ,NVL(( CASE WHEN MAX(IB_EXPENSE.TAX_RATE) = 0 THEN 0
+                 ELSE CASE WHEN TRUNC(MAX(IB_EXPENSE.SUPPLY_PRICE)) <![CDATA[<>]]> SUM(IB_EXPENSE_DISTRIBUTION.SUPPLY_PRICE) 
+                           THEN TRUNC(
+                                MAX(IB_EXPENSE.SUPPLY_PRICE) - SUM(IB_EXPENSE_DISTRIBUTION.SUPPLY_PRICE)   
+                                     )
+                           ELSE 0
+                      END
+                 END), 0)  AS SUPPLY_PRICE_DIFF  
+        FROM    IB_EXPENSE 
+        JOIN    IB_EXPENSE_DISTRIBUTION
+          ON    IB_EXPENSE.SERIALKEY = IB_EXPENSE_DISTRIBUTION.EXPENSE_SN
+        WHERE   IB_EXPENSE.SERIALKEY = #{expenseSn}
+        GROUP BY IB_EXPENSE.SERIALKEY
+    </select>
+    
+</mapper>

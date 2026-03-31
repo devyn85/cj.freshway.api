@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cjfw.wms.tm.mapper.TmDispatchListByDistrictMapper">
+
+    <select id="getDispatchListByDistrict" resultType="TmDispatchListByDistrictResDto">
+        SELECT /* [TmDispatchListByDistrictService.sqlx][getDispatchListByDistrict][배차목록(권역별) 조회][System][2025.01.15] */
+              TM_LIST.DCCODE
+            , FN_DESCR_DC(TM_LIST.DCCODE) AS DCNAME
+            , TM_LIST.DELIVERYDT
+            , TM_LIST.HJDONG_CD
+            , MS_HJDONG_POLYGON.CTP_KOR_NM
+            , MS_HJDONG_POLYGON.SIG_KOR_NM
+            , MS_HJDONG_POLYGON.HJDONG_NM
+            , COUNT(DISTINCT CASE WHEN ORDR_GROUP.BASECODE IS     NULL AND CUSTORDERCLOSETYPE.DATA1 = '20'                             THEN TM_LIST.TRUTHCUSTKEY ELSE NULL END) AS MEALCOUNT
+            , SUM(           CASE WHEN ORDR_GROUP.BASECODE IS     NULL AND CUSTORDERCLOSETYPE.DATA1 = '20' AND TM_LIST.DOCTYPE != 'RT' THEN TM_LIST.WEIGHT       ELSE 0    END) AS MEALWEIGHT
+            , COUNT(DISTINCT CASE WHEN ORDR_GROUP.BASECODE IS     NULL AND CUSTORDERCLOSETYPE.DATA1 = '30'                             THEN TM_LIST.TRUTHCUSTKEY ELSE NULL END) AS RESTAURANTCOUNT
+            , SUM(           CASE WHEN ORDR_GROUP.BASECODE IS     NULL AND CUSTORDERCLOSETYPE.DATA1 = '30' AND TM_LIST.DOCTYPE != 'RT' THEN TM_LIST.WEIGHT       ELSE 0    END) AS RESTAURANTWEIGHT
+            , COUNT(DISTINCT CASE WHEN ORDR_GROUP.BASECODE IS NOT NULL                                                                 THEN TM_LIST.TRUTHCUSTKEY ELSE NULL END) AS O2OCOUNT
+            , SUM(           CASE WHEN ORDR_GROUP.BASECODE IS NOT NULL                                     AND TM_LIST.DOCTYPE != 'RT' THEN TM_LIST.WEIGHT       ELSE 0    END) AS O2OWEIGHT
+            , COUNT(DISTINCT TM_LIST.TRUTHCUSTKEY) AS TOTALCOUNT
+            , SUM(CASE WHEN TM_LIST.DOCTYPE != 'RT' THEN TM_LIST.WEIGHT ELSE 0 END) AS TOTALWEIGHT
+        FROM (
+            SELECT DCCODE, DELIVERYDT, SLIPDT, DOCTYPE, DISTRICTGROUP, DISTRICTCODE, CUSTTYPE, CUSTKEY, CUBE, WEIGHT, STORERKEY, STATUS, POPNO, TM_DELIVERYTYPE, HJDONG_CD, DOCNO, TRUTHCUSTKEY
+            FROM TM_INPLAN
+            WHERE DEL_YN = 'N'
+              AND SPLIT_DELIVERY_YN = 'N'
+            UNION ALL
+            SELECT DCCODE, DELIVERYDT, SLIPDT, DOCTYPE, DISTRICTGROUP, DISTRICTCODE, CUSTTYPE, CUSTKEY, CUBE, WEIGHT, STORERKEY, STATUS, POPNO, TM_DELIVERYTYPE, HJDONG_CD, DOCNO, TRUTHCUSTKEY
+            FROM TM_INPLAN_SPLIT
+            WHERE DEL_YN = 'N'
+        ) TM_LIST
+        LEFT JOIN MS_CUST
+            ON  MS_CUST.CUSTKEY   = TM_LIST.TRUTHCUSTKEY
+            AND MS_CUST.CUSTTYPE  = TM_LIST.CUSTTYPE
+            AND MS_CUST.STORERKEY = TM_LIST.STORERKEY
+        LEFT JOIN CM_CODE CUSTORDERCLOSETYPE
+            ON  CUSTORDERCLOSETYPE.CODELIST  = 'CUSTORDERCLOSETYPE'
+            AND CUSTORDERCLOSETYPE.STORERKEY = 'FW00'
+            AND CUSTORDERCLOSETYPE.BASECODE  = MS_CUST.CUSTSTRATEGY4
+        LEFT JOIN CM_CODE ORDR_GROUP
+            ON  ORDR_GROUP.CODELIST  = 'ORDR_GROUP'
+            AND ORDR_GROUP.STORERKEY = 'FW00'
+            AND ORDR_GROUP.DEL_YN    = 'N'
+            AND ORDR_GROUP.DATA1     IS NULL
+            AND ORDR_GROUP.BASECODE  = MS_CUST.OTCO_GRP_ID
+        LEFT JOIN (
+            SELECT
+                  HJDONG_CD
+                , CTP_KOR_NM
+                , SIG_KOR_NM
+                , HJDONG_NM
+            FROM (
+                SELECT
+                      HJDONG_CD
+                    , CTP_KOR_NM
+                    , SIG_KOR_NM
+                    , HJDONG_NM
+                    , ROW_NUMBER() OVER (PARTITION BY HJDONG_CD ORDER BY FROMDATE DESC) AS RN
+                FROM MS_HJDONG_POLYGON
+                WHERE #{deliverydtFrom} BETWEEN FROMDATE AND TODATE
+                  AND HJDONG_NM IS NOT NULL
+            ) HJDONG_LIST
+            WHERE RN = 1
+        ) MS_HJDONG_POLYGON
+            ON  MS_HJDONG_POLYGON.HJDONG_CD = TM_LIST.HJDONG_CD
+        WHERE TM_LIST.DCCODE = #{dccode}
+          AND TM_LIST.DOCTYPE IN ( 'WD', 'RT' )
+          AND TM_LIST.DELIVERYDT BETWEEN #{deliverydtFrom} AND #{deliverydtTo}
+          AND TM_LIST.SLIPDT BETWEEN TO_CHAR(TRUNC(ADD_MONTHS(TO_DATE(#{deliverydtFrom}, 'YYYYMMDD'), -1), 'MM'), 'YYYYMMDD')
+                                 AND #{deliverydtTo}
+          AND TM_LIST.TM_DELIVERYTYPE IN ( '1', '2', '6' )
+          AND TM_LIST.STATUS = '90'
+          <if test="administrativeRegion != null and administrativeRegion != ''">
+            AND ( MS_HJDONG_POLYGON.CTP_KOR_NM LIKE '%' || #{administrativeRegion} || '%'
+               OR MS_HJDONG_POLYGON.SIG_KOR_NM LIKE '%' || #{administrativeRegion} || '%'
+               OR MS_HJDONG_POLYGON.HJDONG_NM  LIKE '%' || #{administrativeRegion} || '%'
+            )
+          </if>
+        GROUP BY
+              TM_LIST.DCCODE
+            , TM_LIST.DELIVERYDT
+            , TM_LIST.POPNO
+            , TM_LIST.HJDONG_CD
+            , MS_HJDONG_POLYGON.CTP_KOR_NM
+            , MS_HJDONG_POLYGON.SIG_KOR_NM
+            , MS_HJDONG_POLYGON.HJDONG_NM
+        ORDER BY
+              TM_LIST.DCCODE
+            , TM_LIST.DELIVERYDT
+            , TM_LIST.HJDONG_CD
+    </select>
+
+</mapper>

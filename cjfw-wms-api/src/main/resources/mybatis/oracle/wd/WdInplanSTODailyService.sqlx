@@ -1,0 +1,184 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="wdInplanSTODailyService">
+
+
+	<select id="getMasterList" resultType="WdInplanSTODailyResDto" fetchSize="1000">
+        SELECT  /* [WdInplanSTODailyService.sqlx][getTab1MasterList][광역일배검수현황 목록 조회][공두경][2025.11.29] */
+		       SLIPDT                 AS SLIPDT			/*출고일자*/
+		      ,DOCNO                  AS DOCNO          /*주문번호*/
+		      ,WD_DCCODE              AS WD_DCCODE      /*공급물류센터*/
+		      ,MAX(WD_DCNAME)         AS WD_DCNAME      /*공급물류센터명*/
+		      ,DP_DCCODE              AS DP_DCCODE      /*공급받는물류센터*/
+		      ,MAX(DP_DCNAME)         AS DP_DCNAME      /*공급받는물류센터명*/
+		      ,P_CUSTKEY              AS PP_CUSTKEY     /*공급협력사코드*/
+		      ,MAX(P_CUSTNAME)        AS PP_CUSTNAME    /*공급협력사명*/
+		      ,C_CUSTKEY              AS CC_CUSTKEY     /*고객관리처코드*/
+		      ,MAX(C_CUSTNAME)        AS CC_CUSTNAME    /*고객관리처명*/
+		      ,SKU                    AS SKU            /*상품코드*/
+		      ,MAX(SKUNAME)           AS SKUNAME        /*상품명칭*/
+		      ,MAX(STORAGETYPE)       AS STORAGETYPE    /*저장조건*/
+		      ,UOM                    AS UOM            /*단위*/
+		      ,SUM(ORDERQTY)          AS ORDERQTY       /*주문수량*/		      
+		      ,SUM(WD_INSPECTQTY)     AS WD_INSPECTQTY  /*광역출고검수량*/
+		      ,SUM(DP_INSPECTQTY)     AS DP_INSPECTQTY  /*광역입고검수량*/
+		      ,CASE WHEN SUM(ORDERQTY)=SUM(WD_INSPECTQTY) THEN '일치' ELSE '불일치' END AS STATUS_INSPECT_WD	/*출고*/
+		      ,CASE WHEN SUM(ORDERQTY)=SUM(DP_INSPECTQTY) THEN '일치' ELSE '불일치' END AS STATUS_INSPECT_DP   /*입고*/
+		FROM (
+		        SELECT MAX(WD_INPLAN.SLIPDT)                              AS SLIPDT
+		              ,DM_DOCUMENT_D.DOCNO                                AS DOCNO
+		              ,MAX(DM_DOCUMENT_D.ROUTE)                           AS WD_DCCODE
+		              ,MAX(WD_DC.DCNAME)                                  AS WD_DCNAME
+		              ,MAX(DM_DOCUMENT_D.DCCODE)                          AS DP_DCCODE
+		              ,MAX(DP_DC.DCNAME)                                  AS DP_DCNAME
+		              ,MAX(DM_DOCUMENT_H_PO.FROM_CUSTKEY)                 AS P_CUSTKEY
+		              ,MAX(DM_DOCUMENT_H_PO.FROM_CUSTNAME)                AS P_CUSTNAME
+		              ,MAX(DM_DOCUMENT_H.TO_CUSTKEY)                      AS C_CUSTKEY
+		              ,MAX(DM_DOCUMENT_H.TO_CUSTNAME)                     AS C_CUSTNAME
+		              ,MAX(DM_DOCUMENT_D.SKU)                             AS SKU
+		              ,MAX(MS_SKU.DESCRIPTION)                            AS SKUNAME
+		              ,FN_CODEDESCR(MAX(DM_DOCUMENT_D.STORERKEY)
+		                           ,'STORAGETYPE'
+		                           ,MAX(MS_SKU.STORAGETYPE))              AS STORAGETYPE
+		              ,MAX(DM_DOCUMENT_D.STOREROPENQTY)                   AS ORDERQTY
+		              ,FN_CONV_UOM(MAX(DM_DOCUMENT_D.STORERKEY)
+		                          ,MAX(DM_DOCUMENT_D.SKU)
+		                          ,MAX(DM_DOCUMENT_D.UOM)
+		                          ,MAX(DM_DOCUMENT_D.STORERUOM)
+		                          ,NVL(SUM(WD_INVOICE.DP_INSPECTQTY),0))  AS DP_INSPECTQTY
+		              ,MAX(FN_CONV_UOM(DM_DOCUMENT_D.STORERKEY
+		                              ,DM_DOCUMENT_D.SKU
+		                              ,DM_DOCUMENT_D.UOM
+		                              ,DM_DOCUMENT_D.STORERUOM
+		                              ,DM_DOCUMENT_D.ROUTEINSPECTQTY))    AS WD_INSPECTQTY
+		              ,MAX(DM_DOCUMENT_D.STORERUOM)                       AS UOM
+		        FROM   DM_DOCUMENT_D
+		        JOIN   DM_DOCUMENT_H
+		        ON     DM_DOCUMENT_H.DCCODE            = DM_DOCUMENT_D.DCCODE
+		        AND    DM_DOCUMENT_H.STORERKEY         = DM_DOCUMENT_D.STORERKEY
+		        AND    DM_DOCUMENT_H.ORGANIZE          = DM_DOCUMENT_D.ORGANIZE
+		        AND    DM_DOCUMENT_H.DOCTYPE           = DM_DOCUMENT_D.DOCTYPE
+		        AND    DM_DOCUMENT_H.DELIVERYDATE      = DM_DOCUMENT_D.DELIVERYDATE
+		        AND    DM_DOCUMENT_H.DOCNO             = DM_DOCUMENT_D.DOCNO
+		        AND    DM_DOCUMENT_H.DEL_YN            = 'N'
+		        JOIN   WD_INPLAN
+		        ON     WD_INPLAN.DCCODE                = DM_DOCUMENT_D.DCCODE
+		        AND    WD_INPLAN.STORERKEY             = DM_DOCUMENT_D.STORERKEY
+		        AND    WD_INPLAN.ORGANIZE              = DM_DOCUMENT_D.ORGANIZE
+		        AND    WD_INPLAN.AREA                  = DM_DOCUMENT_D.AREA
+		        AND    WD_INPLAN.DOCTYPE               = DM_DOCUMENT_D.DOCTYPE
+		        AND    WD_INPLAN.SLIPDT                = DM_DOCUMENT_D.DELIVERYDATE
+		        AND    WD_INPLAN.DOCNO                 = DM_DOCUMENT_D.DOCNO
+		        AND    WD_INPLAN.DOCLINE               = DM_DOCUMENT_D.DOCLINE
+		        AND    WD_INPLAN.DEL_YN                = 'N'
+		        <!-- 고객 다중선택 -->
+				<if test="toCustkeyMulti != null and toCustkeyMulti != '' ">
+			    	<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+			    		<foreach collection="toCustkeyMulti" item="item">
+			    			OR WD_INPLAN.CUSTKEY IN
+			    			<foreach collection="item" item="code" open="(" close=")" separator=",">
+			    				#{code} 	 
+			          		</foreach>
+			        	</foreach>
+			      	</trim>			                                    
+	            </if>
+		        JOIN   DM_DOCUMENT_D DM_DOCUMENT_D_PO
+		        ON     DM_DOCUMENT_D_PO.DCCODE         = DM_DOCUMENT_D.DCCODE
+		        AND    DM_DOCUMENT_D_PO.STORERKEY      = DM_DOCUMENT_D.STORERKEY
+		        AND    DM_DOCUMENT_D_PO.ORGANIZE       = DM_DOCUMENT_D.ORGANIZE
+		        AND    DM_DOCUMENT_D_PO.AREA           = DM_DOCUMENT_D.AREA
+		        AND    DM_DOCUMENT_D_PO.DOCTYPE        = 'DP'
+		        AND    DM_DOCUMENT_D_PO.DOCNO          = DM_DOCUMENT_D.POKEY
+		        AND    DM_DOCUMENT_D_PO.DOCLINE        = DM_DOCUMENT_D.POLINE
+		        AND    DM_DOCUMENT_D_PO.DEL_YN         = 'N'
+		        JOIN   DM_DOCUMENT_H DM_DOCUMENT_H_PO
+		        ON     DM_DOCUMENT_H_PO.DCCODE         = DM_DOCUMENT_D_PO.DCCODE
+		        AND    DM_DOCUMENT_H_PO.STORERKEY      = DM_DOCUMENT_D_PO.STORERKEY
+		        AND    DM_DOCUMENT_H_PO.ORGANIZE       = DM_DOCUMENT_D_PO.ORGANIZE
+		        AND    DM_DOCUMENT_H_PO.DOCTYPE        = DM_DOCUMENT_D_PO.DOCTYPE
+		        AND    DM_DOCUMENT_H_PO.DELIVERYDATE   = DM_DOCUMENT_D_PO.DELIVERYDATE
+		        AND    DM_DOCUMENT_H_PO.DOCNO          = DM_DOCUMENT_D_PO.DOCNO
+		        AND    DM_DOCUMENT_H_PO.DEL_YN         = 'N'
+		        <if test="fromCustkeyMulti != null and fromCustkeyMulti != '' ">
+			    	<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+			    		<foreach collection="fromCustkeyMulti" item="item">
+			    			OR DM_DOCUMENT_H_PO.FROM_CUSTKEY IN
+			    			<foreach collection="item" item="code" open="(" close=")" separator=",">
+			    				#{code} 	 
+			          		</foreach>
+			        	</foreach>
+			      	</trim>			                                    
+	            </if>
+	            LEFT JOIN WD_INVOICE
+		        ON     WD_INVOICE.DCCODE               = WD_INPLAN.DCCODE
+		        AND    WD_INVOICE.STORERKEY            = WD_INPLAN.STORERKEY
+		        AND    WD_INVOICE.ORGANIZE             = WD_INPLAN.ORGANIZE
+		        AND    WD_INVOICE.AREA                 = WD_INPLAN.AREA
+		        AND    WD_INVOICE.DOCTYPE              = WD_INPLAN.DOCTYPE
+		        AND    WD_INVOICE.DOCDT                = WD_INPLAN.DOCDT
+		        AND    WD_INVOICE.DOCNO                = WD_INPLAN.DOCNO
+		        AND    WD_INVOICE.DOCLINE              = WD_INPLAN.DOCLINE
+		        AND    WD_INVOICE.SLIPDT               = WD_INPLAN.SLIPDT
+		        AND    WD_INVOICE.SLIPNO               = WD_INPLAN.SLIPNO
+		        AND    WD_INVOICE.SLIPLINE             = WD_INPLAN.SLIPLINE
+		        AND    WD_INVOICE.DEL_YN               = 'N'
+		        JOIN   MS_SKU
+		        ON     MS_SKU.STORERKEY                = DM_DOCUMENT_D.STORERKEY
+		        AND    MS_SKU.SKU                      = DM_DOCUMENT_D.SKU
+		        AND    MS_SKU.DEL_YN                   = 'N'
+		        <if test="storagetype != null and storagetype != ''">	        AND    MS_SKU.STORAGETYPE       =  #{storagetype}    </if>
+		        JOIN   CM_DC WD_DC
+		        ON     WD_DC.DCCODE                    = DM_DOCUMENT_D.ROUTE
+		        AND    WD_DC.DEL_YN                    = 'N'
+		        JOIN   CM_DC DP_DC
+		        ON     DP_DC.DCCODE                    = DM_DOCUMENT_D.DCCODE
+		        AND    DP_DC.DEL_YN                    = 'N'
+		        WHERE  1=1
+		        <if test="toDccode != null and toDccode != ''"> 	AND DM_DOCUMENT_D.DCCODE = #{toDccode}	</if>
+		        AND    DM_DOCUMENT_D.STORERKEY         = #{gStorerkey}      
+		        AND    DM_DOCUMENT_D.DOCTYPE           = 'WD'      
+		        AND    DM_DOCUMENT_D.DEL_YN            = 'N'
+		        AND    DM_DOCUMENT_D.CHANNEL           = '3'
+			    <if test="docno != null and docno != ''"> 			AND DM_DOCUMENT_D.DOCNO = #{docno}	</if>
+			    <if test="fromDccode != null and fromDccode != ''"> AND DM_DOCUMENT_D.ROUTE = #{fromDccode}	</if>
+			    <if test="fromSlipdt != null and fromSlipdt != ''"> AND DM_DOCUMENT_D.DELIVERYDATE	 <![CDATA[>=]]>  #{fromSlipdt}	</if>
+		        <if test="toSlipdt != null and toSlipdt != ''"> 	AND DM_DOCUMENT_D.DELIVERYDATE   <![CDATA[<=]]>  #{toSlipdt}	</if>
+		    	<!-- 상품 다중선택 -->
+				<if test="sku != null and sku != '' ">
+					<if test="skuMulti != null and skuMulti.size() > 0">
+						<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+							<foreach collection="skuMulti" item="item">
+								OR DM_DOCUMENT_D.SKU IN
+								<foreach collection="item" item="code" open="(" close=")" separator=",">
+									#{code} 	 
+					      		</foreach>
+					    	</foreach>
+					  	</trim>			                                    
+			    	</if>
+		        </if>
+		        GROUP BY
+		               DM_DOCUMENT_D.DCCODE
+		              ,DM_DOCUMENT_D.DOCDT
+		              ,DM_DOCUMENT_D.DOCNO
+		              ,DM_DOCUMENT_D.DOCLINE
+		       )
+		GROUP BY
+		       DOCNO
+		      ,SLIPDT           
+		      ,WD_DCCODE        
+		      ,DP_DCCODE         
+		      ,P_CUSTKEY         
+		      ,C_CUSTKEY         
+		      ,SKU               
+		      ,UOM               
+		ORDER BY
+		       SLIPDT
+		      ,WD_DCCODE        
+		      ,DP_DCCODE         
+		      ,P_CUSTKEY         
+		      ,C_CUSTKEY         
+		      ,SKU
+		      ,DOCNO       
+    </select>
+    
+</mapper>

@@ -1,0 +1,411 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="WdInplanOutOrgService">
+
+    <select id="getMasterList" resultType="WdInplanOutOrgSoResDto">
+	    SELECT  /* [WdInplanOutOrgService.sqlx][getMasterList][출고운송비 조회][ParkJinWoo][20251117] */ 
+	         A.SLIPNO            AS SLIPNO             /* 오더번호 */
+	       , C.DELIVERYDATE      AS DELIVERYDATE       /* 출고일자 */
+	       , A.ORGANIZE          AS ORGANIZE           /* 조직 */
+	       , PLANTXSL.PLANT      AS PLANT              /* 플랜트 */
+	       , REGEXP_SUBSTR(A.ORGANIZE, '[^-]+', 1, 2)
+	                             AS STORAGELOC          /* 창고코드 */
+	       , PLANTXSL.DESCRIPTION
+	                             AS WAREHOUSENAME       /* 창고명 */
+	       , PLANTXSL.DISTRIC    AS WAREHOUSEZONE       /* 창고권역 */
+	       , PLANTXSL.AREA       AS WAREHOUSEAREA       /* 창고지역 */
+	       , PLANTXSL.ADDRESS1   AS WAREHOUSEADDRESS    /* 창고주소 */
+	       , B.TO_CUSTKEY        AS MANAGECUSTKEY       /* 관리처코드 */
+	       , B.TO_CUSTNAME       AS MANAGECUSTNAME      /* 관리처명 */
+	       , CUST.ZIPCODE        AS MANAGECUSTZIPCODE   /* 관리처우편번호 */
+	       , CUSTINFO.OTHER03    AS MANAGECUSTZONE      /* 관리처권역 */
+	       , CUSTINFO.OTHER04    AS MANAGECUSTAREA      /* 관리처지역 */
+		   , INFO.DELIVERY_ADDR  AS MANAGECUSTADDRESS   /* 관리처주소 */
+		   , MS_CARRIER.DESCRIPTION   AS COURIER        /* 택배사 */
+	       , NVL(C.REFERENCE10,0)
+	                             AS REFERENCE10         /* 운송료 */
+	       , CASE WHEN SKU.OTHER05 = 'X3'
+	              THEN ROUND(TO_NUMBER(NVL(C.REFERENCE10,0)) * 10 / 11)
+	              ELSE TO_NUMBER(NVL(C.REFERENCE10,0))
+	         END                 AS TRANDELIVERYPRICE  /* 운송비 */
+	       , SKU.STORAGETYPE     AS STORAGETYPE         /* 보관유형 */
+	       , SKU.SKU             AS SKU                 /* 상품코드 */
+	       , SKU.DESCRIPTION     AS SKUNAME             /* 상품명 */
+	       , SKU.QTYPERBOX       AS QTYPERBOX           /* 박스당수량 */
+	       , SKU.NETWEIGHT       AS NETWEIGHT           /* 단위중량(kg) */
+	       , SKU.BASEUOM         AS BASEUOM             /* 기본단위 */
+	       , FN_UOMCAL(C.BUNMO, C.BUNJA, A.CONFIRMQTY)
+	                             AS CONFIRMQTY          /* 확정수량 */
+	       , ( FN_CONV_UOM(A.STORERKEY,
+	                       A.SKU,
+	                       SKU.BASEUOM,
+	                       A.UOM,
+	                       FN_UOMCAL(C.BUNMO, C.BUNJA, A.CONFIRMQTY))
+	           * SKU.NETWEIGHT ) AS CONFIRMNETWEIGHT    /* 확정중량(kg) */
+	       , STIF.SERIALNO       AS SERIALNO            /* 이력번호 */
+	       , STIF.BARCODE        AS BARCODE             /* 바코드 */
+	       , STIF.CONVSERIALNO   AS CONVSERIALNO        /* BL번호 */
+	       , STIF.CONTRACTTYPE   AS CONTRACTTYPE        /* 계약유형 */
+	       , STIF.CONTRACTCUSTKEY
+	                             AS CONTRACTCOMPANY     /* 계약업체코드 */
+	       , (SELECT DESCRIPTION
+	            FROM MS_CUST
+	           WHERE CUSTKEY = STIF.CONTRACTCUSTKEY
+	             AND ROWNUM = 1)
+	                            AS CONTRACTCOMPANYNAME /* 계약업체명 */
+	       , STIF.POKEY         AS POKEY               /* PO키 */
+	       , STIF.POLINE        AS POLINE              /* PO라인 */
+	       , NVL(CD1.BASEDESCR, CD1.BASECODE)
+	                            AS STORAGETYPECD       /* 보관유형 */
+	       , NVL(CD2.BASEDESCR, CD2.BASECODE)
+	                            AS CONTRACTTYPE_CD     /* 계약사유 */
+	    FROM WD_INPLAN A
+	    JOIN DM_DOCUMENT_H B
+	      ON A.DCCODE   = B.DCCODE
+	     AND A.SLIPDT   = B.DELIVERYDATE
+	     AND A.DOCNO    = B.DOCNO
+	     AND A.STATUS   = '90'
+	     AND B.DOCTYPE  = 'WD'
+	     AND B.DEL_YN   = 'N'
+	    JOIN DM_DOCUMENT_D C
+	      ON A.DCCODE   = C.DCCODE
+	     AND A.SLIPDT   = C.DELIVERYDATE
+	     AND A.DOCNO    = C.DOCNO
+	     AND C.DOCLINE  = A.DOCLINE
+	     AND C.DOCTYPE  = A.DOCTYPE
+	     AND C.DEL_YN   = 'N'
+	     AND C.CHANNEL  IN ('1','2','3')
+	     AND C.STATUS   = '90'
+	     LEFT JOIN OM_EXDC_DELIVERY_INFO INFO
+	            ON INFO.DOCNO = C.DOCNO
+	           AND INFO.DOCLINE = C.DOCLINE
+	     LEFT JOIN MS_CARRIER 
+	            ON MS_CARRIER.CARRIERKEY = INFO.COURIER 
+	           AND MS_CARRIER.CARRIERTYPE = 'LOCAL'
+	    LEFT JOIN WD_INVOICE_SN SN
+	      ON SN.DCCODE      = A.DCCODE
+	     AND SN.STORERKEY   = A.STORERKEY
+	     AND SN.DOCTYPE     = A.DOCTYPE
+	     AND SN.WD_SLIPNO   = A.SLIPNO
+	     AND SN.WD_SLIPDT   = A.SLIPDT
+	     AND SN.WD_SLIPLINE = A.SLIPLINE
+	     AND SN.SKU         = A.SKU
+	    LEFT JOIN ST_SNINFO STIF
+	      ON STIF.STORERKEY = SN.STORERKEY
+	     AND STIF.SKU       = SN.SKU
+	     AND STIF.SERIALNO  = SN.SERIALNO
+	     AND STIF.STOCKID   = SN.STOCKID
+	    LEFT JOIN MS_SKU SKU
+	      ON SKU.SKU        = A.SKU
+	     AND SKU.STORERKEY  = A.STORERKEY
+	     AND SKU.DEL_YN     = 'N'
+	    LEFT JOIN MS_PLANTXSL PLANTXSL
+	      ON PLANTXSL.DCCODE    = A.DCCODE
+	     AND PLANTXSL.STORAGELOC = REGEXP_SUBSTR(A.ORGANIZE, '[^-]+', 1, 2)
+	    LEFT JOIN MS_CUST CUST
+	      ON B.TO_CUSTKEY   = CUST.CUSTKEY
+	     AND CUST.STORERKEY = B.STORERKEY
+	     AND CUST.CUSTTYPE  = 'C'
+	    LEFT JOIN MS_CUSTDLVINFO CUSTINFO
+	      ON CUSTINFO.CUSTKEY   = CUST.CUSTKEY
+	     AND CUSTINFO.STORERKEY = CUST.STORERKEY
+	     AND CUSTINFO.CUSTTYPE  = 'C'
+	    LEFT JOIN CM_CODE_STORER CD1
+	      ON CD1.STORERKEY  = A.STORERKEY
+	     AND CD1.CODELIST   = 'STORAGETYPE'
+	     AND CD1.BASECODE   = SKU.STORAGETYPE
+	    LEFT JOIN CM_CODE_STORER CD2
+	      ON CD2.STORERKEY  = A.STORERKEY
+	     AND CD2.CODELIST   = 'CONTRACTTYPE_SN'
+	     AND CD2.BASECODE   = STIF.CONTRACTTYPE
+	    WHERE 1 = 1
+	      AND A.DCCODE = #{fixdccode}
+	      AND A.STORERKEY = 'FW00'
+	      AND C.STATUS IN (
+	            SELECT BASECODE
+	              FROM CM_CODE_STORER
+	             WHERE STORERKEY = A.STORERKEY
+	               AND CODELIST  = 'STATUS_WD'
+	               AND DATA2     = 'EX'
+	          )
+	  <!--     AND C.ORDERTYPE <![CDATA[<>]]> 'ZUB'
+	      AND C.SOTYPE    <![CDATA[<>]]> 'ZUB' -->
+	      
+	       AND CASE WHEN C.DCCODE   = '2170' AND C.ORDERTYPE = 'ZUB' AND C.SOTYPE = 'STO'
+	                THEN 'Y'
+	                ELSE 'N'
+	               END = 'N'
+	       AND  NVL(C.REFERENCE10,0) <![CDATA[<>]]> 0
+	      
+	    <if test="fromDate != null and fromDate != ''">
+	      <![CDATA[
+	      AND C.DELIVERYDATE >= #{fromDate}
+	      ]]>
+	    </if>
+	    <if test="toDate != null and toDate != ''">
+	      <![CDATA[
+	      AND C.DELIVERYDATE <= #{toDate}
+	      ]]>
+	    </if>
+	    <if test="custKey != null and custKey != ''">
+	      <![CDATA[
+	      AND B.TO_CUSTKEY = #{custKey}
+	      ]]>
+	    </if>
+	    <if test="organize != null and organize != ''">
+	      <![CDATA[
+	      AND A.ORGANIZE IN (
+					SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS SKU
+					FROM (SELECT #{organize} AS VAL FROM DUAL)
+					CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) > 0
+				)
+	      ]]>
+	    </if>
+	    <if test="slipNo != null and slipNo != ''">
+	      <![CDATA[
+	      AND A.SLIPNO = #{slipNo}
+	      ]]>
+	    </if>
+	    <if test="sku != null and sku != ''">
+	      <![CDATA[
+	            AND A.SKU IN (
+					SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS SKU
+					FROM (SELECT #{sku} AS VAL FROM DUAL)
+					CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) > 0
+				)
+	      ]]>
+	    </if>
+	    <if test="convSerialNo != null and convSerialNo != ''">
+	      <![CDATA[
+	      AND STIF.CONVSERIALNO LIKE #{convSerialNo}||'%'
+	      ]]>
+	    </if>
+	    <if test="serialNo != null and serialNo != ''">
+	      <![CDATA[
+	      AND STIF.SERIALNO LIKE #{serialNo}||'%'
+	      ]]>
+	    </if>
+	    <if test="contractCustKey != null and contractCustKey != ''">
+	      <![CDATA[
+	      AND STIF.CONTRACTCUSTKEY = #{contractCustKey}
+	      ]]>
+	    </if>
+	    <if test="contractType != null and contractType != ''">
+	      <![CDATA[
+	      AND STIF.CONTRACTTYPE = #{contractType}
+	      ]]>
+	    </if>
+    </select>
+    
+	<select id="getMasterList2" resultType="WdInplanOutOrgStoResDto">
+	    SELECT /* [WdInplanOutOrgService.sqlx][getMasterList2][출고운송비 조회][ParkJinWoo][20251117] */
+	         A.SLIPNO            AS SLIPNO             /* 오더번호 */
+	       , C.DELIVERYDATE      AS DELIVERYDATE       /* 출고일자 */
+	       , A.ORGANIZE          AS ORGANIZE           /* 조직 */
+	       , PLANTXSL.PLANT      AS PLANT              /* 플랜트 */
+	       , REGEXP_SUBSTR(A.ORGANIZE, '[^-]+', 1, 2)
+	                             AS STORAGELOC          /* 창고코드 */
+	       , PLANTXSL.DESCRIPTION
+	                             AS WAREHOUSENAME       /* 창고명 */
+	       , PLANTXSL.DISTRIC    AS WAREHOUSEZONE       /* 창고권역 */
+	       , PLANTXSL.AREA       AS WAREHOUSEAREA       /* 창고지역 */
+	       , PLANTXSL.ADDRESS1   AS WAREHOUSEADDRESS    /* 창고주소 */
+	       , B.TO_CUSTKEY        AS MANAGECUSTKEY       /* 관리처코드 */
+	       , B.TO_CUSTNAME       AS MANAGECUSTNAME      /* 관리처명 */
+	       , CUST.ZIPCODE        AS MANAGECUSTZIPCODE   /* 관리처우편번호 */
+	       , CUSTINFO.OTHER03    AS MANAGECUSTZONE      /* 관리처권역 */
+	       , CUSTINFO.OTHER04    AS MANAGECUSTAREA      /* 관리처지역 */
+	       , CUST.ADDRESS1       AS MANAGECUSTADDRESS   /* 관리처주소 */
+	       , CUSTINFO.COURIER    AS COURIER             /* 택배사 */
+	       , NVL(C.REFERENCE10,0)
+	                             AS REFERENCE10         /* 운송료 */
+	       , CASE WHEN SKU.OTHER05 = 'X3'
+	              THEN ROUND(TO_NUMBER(NVL(C.REFERENCE10,0)) * 10 / 11)
+	              ELSE TO_NUMBER(NVL(C.REFERENCE10,0))
+	         END                 AS TRANDELIVERYPRICE   /* 운송비 */
+	       , SKU.STORAGETYPE     AS STORAGETYPE         /* 보관유형 */
+	       , SKU.SKU             AS SKU                 /* 상품코드 */
+	       , SKU.DESCRIPTION     AS SKUNAME             /* 상품명 */
+	       , SKU.QTYPERBOX       AS QTYPERBOX           /* 박스당수량 */
+	       , SKU.NETWEIGHT       AS NETWEIGHT           /* 단위중량(kg) */
+	       , SKU.BASEUOM         AS BASEUOM             /* 기본단위 */
+	       , FN_UOMCAL(C.BUNMO, C.BUNJA, A.CONFIRMQTY)
+	                             AS CONFIRMQTY          /* 확정수량 */
+	       , ( FN_CONV_UOM(A.STORERKEY,
+	                       A.SKU,
+	                       SKU.BASEUOM,
+	                       A.UOM,
+	                       FN_UOMCAL(C.BUNMO, C.BUNJA, A.CONFIRMQTY))
+	           * SKU.NETWEIGHT ) AS CONFIRMNETWEIGHT    /* 확정중량(kg) */
+	       , STIF.SERIALNO       AS SERIALNO            /* 이력번호 */
+	       , STIF.BARCODE        AS BARCODE             /* 바코드 */
+	       , STIF.CONVSERIALNO   AS CONVSERIALNO        /* BL번호 */
+	       , STIF.CONTRACTTYPE   AS CONTRACTTYPE        /* 계약유형 */
+	       , STIF.CONTRACTCUSTKEY
+	                             AS CONTRACTCOMPANY     /* 계약업체코드 */
+	       , (SELECT DESCRIPTION
+	            FROM MS_CUST
+	           WHERE CUSTKEY = STIF.CONTRACTCUSTKEY
+	             AND ROWNUM = 1)
+	                             AS CONTRACTCOMPANYNAME /* 계약업체명 */
+	       , STIF.POKEY          AS POKEY               /* PO키 */
+	       , STIF.POLINE         AS POLINE              /* PO라인 */
+	       , NVL(CD1.BASEDESCR, CD1.BASECODE)
+	                             AS STORAGETYPECD       /* 보관유형 */
+	       , NVL(CD2.BASEDESCR, CD2.BASECODE)
+	                             AS CONTRACTTYPE_CD     /* 계약사유 */
+	       , TM_CARRIER_PRICE.TON
+	       , NVL(CD3.BASEDESCR, CD3.BASECODE) AS TONCD
+	       , EXDCCOST.CARCNT                  AS CARCNT     
+	       , EXDCCOST.SERIALKEY_GROUP         AS SERIALKEY_GROUP    
+	    FROM WD_INPLAN A
+	    JOIN DM_DOCUMENT_H B
+	      ON A.DCCODE   = B.DCCODE
+	     AND A.SLIPDT   = B.DELIVERYDATE
+	     AND A.DOCNO    = B.DOCNO
+	     <!-- AND A.STATUS   = '90' -->
+	     AND B.DOCTYPE  = 'WD'
+	     AND B.DEL_YN   = 'N'
+	    JOIN DM_DOCUMENT_D C
+	      ON A.DCCODE   = C.DCCODE
+	     AND A.SLIPDT   = C.DELIVERYDATE
+	     AND A.DOCNO    = C.DOCNO
+	     AND C.DOCLINE  = A.DOCLINE
+	     AND C.DOCTYPE  = A.DOCTYPE
+	     AND C.DEL_YN   = 'N'
+	     AND C.CHANNEL  IN ('1','2','3')
+	     <!-- AND C.STATUS   = '90' -->
+	   	 LEFT JOIN TM_EXDC_TRSP_COST EXDCCOST
+	       ON EXDCCOST.SERIALKEY_GROUP = C.REFERENCE03
+	     LEFT JOIN TM_CARRIER_PRICE 
+	       ON TM_CARRIER_PRICE.SERIALKEY = EXDCCOST.TCR_SERIALKEY
+	     LEFT JOIN WD_INVOICE_SN SN
+	      ON SN.DCCODE      = A.DCCODE
+	     AND SN.STORERKEY   = A.STORERKEY
+	     AND SN.DOCTYPE     = A.DOCTYPE
+	     AND SN.WD_SLIPNO   = A.SLIPNO
+	     AND SN.WD_SLIPDT   = A.SLIPDT
+	     AND SN.WD_SLIPLINE = A.SLIPLINE
+	     AND SN.SKU         = A.SKU
+	    LEFT JOIN ST_SNINFO STIF
+	      ON STIF.STORERKEY = SN.STORERKEY
+	     AND STIF.SKU       = SN.SKU
+	     AND STIF.SERIALNO  = SN.SERIALNO
+	     AND STIF.STOCKID   = SN.STOCKID
+	    LEFT JOIN MS_SKU SKU
+	      ON SKU.SKU        = A.SKU
+	     AND SKU.STORERKEY  = A.STORERKEY
+	     AND SKU.DEL_YN     = 'N'
+	    LEFT JOIN MS_PLANTXSL PLANTXSL
+	      ON PLANTXSL.DCCODE    = A.DCCODE
+	     AND PLANTXSL.STORAGELOC = REGEXP_SUBSTR(A.ORGANIZE, '[^-]+', 1, 2)
+	    LEFT JOIN MS_CUST CUST
+	      ON B.TO_CUSTKEY   = CUST.CUSTKEY
+	     AND CUST.STORERKEY = B.STORERKEY
+	     AND CUST.CUSTTYPE  = 'C'
+	    LEFT JOIN MS_CUSTDLVINFO CUSTINFO
+	      ON CUSTINFO.CUSTKEY   = CUST.CUSTKEY
+	     AND CUSTINFO.STORERKEY = CUST.STORERKEY
+	     AND CUSTINFO.CUSTTYPE  = 'C'
+	    LEFT JOIN CM_CODE_STORER CD1
+	      ON CD1.STORERKEY  = A.STORERKEY
+	     AND CD1.CODELIST   = 'STORAGETYPE'
+	     AND CD1.BASECODE   = SKU.STORAGETYPE
+	    LEFT JOIN CM_CODE_STORER CD2
+	      ON CD2.STORERKEY  = A.STORERKEY
+	     AND CD2.CODELIST   = 'CONTRACTTYPE_SN'
+	     AND CD2.BASECODE   = STIF.CONTRACTTYPE
+	   LEFT JOIN CM_CODE_STORER CD3
+	      ON CD3.STORERKEY  = A.STORERKEY
+	     AND CD3.CODELIST   = 'CARCAPACITY'
+	     AND CD3.BASECODE   = TM_CARRIER_PRICE.TON
+	     
+	    WHERE 1 = 1
+	      AND A.DCCODE = #{fixdccode}
+	      AND A.STORERKEY = 'FW00'
+	      AND C.STATUS IN (
+	            SELECT BASECODE
+	              FROM CM_CODE_STORER
+	             WHERE STORERKEY = A.STORERKEY
+	               AND CODELIST  = 'STATUS_WD'
+	               AND DATA2     = 'EX'
+	          )
+	      AND CASE WHEN C.DCCODE   = '2170' AND C.ORDERTYPE = 'ZUB' AND C.SOTYPE = 'STO'
+	                THEN 'Y'
+	                ELSE 'N'
+	           END = 'Y'
+	      AND CASE WHEN SKU.OTHER05 = 'X3'
+	              THEN ROUND(TO_NUMBER(NVL(C.REFERENCE10,0)) * 10 / 11)
+	              ELSE TO_NUMBER(NVL(C.REFERENCE10,0))
+	           END <![CDATA[ > ]]> 0  
+	    <if test="fromDate != null and fromDate != ''">
+	      <![CDATA[
+	      AND C.DELIVERYDATE >= #{fromDate}
+	      ]]>
+	    </if>
+	    <if test="toDate != null and toDate != ''">
+	      <![CDATA[
+	      AND C.DELIVERYDATE <= #{toDate}
+	      ]]>
+	    </if>
+	    <if test="custKey != null and custKey != ''">
+	      <![CDATA[
+	      AND B.TO_CUSTKEY = #{custKey}
+	      ]]>
+	    </if>
+	    <if test="organize != null and organize != ''">
+	      <![CDATA[
+	      AND A.ORGANIZE IN (
+					SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS SKU
+					FROM (SELECT #{organize} AS VAL FROM DUAL)
+					CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) > 0
+				)
+	      ]]>
+	    </if>
+	    <if test="slipNo != null and slipNo != ''">
+	      <![CDATA[
+	      AND A.SLIPNO = #{slipNo}
+	      ]]>
+	    </if>
+	    <if test="sku != null and sku != ''">
+	      <![CDATA[
+	      AND A.SKU IN (
+					SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS SKU
+					FROM (SELECT #{sku} AS VAL FROM DUAL)
+					CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) > 0
+				)
+	      ]]>
+	    </if>
+	    <if test="convSerialNo != null and convSerialNo != ''">
+	      <![CDATA[
+	      AND STIF.CONVSERIALNO LIKE #{convSerialNo}||'%'
+	      ]]>
+	    </if>
+	    <if test="serialNo != null and serialNo != ''">
+	      <![CDATA[
+	      AND STIF.SERIALNO LIKE #{serialNo}||'%'
+	      ]]>
+	    </if>
+	    <if test="contractCustKey != null and contractCustKey != ''">
+	      <![CDATA[
+	      AND STIF.CONTRACTCUSTKEY = #{contractCustKey}
+	      ]]>
+	    </if>
+	    <if test="contractType != null and contractType != ''">
+	      <![CDATA[
+	      AND STIF.CONTRACTTYPE = #{contractType}
+	      ]]>
+	    </if>
+	        <if test="storagetype != null and storagetype != ''">
+	      <![CDATA[
+	      AND SKU.STORAGETYPE = #{storagetype}
+	      ]]>
+	    </if>
+	          <if test="carcapacity != null and carcapacity != ''">
+	      <![CDATA[
+	      AND TM_CARRIER_PRICE.TON = #{carcapacity}
+	      ]]>
+	    </if>
+	</select>
+
+</mapper>

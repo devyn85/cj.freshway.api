@@ -1,0 +1,331 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="msSkuChainMoqService">
+    
+    <!-- 체인 상품 정보 조회 (목록) -->
+    <select id="getMasterList" resultType="MsSkuChainMoqResDto">
+        SELECT DISTINCT	A.* /* [msSkuChainMoqService.sqlx][msSkuChainMoqService.getMasterList][체인 상품 정보 조회 (목록)][JeongHyeongCheol][20250624] */ 
+          FROM(
+                SELECT 
+                      '0'                                           AS CHECKYN  
+                     , MS_SKUCHAIN_MOQ.DCCODE                       AS DCCODE             	/* 센터코드 */
+                     , CASE WHEN MS_SKUCHAIN_MOQ.DCCODE IS NULL 
+                            THEN ''
+                            ELSE NVL(CD1.DCNAME,'UNKNOWN')
+                       END                                          AS DCNAME               /* 센터명 */
+                    , PC1.CUSTKEY                                   AS CUSTKEY              /* 협력사코드 */
+	                , CASE WHEN PC1.CUSTKEY IS NULL    THEN ''
+                           ELSE NVL(CUST1.DESCRIPTION,'UNKNOWN')
+                      END                                           AS CUSTNAME             /* 협력사명 */
+                    , MS_SKU.STORERKEY                              AS STORERKEY          	/* 고객사 */
+                    , MS_SKU.SKU                                    AS SKU                	/* 상품코드 */
+                    , MS_SKU.DESCRIPTION                            AS DESCRIPTION
+                    , MS_SKUCHAIN_MOQ.DEL_YN                        AS DEL_YN               /* 삭제여부*/
+                    , COALESCE(MDPL1.BOXPERLAYER * MDPL1.LAYERPERPLT,               
+                           (SELECT MDPL2.BOXPERLAYER * MDPL2.LAYERPERPLT
+                              FROM MS_DC_PLT_LOAD MDPL2
+                             WHERE 1=1
+                               AND MDPL2.SKU       = MS_SKUCHAIN_MOQ.SKU
+                               AND MDPL2.STORERKEY = MS_SKUCHAIN_MOQ.STORERKEY 
+                               AND MDPL2.DCCODE    = '공통'
+                            ))                                  AS BOXPERPLT    /* PLT당 BOX수*/
+                    --, PC1.LEADTIME                                  AS LEADTIME             /* 리드타임*/
+                    , MS_SKUCHAIN_MOQ.LEADTIME                      AS LEADTIME             /* 리드타임 */
+                    , MS_SKUCHAIN_MOQ.MOQ_SKU                       AS MOQ_SKU    	    	/* 상품 MOQ(BOX)*/
+                    , MS_SKUCHAIN_MOQ.MOQ_SKU_PLT                   AS MOQ_SKU_PLT          /* 상품 MOQ(PLT)*/
+                    , MS_SKUCHAIN_MOQ.MOQ_VENDER                    AS MOQ_VENDER_BOX       /* 협력사 MOQ(BOX)*/
+                    , MS_SKUCHAIN_MOQ.MOQ_VENDER_PLT                AS MOQ_VENDER_PLT       /* 협력사 MOQ(PLT)*/
+                    , MS_SKUCHAIN_MOQ.ADDWHO                        AS ADDWHO               /* 최초등록자*/
+                    , MS_SKUCHAIN_MOQ.ADDDATE                       AS ADDDATE              /* 최초등록시간*/
+                    , MS_SKUCHAIN_MOQ.EDITWHO                       AS EDITWHO              /* 최종변경자*/
+                    , MS_SKUCHAIN_MOQ.EDITDATE                      AS EDITDATE             /* 최종변경시간*/
+                    , USER1.USER_NM                                 AS REG_NM               /* 등록자명*/
+                    , USER2.USER_NM                                 AS UPD_NM               /* 수정자명*/
+                FROM MS_SKUCHAIN
+          INNER JOIN MS_SKU
+                  ON MS_SKU.SKU = MS_SKUCHAIN.SKU
+                 AND MS_SKU.STORERKEY = MS_SKUCHAIN.STORERKEY
+
+          LEFT JOIN MS_SKUCHAIN_MOQ
+                 ON MS_SKUCHAIN.SKU = MS_SKUCHAIN_MOQ.SKU
+                AND MS_SKUCHAIN.STORERKEY = MS_SKUCHAIN_MOQ.STORERKEY  
+          LEFT JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = MS_SKUCHAIN_MOQ.ADDWHO  
+          LEFT JOIN   FRAMEONE_USER USER2 ON USER2.USER_ID = MS_SKUCHAIN_MOQ.EDITWHO
+         INNER JOIN (
+                     SELECT * FROM (
+	                     SELECT
+	                            CUSTKEY
+	                          , DCCODE
+	                          , SKU
+	                          , STORERKEY
+	                          , LEADTIME
+	                          , ROW_NUMBER() OVER (PARTITION BY  DCCODE, SKU
+                                                       ORDER BY CUSTKEY, DCCODE, SKU, LEADTIME  DESC) AS ROW_NUM
+	                      FROM MS_PURCHASECUST
+	                     WHERE 1 = 1
+	                    <if test='dccodeMulti != null and dccodeMulti != ""'>
+	                       AND DCCODE IN 
+	                        <foreach collection="dccodeMulti" item="code" open="(" close=")" separator="," >
+	                                 #{code}
+	                        </foreach>
+	                    </if>
+	                    <if test='skuMulti != null and skuMulti != ""'>
+	                        <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+	                            <foreach collection="skuMulti" item="item">
+	                                OR SKU IN
+	                                <foreach collection="item" item="code" open="(" close=")" separator=",">
+	                                          #{code}
+	                                </foreach>
+	                            </foreach>
+	                        </trim>
+	                    </if>
+	                       AND VALIDATE_CONVERSION(TODATE AS DATE, 'YYYYMMDD') = 1
+	                       AND TO_DATE(TODATE, 'YYYYMMDD') <![CDATA[>=]]>  SYSDATE
+	                  ) WHERE ROW_NUM = 1
+                    ) PC1
+                 ON PC1.SKU = MS_SKUCHAIN_MOQ.SKU
+                AND PC1.DCCODE = MS_SKUCHAIN_MOQ.DCCODE
+                AND PC1.STORERKEY = MS_SKUCHAIN_MOQ.STORERKEY
+                
+                LEFT JOIN LOGISONE.MS_DC_PLT_LOAD MDPL1 
+                  ON MDPL1.SKU = MS_SKUCHAIN_MOQ.SKU
+                 AND MDPL1.STORERKEY = MS_SKUCHAIN_MOQ.STORERKEY 
+                 AND MDPL1.DCCODE != '공통'  /*고정처리*/
+                AND MDPL1.DCCODE = MS_SKUCHAIN_MOQ.DCCODE
+
+                
+          LEFT JOIN CM_DC CD1 
+                 ON MS_SKUCHAIN_MOQ.DCCODE = CD1.DCCODE
+          LEFT JOIN MS_CUST CUST1 
+                 ON CUST1.STORERKEY = PC1.STORERKEY 
+                AND CUST1.CUSTTYPE  = 'P' 
+                AND CUST1.CUSTKEY   = PC1.CUSTKEY
+              WHERE  1=1
+                AND MS_SKUCHAIN.STORERKEY = 'FW00'
+                AND MS_SKUCHAIN.DEL_YN = 'N'
+                AND MS_SKU.DEL_YN = 'N'
+            <if test='skuMulti != null and skuMulti != ""'>
+                <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                    <foreach collection="skuMulti" item="item">
+                     OR MS_SKUCHAIN.SKU IN
+                        <foreach collection="item" item="code" open="(" close=")" separator=",">
+                                    #{code}
+                        </foreach>
+                    </foreach>
+                </trim>
+            </if>
+            <if test='dccodeMulti != null and dccodeMulti != ""'>
+                AND MS_SKUCHAIN_MOQ.DCCODE IN 
+                <foreach collection="dccodeMulti" item="code" open="(" close=")" separator="," >
+                            #{code}
+                </foreach>
+            </if>
+            <if test='delYn != null and delYn != ""'>
+                AND MS_SKUCHAIN_MOQ.DEL_YN = #{delYn} 
+            </if>
+            <if test='delYn == "XXX"'>
+              UNION ALL /* delYn : null 임. 전체 조회 */
+             SELECT
+                   '0' AS CHECKYN
+                <choose>
+                    <when test="dccodeMulti != null and dccodeMulti.size() == 1">
+                  , #{dccode} AS DCCODE /* 센터코드 */
+                    </when>
+                    <otherwise>
+                  , UNISTR('') AS DCCODE /* 센터코드 */
+                    </otherwise>
+                </choose>
+                <choose>
+                    <when test="dccodeMulti != null and dccodeMulti.size() == 1">
+                  , CASE WHEN MS_SKUCHAIN_MOQ.DCCODE IS NULL    THEN ''
+                         ELSE NVL(CD1.DCNAME,'UNKNOWN')
+                     END     AS DCNAME /* 센터명 */
+                    </when>
+                    <otherwise>
+                  , UNISTR('') AS DCNAME /* 센터명 */
+                    </otherwise>
+                </choose>
+                  , PC1.CUSTKEY                                     AS CUSTKEY              /* 협력사코드 */
+                  , CASE WHEN PC1.CUSTKEY IS NULL THEN ''
+                         ELSE NVL(CUST1.DESCRIPTION, 'UNKNOWN')
+                    END                                             AS CUSTNAME             /* 협력사명 */
+                  , MS_SKU.STORERKEY                                AS STORERKEY            /* 고객사 */
+                  , MS_SKU.SKU                                      AS SKU                                 /* 상품코드 */
+                  , MS_SKU.DESCRIPTION                              AS DESCRIPTION
+                  , UNISTR('')                                      AS DEL_YN                             /* 삭제여부*/
+                  , COALESCE(MDPL1.BOXPERLAYER * MDPL1.LAYERPERPLT, MS_SKUCHAIN.BOXPERPLT) AS BOXPERPLT                        /* PLT당 BOX수*/
+                  , PC1.LEADTIME                                    AS LEADTIME                         /* 리드타임*/
+                  , UNISTR('')                                      AS MOQ_SKU                             /* 상품 MOQ(BOX)*/
+                  , UNISTR('')                                      AS MOQ_SKU_PLT                         /* 상품 MOQ(PLT)*/
+                  , UNISTR('')                                      AS MOQ_VENDER_BOX                     /* 협력사 MOQ(BOX)*/
+                  , UNISTR('')                                      AS MOQ_VENDER_PLT                   /* 협력사 MOQ(PLT)*/
+                  , UNISTR('')                                      AS ADDWHO                             /* 최초등록자*/
+                  , UNISTR('')                                      AS ADDDATE                             /* 최초등록시간*/
+                  , UNISTR('')                                      AS EDITWHO                             /* 최종변경자*/
+                  , UNISTR('')                                      AS EDITDATE                            /* 최종변경시간*/
+                  , UNISTR('')                                      AS REG_NM                         /* 최초등록자이름*/
+                  , UNISTR('')                                      AS UPD_NM                         /* 최종변경자이름*/
+              FROM MS_SKUCHAIN     
+        INNER JOIN MS_SKU 
+                ON MS_SKU.SKU         = MS_SKUCHAIN.SKU
+               AND MS_SKU.STORERKEY   = MS_SKUCHAIN.STORERKEY
+         LEFT JOIN LOGISONE.MS_DC_PLT_LOAD MDPL1 
+                ON MDPL1.SKU         = MS_SKUCHAIN.SKU
+               AND MDPL1.STORERKEY = MS_SKUCHAIN.STORERKEY
+         LEFT JOIN MS_SKUCHAIN_MOQ
+                ON MS_SKUCHAIN.SKU = MS_SKUCHAIN_MOQ.SKU
+               AND MS_SKUCHAIN.STORERKEY = MS_SKUCHAIN_MOQ.STORERKEY
+        INNER JOIN (
+                   SELECT
+                          CUSTKEY
+                        , DCCODE
+                        , SKU
+                        , STORERKEY
+                        , LEADTIME
+                    FROM MS_PURCHASECUST
+                   WHERE 1 = 1
+                     <if test='dccodeMulti != null and dccodeMulti != ""'>
+                     AND DCCODE IN 
+                          <foreach collection="dccodeMulti" item="code" open="(" close=")" separator="," >
+                                #{code}
+                          </foreach>
+                     </if>
+                     AND VALIDATE_CONVERSION(TODATE AS DATE, 'YYYYMMDD') = 1
+                     AND TO_DATE(TODATE, 'YYYYMMDD') >= SYSDATE
+                    ) PC1
+                ON PC1.SKU = MS_SKU.SKU
+               AND PC1.STORERKEY = MS_SKU.STORERKEY
+         LEFT JOIN MS_CUST CUST1
+                ON CUST1.STORERKEY = PC1.STORERKEY
+               AND CUST1.CUSTTYPE = 'P'
+               AND CUST1.CUSTKEY = PC1.CUSTKEY
+                <if test="dccodeMulti != null and dccodeMulti.size() == 1">
+         LEFT JOIN CM_DC CD1 
+                ON CD1.DCCODE = #{dccode}
+                </if>                
+             WHERE 1=1                            
+               AND MS_SKUCHAIN.STORERKEY =  'FW00' /**P*/              
+               AND MS_SKUCHAIN.DEL_YN = 'N'
+               AND MS_SKU.DEL_YN = 'N'
+               AND MS_SKUCHAIN.SKU NOT IN(
+                                         SELECT B.SKU 
+                                           FROM MS_SKUCHAIN_MOQ B 
+                                          WHERE 1=1
+                                    <if test='dccodeMulti != null and dccodeMulti != ""'>
+                                            AND B.DCCODE IN 
+                                            <foreach collection="dccodeMulti" item="code" open="(" close=")" separator="," >
+                                                            #{code}
+                                            </foreach>
+                                    </if>
+                                    <if test='delYn != null and delYn != ""'>
+                                            AND B.DEL_YN = #{delYn} 
+                                    </if>
+                                          )
+                                    <if test='skuMulti != null and skuMulti != ""'>
+                                        <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                                            <foreach collection="skuMulti" item="item">
+                                                    OR MS_SKUCHAIN.SKU IN
+                                                    <foreach collection="item" item="code" open="(" close=")" separator=",">
+                                                                        #{code}
+                                                    </foreach>
+                                            </foreach>
+                                        </trim>
+                                    </if>
+                </if>
+                                          ) A
+             ORDER BY A.DCCODE, A.SKU
+    </select>
+    
+    <!-- 상품코드 유효성 체크 -->
+	<select id="getValidateSaveList" resultType="MsSkuChainMoqResDto">
+		WITH  /* [msSkuChainService.sqlx][msSkuChainService.getValidateSaveList][상품코드 유효성 체크][JeongHyeongCheol][20250805] */
+	  		 V AS (
+		        <foreach collection="list" item="item" separator="UNION ALL">
+			        SELECT
+			             #{item.sku}									AS SKU
+						,#{item.dccode}								AS DCCODE
+						,#{item.moqSku}								AS MOQ_SKU
+						,#{item.moqSkuPlt}							AS MOQ_SKU_PLT
+						,#{item.moqVenderBox}						AS MOQ_VENDER_BOX
+						,#{item.moqVenderPlt}						AS MOQ_VENDER_PLT
+			            ,ROW_NUMBER() OVER(ORDER BY 1) AS RN 
+			        FROM DUAL
+		        </foreach>
+		    )
+		    
+		    SELECT 
+		         V.SKU 						AS SKU
+		        ,V.DCCODE					AS DCCODE				
+				,V.MOQ_SKU					AS MOQ_SKU				
+				,V.MOQ_SKU_PLT				AS MOQ_SKU_PLT
+				,V.MOQ_VENDER_BOX			AS MOQ_VENDER_BOX
+				,V.MOQ_VENDER_PLT			AS MOQ_VENDER_PLT
+								
+		        ,CASE 
+		        	WHEN T1.SKU IS NOT NULL 
+		        	THEN 'Y' ELSE 'N' 
+		         END 								AS SKU_CHK
+		        ,CASE 
+		        	WHEN T2.DCCODE IS NOT NULL 
+		        	THEN 'Y' ELSE 'N' 
+		         END 								AS DCCODE_CHK		       
+		        
+		    FROM V
+		    
+		    LEFT JOIN MS_SKU T1 
+		    	   ON T1.STORERKEY 		= 'FW00'
+		          AND T1.SKU 	= V.SKU
+		        
+		    LEFT JOIN CM_DC T2 
+		    	   ON T2.DEL_YN ='N'
+				  AND (T2.REAL_DC_YN <![CDATA[<>]]> 'N' OR T2.REAL_DC_YN IS NULL)
+				  AND T2.DCCODE 	= V.DCCODE		        
+				  
+		    ORDER BY V.RN 
+    </select>
+	
+    <!-- 상품 정보 MERGE -->
+    <update id="saveMasterList">
+    	BEGIN
+            MERGE INTO MS_SKUCHAIN_MOQ
+                  USING DUAL ON (DCCODE  = #{dccode}
+                             AND SKU     = #{sku})
+
+             WHEN MATCHED THEN
+                UPDATE SET MOQ_SKU        = #{moqSku}
+                		  ,MOQ_SKU_PLT    = #{moqSkuPlt}
+                		  ,MOQ_VENDER     = #{moqVenderBox}
+                		  ,MOQ_VENDER_PLT = #{moqVenderPlt}
+                		  ,DEL_YN		  = NVL(#{delYn}, 'N')
+                          ,EDITDATE       = SYSDATE
+                          ,EDITWHO        = #{gUserId}
+
+             WHEN NOT MATCHED THEN
+                 INSERT
+	    			(SERIALKEY
+	    			,STORERKEY
+	    			,DCCODE
+	    			,SKU
+	    			,MOQ_SKU
+	    			,MOQ_SKU_PLT
+	    			,MOQ_VENDER
+	    			,MOQ_VENDER_PLT
+	    			,DEL_YN	    			
+	    			,ADDWHO
+	    			,EDITWHO)
+    			VALUES
+	    			(SEQ_MS_SKUCHAIN_MOQ.NEXTVAL
+	    			,'FW00'
+	    			,#{dccode}
+	    			,#{sku}
+	    			,#{moqSku}
+	    			,#{moqSkuPlt}
+	    			,#{moqVenderBox}
+	    			,#{moqVenderPlt}
+	    			,NVL(#{delYn}, 'N')	    			
+	    			,#{gUserId}
+	    			,#{gUserId});
+
+		END;
+    </update>
+</mapper>

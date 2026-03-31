@@ -1,0 +1,563 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="tmIssueService">
+    <!-- CRM 배송 이슈 목록 조회 -->
+    <select id="getMasterList" resultType="cjfw.wms.tm.dto.TmIssueResDto">
+        SELECT /* [tmIssueService.sqlx][tmIssueService.getMasterList][배송이슈 조회][YeoSeungCheol][20251023] */
+               '0'                                                                      AS checkYn
+             , issue.ISSUENO                                                            AS issueNo
+             , issue.DCCODE                                                             AS dcCode
+             , issue.DELIVERYDT                                                         AS deliveryDt
+             , issue.CUSTKEY                                                            AS custKey
+             , FN_DESCR_CUST(issue.STORERKEY,issue.CUSTKEY)                             AS custName
+             , issue.ISSUECODE                                                          AS issueCode
+             , issue.SKU                                                                AS sku
+             , CASE WHEN issue.SKU IS NULL THEN '' ELSE FN_DESCR_SKU(issue.STORERKEY,issue.SKU)  END AS skuName
+             , issue.STORAGETYPE                                                        AS storageType /* 저장유형 */
+             , issue.ORDERQTY                                                           AS orderQty
+             , issue.CONFIRMQTY                                                         AS confirmQty
+             , issue.WORKQTY                                                            AS workQty
+             , issue.UOM                                                                AS uom
+             , issue.DRIVERNAME                                                         AS driverName
+             , DAMO.DEC(issue.PHONE)                                                    AS phone
+             , issue.DELIVERYTIME                                                       AS deliveryTime
+             , issue.DELIVERYPLACE                                                      AS deliveryPlace
+             , issue.REASONCODE                                                         AS reasonCode
+             , issue.REASONMSG                                                          AS reasonMsg
+             , issue.DEL_YN                                                             AS delYn
+             , (SELECT COUNT(1) 
+                  FROM  TM_ISSUE_FILE tFile
+                 WHERE  tFile.issueNo = issue.issueNo 
+                   AND  tFile.STATUS  = 'Y')                                            AS fileCnt
+             , issue.STATUS                                                             AS status /* 진행상태 */
+             , issue.CONFIRMDATE                                                        AS confirmDate
+             , issue.CONFIRMWHO                                                         AS confirmWho
+             , to_char(issue.ADDDATE,'yyyy-mm-dd hh24:mi:ss')                           AS addDate
+             , issue.ADDWHO                                                             AS addWho
+             , fn_getusername(issue.ADDWHO)||'['||issue.ADDWHO||']'                     AS addWhoNm
+             , to_char(issue.EDITDATE,'yyyy-mm-dd hh24:mi:ss')                          AS editDate
+             , issue.EDITWHO                                                            AS editWho
+             , fn_getusername(issue.EDITWHO)||'['||issue.EDITWHO||']'                   AS editWhoNm
+             
+        FROM TM_ISSUE issue
+  INNER JOIN CM_USER_AUTHORITY_DCXSTORER  dcxStorer
+          ON dcxStorer.USERID       = #{gUserId}  
+         AND dcxStorer.DCCODE       = issue.DCCODE    
+         AND dcxStorer.STORERKEY    = issue.STORERKEY
+        <if test="schDcCode != null and schDcCode != ''">
+         AND dcxStorer.DCCODE = #{schDcCode}
+        </if>
+        <if test="gStorerkey != null and gStorerkey != ''">
+         AND dcxStorer.STORERKEY = #{gStorerkey}
+        </if>
+       WHERE NVL( issue.LOADTYPE , '-1') NOT IN ('01', '02') /* LOADTYPE 이 NULL 인것이 조회가 안되서 NVL 처리함. */
+         AND issue.STORERKEY  = #{gStorerkey}
+         <if test="schDcCode != null and schDcCode != ''">
+         AND issue.DCCODE     = #{schDcCode}
+         </if>
+         <if test="schDeliveryDt != null and schDeliveryDt != ''">
+         AND issue.DELIVERYDT = #{schDeliveryDt}
+         </if>
+         AND issue.DEL_YN     = 'N'
+        <if test="schStatus != null and schStatus != ''"> <!-- 상태 -->
+         AND issue.STATUS = #{schStatus}
+        </if>
+        <if test="multiToCustkey != null and multiToCustkey.size() > 0"><!-- 고객 다중선택 -->
+         AND issue.CUSTKEY IN
+             <foreach collection="multiToCustkey" item="item" separator="," close=")" open="(">
+                #{item}
+            </foreach>
+        </if>
+       ORDER BY issue.DCCODE
+              , issue.DELIVERYDT
+              , issue.ISSUENO
+    </select>
+    
+    <insert id="insertTMIssue">
+        /* [tmIssueService.sqlx][tmIssueService.insertTMIssue][배송이슈등록][YeoSeungCheol][20251023] */
+        MERGE INTO TM_ISSUE 
+        USING DUAL ON ( ISSUENO = #{issueNo} )
+          WHEN MATCHED THEN
+            UPDATE 
+               SET DELIVERYDT    = #{deliveryDt}
+                 , CUSTKEY       = #{custKey}
+                 , ISSUECODE     = #{issueCode}
+                 , SKU           = #{sku}
+                 , STORAGETYPE   = #{storageType}
+                 , ORDERQTY      = #{orderQty}
+                 , CONFIRMQTY    = #{confirmQty}
+                 , WORKQTY       = #{workQty}
+                 , UOM           = #{uom}
+                 , DRIVERNAME    = #{driverName}
+                 , PHONE         = #{phone}
+                 , PHONE = CASE WHEN INSTR(#{phone}, '*') > 0 THEN PHONE  ELSE DAMO.ENC(#{phone}) END
+                 , DELIVERYTIME  = #{deliveryTime}
+                 , DELIVERYPLACE = #{deliveryPlace}
+                 , REASONCODE    = #{reasonCode}
+                 , REASONMSG     = #{reasonMsg}
+                 , EDITDATE      = SYSDATE
+                 , EDITWHO       = #{gUserId}
+             WHERE DEL_YN  = 'N'
+               AND STATUS  = '00'
+          WHEN NOT MATCHED THEN
+            INSERT 
+                 ( ISSUENO
+                 , STORERKEY
+                 , DCCODE
+                 , deliveryDt
+                 , CUSTKEY
+                 , ISSUECODE
+                 , SKU
+                 , STORAGETYPE
+                 , ORDERQTY
+                 , CONFIRMQTY
+                 , WORKQTY
+                 , UOM
+                 , DRIVERNAME
+                 , PHONE
+                 , DELIVERYTIME
+                 , DELIVERYPLACE
+                 , REASONCODE
+                 , REASONMSG
+                 , CONFIRMDATE
+                 , CONFIRMWHO
+                 , STATUS
+                 , DEL_YN
+                 , ADDDATE
+                 , EDITDATE
+                 , ADDWHO
+                 , EDITWHO)
+            VALUES
+                  ( SEQ_TM_ISSUE.nextval
+                  , #{storerKey}
+                  , #{dcCode}
+                  , #{deliveryDt}
+                  , #{custKey}
+                  , #{issueCode}
+                  , #{sku}
+                  , #{storageType}
+                  , #{orderQty}
+                  , #{confirmQty}
+                  , #{workQty}
+                  , #{uom}
+                  , #{driverName}
+                  , DAMO.ENC(#{phone})
+                  , #{deliveryTime}
+                  , #{deliveryPlace}
+                  , #{reasonCode}
+                  , #{reasonMsg}
+                  , null
+                  , null
+                  , '00'
+                  , 'N'
+                  , SYSDATE
+                  , SYSDATE
+                  , #{gUserId}
+                  , #{gUserId}
+                  )
+    </insert>
+    
+    <update id="updateTMIssue">
+        /* [tmIssueService.sqlx][tmIssueService.updateTMIssue][배송이슈수정][YeoSeungCheol][20251023] */ 
+        UPDATE TM_ISSUE 
+           SET DELIVERYDT    = #{deliveryDt}
+             , CUSTKEY       = #{custKey}
+             , ISSUECODE     = #{issueCode}
+             , SKU           = #{sku}
+             , STORAGETYPE   = #{storageType}
+             , ORDERQTY      = #{orderQty}
+             , CONFIRMQTY    = #{confirmQty}
+             , WORKQTY       = #{workQty}
+             , UOM           = #{uom}
+             , DRIVERNAME    = #{driverName}
+             , PHONE         = CASE WHEN INSTR(#{phone}, '*') > 0 THEN PHONE  ELSE DAMO.ENC(#{phone}) END
+             , DELIVERYTIME  = #{deliveryTime}
+             , DELIVERYPLACE = #{deliveryPlace}
+             , REASONCODE    = #{reasonCode}
+             , REASONMSG     = #{reasonMsg}
+             , EDITDATE      = SYSDATE
+             , EDITWHO       = #{gUserId}
+        WHERE ISSUENO = #{issueNo}
+          AND DEL_YN  = 'N'
+          AND STATUS  = '00'
+    </update>
+    
+    <delete id="deleteTMIssue">
+        /* [tmIssueService.sqlx][tmIssueService.deleteTMIssue][배송이슈삭제][YeoSeungCheol][20251023] */ 
+        UPDATE TM_ISSUE
+           SET DEL_YN       = 'Y'
+             , EDITDATE     = SYSDATE
+             , EDITWHO      = #{gUserId}
+         WHERE
+             ISSUENO   = #{issueNo}
+           AND DEL_YN  = 'N'
+           AND STATUS  = '00'
+    </delete>
+    
+    <!-- 파일 일괄 삭제 -->
+    <update id="saveFileDeleteForissueNo">
+        UPDATE /* [tmIssueService.sqlx][tmIssueService.saveFileDelete][파일 삭제][YeoSeungCheol][20251023] */
+              TM_ISSUE_FILE
+           SET STATUS      = 'N'
+             , EDITDATE    = SYSDATE
+             , EDITWHO     = #{gUserNo}
+        WHERE
+              ISSUENO      = #{issueNo}
+          AND STATUS       = 'Y'
+    </update>
+    
+    
+    <update id="updateConfirmTMIssue">
+        /* [tmIssueService.sqlx][tmIssueService.updateConfirmTMIssue][배송이슈확정][YeoSeungCheol][20251023] */ 
+        UPDATE TM_ISSUE 
+           SET DELIVERYDT    = #{deliveryDt}
+             , CUSTKEY       = #{custKey}
+             , ISSUECODE     = #{issueCode}
+             , SKU           = #{sku}
+             , STORAGETYPE   = #{storageType}
+             , ORDERQTY      = #{orderQty}
+             , CONFIRMQTY    = #{confirmQty}
+             , WORKQTY       = #{workQty}
+             , UOM           = #{uom}
+             , DRIVERNAME    = #{driverName}
+             , PHONE         = CASE WHEN INSTR(#{phone}, '*') > 0 THEN PHONE ELSE #{phone} END
+             , DELIVERYTIME  = #{deliveryTime}
+             , DELIVERYPLACE = #{deliveryPlace}
+             , REASONCODE    = #{reasonCode}
+             , REASONMSG     = #{reasonMsg}
+             , CONFIRMDATE   = SYSDATE
+             , CONFIRMWHO    = #{gUserId}
+             , STATUS        = '90'
+             , EDITDATE      = SYSDATE
+             , EDITWHO       = #{gUserId}
+        WHERE ISSUENO = #{issueNo}
+          AND DEL_YN  = 'N'
+          AND STATUS  = '00'
+    </update>
+    
+    
+    <insert id="insertTMIssueIFData">
+        INSERT /* [tmIssueService.sqlx][tmIssueService.insertTMIssueIFData][배송이슈I/F데이터 등록][YeoSeungCheol][20251023] */
+          INTO IF_TM_ISSUE
+             ( SERIALKEY
+             , ISSUENO
+             , STORERKEY
+             , DCCODE
+             , DELIVERYDT
+             , CUSTKEY
+             , ISSUECODE
+             , SKU
+             , STORAGETYPE
+             , ORDERQTY
+             , CONFIRMQTY
+             , WORKQTY
+             , UOM
+             , DRIVERNAME
+             , PHONE
+             , DELIVERYTIME
+             , DELIVERYPLACE
+             , REASONCODE
+             , REASONMSG
+             , IF_DESTINATION
+             , IF_FLAG
+             , IF_DATE
+             , IF_MEMO
+             , IF_ID
+             , IF_TIMESTAMP
+             , STATUS
+             , DEL_YN
+             , ADDDATE
+             , EDITDATE
+             , ADDWHO
+             , EDITWHO)
+        SELECT 
+               SEQ_IF_TM_ISSUE.NEXTVAL 
+             , ISSUENO
+             , STORERKEY
+             , DCCODE
+             , DELIVERYDT
+             , CUSTKEY
+             , ISSUECODE
+             , SKU
+             , STORAGETYPE
+             , ORDERQTY
+             , CONFIRMQTY
+             , WORKQTY
+             , UOM
+             , DRIVERNAME
+             , PHONE
+             , DELIVERYTIME
+             , DELIVERYPLACE
+             , REASONCODE
+             , REASONMSG
+             , 'SAFS'       AS IF_DESTINATION
+             , 'N'          AS IF_FLAG
+             , SYSDATE      AS IF_DATE
+             , ''           AS IF_MEMO
+             , 'SCM0550'    AS IF_ID
+             , SYSTIMESTAMP AS IF_TIMESTAMP
+             , STATUS
+             , DEL_YN
+             , ADDDATE
+             , EDITDATE
+             , ADDWHO
+             , EDITWHO
+         FROM TM_ISSUE
+        WHERE TM_ISSUE.ISSUENO = #{issueNo}
+          AND TM_ISSUE.STATUS  = '90'
+          AND TM_ISSUE.DEL_YN  = 'N'
+    </insert>
+    
+    <!-- 배송이슈 Upload File List -->
+    <select id="getPopupUploadFileList" resultType="cjfw.wms.tm.dto.TmIssueResDto">
+        SELECT /* [tmIssueService.sqlx][tmIssueService.getPopupUploadFileList][배송이슈 Upload File List][YeoSeungCheol][20251023] */
+               '0'                    AS checkYn
+             , SERIALKEY              AS serialKey
+             , ISSUENO                AS issueNo
+             , DOC_TYPE               AS docType
+             , DOC_NAME               AS docName
+             , FILE_NAME              AS fileName
+             , FILE_EXTENSION         AS fileExtension
+             , FILE_LOCATION          AS fileLocation
+             , FILE_SIZE_BYTES        AS fileSizeBytes
+             , TRANS_FILE_NAME        AS transFileName
+             , UPLOAD_HASH_ID         AS uploadHashId
+             , UPLOAD_RES_DOC_ID      AS uploadResDocId
+             , UPLOAD_FILE_NAME       AS uploadFileName
+             , UPLOAD_WORKPLACE_ID    AS uploadWorkplaceId
+             , UPLOAD_LOCATION        AS uploadLocation
+             , DOWNLOAD_COUNT         AS downloadCount
+             , FILE_TYPE              AS fileType
+             , STATUS                 AS status
+             , ADDWHO                 AS addWho
+             , ADDDATE                AS addDate
+             , EDITWHO                AS editWho
+             , EDITDATE               AS editDate
+          FROM TM_ISSUE_FILE
+         WHERE 1=1
+           AND ISSUENO  = #{issueNo}
+           AND STATUS   = 'Y'
+    </select>
+    
+    <!-- 배송이슈 첨부파일 Insert -->
+    <insert id="insertFileInfo">
+        INSERT /* [tmIssueService.sqlx][tmIssueService.insertFileInfo][배송이슈 첨부파일 Insert][YeoSeungCheol][20251023] */
+          INTO TM_ISSUE_FILE 
+             ( SERIALKEY
+             , ISSUENO  
+             , DOC_TYPE  
+             , DOC_NAME  
+             , FILE_NAME  
+             , FILE_EXTENSION  
+             , FILE_LOCATION  
+             , FILE_SIZE_BYTES  
+             , TRANS_FILE_NAME  
+             , UPLOAD_HASH_ID  
+             , UPLOAD_RES_DOC_ID  
+             , UPLOAD_FILE_NAME  
+             , UPLOAD_WORKPLACE_ID  
+             , UPLOAD_LOCATION  
+             , DOWNLOAD_COUNT  
+             , FILE_CONTENT  
+             , FILE_TYPE  
+             , STATUS  
+             , ADDWHO
+             , ADDDATE
+             , EDITWHO
+             , EDITDATE
+             )
+        VALUES 
+             (
+              SEQ_TM_ISSUE_FILE.NEXTVAL
+             , #{issueNo}
+             , #{docType}
+             , 'TMISSUE_FILE' 
+             , #{fileName} 
+             , #{fileExtension}
+             , #{fileLocation}
+             , #{fileSizeBytes} 
+             , #{transFileName}
+             , ''
+             , #{uploadResDocId}
+             , #{uploadFileName}
+             , #{uploadWorkplaceId}
+             , ''
+             , '0'
+             , ''
+             , 'HTTP'
+             , 'Y'
+             , #{gUserNo}
+             , SYSDATE
+             , #{gUserNo}
+             , SYSDATE
+             )
+    </insert>
+    
+    <!-- 파일 다운로드 카운트 -->
+    <update id="updateDownloadCnt">
+        UPDATE /* [tmIssueService.sqlx][tmIssueService.updateDownloadCnt][파일 다운로드 카운트][YeoSeungCheol][20251023] */
+              TM_ISSUE_FILE
+           SET
+               DOWNLOAD_COUNT     = NVL(DOWNLOAD_COUNT,0) + 1
+             , EDITDATE           = SYSDATE
+             , EDITWHO            = #{gUserNo}
+        WHERE SERIALKEY           = #{serialKey}  
+          AND issueNo             = #{issueNo}
+    </update>
+    
+    <!-- 파일 삭제 -->
+    <update id="saveFileDelete">
+        UPDATE /* [tmIssueService.sqlx][tmIssueService.saveFileDelete][파일 삭제][YeoSeungCheol][20251023] */
+              TM_ISSUE_FILE
+           SET
+               STATUS     = 'N'
+             , EDITDATE   = SYSDATE
+             , EDITWHO    = #{gUserNo}
+        WHERE SERIALKEY   = #{serialKey}
+          AND ISSUENO     = #{issueNo}
+          AND STATUS      = 'Y'
+    </update>
+    
+    <!-- 엑셀업로드 유효성체크-->
+    <select id="getValidateExcelList" resultType="cjfw.wms.tm.dto.TmIssueResDto">
+        WITH  /* [tmIssueService.sqlx][tmIssueService.getValidateExcelList][엑셀 업로드 유효성 체크][jun][20260205] */
+    BASE_TBL AS (
+            <foreach collection="list" item="item" index="index" separator="UNION ALL">
+                 SELECT
+                        #{item.deliveryDt}                             AS DELIVERYDT   /* 출고일자 */
+                      , #{item.storerKey}                              AS STORERKEY    /* 회사코드 */
+                      , #{item.custKey}                                AS CUSTKEY      /* 관리처코드 */
+                      , #{item.dcCode}                                 AS DCCODE       /* 물류센터코드 */
+                      , #{item.issueCode}                              AS ISSUECODE    /* 배송이슈코드 */
+                      , #{item.sku}                                    AS SKU          /* 품목코드 */
+                      , #{item.storageType}                            AS STORAGETYPE  /* 저장유형 */
+                      , #{item.workQty}                                AS WORKQTY      /* 출고수량 */
+                      , #{item.uom}                                    AS UOM          /* 단위 */
+                      , #{item.driverName}                             AS DRIVERNAME   /* 기사명 */
+                      , #{item.phone}                                  AS PHONE        /* 기사 연락처 */
+                      , #{item.deliveryTime}                           AS DELIVERYTIME /* 도착시간 */
+                      , #{item.deliveryPlace}                          AS DELIVERYPLACE  /* 배송장소 */
+                      , #{item.reasonCode}                             AS REASONCODE   /* 이슈사유코드 */
+                      , #{index} + 1                  AS RN 
+                   FROM DUAL
+             </foreach>
+                )
+        SELECT 
+               baseTbl.DELIVERYDT                   AS deliveryDt   /* 출고일자 */
+             , baseTbl.STORERKEY                    AS storerKey      /* 회사코드 */
+             , baseTbl.CUSTKEY                                  AS custKey      /* 관리처코드 */
+             , FN_DESCR_CUST(baseTbl.STORERKEY,baseTbl.CUSTKEY) AS custName     /* 관리처명 */
+             , baseTbl.DCCODE                       AS dcCode       /* 물류 센터 코드 */
+             , baseTbl.ISSUECODE                    AS issueCode    /* 배송이슈코드 */
+             , baseTbl.SKU                                 AS sku          /* 품목코드 */
+             , FN_DESCR_SKU(baseTbl.STORERKEY,baseTbl.SKU) AS skuName      /* 품목명 */
+             , baseTbl.STORAGETYPE                  AS storageType  /* 저장유형 */
+             , baseTbl.WORKQTY                      AS workQty      /* 출고수량 */
+             , baseTbl.UOM                          AS uom          /* 단위 */  
+             , baseTbl.DRIVERNAME                   AS driverName   /* 기사명 */
+             , baseTbl.PHONE                        AS phone        /* 기사 연락처 */
+             , baseTbl.DELIVERYTIME                 AS deliveryTime /* 도착시간 */
+             , baseTbl.DELIVERYPLACE                AS deliveryPlace  /* 배송장소 */
+             , baseTbl.REASONCODE                   AS reasonCode   /* 이슈사유코드 */
+             , CASE WHEN baseTbl.DELIVERYDT IS NULL THEN 'N'
+                    WHEN VALIDATE_CONVERSION(baseTbl.DELIVERYDT AS DATE, 'YYYYMMDD') = 1 THEN 'Y'
+                    ELSE 'N'
+                END                               AS deliveryDtYn  /* 출고일자 유무 */
+             , CASE WHEN tmIssue.ISSUECODE IS NOT NULL AND cmCode4.BASECODE IS NOT NULL  THEN 'Y' 
+                    ELSE 'N' 
+                END                                AS databaseYn     /* 기존 정보 존재 유무 */ 
+             , CASE WHEN mcCust.CUSTKEY IS NOT NULL THEN 'Y' 
+                    ELSE 'N' 
+                END                                AS custKeyYn     /* 관리처 코드 존재 유무 */ 
+             , CASE WHEN cmCode.BASECODE IS NOT NULL THEN 'Y' 
+                    ELSE 'N' 
+                END                                AS issueCodeYn   /* 이슈 코드 존재 유무 */ 
+             , CASE WHEN baseTbl.WORKQTY IS NOT NULL THEN 'Y' 
+                    ELSE 'N' 
+                END                                AS workQtyYn         /* 출고수량 유무 */ 
+             , CASE WHEN baseTbl.UOM IS NOT NULL AND cmCode3.BASECODE IS NOT NULL THEN 'Y'
+                    ELSE 'N' 
+                END                                AS uomYn             /* 단위 유무 */ 
+             , CASE WHEN baseTbl.ISSUECODE IN ('06', '07', '10') AND skuCode.SKU IS NULL THEN 'N'  
+             	    WHEN baseTbl.SKU IS NOT NULL AND skuCode.SKU IS NULL THEN 'N'
+                    ELSE 'Y' 
+                END                                AS skuYn         /* 상품 코드 존재 유무 */
+             , CASE WHEN baseTbl.ISSUECODE IN ('02') AND cmCode2.BASECODE IS NULL THEN 'N'
+                    WHEN baseTbl.STORAGETYPE IS NOT NULL AND cmCode2.BASECODE IS NULL THEN 'N'
+                    ELSE 'Y' 
+                END                                AS storageTypeYn       /* 저장유형 코드 존재 유무 */
+             , CASE WHEN baseTbl.ISSUECODE NOT IN ('06', '07', '10') THEN 'Y'
+                    WHEN baseTbl.DRIVERNAME IS NOT NULL THEN 'Y' 
+                    ELSE 'N' 
+                END AS driverNameYn      /* 기사명 유무 */ 
+             , CASE WHEN baseTbl.ISSUECODE NOT IN ('01','02','03','04','09','10') THEN 'Y'
+                    WHEN baseTbl.DELIVERYTIME IS NOT NULL THEN 'Y' 
+                    ELSE 'N' 
+                END AS deliveryTimeYn    /* 도착시간 유무 */ 
+                
+             , CASE WHEN baseTbl.ISSUECODE NOT IN ('02','03','04') AND cmCode5.BASECODE IS  NULL THEN 'N'
+                    WHEN baseTbl.DELIVERYPLACE IS NOT NULL  AND cmCode5.BASECODE IS  NULL THEN 'N' 
+                    ELSE 'Y' 
+                END AS deliveryPlaceYn     /* 배송장소 유무 */ 
+                
+             , CASE WHEN baseTbl.ISSUECODE IN ('06','07') AND cmCode3.BASECODE IS NULL THEN 'N'
+                    WHEN baseTbl.REASONCODE IS NOT NULL AND cmCode3.BASECODE IS NULL THEN 'N'
+                    ELSE 'Y' 
+                END AS reasonCodeYn    /* 이슈사유코드 존재 유무 */ 
+             , CASE WHEN baseTbl.DCCODE IS NOT NULL AND CD1.DCCODE IS NOT NULL  THEN 'Y' 
+                    ELSE 'N'
+                END AS dcCodeYn
+                
+         FROM BASE_TBL baseTbl
+    LEFT JOIN MS_CUST mcCust 
+           ON mcCust.STORERKEY      = baseTbl.STORERKEY
+          AND mcCust.CUSTKEY        = baseTbl.CUSTKEY
+    LEFT JOIN CM_CODE cmCode 
+           ON cmCode.STORERKEY  = mcCust.STORERKEY
+          AND cmCode.CODELIST   = 'TMISSUE_CODE'
+          AND cmCode.DEL_YN     = 'N'
+          AND cmCode.BASECODE   = baseTbl.ISSUECODE
+    LEFT JOIN CM_CODE cmCode2
+           ON cmCode2.STORERKEY  = baseTbl.STORERKEY
+          AND cmCode2.CODELIST   = 'STORAGETYPE'
+          AND cmCode2.DEL_YN     = 'N'
+          AND cmCode2.BASECODE   = baseTbl.STORAGETYPE
+    LEFT JOIN CM_CODE cmCode3
+           ON cmCode3.STORERKEY  = baseTbl.STORERKEY
+          AND cmCode3.CODELIST   = 'TMISSUE_REASON_CODE'
+          AND cmCode3.DEL_YN     = 'N'
+          AND cmCode3.BASECODE   = baseTbl.REASONCODE
+    LEFT JOIN CM_CODE cmCode4
+           ON cmCode4.STORERKEY  = baseTbl.STORERKEY
+          AND cmCode4.CODELIST   = 'TMISSUE_CODE'
+          AND cmCode4.DEL_YN     = 'N'
+          AND cmCode4.BASECODE   = baseTbl.ISSUECODE
+    LEFT JOIN CM_CODE cmCode5
+           ON cmCode5.STORERKEY  = baseTbl.STORERKEY
+          AND cmCode5.CODELIST   = 'TMISSUE_PLACE'
+          AND cmCode5.DEL_YN     = 'N'
+          AND cmCode5.BASECODE   = baseTbl.DELIVERYPLACE
+    LEFT JOIN TM_ISSUE tmIssue
+           ON tmIssue.STORERKEY   = baseTbl.STORERKEY
+          AND tmIssue.DELIVERYDT  = baseTbl.DELIVERYDT
+          AND tmIssue.CUSTKEY     = baseTbl.CUSTKEY
+          AND tmIssue.ISSUECODE   = baseTbl.ISSUECODE
+          AND tmIssue.DCCODE      = baseTbl.DCCODE    /* '물류센터 코드' */
+    LEFT JOIN MS_SKU skuCode
+      ON skuCode.SKU = baseTbl.SKU
+     AND skuCode.STORERKEY = baseTbl.STORERKEY
+     LEFT JOIN CM_DC CD1 
+      ON baseTbl.DCCODE = CD1.DCCODE
+        ORDER BY baseTbl.RN 
+    </select>
+     <select  id="getDetailList" resultType="TmIssueResDto">
+   SELECT /* [tmIssueService.sqlx][tmIssueService.getDetailList][개인정보 단건 조회] */
+           DRIVERNAME                                                                               AS USERNM  
+        , REGEXP_REPLACE(DAMO.DEC(PHONE), '(02|010|0[3-8][0-9])([0-9]{3,4})([0-9]{4})', '\1-\2-\3') AS PHONE
+     FROM TM_ISSUE
+    WHERE 1=1
+     AND STORERKEY = 'FW00'
+     AND ISSUENO = #{issueNo}
+     
+    </select>   
+</mapper>

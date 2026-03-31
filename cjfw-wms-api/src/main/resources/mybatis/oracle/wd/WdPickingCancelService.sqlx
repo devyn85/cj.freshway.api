@@ -1,0 +1,367 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="wdPickingCancelService">
+
+
+	<select id="getMasterList" resultType="WdPickingCancelResDto">		
+		WITH T_WD_INPLAN AS (
+		    SELECT DM_DOCUMENT_D.DCCODE
+		          ,DM_DOCUMENT_D.STORERKEY
+		          ,DM_DOCUMENT_D.ORGANIZE
+		          ,DM_DOCUMENT_D.DOCTYPE
+		          ,DM_DOCUMENT_D.DOCDT
+		          ,DM_DOCUMENT_D.DOCNO
+		          ,WD_INPLAN.CUSTKEY
+		          ,WD_INPLAN.SLIPDT
+		          ,WD_INPLAN.SLIPNO
+		          ,WD_INPLAN.DELIVERYGROUP
+		    FROM   DM_DOCUMENT_D
+			JOIN   WD_INPLAN
+		    ON     WD_INPLAN.DCCODE    = DM_DOCUMENT_D.DCCODE
+		    AND    WD_INPLAN.STORERKEY = DM_DOCUMENT_D.STORERKEY
+		    AND    WD_INPLAN.DOCTYPE   = DM_DOCUMENT_D.DOCTYPE
+		    AND    WD_INPLAN.DOCDT     = DM_DOCUMENT_D.DOCDT  
+		    AND    WD_INPLAN.DOCNO     = DM_DOCUMENT_D.DOCNO  
+		    AND    WD_INPLAN.DOCLINE   = DM_DOCUMENT_D.DOCLINE
+		    AND    DM_DOCUMENT_D.DELIVERYDATE   = WD_INPLAN.SLIPDT
+		    AND    WD_INPLAN.STATUS    <![CDATA[<]]>  '90'         
+		    <if test="deliverygroup != null and deliverygroup != ''">		AND WD_INPLAN.DELIVERYGROUP	=  #{deliverygroup}		</if>
+		    <if test="slipdt != null and slipdt != ''">		AND WD_INPLAN.SLIPDT	=  #{slipdt}		</if>
+		   	<!-- 고객 다중선택 -->
+			<if test="toCustkeyMulti != null and toCustkeyMulti != '' ">
+		    	<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+		    		<foreach collection="toCustkeyMulti" item="item">
+		    			OR WD_INPLAN.CUSTKEY IN
+		    			<foreach collection="item" item="code" open="(" close=")" separator=",">
+		    				#{code} 	 
+		          		</foreach>
+		        	</foreach>
+		      	</trim>			                                    
+            </if>
+	    	<!-- 상품 다중선택 -->
+			<if test="sku != null and sku != '' ">
+				<if test="skuMulti != null and skuMulti.size() > 0">
+					<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+						<foreach collection="skuMulti" item="item">
+							OR WD_INPLAN.SKU IN
+							<foreach collection="item" item="code" open="(" close=")" separator=",">
+								#{code} 	 
+				      		</foreach>
+				    	</foreach>
+				  	</trim>			                                    
+		    	</if>
+	        </if>
+			 JOIN   WD_TASK
+	    	 ON     WD_TASK.DCCODE        = WD_INPLAN.DCCODE
+	    	 AND    WD_TASK.STORERKEY     = WD_INPLAN.STORERKEY
+	    	 AND    WD_TASK.SLIPDT        = WD_INPLAN.SLIPDT
+	    	 AND    WD_TASK.SLIPNO        = WD_INPLAN.SLIPNO
+	    	 AND    WD_TASK.SLIPLINE      = WD_INPLAN.SLIPLINE
+	    	 AND    WD_TASK.TASKTYPE      = 'PK'  /*피킹완료된 건만 조회 20260227 공두경*/
+			 AND    WD_TASK.WORKQTY - WD_TASK.CONFIRMQTY    <![CDATA[>]]>  '0'         
+			 AND    WD_TASK.WORKQTY     <![CDATA[>]]>  '0'         
+			 AND    WD_TASK.STATUS      <![CDATA[<]]>  '90'         
+			 AND    WD_TASK.DEL_YN               = 'N' 
+	         AND    WD_TASK.STATUS  <![CDATA[<]]>  '90'
+	         <if test="tasksystem != null and tasksystem != ''">		AND WD_TASK.TASKSYSTEM	=  #{tasksystem}		</if>
+	    	WHERE   WD_TASK.DCCODE  	= #{fixdccode}
+         	AND     WD_TASK.STORERKEY	= #{gStorerkey} 
+	    	AND     DM_DOCUMENT_D.STATUS    <![CDATA[<]]>  '90'        
+	    	<!-- START.권한센터 -->
+		    AND EXISTS (SELECT 1
+	                      FROM CM_USER_AUTHORITY 
+	                     WHERE CM_USER_AUTHORITY.DCCODE    = DM_DOCUMENT_D.DCCODE       
+	                       AND CM_USER_AUTHORITY.STORERKEY = DM_DOCUMENT_D.STORERKEY    
+	                       AND CM_USER_AUTHORITY.ORGANIZE  = DM_DOCUMENT_D.ORGANIZE     
+	                       AND CM_USER_AUTHORITY.AREA      = DM_DOCUMENT_D.AREA         
+	                       AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey}
+	                       AND CM_USER_AUTHORITY.USERID    = #{gUserId}
+	                       AND CM_USER_AUTHORITY.DCCODE    = #{fixdccode}
+	                       AND CM_USER_AUTHORITY.AREA      = #{gArea}   
+				           <!-- 창고.다중검색 -->
+				           <if test='gOrganizeMulti != null and gOrganizeMulti.length > 0'>
+					           AND CM_USER_AUTHORITY.ORGANIZE IN
+					           <foreach collection="gOrganizeMulti" item="code" open="(" close=")" separator=",">
+					             #{code}
+					           </foreach>
+				           </if>                       
+	                   )
+		    <!-- END.권한센터	-->
+		    GROUP BY DM_DOCUMENT_D.DCCODE
+		            ,DM_DOCUMENT_D.STORERKEY
+		            ,DM_DOCUMENT_D.ORGANIZE
+		            ,DM_DOCUMENT_D.DOCTYPE
+		            ,DM_DOCUMENT_D.DOCDT
+		            ,DM_DOCUMENT_D.DOCNO
+		            ,WD_INPLAN.CUSTKEY
+		            ,WD_INPLAN.SLIPDT
+		            ,WD_INPLAN.SLIPNO
+		            ,WD_INPLAN.DELIVERYGROUP            
+		)
+		SELECT /* [WdPickingCancelService.sqlx][getMasterList][피킹취소처리 목록 조회][공두경][2025.06.30] */
+		       T_WD_INPLAN.SLIPDT                    AS SLIPDT			/*출고일자*/
+		      ,T_WD_INPLAN.DELIVERYGROUP        	 AS DELIVERYGROUP	/*POP번호*/
+		      ,NVL(CD1.BASEDESCR,CD1.BASECODE) 		 AS ORDERTYPE		/*주문유형*/
+		      ,DM_DOCUMENT_H.TO_CUSTKEY              AS TO_CUSTKEY		/*관리처코드*/
+		      ,DM_DOCUMENT_H.TO_CUSTNAME             AS TO_CUSTNAME		/*배송인도처명*/
+		      ,DM_DOCUMENT_H.TO_ADDRESS_DISP         AS TO_ADDRESS_DISP	/*고객주소*/
+		      ,DM_DOCUMENT_H.DOCNO                   AS DOCNO			/*주문번호*/
+		      ,DM_DOCUMENT_H.CHANNEL                 AS CHANNEL			/*영업경로*/
+		      ,NVL(CD2.BASEDESCR,CD2.BASECODE) 		 AS STATUS			/*진행상태*/
+		      ,DM_DOCUMENT_H.DCCODE                  AS DCCODE			/**/
+		      ,DM_DOCUMENT_H.ORGANIZE                AS ORGANIZE		/**/
+		      ,DM_DOCUMENT_H.STORERKEY               AS STORERKEY		/**/
+		      ,DM_DOCUMENT_H.DOCDT                   AS DOCDT			/**/
+		      ,DM_DOCUMENT_H.DOCTYPE                 AS DOCTYPE			/**/
+		      ,DM_DOCUMENT_H.TO_CUSTKEY              AS CUSTKEY			/**/
+		      ,T_WD_INPLAN.SLIPNO                    AS SLIPNO			/**/
+		      ,DM_DOCUMENT_H.TO_VATNO                AS TO_VATNO		/**/
+		      ,DM_DOCUMENT_H.TO_VATOWNER             AS TO_VATOWNER		/**/
+		      ,DM_DOCUMENT_H.DOCNO                   AS DOCNO			/**/
+		FROM   DM_DOCUMENT_H
+		JOIN   T_WD_INPLAN
+		ON     T_WD_INPLAN.DCCODE    = DM_DOCUMENT_H.DCCODE
+		AND    T_WD_INPLAN.STORERKEY = DM_DOCUMENT_H.STORERKEY
+		AND    T_WD_INPLAN.DOCTYPE   = DM_DOCUMENT_H.DOCTYPE
+		AND    T_WD_INPLAN.DOCDT     = DM_DOCUMENT_H.DOCDT  
+		AND    T_WD_INPLAN.DOCNO     = DM_DOCUMENT_H.DOCNO  
+		AND    DM_DOCUMENT_H.DELIVERYDATE   = T_WD_INPLAN.SLIPDT
+		LEFT JOIN CM_CODE_STORER CD1 ON (CD1.STORERKEY = DM_DOCUMENT_H.STORERKEY	AND CD1.CODELIST = 'ORDERTYPE_WD' 	AND CD1.BASECODE  = DM_DOCUMENT_H.ORDERTYPE)
+		LEFT JOIN CM_CODE_STORER CD2 ON (CD2.STORERKEY = DM_DOCUMENT_H.STORERKEY	AND CD2.CODELIST = 'STATUS_WD' 	AND CD2.BASECODE  = DM_DOCUMENT_H.STATUS)
+        WHERE  DM_DOCUMENT_H.STATUS         <![CDATA[<]]>  '90'    
+		<!-- 배송그룹 공통조회 조건 -->
+		<if test="gMultiCourier != null and gMultiCourier != ''">				AND DM_DOCUMENT_H.COURIER 	= 	 #{gMultiCourier}		</if>
+	    <!-- 문서번호 다중선택 -->
+		<if test="docnoMulti != null and docnoMulti != ''">
+	       AND DM_DOCUMENT_H.DOCNO IN
+	       <foreach collection="docnoMulti" item="code" open="(" close=")" separator=",">
+	         #{code}
+	       </foreach>   
+        </if>
+	   	<!-- 고객 다중선택 -->
+		<if test="toCustkeyMulti != null and toCustkeyMulti != '' ">
+		    	<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+		    		<foreach collection="toCustkeyMulti" item="item">
+		    			OR DM_DOCUMENT_H.TO_CUSTKEY IN
+		    			<foreach collection="item" item="code" open="(" close=")" separator=",">
+		    				#{code} 	 
+		          		</foreach>
+		        	</foreach>
+		      	</trim>			                                    
+            </if>
+    	ORDER BY DM_DOCUMENT_H.DCCODE
+		        ,DM_DOCUMENT_H.STORERKEY
+		        ,T_WD_INPLAN.SLIPDT 
+		        ,DM_DOCUMENT_H.DOCDT
+		        ,DM_DOCUMENT_H.DOCNO
+		        ,T_WD_INPLAN.SLIPDT
+		        ,T_WD_INPLAN.SLIPNO
+				 
+    </select>
+    
+    <select id="getDetailList" resultType="WdPickingCancelDetailResDto">		
+		SELECT /* [WdPickingCancelService.sqlx][getDetailList][피킹취소처리 상세 조회][공두경][2025.06.30] */
+               MS_SKU.SKU                      AS SKU			/*상품코드*/
+              ,MS_SKU.DESCRIPTION              AS SKUNAME		/*상품명칭*/
+              ,'['||DM_DOCUMENT_D.PLANT||']'||DECODE(TRIM(NVL(PLANT1.DESCRIPTION,'')),'',PLANT1.PLANT,TRIM(NVL(PLANT1.DESCRIPTION,'')))  AS PLANT_DESCR	/*플랜트*/
+              ,NVL(WD_INPLAN.QTYALLOCATED, 0)  AS PROCESSQTY	/*분배량*/
+              ,NVL(WD_TASK.WORKQTY    ,0)      AS WORKQTY		/*피킹량*/
+              ,NVL(WD_TASK.INSPECTQTY ,0)      AS INSPECTQTY	/*출고검수량*/
+              ,NVL(WD_TASK.CONFIRMQTY ,0)      AS CONFIRMQTY	/*확정수량*/
+              ,0                               AS CANCELQTY		/*피킹취소량*/
+              ,WD_INPLAN.UOM                   AS UOM			/*단위*/
+              ,WD_TASK.LOC                     AS LOC			/*피킹LOC*/
+              /*
+              *	기준일(제조) ~까지 : DURATIONTYPE =1 일때 , LOTTABLE01 - DURATION 
+			  *	            DURATIONTYPE =2 일때 LOTTABLE01 
+			  *	기준일(소비) ~부터 : DURATIONTYPE =1 일때 LOTTABLE01
+			  *	            DURATIONTYPE =2일때 LOTTABLE01 + DURATION  -1
+              */
+			  ,CASE WHEN VALIDATE_CONVERSION(CM_LOT.LOTTABLE01 AS DATE, 'YYYYMMDD') = 1  
+			        THEN (CASE WHEN MS_SKU.DURATIONTYPE = '1' 
+			        		   THEN TO_CHAR(TO_DATE(REPLACE(CM_LOT.LOTTABLE01,'-',''),'YYYYMMDD') - (MS_SKU.DURATION - 1),'YYYY-MM-DD')
+			        		   WHEN MS_SKU.DURATIONTYPE = '2'
+			        		   THEN TO_CHAR(TO_DATE(REPLACE(CM_LOT.LOTTABLE01,'-',''),'YYYYMMDD'),'YYYY-MM-DD')
+			        		   ELSE CM_LOT.LOTTABLE01 END)
+			        ELSE CM_LOT.LOTTABLE01 END 			   AS MANUFACTUREDT   /*제조일자*/
+			  ,CASE WHEN VALIDATE_CONVERSION(CM_LOT.LOTTABLE01 AS DATE, 'YYYYMMDD') = 1  
+			        THEN (CASE WHEN MS_SKU.DURATIONTYPE = '1' 
+			        		   THEN TO_CHAR(TO_DATE(REPLACE(CM_LOT.LOTTABLE01,'-',''),'YYYYMMDD'),'YYYY-MM-DD')
+			        		   WHEN MS_SKU.DURATIONTYPE = '2'
+			        		   THEN TO_CHAR(TO_DATE(REPLACE(CM_LOT.LOTTABLE01,'-',''),'YYYYMMDD') + (MS_SKU.DURATION - 1) -1,'YYYY-MM-DD')
+			        		   ELSE CM_LOT.LOTTABLE01 END)
+			        ELSE CM_LOT.LOTTABLE01 END 			   AS EXPIREDT      	/*소비일자*/
+              ,MS_SKU.DURATION                 AS DURATION		/*소비기간*/
+              ,NVL((SELECT MIN(SETVALUE) KEEP (
+              			  DENSE_RANK FIRST
+	                      ORDER BY CASE WHEN DCCODE = WD_INPLAN.DCCODE 	AND STORERKEY = WD_INPLAN.STORERKEY AND ORDERTYPE = WD_INPLAN.ORDERTYPE AND SLIPTYPE  = WD_INPLAN.SLIPTYPE 	THEN 1
+	                                    WHEN DCCODE = WD_INPLAN.DCCODE 	AND STORERKEY = WD_INPLAN.STORERKEY AND ORDERTYPE = WD_INPLAN.ORDERTYPE AND SLIPTYPE  = 'STD'        		THEN 2
+	                                    WHEN DCCODE = WD_INPLAN.DCCODE 	AND STORERKEY = WD_INPLAN.STORERKEY AND ORDERTYPE = 'STD'               AND SLIPTYPE  = WD_INPLAN.SLIPTYPE 	THEN 3
+	                                    WHEN DCCODE = WD_INPLAN.DCCODE 	AND STORERKEY = WD_INPLAN.STORERKEY AND ORDERTYPE = 'STD'               AND SLIPTYPE  = 'STD'        		THEN 4
+	                                    WHEN DCCODE = WD_INPLAN.DCCODE 	AND STORERKEY = 'STD'               AND ORDERTYPE = WD_INPLAN.ORDERTYPE AND SLIPTYPE  = WD_INPLAN.SLIPTYPE 	THEN 5
+	                                    WHEN DCCODE = WD_INPLAN.DCCODE 	AND STORERKEY = 'STD'               AND ORDERTYPE = WD_INPLAN.ORDERTYPE AND SLIPTYPE  = 'STD'        		THEN 6
+	                                    WHEN DCCODE = WD_INPLAN.DCCODE 	AND STORERKEY = 'STD'               AND ORDERTYPE = 'STD'               AND SLIPTYPE  = WD_INPLAN.SLIPTYPE  THEN 7
+	                                    WHEN DCCODE = WD_INPLAN.DCCODE 	AND STORERKEY = 'STD'               AND ORDERTYPE = 'STD'               AND SLIPTYPE  = 'STD'        		THEN 8
+	                                    WHEN DCCODE = 'STD'      		AND STORERKEY = WD_INPLAN.STORERKEY AND ORDERTYPE = WD_INPLAN.ORDERTYPE AND SLIPTYPE  = WD_INPLAN.SLIPTYPE  THEN 9
+	                                    WHEN DCCODE = 'STD'             AND STORERKEY = WD_INPLAN.STORERKEY AND ORDERTYPE = WD_INPLAN.ORDERTYPE AND SLIPTYPE  = 'STD'        		THEN 10
+	                                    WHEN DCCODE = 'STD'             AND STORERKEY = WD_INPLAN.STORERKEY AND ORDERTYPE = 'STD'               AND SLIPTYPE  = WD_INPLAN.SLIPTYPE  THEN 11
+	                                    WHEN DCCODE = 'STD'             AND STORERKEY = WD_INPLAN.STORERKEY AND ORDERTYPE = 'STD'               AND SLIPTYPE  = 'STD'        		THEN 12
+	                                    WHEN DCCODE = 'STD'             AND STORERKEY = 'STD'               AND ORDERTYPE = WD_INPLAN.ORDERTYPE AND SLIPTYPE  = WD_INPLAN.SLIPTYPE  THEN 13
+	                                    WHEN DCCODE = 'STD'             AND STORERKEY = 'STD'               AND ORDERTYPE = WD_INPLAN.ORDERTYPE AND SLIPTYPE  = 'STD'        		THEN 14
+	                                    WHEN DCCODE = 'STD'             AND STORERKEY = 'STD'               AND ORDERTYPE = 'STD'               AND SLIPTYPE  = WD_INPLAN.SLIPTYPE  THEN 15
+	                                    WHEN DCCODE = 'STD'             AND STORERKEY = 'STD'               AND ORDERTYPE = 'STD'               AND SLIPTYPE  = 'STD'        		THEN 16
+	                                    ELSE 99
+	                               END
+              		   )
+              	  FROM CM_STRATEGY
+				 WHERE SYSTEM        = 'STD'
+		           AND STRATEGYGROUP = 'WD'
+		           AND SETLIST       = 'MODIFY'
+		           AND SETCODE       = 'CANCELLOC'
+		           AND SETVALUE      <![CDATA[<>]]> 'EDIT'
+		           AND DOCTYPE       IN ('STD','WD')
+		           AND DCCODE        IN ('STD',WD_INPLAN.DCCODE)
+		           AND STORERKEY     IN ('STD',WD_INPLAN.STORERKEY)
+		           AND ORDERTYPE     IN ('STD',WD_INPLAN.ORDERTYPE)
+		           AND SLIPTYPE      IN ('STD',WD_INPLAN.SLIPTYPE )
+		           AND DEL_YN        = 'N'),'') AS CANCELLOC	/*취소적재LOC*/	       
+              ,WD_TASK.PICKER                  AS PICKER		/*피킹작업자*/              
+              ,CM_LOT.LOTTABLE01               AS LOTTABLE01	/*준일(소비,제조)-*/
+              ,WD_INPLAN.DCCODE                AS DCCODE  		/**/
+		      ,WD_INPLAN.STORERKEY             AS STORERKEY		/**/
+		      ,WD_INPLAN.ORGANIZE              AS ORGANIZE		/**/
+		      ,WD_INPLAN.AREA                  AS AREA			/**/
+		      ,WD_INPLAN.CUSTKEY               AS CUSTKEY		/**/
+		      ,WD_INPLAN.SLIPDT                AS SLIPDT  		/**/
+		      ,WD_INPLAN.SLIPNO                AS SLIPNO  		/**/
+		      ,WD_INPLAN.SLIPLINE              AS SLIPLINE		/**/
+		      ,WD_INPLAN.DOCDT                 AS DOCDT   		/**/
+		      ,WD_INPLAN.DOCNO                 AS DOCNO   		/**/
+		      ,WD_INPLAN.DOCLINE               AS DOCLINE 		/**/
+		      ,WD_TASK.SERIALKEY               AS SERIALKEY		/**/
+		      ,WD_TASK.TASKKEY                 AS TASKKEY		/**/
+		      ,WD_TASK.LOT                     AS LOT			/**/
+	          ,WD_TASK.STOCKID                 AS STOCKID		/**/
+	          ,WD_TASK.STOCKGRADE              AS STOCKGRADE 	/**/
+              ,NVL(WD_TASK.TASKTYPE,'INPLAN')  AS TASKTYPE		/**/
+              ,WD_INPLAN.ORDERQTY              AS ORDERQTY		/**/
+              ,DM_DOCUMENT_D.PLANT			   AS PLANT			/**/
+		FROM   WD_INPLAN        
+		JOIN   DM_DOCUMENT_D
+		ON     DM_DOCUMENT_D.DCCODE         = WD_INPLAN.DCCODE    
+		AND    DM_DOCUMENT_D.STORERKEY      = WD_INPLAN.STORERKEY 
+		AND    DM_DOCUMENT_D.DOCTYPE        = 'WD' 
+		AND    DM_DOCUMENT_D.DOCDT          = WD_INPLAN.DOCDT     
+		AND    DM_DOCUMENT_D.DOCNO          = WD_INPLAN.DOCNO     
+		AND    DM_DOCUMENT_D.DOCLINE        = WD_INPLAN.DOCLINE   
+		AND    DM_DOCUMENT_D.DELIVERYDATE   = WD_INPLAN.SLIPDT
+    	AND    DM_DOCUMENT_D.STATUS    <![CDATA[<]]>  '90'         
+		JOIN   MS_SKU 
+		ON     MS_SKU.STORERKEY             = WD_INPLAN.STORERKEY         
+		AND    MS_SKU.SKU                   = WD_INPLAN.SKU
+		AND    MS_SKU.DEL_YN                = 'N'   
+        JOIN   WD_TASK 
+	    ON     WD_TASK.DCCODE             = WD_INPLAN.DCCODE         
+		AND    WD_TASK.STORERKEY          = WD_INPLAN.STORERKEY         
+		AND    WD_TASK.SLIPDT             = WD_INPLAN.SLIPDT         
+		AND    WD_TASK.SLIPNO             = WD_INPLAN.SLIPNO         
+		AND    WD_TASK.SLIPLINE           = WD_INPLAN.SLIPLINE         
+		<if test="tasksystem != null and tasksystem != ''">		AND WD_TASK.TASKSYSTEM	=  #{tasksystem}		</if>
+		AND    WD_TASK.TASKTYPE           = 'PK'  /*피킹완료된 건만 조회 20260227 공두경*/
+		AND    WD_TASK.WORKQTY - WD_TASK.CONFIRMQTY    <![CDATA[>]]>  '0'         
+		AND    WD_TASK.WORKQTY     <![CDATA[>]]>  '0'         
+		AND    WD_TASK.STATUS      <![CDATA[<]]>  '90'         
+		AND    WD_TASK.DEL_YN               = 'N' 
+        JOIN   CM_LOT 
+		ON     CM_LOT.STORERKEY             = WD_TASK.STORERKEY         
+		AND    CM_LOT.LOT                   = WD_TASK.LOT
+		AND    CM_LOT.DEL_YN                = 'N'        
+		LEFT JOIN MS_PLANT PLANT1 	 ON PLANT1.PLANT = DM_DOCUMENT_D.PLANT   
+		WHERE  WD_INPLAN.DCCODE	        =  #{dccode}
+		AND    WD_INPLAN.STORERKEY	    =  #{storerkey}
+		AND    WD_INPLAN.ORGANIZE 	    =  #{organize}
+		AND    WD_INPLAN.SLIPDT	        =  #{slipdt}
+		AND    WD_INPLAN.SLIPNO	        =  #{slipno}
+		AND    WD_INPLAN.STATUS    <![CDATA[<]]>  '90'         
+		AND    WD_INPLAN.DEL_YN         = 'N'         
+		<!-- 상품 다중선택 -->
+		<if test="sku != null and sku != '' ">
+				<if test="skuMulti != null and skuMulti.size() > 0">
+					<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+						<foreach collection="skuMulti" item="item">
+							OR WD_INPLAN.SKU IN
+							<foreach collection="item" item="code" open="(" close=")" separator=",">
+								#{code} 	 
+				      		</foreach>
+				    	</foreach>
+				  	</trim>			                                    
+		    	</if>
+	        </if>
+	    
+        <!-- START.권한센터 -->
+	    AND EXISTS (SELECT 1
+                      FROM CM_USER_AUTHORITY 
+                     WHERE CM_USER_AUTHORITY.DCCODE    = WD_INPLAN.DCCODE       
+                       AND CM_USER_AUTHORITY.STORERKEY = WD_INPLAN.STORERKEY    
+                       AND CM_USER_AUTHORITY.ORGANIZE  = WD_INPLAN.ORGANIZE     
+                       AND CM_USER_AUTHORITY.AREA      = WD_INPLAN.AREA         
+                       AND CM_USER_AUTHORITY.STORERKEY = #{storerkey}
+                       AND CM_USER_AUTHORITY.USERID    = #{gUserId}
+                       AND CM_USER_AUTHORITY.DCCODE    = #{dccode}
+                       AND CM_USER_AUTHORITY.AREA      = #{gArea}   
+			           AND CM_USER_AUTHORITY.ORGANIZE  = #{organize}                 
+                   )
+	    <!-- END.권한센터	-->    
+		ORDER BY WD_INPLAN.DOCLINE
+		        ,WD_INPLAN.SLIPDT
+		        ,WD_INPLAN.SLIPNO
+		        ,WD_INPLAN.SLIPLINE
+		        ,WD_INPLAN.SKU 
+    
+    </select>
+    
+    
+    <delete id="deleteTampTable">
+        DELETE /* [WdPickingCancelService.sqlx][deleteTampTable][일괄취소 임시 Tabele 삭제][공두경][2025.07.01] */
+               SY_PROCESSTEMP_WD
+         WHERE PROCESSCREATOR = #{gUserId}
+           AND PROCESSTYPE    = 'WD_PICKINGCANCEL'
+           AND SPID           = #{gSpid}
+    </delete>    
+    
+    <insert id="insertTempExcel" parameterType="java.util.List" >
+        <foreach collection="list" index="index" item="item" separator=" " open="INSERT ALL" close="SELECT * FROM DUAL">
+              /* [WdPickingCancelService.sqlx][insertTempExcel][일괄취소 임시 Tabele 등록][공두경][2025.07.01] */
+              INTO SY_PROCESSTEMP_WD (PROCESSTYPE,PROCESSCREATOR,SPID,ADDWHO,EDITWHO
+                                      /**/
+                                     ,CANCELTYPE
+                                     ,DCCODE
+                                     ,STORERKEY
+                                     ,ORGANIZE
+                                     ,CUSTKEY
+                                     ,DOCDT
+                                     ,DOCNO
+                                     ,SLIPDT
+                                     ,SLIPNO
+                                     /**/
+                                     ,OTHER01
+                                    )
+            VALUES (
+                    #{item.processtype},#{item.gUserId},#{item.gSpid},#{item.gUserId},#{item.gUserId}
+                    /**/
+                    ,'SLIPNO'				/*1.CANCELTYPE*/
+                    ,#{item.dccode}         /*2.센터코드*/
+                    ,#{item.storerkey}      /*3.고객사코드*/
+                    ,#{item.organize}       /*4.조직코드*/
+                    ,#{item.custkey}        /*5.출고거래처*/
+                    ,#{item.docdt}          /*6.문서일자*/
+                    ,#{item.docno}          /*7.문서번호*/
+                    ,#{item.slipdt}    		/*8.전표일자*/
+                    ,#{item.slipno}    		/*9.전표번호*/
+                    /**/
+                    ,TO_CHAR(#{index})      /*1~999999*/
+                   )
+        </foreach>
+    </insert>
+    
+</mapper>

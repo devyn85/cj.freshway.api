@@ -1,0 +1,887 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="tmPopUnregisterService">
+
+    <select id="getMasterList" resultType="TmPopUnregisterResDto">
+        WITH M AS (      /* [TmPopUnregisterService.sqlx][getMasterList][거래처POP 미등록 현황 조회][sunho.kim][2025.06.02] */        
+                SELECT /*+ MATERIALIZE */
+                       A.DCCODE                                                                               /* 물류센터 */
+                      ,A.STORERKEY                                                                            /* 고객사코드 */
+                      ,A.DOCTYPE                                                                              /* 문서유형 */
+                      ,A.DELIVERYDT                                                                           /* 일자 */
+                      ,A.CUSTKEY                                                                              /* 거래처코드 */
+                      ,B.DESCRIPTION                                                        AS CUSTNAME       /* 거래처명 */
+                      ,B.CUSTTYPE                                                                             /* 거래처유형코드 */
+                      ,CD1.BASEDESCR                                                        AS CUSTTYPE_NAME  /* 거래처유형명 */
+                      ,B.ADDRESS1 || DECODE(NVL(B.ADDRESS2, ''), '', '', ' ' || B.ADDRESS2) AS ADDRESS        /* 주소지 */
+                FROM (
+                    SELECT 
+                           DM_DOCUMENT_H.DCCODE             AS DCCODE
+                          ,DM_DOCUMENT_H.STORERKEY          AS STORERKEY
+                          ,DM_DOCUMENT_H.DOCTYPE            AS DOCTYPE
+                          ,DM_DOCUMENT_H.DELIVERYDATE       AS DELIVERYDT
+                          ,DM_DOCUMENT_H.TO_CUSTKEY         AS CUSTKEY
+                          ,DM_DOCUMENT_H.TO_CUSTTYPE        AS CUSTTYPE
+                                    
+                      FROM DM_DOCUMENT_H
+                      JOIN DM_DOCUMENT_D
+                        ON DM_DOCUMENT_H.DCCODE         = DM_DOCUMENT_D.DCCODE
+                       AND DM_DOCUMENT_H.DOCTYPE        = DM_DOCUMENT_D.DOCTYPE
+                       AND DM_DOCUMENT_H.DELIVERYDATE   = DM_DOCUMENT_D.DELIVERYDATE
+                       AND DM_DOCUMENT_H.DOCNO          = DM_DOCUMENT_D.DOCNO  
+                       AND DM_DOCUMENT_D.DEL_YN         = 'N'
+                     WHERE NOT EXISTS (
+                             SELECT 'A'
+                              FROM MS_CUSTXPOP
+                             WHERE MS_CUSTXPOP.DCCODE         = DM_DOCUMENT_H.DCCODE
+                               AND MS_CUSTXPOP.STORERKEY      = DM_DOCUMENT_H.STORERKEY
+                               AND MS_CUSTXPOP.CUSTTYPE       = DM_DOCUMENT_H.TO_CUSTTYPE
+                               AND MS_CUSTXPOP.CUSTKEY        = DM_DOCUMENT_H.TO_CUSTKEY
+                            )
+                         AND DM_DOCUMENT_H.STORERKEY    = #{gStorerkey}
+                         AND DM_DOCUMENT_H.DCCODE       = #{fixdccode}
+                         AND DM_DOCUMENT_H.DOCTYPE      = 'WD'
+                         AND DM_DOCUMENT_H.DELIVERYDATE = #{deliverydate}
+                          
+                         AND DM_DOCUMENT_H.TO_CUSTTYPE  = 'C'
+                          
+                                          
+                         AND EXISTS (SELECT USERID 
+                                     FROM CM_USER_AUTHORITY
+                                     WHERE STORERKEY = #{gStorerkey}
+                                       AND DCCODE    = #{fixdccode}
+                                       AND USERID    = #{gUserId})
+                     GROUP BY DM_DOCUMENT_H.DCCODE
+                             ,DM_DOCUMENT_H.STORERKEY
+                             ,DM_DOCUMENT_H.DOCTYPE
+                             ,DM_DOCUMENT_H.DELIVERYDATE
+                             ,DM_DOCUMENT_H.TO_CUSTKEY
+                             ,DM_DOCUMENT_H.TO_CUSTTYPE
+                             
+                     ORDER BY DM_DOCUMENT_H.TO_CUSTKEY        
+                 ) A                   
+                
+                 JOIN MS_CUST B
+                    ON B.STORERKEY = A.STORERKEY
+                   AND B.CUSTKEY   = A.CUSTKEY 
+                   AND B.CUSTTYPE  = 'C'
+                                       
+               
+                 LEFT OUTER JOIN CM_CODE_STORER CD1
+                    ON CD1.STORERKEY = B.STORERKEY
+                   AND CD1.CODELIST  = 'CUSTTYPE'   
+                   AND CD1.BASECODE  = B.CUSTTYPE
+        ),       
+        
+        BASE_DATA AS (
+              SELECT /*+ MATERIALIZE */ 
+                    TMINPLAN.DCCODE                         AS DCCODE         /* 센터코드 */
+                   ,TMINPLAN.STORERKEY                      AS STORERKEY      /* 고객사 */
+                   ,TMINPLAN.CUSTKEY                        AS CUSTKEY        /* 거래처코드 */
+                   ,TMINPLAN.CUSTTYPE                       AS CUSTTYPE       /* 거래처코드 */
+                   ,MIN(TMINPLAN.DELIVERYDT)                AS MIN_DELIVERYDT /* 최초 배송일자 */
+                   ,COUNT(DISTINCT(TMINPLAN.DELIVERYDT))    AS DELIVERY_CNT   /* 배송일수 */
+              FROM (
+                  SELECT
+                        TM_INPLAN.DCCODE             AS DCCODE        /* 센터코드 */
+                       ,TM_INPLAN.STORERKEY          AS STORERKEY     /* 고객사 */
+                       ,TM_INPLAN.CUSTKEY            AS CUSTKEY       /* 거래처코드 */
+                       ,TM_INPLAN.DELIVERYDT         AS DELIVERYDT    /* 배송일자 */
+                       ,TM_INPLAN.CUSTTYPE           AS CUSTTYPE      /* 거래처유형 */
+                       ,TM_INPLAN.CARNO              AS CARNO         /* 차량번호 */
+                  FROM   TM_INPLAN    
+                  WHERE 1=1
+                    AND TM_INPLAN.DCCODE     = #{fixdccode}
+                    AND TM_INPLAN.STORERKEY  = #{gStorerkey}
+                    AND TM_INPLAN.DELIVERYDT <![CDATA[<=]]> TO_CHAR(SYSDATE, 'YYYYMMDD')
+                    AND TM_INPLAN.DELIVERYDT <![CDATA[>=]]> TO_CHAR(SYSDATE-180, 'YYYYMMDD')
+                    AND TM_INPLAN.DEL_YN     = 'N'     
+                    AND TM_INPLAN.STATUS     = '90'
+                    AND TM_INPLAN.SPLIT_DELIVERY_YN = 'N'
+                    AND TM_INPLAN.TM_DELIVERYTYPE IN ('1')
+                    AND TM_INPLAN.CARNO IS NOT NULL
+                  UNION ALL
+                  SELECT 
+                        TM_INPLAN_SPLIT.DCCODE             AS DCCODE        /* 센터코드 */
+                       ,TM_INPLAN_SPLIT.STORERKEY          AS STORERKEY     /* 고객사 */
+                       ,TM_INPLAN_SPLIT.CUSTKEY            AS CUSTKEY       /* 거래처코드 */
+                       ,TM_INPLAN_SPLIT.DELIVERYDT         AS DELIVERYDT    /* 배송일자 */
+                       ,TM_INPLAN_SPLIT.CUSTTYPE           AS CUSTTYPE      /* 거래처유형 */
+                       ,TM_INPLAN_SPLIT.CARNO              AS CARNO         /* 차량번호 */
+                  FROM   TM_INPLAN_SPLIT    
+                  WHERE 1=1
+                    AND TM_INPLAN_SPLIT.DCCODE     = #{fixdccode}
+                    AND TM_INPLAN_SPLIT.STORERKEY  = #{gStorerkey}
+                    AND TM_INPLAN_SPLIT.DELIVERYDT <![CDATA[<=]]> TO_CHAR(SYSDATE, 'YYYYMMDD')
+                    AND TM_INPLAN_SPLIT.DELIVERYDT <![CDATA[>=]]> TO_CHAR(SYSDATE-180, 'YYYYMMDD')
+                    AND TM_INPLAN_SPLIT.DEL_YN     = 'N'     
+                    AND TM_INPLAN_SPLIT.STATUS     = '90'
+                    AND TM_INPLAN_SPLIT.TM_DELIVERYTYPE IN ('1')  
+                    AND TM_INPLAN_SPLIT.CARNO IS NOT NULL 
+            ) TMINPLAN
+
+            WHERE (TMINPLAN.DCCODE, TMINPLAN.STORERKEY, TMINPLAN.CUSTKEY, TMINPLAN.CUSTTYPE) IN (
+                    SELECT 
+                           M.DCCODE             AS DCCODE
+                          ,M.STORERKEY          AS STORERKEY
+                          ,M.CUSTKEY            AS CUSTKEY
+                          ,M.CUSTTYPE           AS CUSTTYPE
+                    FROM M
+                )
+            
+            GROUP BY TMINPLAN.DCCODE
+                   , TMINPLAN.STORERKEY
+                   , TMINPLAN.CUSTKEY
+                   , TMINPLAN.CUSTTYPE     
+        ),
+        
+        SKU_DATA AS (
+              SELECT  /*+ MATERIALIZE */
+                        DMDOCUMENT.DCCODE                     AS DCCODE        /* 센터코드 */
+                       ,DMDOCUMENT.STORERKEY                  AS STORERKEY     /* 고객사 */
+                       ,DMDOCUMENT.CUSTKEY                    AS CUSTKEY       /* 거래처코드 */
+                       ,DMDOCUMENT.CUSTTYPE                   AS CUSTTYPE      /* 거래처코드 */
+                       ,ROUND(SUM(FN_CONV_UOM(
+                              DMDOCUMENT.STORERKEY
+                            , DMDOCUMENT.SKU
+                            , DMDOCUMENT.UOM
+                            , DECODE(DMDOCUMENT.UOM, 'KG', 'BASE', 'KG')
+                            , DECODE(DMDOCUMENT.DEL_YN,'N',DMDOCUMENT.ORDERQTY,0)
+                          )), 3)                              AS ORDERWEIGHT   /* 당일 주문중량 */
+                       ,ROUND(NVL(SUM((DMDOCUMENT.ORDERQTY * (DMDOCUMENT.BUNJA / DMDOCUMENT.BUNMO)) * DMDOCUMENT.CUBE), 0), 3)
+                                                              AS ORDERCBM      /* 당일 주문체적 */
+                       ,ROUND(SUM(DMDOCUMENT.ORDERQTY), 3)    AS ORDERQTY      /* 당일 주문건수 */
+                       
+                       --,ROUND(SUM(FN_CONV_UOM(
+                       --       WD_INPLAN.STORERKEY
+                       --     , WD_INPLAN.SKU
+                       --     , WD_INPLAN.UOM
+                       --     , DECODE(WD_INPLAN.UOM, 'KG', 'BASE', 'KG')
+                       --     , DECODE(DM_DOCUMENT_D.DEL_YN,'N',WD_INPLAN.ORDERQTY,0)
+                       --   )), 3)                      AS ORDERWEIGHT   /* 당일 주문중량 */
+                       --,ROUND(NVL(SUM((WD_INPLAN.ORDERQTY * (MS_UOM.BUNJA / MS_UOM.BUNMO)) * MS_UOM.CUBE), 0), 3)
+                       --                               AS ORDERCBM      /* 당일 주문체적 */
+                       --,SUM(WD_INPLAN.ORDERQTY)       AS ORDERQTY      /* 당일 주문건수 */
+              FROM (
+                  SELECT
+                        DM_DOCUMENT_H.DCCODE             AS DCCODE        /* 센터코드 */
+                       ,DM_DOCUMENT_H.STORERKEY          AS STORERKEY     /* 고객사 */
+                       ,DM_DOCUMENT_H.TO_CUSTKEY         AS CUSTKEY       /* 거래처코드 */
+                       ,DM_DOCUMENT_H.TO_CUSTTYPE        AS CUSTTYPE      /* 거래처코드 */
+                       ,DM_DOCUMENT_D.DEL_YN             AS DEL_YN        /* 삭제여부 */
+                       ,WD_INPLAN.ORDERQTY               AS ORDERQTY      /* 주문건수 */
+                       ,WD_INPLAN.SKU                    AS SKU           /* 상품코드 */
+                       ,WD_INPLAN.UOM                    AS UOM           /* 단위 */
+                       ,UOM11.BUNJA                      AS BUNJA         /* 분자 */
+                       ,UOM11.BUNMO                      AS BUNMO         /* 분모 */
+                       ,UOM11.CUBE                       AS CUBE          /* 체적 */
+                       
+                       --,CASE WHEN 'KG' != UOM11.BASEUOM 
+                       --      THEN NVL((NVL((DM_DOCUMENT_D.STOREROPENQTY * UOM11.BUNJA / UOM11.BUNMO),0) * UOM12.BUNMO / UOM12.BUNJA),0)
+                       --      ELSE NVL((DM_DOCUMENT_D.STOREROPENQTY * UOM11.BUNJA / UOM11.BUNMO),0) 
+                       -- END                              AS ORDERWEIGHT 
+                  FROM   DM_DOCUMENT_H     
+                  JOIN   DM_DOCUMENT_D
+                      ON DM_DOCUMENT_D.DCCODE       = DM_DOCUMENT_H.DCCODE
+                     AND DM_DOCUMENT_D.DOCTYPE      = DM_DOCUMENT_H.DOCTYPE
+                     AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE 
+                     AND DM_DOCUMENT_D.DOCNO        = DM_DOCUMENT_H.DOCNO
+                   --  AND DM_DOCUMENT_D.STATUS       = '90' /*상태(90:확정완료)*/
+                     AND DM_DOCUMENT_D.DEL_YN       = 'N'  
+                  JOIN WD_INPLAN
+                      ON WD_INPLAN.DCCODE           = DM_DOCUMENT_D.DCCODE
+                     AND WD_INPLAN.STORERKEY        = DM_DOCUMENT_D.STORERKEY
+                     AND WD_INPLAN.DOCTYPE          = DM_DOCUMENT_D.DOCTYPE
+                     AND WD_INPLAN.SLIPDT           = DM_DOCUMENT_D.DELIVERYDATE
+                     AND WD_INPLAN.DOCNO            = DM_DOCUMENT_D.DOCNO
+                     AND WD_INPLAN.DOCLINE          = DM_DOCUMENT_D.DOCLINE
+                  LEFT JOIN MS_UOM UOM11      
+                      ON UOM11.STORERKEY = DM_DOCUMENT_D.STORERKEY 
+                     AND UOM11.SKU       = DM_DOCUMENT_D.SKU    
+                     AND UOM11.UOM       = DM_DOCUMENT_D.STORERUOM
+                  LEFT JOIN MS_UOM UOM12          
+                      ON UOM12.STORERKEY = DM_DOCUMENT_D.STORERKEY 
+                     AND UOM12.SKU       = DM_DOCUMENT_D.SKU        
+                     AND UOM12.UOM       = 'KG'
+                  WHERE 1=1
+                    AND DM_DOCUMENT_H.DCCODE       = #{fixdccode}
+                    AND DM_DOCUMENT_H.STORERKEY    = #{gStorerkey}
+                    AND DM_DOCUMENT_H.DELIVERYDATE = #{deliverydate}
+                    AND DM_DOCUMENT_H.DOCTYPE      = 'WD'
+                    AND DM_DOCUMENT_H.DEL_YN       = 'N'   
+                  --  AND DM_DOCUMENT_H.STATUS     IN ('85', '90')  
+            ) DMDOCUMENT
+
+            WHERE (DMDOCUMENT.DCCODE, DMDOCUMENT.STORERKEY, DMDOCUMENT.CUSTKEY, DMDOCUMENT.CUSTTYPE) IN (
+                    SELECT 
+                           M.DCCODE             AS DCCODE
+                          ,M.STORERKEY          AS STORERKEY
+                          ,M.CUSTKEY            AS CUSTKEY
+                          ,M.CUSTTYPE           AS CUSTTYPE
+                    FROM M
+                )
+            
+            GROUP BY DMDOCUMENT.DCCODE
+                   , DMDOCUMENT.STORERKEY
+                   , DMDOCUMENT.CUSTKEY
+                   , DMDOCUMENT.CUSTTYPE             
+        )
+        
+        SELECT   
+             M.DCCODE                                                                   /* 센터코드 */
+            ,M.STORERKEY                                                                /* 고객사 */
+            ,M.CUSTKEY                                                                  /* 거래처코드 */
+            ,M.CUSTNAME                                                                 /* 거래처명 */
+            ,M.CUSTTYPE                                                                 /* 거래처유형코드 */
+            ,M.CUSTTYPE_NAME                                                            /* 거래처유형명 */
+            ,M.ADDRESS                                                                  /* 주소지 */
+            ,CASE WHEN B.MIN_DELIVERYDT IS NOT NULL 
+                  THEN TRUNC(SYSDATE) - TRUNC(TO_DATE(B.MIN_DELIVERYDT, 'YYYYMMDD')) + 1
+                  ELSE TRUNC(SYSDATE) - TRUNC(SYSDATE-180)
+              END                                                                AS DIFF_DAYS          /* 미등록일수 */
+            ,NVL(B.DELIVERY_CNT, 0)                                              AS DELIVERYDATE_CNT   /* 주문횟수 */
+            ,NVL(S.ORDERQTY, 0)                                                  AS SKU_CNT            /* 당일주문건수 */      
+            ,ROUND(NVL(S.ORDERWEIGHT, 0), 3)                                     AS ORDERWEIGHT        /* 당일물량(KG) */ 
+            ,ROUND(NVL(S.ORDERCBM, 0), 3)                                        AS ORDERCBM           /* 당일물량(CBM) */
+        FROM  M         
+        LEFT JOIN BASE_DATA B
+             ON M.DCCODE    = B.DCCODE
+            AND M.STORERKEY = B.STORERKEY
+            AND M.CUSTTYPE  = B.CUSTTYPE
+            AND M.CUSTKEY   = B.CUSTKEY
+        LEFT JOIN SKU_DATA S
+            ON M.DCCODE     = S.DCCODE
+            AND M.STORERKEY = S.STORERKEY
+            AND M.CUSTTYPE  = S.CUSTTYPE
+            AND M.CUSTKEY   = S.CUSTKEY 
+    </select>
+    
+    <select id="getMasterList222" resultType="TmPopUnregisterResDto">
+        WITH M AS (      /* [TmPopUnregisterService.sqlx][getMasterList][거래처POP 미등록 현황 조회][sunho.kim][2025.06.02] */        
+                SELECT /*+ MATERIALIZE */
+                       A.DCCODE                                                                               /* 물류센터 */
+                      ,A.STORERKEY                                                                            /* 고객사코드 */
+                      ,A.DOCTYPE                                                                              /* 문서유형 */
+                      ,A.DELIVERYDT                                                                           /* 일자 */
+                      ,A.CUSTKEY                                                                              /* 거래처코드 */
+                      ,B.DESCRIPTION                                                        AS CUSTNAME       /* 거래처명 */
+                      ,B.CUSTTYPE                                                                             /* 거래처유형코드 */
+                      ,CD1.BASEDESCR                                                        AS CUSTTYPE_NAME  /* 거래처유형명 */
+                      ,B.ADDRESS1 || DECODE(NVL(B.ADDRESS2, ''), '', '', ' ' || B.ADDRESS2) AS ADDRESS        /* 주소지 */
+                FROM (
+                    SELECT 
+                           DM_DOCUMENT_H.DCCODE             AS DCCODE
+                          ,DM_DOCUMENT_H.STORERKEY          AS STORERKEY
+                          ,DM_DOCUMENT_H.DOCTYPE            AS DOCTYPE
+                          ,DM_DOCUMENT_H.DELIVERYDATE       AS DELIVERYDT
+                          ,DM_DOCUMENT_H.TO_CUSTKEY         AS CUSTKEY
+                          ,DM_DOCUMENT_H.TO_CUSTTYPE        AS CUSTTYPE
+                                    
+                      FROM DM_DOCUMENT_H
+                      JOIN DM_DOCUMENT_D
+                        ON DM_DOCUMENT_H.DCCODE         = DM_DOCUMENT_D.DCCODE
+                       AND DM_DOCUMENT_H.DOCTYPE        = DM_DOCUMENT_D.DOCTYPE
+                       AND DM_DOCUMENT_H.DELIVERYDATE   = DM_DOCUMENT_D.DELIVERYDATE
+                       AND DM_DOCUMENT_H.DOCNO          = DM_DOCUMENT_D.DOCNO  
+                       AND DM_DOCUMENT_D.DEL_YN         = 'N'
+                     WHERE NOT EXISTS (
+                             SELECT 'A'
+                              FROM MS_CUSTXPOP
+                             WHERE MS_CUSTXPOP.DCCODE         = DM_DOCUMENT_H.DCCODE
+                               AND MS_CUSTXPOP.STORERKEY      = DM_DOCUMENT_H.STORERKEY
+                               AND MS_CUSTXPOP.CUSTTYPE       = DM_DOCUMENT_H.TO_CUSTTYPE
+                               AND MS_CUSTXPOP.CUSTKEY        = DM_DOCUMENT_H.TO_CUSTKEY
+                            )
+                         AND DM_DOCUMENT_H.STORERKEY    = #{gStorerkey}
+                         AND DM_DOCUMENT_H.DCCODE       = #{fixdccode}
+                         AND DM_DOCUMENT_H.DOCTYPE      = 'WD'
+                         AND DM_DOCUMENT_H.DELIVERYDATE = #{deliverydate}
+                         AND DM_DOCUMENT_H.TO_CUSTTYPE  = 'C'
+                         AND EXISTS (SELECT USERID 
+                                     FROM CM_USER_AUTHORITY
+                                     WHERE STORERKEY = #{gStorerkey}
+                                       AND DCCODE    = #{fixdccode}
+                                       AND USERID    = #{gUserId})
+                     GROUP BY DM_DOCUMENT_H.DCCODE
+                             ,DM_DOCUMENT_H.STORERKEY
+                             ,DM_DOCUMENT_H.DOCTYPE
+                             ,DM_DOCUMENT_H.DELIVERYDATE
+                             ,DM_DOCUMENT_H.TO_CUSTKEY
+                             ,DM_DOCUMENT_H.TO_CUSTTYPE
+                             
+                     ORDER BY DM_DOCUMENT_H.TO_CUSTKEY        
+                 ) A                   
+                
+                 JOIN MS_CUST B
+                    ON B.STORERKEY = A.STORERKEY
+                   AND B.CUSTKEY   = A.CUSTKEY 
+                   AND B.CUSTTYPE  = 'C'
+               
+                 LEFT OUTER JOIN CM_CODE_STORER CD1
+                    ON CD1.STORERKEY = B.STORERKEY
+                   AND CD1.CODELIST  = 'CUSTTYPE'   
+                   AND CD1.BASECODE  = B.CUSTTYPE
+        ),       
+        
+        BASE_DATA AS (
+              SELECT /*+ MATERIALIZE */ 
+                        DMDOCUMENT.DCCODE             AS DCCODE        /* 센터코드 */
+                       ,DMDOCUMENT.STORERKEY          AS STORERKEY     /* 고객사 */
+                       ,DMDOCUMENT.CUSTKEY            AS CUSTKEY       /* 거래처코드 */
+                       ,DMDOCUMENT.CUSTTYPE           AS CUSTTYPE      /* 거래처코드 */
+                       ,DMDOCUMENT.MIN_DELIVERYDT     AS MIN_DELIVERYDT/* 배송일자 */
+                       ,DMDOCUMENT.DELIVERY_CNT       AS DELIVERY_CNT
+              FROM (
+                  SELECT
+                        DM_DOCUMENT_H.DCCODE             AS DCCODE        /* 센터코드 */
+                       ,DM_DOCUMENT_H.STORERKEY          AS STORERKEY     /* 고객사 */
+                       ,DM_DOCUMENT_H.TO_CUSTKEY         AS CUSTKEY       /* 거래처코드 */
+                       ,DM_DOCUMENT_H.TO_CUSTTYPE        AS CUSTTYPE      /* 거래처코드 */
+                       ,MIN(DM_DOCUMENT_H.DELIVERYDATE)  AS MIN_DELIVERYDT    /* 배송일자 */
+                       ,COUNT(1)                         AS DELIVERY_CNT
+                  FROM   DM_DOCUMENT_H     
+                  WHERE 1=1
+                    AND DM_DOCUMENT_H.DCCODE     = #{fixdccode}
+                    AND DM_DOCUMENT_H.STORERKEY  = #{gStorerkey}
+                    AND DM_DOCUMENT_H.DELIVERYDATE <![CDATA[<=]]> TO_CHAR(SYSDATE, 'YYYYMMDD')
+                    AND DM_DOCUMENT_H.DELIVERYDATE <![CDATA[>=]]> TO_CHAR(SYSDATE-180, 'YYYYMMDD')
+                    AND DM_DOCUMENT_H.DOCTYPE    = 'WD'
+                    AND DM_DOCUMENT_H.DEL_YN     = 'N'     
+                  GROUP BY DM_DOCUMENT_H.DCCODE
+                         , DM_DOCUMENT_H.STORERKEY
+                         , DM_DOCUMENT_H.TO_CUSTKEY
+                         , DM_DOCUMENT_H.TO_CUSTTYPE                 
+                  --  AND DM_DOCUMENT_H.STATUS     IN ('85', '90')           
+            ) DMDOCUMENT
+
+            WHERE (DMDOCUMENT.DCCODE, DMDOCUMENT.STORERKEY, DMDOCUMENT.CUSTKEY, DMDOCUMENT.CUSTTYPE) IN (
+                    SELECT 
+                           M.DCCODE             AS DCCODE
+                          ,M.STORERKEY          AS STORERKEY
+                          ,M.CUSTKEY            AS CUSTKEY
+                          ,M.CUSTTYPE           AS CUSTTYPE
+                    FROM M
+                )
+        ),
+        
+        SKU_DATA AS (
+              SELECT  /*+ MATERIALIZE */
+                        DMDOCUMENT.DCCODE             AS DCCODE        /* 센터코드 */
+                       ,DMDOCUMENT.STORERKEY          AS STORERKEY     /* 고객사 */
+                       ,DMDOCUMENT.CUSTKEY            AS CUSTKEY       /* 거래처코드 */
+                       ,DMDOCUMENT.CUSTTYPE           AS CUSTTYPE      /* 거래처코드 */
+                       ,ROUND(SUM(FN_CONV_UOM(
+                              DMDOCUMENT.STORERKEY
+                            , DMDOCUMENT.SKU
+                            , DMDOCUMENT.UOM
+                            , DECODE(DMDOCUMENT.UOM, 'KG', 'BASE', 'KG')
+                            , DECODE(DMDOCUMENT.DEL_YN,'N',DMDOCUMENT.ORDERQTY,0)
+                          )), 3)                      AS ORDERWEIGHT   /* 당일 주문중량 */
+                       ,ROUND(NVL(SUM((DMDOCUMENT.ORDERQTY * (DMDOCUMENT.BUNJA / DMDOCUMENT.BUNMO)) * DMDOCUMENT.CUBE), 0), 3)
+                                                      AS ORDERCBM      /* 당일 주문체적 */
+                       ,SUM(DMDOCUMENT.ORDERQTY)      AS ORDERQTY      /* 당일 주문건수 */
+                       
+                       --,ROUND(SUM(FN_CONV_UOM(
+                       --       WD_INPLAN.STORERKEY
+                       --     , WD_INPLAN.SKU
+                       --     , WD_INPLAN.UOM
+                       --     , DECODE(WD_INPLAN.UOM, 'KG', 'BASE', 'KG')
+                       --     , DECODE(DM_DOCUMENT_D.DEL_YN,'N',WD_INPLAN.ORDERQTY,0)
+                       --   )), 3)                      AS ORDERWEIGHT   /* 당일 주문중량 */
+                       --,ROUND(NVL(SUM((WD_INPLAN.ORDERQTY * (MS_UOM.BUNJA / MS_UOM.BUNMO)) * MS_UOM.CUBE), 0), 3)
+                       --                               AS ORDERCBM      /* 당일 주문체적 */
+                       --,SUM(WD_INPLAN.ORDERQTY)       AS ORDERQTY      /* 당일 주문건수 */
+              FROM (
+                  SELECT
+                        DM_DOCUMENT_H.DCCODE             AS DCCODE        /* 센터코드 */
+                       ,DM_DOCUMENT_H.STORERKEY          AS STORERKEY     /* 고객사 */
+                       ,DM_DOCUMENT_H.TO_CUSTKEY         AS CUSTKEY       /* 거래처코드 */
+                       ,DM_DOCUMENT_H.TO_CUSTTYPE        AS CUSTTYPE      /* 거래처코드 */
+                       ,DM_DOCUMENT_D.DEL_YN             AS DEL_YN        /* 삭제여부 */
+                       ,WD_INPLAN.ORDERQTY               AS ORDERQTY      /* 주문건수 */
+                       ,WD_INPLAN.SKU                    AS SKU           /* 상품코드 */
+                       ,WD_INPLAN.UOM                    AS UOM           /* 단위 */
+                       ,UOM11.BUNJA                      AS BUNJA         /* 분자 */
+                       ,UOM11.BUNMO                      AS BUNMO         /* 분모 */
+                       ,UOM11.CUBE                       AS CUBE          /* 체적 */
+                       
+                       --,CASE WHEN 'KG' != UOM11.BASEUOM 
+                       --      THEN NVL((NVL((DM_DOCUMENT_D.STOREROPENQTY * UOM11.BUNJA / UOM11.BUNMO),0) * UOM12.BUNMO / UOM12.BUNJA),0)
+                       --      ELSE NVL((DM_DOCUMENT_D.STOREROPENQTY * UOM11.BUNJA / UOM11.BUNMO),0) 
+                       -- END                              AS ORDERWEIGHT 
+                  FROM   DM_DOCUMENT_H     
+                  JOIN   DM_DOCUMENT_D
+                      ON DM_DOCUMENT_D.DCCODE       = DM_DOCUMENT_H.DCCODE
+                     AND DM_DOCUMENT_D.DOCTYPE      = DM_DOCUMENT_H.DOCTYPE
+                     AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE 
+                     AND DM_DOCUMENT_D.DOCNO        = DM_DOCUMENT_H.DOCNO
+                   --  AND DM_DOCUMENT_D.STATUS       = '90' /*상태(90:확정완료)*/
+                     AND DM_DOCUMENT_D.DEL_YN       = 'N'  
+                  JOIN WD_INPLAN
+                      ON WD_INPLAN.DCCODE           = DM_DOCUMENT_D.DCCODE
+                     AND WD_INPLAN.STORERKEY        = DM_DOCUMENT_D.STORERKEY
+                     AND WD_INPLAN.DOCTYPE          = DM_DOCUMENT_D.DOCTYPE
+                     AND WD_INPLAN.SLIPDT           = DM_DOCUMENT_D.DELIVERYDATE
+                     AND WD_INPLAN.DOCNO            = DM_DOCUMENT_D.DOCNO
+                     AND WD_INPLAN.DOCLINE          = DM_DOCUMENT_D.DOCLINE
+                  LEFT JOIN MS_UOM UOM11      
+                      ON UOM11.STORERKEY = DM_DOCUMENT_D.STORERKEY 
+                     AND UOM11.SKU       = DM_DOCUMENT_D.SKU    
+                     AND UOM11.UOM       = DM_DOCUMENT_D.STORERUOM
+                  LEFT JOIN MS_UOM UOM12          
+                      ON UOM12.STORERKEY = DM_DOCUMENT_D.STORERKEY 
+                     AND UOM12.SKU       = DM_DOCUMENT_D.SKU        
+                     AND UOM12.UOM       = 'KG'
+                  WHERE 1=1
+                    AND DM_DOCUMENT_H.DCCODE       = #{fixdccode}
+                    AND DM_DOCUMENT_H.STORERKEY    = #{gStorerkey}
+                    AND DM_DOCUMENT_H.DELIVERYDATE = #{deliverydate}
+                    AND DM_DOCUMENT_H.DOCTYPE      = 'WD'
+                    AND DM_DOCUMENT_H.DEL_YN       = 'N'   
+                  --  AND DM_DOCUMENT_H.STATUS     IN ('85', '90')  
+            ) DMDOCUMENT
+
+            WHERE (DMDOCUMENT.DCCODE, DMDOCUMENT.STORERKEY, DMDOCUMENT.CUSTKEY, DMDOCUMENT.CUSTTYPE) IN (
+                    SELECT 
+                           M.DCCODE             AS DCCODE
+                          ,M.STORERKEY          AS STORERKEY
+                          ,M.CUSTKEY            AS CUSTKEY
+                          ,M.CUSTTYPE           AS CUSTTYPE
+                    FROM M
+                )
+            
+            GROUP BY DMDOCUMENT.DCCODE
+                   , DMDOCUMENT.STORERKEY
+                   , DMDOCUMENT.CUSTKEY
+                   , DMDOCUMENT.CUSTTYPE             
+        )
+        
+        SELECT   
+             M.DCCODE                                                                   /* 센터코드 */
+            ,M.STORERKEY                                                                /* 고객사 */
+            ,M.CUSTKEY                                                                  /* 거래처코드 */
+            ,M.CUSTNAME                                                                 /* 거래처명 */
+            ,M.CUSTTYPE                                                                 /* 거래처유형코드 */
+            ,M.CUSTTYPE_NAME                                                            /* 거래처유형명 */
+            ,M.ADDRESS                                                                  /* 주소지 */
+            ,CASE WHEN B.MIN_DELIVERYDT IS NOT NULL 
+                  THEN TRUNC(SYSDATE) - TRUNC(TO_DATE(B.MIN_DELIVERYDT, 'YYYYMMDD')) + 1
+                  ELSE TRUNC(SYSDATE) - TRUNC(SYSDATE-180)
+              END                                                                AS DIFF_DAYS          /* 미등록일수 */
+            ,B.DELIVERY_CNT                                                      AS DELIVERYDATE_CNT   /* 주문횟수 */
+            ,S.ORDERQTY                                                          AS SKU_CNT            /* 당일주문건수 */      
+            ,ROUND(S.ORDERWEIGHT, 3)                                             AS ORDERWEIGHT        /* 당일물량(KG) */ 
+            ,ROUND(S.ORDERCBM, 3)                                                AS ORDERCBM           /* 당일물량(CBM) */
+        FROM  M         
+        LEFT JOIN BASE_DATA B
+             ON M.DCCODE    = B.DCCODE
+            AND M.STORERKEY = B.STORERKEY
+            AND M.CUSTTYPE  = B.CUSTTYPE
+            AND M.CUSTKEY   = B.CUSTKEY
+        LEFT JOIN SKU_DATA S
+            ON M.DCCODE     = S.DCCODE
+            AND M.STORERKEY = S.STORERKEY
+            AND M.CUSTTYPE  = S.CUSTTYPE
+            AND M.CUSTKEY   = S.CUSTKEY 
+    </select>
+    
+    <select id="getCustDeliveryList" resultType="TmPopUnregisterDeliveryResDto">       
+        SELECT    /* [TmPopUnregisterService.sqlx][getCustDeliveryList][거래처별 배송이력 조회][sunho.kim][2025.06.02] */ 
+              A.DCCODE              /* 센터코드 */
+             ,A.STORERKEY           /* 고객사 */
+             ,A.DELIVERYDT  AS  DELIVERYDATE       /* 배송일자 */
+             ,A.CARNO               /* 차량번호 */
+             ,B.POPNO               /* POP번호 */  
+             ,A.ORDERWEIGHT         /* 주문중량 */
+             ,A.ORDERCBM            /* 주문량(CBM)  */
+             ,#{custtype}           AS CUSTTYPE        /* 고객유형 */
+             ,#{custkey}            AS CUSTKEY         /* 고객 */
+             ,' ' AS ROLLTAINER_NO  /* 롤테이너 */     
+        
+        FROM (
+        
+          SELECT
+                  TMINPLAN.DCCODE                     AS DCCODE
+                 ,TMINPLAN.STORERKEY                  AS STORERKEY
+                 ,TMINPLAN.CARNO                      AS CARNO
+                 ,TMINPLAN.DELIVERYDT                 AS DELIVERYDT
+                 ,MAX(TMINPLAN.CUSTKEY)               AS CUSTKEY
+                 ,MAX(TMINPLAN.CUSTTYPE)              AS CUSTTYPE
+                 ,ROUND(SUM(TMINPLAN.ORDERWEIGHT), 3) AS ORDERWEIGHT 
+                 ,ROUND(SUM(TMINPLAN.ORDERCBM), 3)    AS ORDERCBM 
+          FROM (
+        
+             SELECT
+                    TM_INPLAN.DCCODE             AS DCCODE        /* 센터코드 */
+                   ,TM_INPLAN.STORERKEY          AS STORERKEY     /* 고객사 */
+                   ,TM_INPLAN.CUSTKEY            AS CUSTKEY       /* 거래처코드 */
+                   ,TM_INPLAN.DELIVERYDT         AS DELIVERYDT    /* 배송일자 */
+                   ,TM_INPLAN.CUSTTYPE           AS CUSTTYPE      /* 거래처유형 */
+                   ,TM_INPLAN.CARNO              AS CARNO         /* 차량번호 */
+                   ,TM_INPLAN.WEIGHT             AS ORDERWEIGHT   /* 주문중량 */
+                   ,TM_INPLAN.CUBE               AS ORDERCBM      /* 주문량(CBM)  */
+              FROM   TM_INPLAN    
+              WHERE 1=1
+                AND TM_INPLAN.DCCODE     = #{dccode}
+                AND TM_INPLAN.STORERKEY  = #{gStorerkey}
+                AND TM_INPLAN.DELIVERYDT <![CDATA[<=]]> TO_CHAR(SYSDATE, 'YYYYMMDD')
+                AND TM_INPLAN.DELIVERYDT <![CDATA[>=]]> TO_CHAR(SYSDATE-180, 'YYYYMMDD')
+                AND TM_INPLAN.CUSTTYPE   = #{custtype} 
+                AND TM_INPLAN.CUSTKEY    = #{custkey}
+                AND TM_INPLAN.DEL_YN     = 'N'     
+                AND TM_INPLAN.STATUS     = '90'
+                AND TM_INPLAN.SPLIT_DELIVERY_YN = 'N'
+                AND TM_INPLAN.TM_DELIVERYTYPE IN ('1')
+                AND TM_INPLAN.CARNO IS NOT NULL
+              UNION ALL
+              SELECT 
+                    TM_INPLAN_SPLIT.DCCODE             AS DCCODE        /* 센터코드 */
+                   ,TM_INPLAN_SPLIT.STORERKEY          AS STORERKEY     /* 고객사 */
+                   ,TM_INPLAN_SPLIT.CUSTKEY            AS CUSTKEY       /* 거래처코드 */
+                   ,TM_INPLAN_SPLIT.DELIVERYDT         AS DELIVERYDT    /* 배송일자 */
+                   ,TM_INPLAN_SPLIT.CUSTTYPE           AS CUSTTYPE      /* 거래처유형 */
+                   ,TM_INPLAN_SPLIT.CARNO              AS CARNO         /* 차량번호 */
+                   ,TM_INPLAN_SPLIT.WEIGHT             AS ORDERWEIGHT   /* 주문중량 */
+                   ,TM_INPLAN_SPLIT.CUBE               AS ORDERCBM      /* 주문량(CBM)  */
+              FROM   TM_INPLAN_SPLIT    
+              WHERE 1=1
+                AND TM_INPLAN_SPLIT.DCCODE     = #{dccode}
+                AND TM_INPLAN_SPLIT.STORERKEY  = #{gStorerkey}
+                AND TM_INPLAN_SPLIT.DELIVERYDT <![CDATA[<=]]> TO_CHAR(SYSDATE, 'YYYYMMDD')
+                AND TM_INPLAN_SPLIT.DELIVERYDT <![CDATA[>=]]> TO_CHAR(SYSDATE-180, 'YYYYMMDD')
+                AND TM_INPLAN_SPLIT.CUSTTYPE   = #{custtype} 
+                AND TM_INPLAN_SPLIT.CUSTKEY    = #{custkey}
+                AND TM_INPLAN_SPLIT.DEL_YN     = 'N'     
+                AND TM_INPLAN_SPLIT.STATUS     = '90'
+                AND TM_INPLAN_SPLIT.TM_DELIVERYTYPE IN ('1')
+                AND TM_INPLAN_SPLIT.CARNO IS NOT NULL
+          ) TMINPLAN
+        
+          GROUP BY TMINPLAN.DCCODE
+                 , TMINPLAN.STORERKEY
+                 , TMINPLAN.DELIVERYDT
+                 , TMINPLAN.CARNO
+        ) A         
+        
+        LEFT OUTER JOIN (
+            SELECT 
+                     MS_CUSTXPOP.DCCODE
+                   , MS_CUSTXPOP.STORERKEY
+                   , MS_CUSTXPOP.POPNO
+                   , MS_CUSTXPOP.POPNAME   AS CARNO
+            FROM MS_CUSTXPOP
+            WHERE MS_CUSTXPOP.DCCODE = #{dccode}
+             AND  MS_CUSTXPOP.DEL_YN = 'N'
+            GROUP BY MS_CUSTXPOP.DCCODE
+                   , MS_CUSTXPOP.STORERKEY
+                   , MS_CUSTXPOP.POPNO
+                   , MS_CUSTXPOP.POPNAME 
+        
+        ) B      
+          ON  B.CARNO = A.CARNO 
+         AND  B.DCCODE = A.DCCODE 
+          
+        ORDER BY A.DELIVERYDT DESC
+    </select>
+    
+    <select id="getRecommendPopList" resultType="TmPopUnregisterDeliveryResDto">       
+        WITH BASE AS (  /* [TmPopUnregisterService.sqlx][getRecommendPopList][추천 POP 조회][sunho.kim][2025.06.02] */
+            SELECT 
+                  MS_CUSTDLVINFO.DLVCUSTKEY AS BASE_DLVCUSTKEY
+                , MS_CUSTDLVINFO.LONGITUDE  AS BASE_LONGITUDE
+                , MS_CUSTDLVINFO.LATITUDE   AS BASE_LATITUDE           
+           FROM MS_CUSTDLVINFO
+           INNER JOIN MS_CUST 
+                ON MS_CUST.CUSTKEY   = MS_CUSTDLVINFO.DLVCUSTKEY 
+               AND MS_CUST.CUSTTYPE  = MS_CUSTDLVINFO.CUSTTYPE
+               AND MS_CUST.STORERKEY = MS_CUSTDLVINFO.STORERKEY        
+           WHERE 1=1
+             AND MS_CUST.STORERKEY     = #{gStorerkey}
+             AND MS_CUST.CUSTKEY       = #{custkey}
+             AND MS_CUST.CUSTTYPE      = #{custtype}  
+             AND MS_CUST.DLV_DCCODE    = #{dccode}
+             AND MS_CUST.DEL_YN        = 'N'
+             AND MS_CUSTDLVINFO.DEL_YN = 'N'
+        )
+
+        SELECT 
+             BASE_POP.STORERKEY                       AS STORERKEY       /* 고객사코드 */
+            ,BASE_POP.DCCODE                          AS DCCODE          /* 물류센터 */
+            ,BASE_POP.POPNO                           AS POPNO           /* POP */ 
+            ,BASE_POP.CARNO                           AS CARNO           /* 차량번호 */
+            ,#{custtype}                              AS CUSTTYPE        /* 고객유형 */
+            ,#{custkey}                               AS CUSTKEY         /* 고객 */
+            --,SUM(TMINPLAN.WEIGHT)                     AS WEIGHT
+            --,SUM(TMINPLAN.CUBE)                       AS CUBE 
+            --,SUM(TMINPLAN.DELIVERYDT)                 AS DELIVERYDT
+            ,ROUND(SUM(NVL(TMINPLAN.WEIGHT, 0)) / SUM(TMINPLAN.DELIVERYDT), 3) AS AVGWEIGHT       /* 평균중량 */
+            ,ROUND(SUM(NVL(TMINPLAN.CUBE, 0))   / SUM(TMINPLAN.DELIVERYDT), 3) AS AVGCBM          /* 평균 물량(CBM) */ 
+            ,' '                                      AS ROLLTAINER_NO   /* 롤테이너 */ 
+
+        FROM (
+            SELECT  
+                  T.STORERKEY
+                , T.DCCODE
+                , T.POPNO
+                , T.CARNO
+            FROM (
+                SELECT
+                    M.STORERKEY                   
+                  , M.DCCODE
+                  , M.CUSTKEY 
+                  , M.CUSTTYPE
+                  , MS_CUSTXPOP.POPNO   
+                  , MS_CUSTXPOP.POPNAME AS CARNO 
+                FROM (
+                    SELECT                       
+                         MS_CUST.STORERKEY            AS STORERKEY
+                       , MS_CUST.DLV_DCCODE           AS DCCODE
+                       , MS_CUSTDLVINFO.DLVCUSTKEY    AS CUSTKEY
+                       , MS_CUSTDLVINFO.CUSTTYPE      AS CUSTTYPE       
+                       , 6371 * ACOS(
+                          LEAST(GREATEST(   
+                             COS(BASE.BASE_LATITUDE * (ACOS(-1)/180)) * COS(MS_CUSTDLVINFO.LATITUDE * (ACOS(-1)/180)) *
+                             COS((MS_CUSTDLVINFO.LONGITUDE - BASE.BASE_LONGITUDE) * (ACOS(-1)/180)) +
+                             SIN(BASE.BASE_LATITUDE * (ACOS(-1)/180)) * SIN(MS_CUSTDLVINFO.LATITUDE * (ACOS(-1)/180)) ,
+                           -1), 1)  
+                            )                         AS DISTANCE_KM
+                    FROM MS_CUSTDLVINFO
+                    INNER JOIN MS_CUST 
+                        ON MS_CUST.CUSTKEY   = MS_CUSTDLVINFO.DLVCUSTKEY 
+                       AND MS_CUST.CUSTTYPE  = MS_CUSTDLVINFO.CUSTTYPE
+                       AND MS_CUST.STORERKEY = MS_CUSTDLVINFO.STORERKEY
+                    CROSS JOIN BASE
+                    WHERE 1=1
+                      AND MS_CUSTDLVINFO.STORERKEY   = #{gStorerkey}
+                      AND MS_CUSTDLVINFO.DLVCUSTKEY != BASE.BASE_DLVCUSTKEY
+                      AND MS_CUSTDLVINFO.LATITUDE  IS NOT NULL
+                      AND MS_CUSTDLVINFO.LONGITUDE IS NOT NULL
+                      AND MS_CUSTDLVINFO.DEL_YN     = 'N'
+                      AND MS_CUST.DLV_DCCODE        = #{dccode}
+                      AND 6371 * ACOS(
+                             LEAST(GREATEST(
+                                 COS(BASE.BASE_LATITUDE * (ACOS(-1)/180)) * COS(MS_CUSTDLVINFO.LATITUDE * (ACOS(-1)/180)) *
+                                 COS((MS_CUSTDLVINFO.LONGITUDE - BASE.BASE_LONGITUDE) * (ACOS(-1)/180)) +
+                                 SIN(BASE.BASE_LATITUDE * (ACOS(-1)/180)) * SIN(MS_CUSTDLVINFO.LATITUDE * (ACOS(-1)/180)) ,
+                               -1), 1)  
+                            ) <![CDATA[<=]]> 50      -- 범위 KM 
+                    ORDER BY DISTANCE_KM
+                    FETCH FIRST 1000 ROWS ONLY
+                ) M
+                INNER JOIN MS_CUSTXPOP 
+                   ON MS_CUSTXPOP.STORERKEY = M.STORERKEY
+                  AND MS_CUSTXPOP.DCCODE    = M.DCCODE 
+                  AND MS_CUSTXPOP.CUSTKEY   = M.CUSTKEY 
+                  AND MS_CUSTXPOP.DEL_YN    = 'N'
+            ) T 
+            
+            WHERE T.DCCODE = #{dccode}
+
+            GROUP BY T.STORERKEY
+                    ,T.DCCODE
+                    ,T.POPNO
+                    ,T.CARNO
+    
+        ) BASE_POP
+        
+        INNER JOIN (
+            SELECT 
+                STORERKEY, DCCODE, DELIVERYGROUP, CARNO, SUM(WEIGHT) WEIGHT, SUM(CUBE) CUBE, COUNT(DISTINCT(DELIVERYDT)) DELIVERYDT
+            FROM (
+                 SELECT 
+                     STORERKEY, DCCODE, DELIVERYGROUP, CARNO, WEIGHT, CUBE, DELIVERYDT
+                 FROM TM_INPLAN 
+                 WHERE TM_INPLAN.STORERKEY     = #{gStorerkey}
+                   AND TM_INPLAN.DCCODE        = #{dccode}
+                   AND TM_INPLAN.DELIVERYDT <![CDATA[<=]]> TO_CHAR(SYSDATE, 'YYYYMMDD')
+                   AND TM_INPLAN.DELIVERYDT <![CDATA[>=]]> TO_CHAR(SYSDATE-180, 'YYYYMMDD')
+                   AND TM_INPLAN.STATUS        = '90'
+                   AND TM_INPLAN.DEL_YN        = 'N'
+                   AND TM_INPLAN.SPLIT_DELIVERY_YN = 'N'
+                   AND TM_INPLAN.TM_DELIVERYTYPE IN ('1') 
+                   AND TM_INPLAN.CARNO IS NOT NULL  
+                   
+                 UNION ALL 
+                 
+                 SELECT STORERKEY, DCCODE, DELIVERYGROUP, CARNO, WEIGHT, CUBE, DELIVERYDT
+                 FROM TM_INPLAN_SPLIT 
+                 WHERE TM_INPLAN_SPLIT.STORERKEY     = #{gStorerkey}
+                   AND TM_INPLAN_SPLIT.DCCODE        = #{dccode}
+                   AND TM_INPLAN_SPLIT.DELIVERYDT <![CDATA[<=]]> TO_CHAR(SYSDATE, 'YYYYMMDD')
+                   AND TM_INPLAN_SPLIT.DELIVERYDT <![CDATA[>=]]> TO_CHAR(SYSDATE-180, 'YYYYMMDD')
+                   AND TM_INPLAN_SPLIT.STATUS        = '90'
+                   AND TM_INPLAN_SPLIT.DEL_YN        = 'N'
+                   AND TM_INPLAN_SPLIT.TM_DELIVERYTYPE IN ('1')
+                   AND TM_INPLAN_SPLIT.CARNO IS NOT NULL
+                 ) T
+                 GROUP BY  STORERKEY, DCCODE, DELIVERYGROUP, CARNO
+                 
+             ) TMINPLAN
+             
+           ON TMINPLAN.DCCODE        = BASE_POP.DCCODE
+          AND TMINPLAN.DELIVERYGROUP = BASE_POP.POPNO
+          AND TMINPLAN.CARNO         = BASE_POP.CARNO
+    
+        WHERE  1=1 
+
+        GROUP BY  BASE_POP.STORERKEY
+                 ,BASE_POP.DCCODE
+                 ,BASE_POP.POPNO
+                 ,BASE_POP.CARNO
+
+        ORDER BY BASE_POP.POPNO ASC   
+        
+        FETCH FIRST 10 ROWS ONLY
+    </select>
+        
+    <select id="getCarRolltainerList" resultType="TmPopUnregisterRolltainerResDto">       
+        WITH T1 AS (      /* [TmPopUnregisterService.sqlx][getCarRolltainerList][차량별 롤테이너별 배송이력 조회][sunho.kim][2025.06.02] */ 
+             SELECT 
+                 DCCODE                          AS DCCODE
+                ,DISTRICTCODE                    AS POPNO
+                ,ROLLTAINER_START_NO + LEVEL - 1 AS ROLLTAINER_NO
+            FROM (        
+                SELECT 
+                     DCCODE
+                    ,DISTRICTCODE
+                    ,ROLLTAINER_START_NO
+                    ,ROLLTAINER_END_NO
+                FROM MS_DISTRICT        
+                WHERE DCCODE              = #{dccode}
+                  AND DISTRICTCODE        = #{popno}
+                  AND ROLLTAINER_START_NO IS NOT NULL
+                  AND ROLLTAINER_END_NO   IS NOT NULL
+                ) T 
+                CONNECT BY LEVEL <![CDATA[<=]]> (T.ROLLTAINER_END_NO - T.ROLLTAINER_START_NO + 1)  
+        )
+        
+        SELECT
+             T1.DCCODE                                                                                                    AS DCCODE               /* 물류센터 */
+            ,T1.POPNO                                                                                                     AS POPNO                /* POP */
+            ,T1.ROLLTAINER_NO                                                                                             AS ROLLTAINER_NO        /* 롤테이너 번호 */
+            --,SUM(T2.WEIGHT) AS SUM_WEIGHT
+            --,SUM(T2.CUBE)   AS SUM_CUBE  
+            ,MAX(T2.DELIVERYDT)  AS DELIVERYDT    
+            ,ROUND(SUM(T2.WEIGHT) / MAX(T2.DELIVERYDT), 3)                                                                AS AVG_WEIGHT           /* 일평균 중량 */ 
+            ,ROUND(SUM(T2.CUBE) / MAX(T2.DELIVERYDT), 3)                                                                  AS AVG_CUBE             /* 일평균 체적*/
+            ,ROUND(SUM(T2.DELIVERY_CNT) / MAX(T2.DELIVERYDT), 1)                                                          AS AVG_DELIVERY_CNT     /* 평균고객(건) */
+            ,MAX(T4.ROLLTAINER_WEIGHT)                                                                                    AS ROLLTAINER_WEIGHT    /* 기준 롤테이너 중량 */
+            ,MAX(T4.ROLLTAINER_CUBE)                                                                                      AS ROLLTAINER_CUBE      /* 기준 롤테이너 체적 */
+            ,ROUND((SUM(T2.WEIGHT) / MAX(T2.DELIVERYDT)) / 
+                CASE WHEN NVL(MAX(T4.ROLLTAINER_WEIGHT), 0) = 0 THEN 1.00 ELSE MAX(T4.ROLLTAINER_WEIGHT) END, 5) * 100.00 AS RATE_WEIGHT          /* 중량 비율 */
+            ,ROUND((SUM(T2.CUBE) / MAX(T2.DELIVERYDT)) / 
+                CASE WHEN NVL(MAX(T4.ROLLTAINER_CUBE), 0) = 0 THEN 1.00 ELSE MAX(T4.ROLLTAINER_CUBE) END, 5) * 100.00     AS RATE_CUBE            /* 체적 비율 */
+        FROM T1    
+        
+        LEFT OUTER JOIN MS_CUSTXPOP T3 
+           ON T3.DCCODE        = T1.DCCODE
+          AND T3.POPNO         = T1.POPNO
+          AND T3.ROLLTAINER_NO = T1.ROLLTAINER_NO 
+        
+        LEFT OUTER JOIN (     
+                SELECT 
+                    STORERKEY, DCCODE, DELIVERYGROUP, CUSTKEY, CARNO, SUM(WEIGHT) WEIGHT, SUM(CUBE) CUBE, COUNT(DISTINCT(DELIVERYDT))DELIVERYDT, COUNT(1) DELIVERY_CNT
+                FROM (
+                        SELECT STORERKEY, DCCODE, CUSTKEY, DELIVERYDT, DELIVERYGROUP, TM_DELIVERYTYPE, CARNO, WEIGHT, CUBE 
+                        FROM TM_INPLAN 
+                        WHERE TM_INPLAN.STORERKEY         = #{gStorerkey}
+                          AND TM_INPLAN.DCCODE            = #{dccode}
+                          AND TM_INPLAN.DELIVERYDT <![CDATA[<=]]> TO_CHAR(SYSDATE, 'YYYYMMDD')
+                          AND TM_INPLAN.DELIVERYDT <![CDATA[>=]]> TO_CHAR(SYSDATE-180, 'YYYYMMDD')
+                          AND TM_INPLAN.STATUS            = '90'
+                          AND TM_INPLAN.DEL_YN            = 'N'
+                          AND TM_INPLAN.SPLIT_DELIVERY_YN = 'N'
+                          AND TM_INPLAN.TM_DELIVERYTYPE IN ('1') 
+                          AND TM_INPLAN.CARNO            = #{carno}
+                        UNION ALL 
+                        SELECT STORERKEY, DCCODE, CUSTKEY, DELIVERYDT, DELIVERYGROUP, TM_DELIVERYTYPE, CARNO, WEIGHT, CUBE 
+                        FROM TM_INPLAN_SPLIT 
+                        WHERE TM_INPLAN_SPLIT.STORERKEY     = #{gStorerkey}
+                          AND TM_INPLAN_SPLIT.DCCODE        = #{dccode}
+                          AND TM_INPLAN_SPLIT.DELIVERYDT <![CDATA[<=]]> TO_CHAR(SYSDATE, 'YYYYMMDD')
+                          AND TM_INPLAN_SPLIT.DELIVERYDT <![CDATA[>=]]> TO_CHAR(SYSDATE-180, 'YYYYMMDD')
+                          AND TM_INPLAN_SPLIT.STATUS        = '90'
+                          AND TM_INPLAN_SPLIT.DEL_YN        = 'N'
+                          AND TM_INPLAN_SPLIT.TM_DELIVERYTYPE IN ('1')
+                          AND TM_INPLAN_SPLIT.CARNO         = #{carno}
+                    ) TMINPLAN
+                          
+                WHERE 1 = 1                    
+
+                GROUP BY STORERKEY, DCCODE, DELIVERYGROUP, CUSTKEY, CARNO
+        ) T2 
+     
+            ON T2.DCCODE        = T3.DCCODE
+           AND T2.DELIVERYGROUP = T3.POPNO
+           AND T2.CUSTKEY       = T3.CUSTKEY
+
+        LEFT OUTER JOIN CM_DC T4
+          ON T4.DCCODE        = T1.DCCODE    
+        
+        GROUP BY T1.DCCODE
+                ,T1.POPNO
+                ,T1.ROLLTAINER_NO
+             
+         ORDER BY T1.ROLLTAINER_NO
+    </select>
+    
+    <insert id="insert">
+        MERGE    /* [TmPopUnregisterService.sqlx][insert][거래처별POP INSERT][sunho.kim][2025.06.02] */
+        INTO MS_CUSTXPOP T
+        USING (
+            SELECT
+                  #{dccode}                                         AS DCCODE
+                , #{storerkey}                                      AS STORERKEY
+                , #{custkey}                                        AS CUSTKEY
+                , #{custtype}                                       AS CUSTTYPE
+                , NVL(#{fromdate}, TO_CHAR(SYSDATE+3, 'yyyymmdd'))  AS FROMDATE
+                , #{popno}                                          AS POPNO
+                , #{carno}                                          AS CARNO
+                , #{rolltainerNo}                                   AS ROLLTAINER_NO
+                , #{gUserId}                                        AS EDITWHO
+            FROM DUAL
+        ) S
+        ON (
+                T.DCCODE    = S.DCCODE
+            AND T.STORERKEY = S.STORERKEY
+            AND T.CUSTKEY   = S.CUSTKEY  
+            AND T.CUSTTYPE  = S.CUSTTYPE
+            AND T.FROMDATE  = S.FROMDATE
+        )
+        
+        WHEN MATCHED THEN
+        UPDATE SET
+              T.POPNO     = S.POPNO
+            , T.EDITDATE  = SYSDATE
+            , T.EDITWHO   = S.EDITWHO
+        WHEN NOT MATCHED THEN
+            INSERT (
+                  DCCODE
+                , STORERKEY
+                , CUSTKEY
+                , CUSTTYPE
+                , FROMDATE
+                , POPNO
+                , POPNAME
+                , ROLLTAINER_NO
+                , ADDDATE
+                , EDITDATE
+                , ADDWHO
+                , EDITWHO
+            )
+            VALUES (
+                  S.DCCODE
+                , S.STORERKEY
+                , S.CUSTKEY
+                , S.CUSTTYPE
+                , S.FROMDATE
+                , S.POPNO
+                , S.CARNO
+                , S.ROLLTAINER_NO
+                , SYSDATE
+                , SYSDATE
+                , S.EDITWHO
+                , S.EDITWHO
+            )
+    </insert>
+</mapper>

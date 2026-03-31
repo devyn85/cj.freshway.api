@@ -1,0 +1,665 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+    "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="stTplReceiptReqService">
+
+    <select id="getMasterList" resultType="StTplReceiptReqResDto">
+		SELECT /* [stTplReceiptReqService][getMasterList][위탁입고요청 조회][ParkJinWoo][20251010] */
+		      ''                     AS ROWSTATUS               
+		    , A.DELIVERYDATE         AS DELIVERYDATE       
+		    , A.DOCDT                AS DOCDT              /*요청번호*/
+		    , A.DOCNO                AS DOCNO              /*문서번호*/
+		    , A.DOCLINE              AS DOCLINE     
+		    , A.ORGANIZE             AS ORGANIZE        
+		    , A.SKU                  AS SKU                /*상품코드*/
+		    , B.DESCRIPTION          AS SKUNAME
+		    , B.DURATIONTYPE		 AS DURATIONTYPE
+		    , B.BASEUOM              AS BASEUOM
+		    , C.ORDERQTY             AS ORDERQTY
+		    , NVL(ROUND(FN_CONV_UOM(A.STORERKEY,A.SKU,B.BASEUOM,'BOX',C.ORDERQTY),2),'0') AS BOXQTY
+		    , NVL(ROUND(FN_CONV_UOM(A.STORERKEY,A.SKU,B.BASEUOM,'PLT',C.ORDERQTY),2),'0') AS PLTQTY
+		    , C.SLIPDT               AS SLIPDT
+		    , CASE WHEN C.LOTTABLE01 IS NULL THEN ''
+		           ELSE FN_LOTDURATION(B.STORERKEY,B.DURATIONTYPE,B.DURATION,C.LOTTABLE01,'N')
+		               ||'/'|| B.DURATION END  AS DURATION_TERM            
+			, CASE WHEN FN_LOTDURATION(B.STORERKEY, B.DURATIONTYPE, B.DURATION, C.LOTTABLE01, 'R') IS NULL THEN FN_LOTDURATION(B.STORERKEY, B.DURATIONTYPE, B.DURATION, C.LOTTABLE01, 'R')
+				   ELSE FN_LOTDURATION(B.STORERKEY, B.DURATIONTYPE, B.DURATION, C.LOTTABLE01, 'R') || '%' END  AS DURATION_RATE
+			, FN_LOTDURATION(B.STORERKEY,B.DURATIONTYPE,B.DURATION,C.LOTTABLE01,'N') AS DURATION
+		    , C.LOTTABLE01           AS LOTTABLE01
+		    , A.ORGANIZE             AS ORGANIZE
+		    , A.DOCTYPE              AS DOCTYPE
+		    , A.IOTYPE               AS IOTYPE
+		    , A.ORDERTYPE            AS ORDERTYPE
+		    , A.WORKPROCESSCODE      AS WORKPROCESSCODE
+		    , A.STORERKEY     		 AS STORERKEY 
+		    , D.TO_CUSTKEY           AS TO_CUSTKEY
+			, D.TO_CUSTNAME          AS TO_CUSTNAME
+			, D.FROM_CUSTKEY         AS FROM_CUSTKEY
+			, D.FROM_CUSTNAME        AS FROM_CUSTNAME
+		    , E.STOCKID              AS STOCK_ID
+		    , F.SERIALNO             AS SERIALNO
+		    , F.CONVSERIALNO		 AS CONVSERIALNO
+		    , A.OPEN_TIME			 AS OPENTIME
+		    , A.MEMO1				 AS RMK
+		    , A.DOCTYPE				 AS DOCTYPE
+		    , CASE
+			  WHEN UPPER(TRIM(C.LOTTABLE01)) = 'STD' THEN C.LOTTABLE01
+			  ELSE
+				CASE WHEN B.DURATIONTYPE = '1'
+					THEN TO_CHAR (  TO_DATE(SUBSTR(REGEXP_REPLACE(C.LOTTABLE01, '[^0-9]', ''), 1, 8), 'YYYYMMDD')- B.DURATION,'YYYYMMDD')
+					ELSE 
+					     TO_CHAR(
+				         TO_DATE(SUBSTR(REGEXP_REPLACE(C.LOTTABLE01, '[^0-9]', ''), 1, 8), 'YYYYMMDD')
+				       , 'YYYYMMDD')
+					    END 
+				END                  AS DURATIONFROM
+		    , CASE
+			  WHEN UPPER(TRIM(C.LOTTABLE01)) = 'STD' THEN 'STD'
+			  WHEN B.DURATIONTYPE = '2' THEN
+			       TO_CHAR(
+			         TO_DATE(SUBSTR(REGEXP_REPLACE(C.LOTTABLE01, '[^0-9]', ''), 1, 8), 'YYYYMMDD')
+			         + NVL(B.DURATION, 0)
+			       , 'YYYYMMDD')
+			  ELSE
+			       TO_CHAR(
+			         TO_DATE(SUBSTR(REGEXP_REPLACE(C.LOTTABLE01, '[^0-9]', ''), 1, 8), 'YYYYMMDD')
+			       , 'YYYYMMDD')
+			   END                   AS DURATIONTO
+			,NVL((SELECT COUNT(*)
+				FROM ST_CONSIGN_FILE G
+			   WHERE 1=1
+			     AND G.DOCNO = A.DOCNO
+			     <!-- AND G.DOCTYPE = A.DOCTYPE -->
+			     AND DEL_YN = 'N'),0) AS ATTACHMENT
+			, U1.USERNAME            AS ADDWHO                     /* 등록자ID */
+			, U2.USERNAME            AS EDITWHO                    /* 수정자ID */
+			, A.ADDDATE              AS ADDDATE
+			, A.ADDWHO               AS ADDWHOID
+			, A.EDITDATE             AS EDITDATE
+			, A.EDITWHO              AS EDITWHOID
+			     
+		FROM DM_DOCUMENT_D A
+		LEFT JOIN CM_USER U1 ON U1.USERID = A.ADDWHO
+		LEFT JOIN CM_USER U2 ON U2.USERID = A.EDITWHO
+		LEFT JOIN MS_SKU B
+		       ON A.SKU          = B.SKU
+		      AND A.STORERKEY    = B.STORERKEY
+		LEFT JOIN DM_DOCUMENT_H D
+		       ON A.DCCODE       = D.DCCODE
+		      AND A.DOCTYPE      = D.DOCTYPE
+		      AND A.DELIVERYDATE = D.DELIVERYDATE
+		      AND A.DOCNO        = D.DOCNO
+		      AND A.DEL_YN       = 'N'  
+		LEFT JOIN DP_INVOICE_SN E
+		       ON A.DCCODE        = E.DCCODE
+		      AND A.DOCNO         = E.DOCNO
+		      AND A.DELIVERYDATE  = E.SLIPDT
+		      AND A.STORERKEY     = E.STORERKEY
+              AND A.DOCLINE       = E.DOCLINE
+		      AND E.SKU = B.SKU
+		LEFT JOIN DP_INPLAN C
+		       ON C.DCCODE    = A.DCCODE
+		      AND C.STORERKEY = A.STORERKEY
+              AND A.DOCLINE   = C.DOCLINE
+		      AND C.DOCNO     = A.DOCNO
+		      AND C.DOCTYPE   = A.DOCTYPE
+		LEFT JOIN ST_SNINFO F
+		       ON E.STORERKEY = F.STORERKEY
+		      AND E.STOCKID   = F.STOCKID
+		      AND B.SKU       = F.SKU
+		 
+		WHERE 1=1
+		  AND A.DOCTYPE = 'DP'
+		  AND A.DEL_YN  = 'N'
+		<if test="dcCode != null and dcCode != ''">     
+		  AND A.DCCODE LIKE #{dcCode}	
+		</if>
+		<if test="fromDate != null and fromDate != ''">     
+		  AND A.DELIVERYDATE BETWEEN #{fromDate} AND #{toDate}
+		</if>
+		<if test="organize != null and organize != ''">     
+		  AND A.ORGANIZE = #{organize}
+		</if>
+		<if test="vendor != null and vendor != ''">     
+		  AND D.FROM_CUSTKEY = #{vendor}
+		</if>
+		<if test="sku != null and sku != '' ">
+				<if test="skuMulti != null and skuMulti.size() > 0">
+					<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+						<foreach collection="skuMulti" item="item">
+							OR A.SKU IN
+							<foreach collection="item" item="code" open="(" close=")" separator=",">
+								#{code} 	 
+				      		</foreach>
+				    	</foreach>
+				  	</trim>			                                    
+		    	</if>
+	    </if>
+		<if test="blNo != null and blNo != ''">     
+		  AND F.CONVSERIALNO = #{blNo}
+		</if>
+		<if test="serialNo != null and serialNo != ''">     
+		  AND F.SERIALNO = #{serialNo}
+		</if>
+		<if test="tplUser != null and tplUser != ''">     
+		  AND D.TPL_BCNR_ID = #{tplUser}
+		</if>
+		ORDER BY A.DOCNO, A.SKU
+    </select>
+  
+	<insert id="insertDmDocumentH" parameterType="map">
+	    <![CDATA[
+	    INSERT INTO IF_DM_EXDC_DOCUMENT_H ( /* [stTplReceiptReqService][insertDmDocumentH][IF_DM_EXDC_DOCUMENT_H 헤더 INSERT][ParkJinWoo][20251103] */
+	               SERIALKEY           /* 데이터번호 */
+	            ,  DOCNO               /* 문서번호 */
+	            ,  DOCDT               /* 문서일자 */
+	            ,  DOCTYPE             /* 문서유형 */
+	            ,  ORDERTYPE           /* 고객사주문유형 */
+	            ,  DCCODE              /* 센터코드 */
+	            ,  STORERKEY           /* 고객사코드(화주코드) */
+	            ,  ORGANIZE            /* 조직코드(창고코드) */
+	            ,  WORKPROCESSCODE     /* 작업 전략 코드 */
+	            ,  DELIVERYDATE        /* 배송일자(인도예정일자) */
+	            ,  SLIPDT              /* 전표일자(입고예정일자) */
+	            ,  TO_CUSTKEY          /* TO 거래처코드(수신거래처코드) */
+	            ,  TO_CUSTNAME         /* TO 거래처명(수신거래처명) */
+	            ,  TO_CUSTTYPE         /* TO 거래처 유형 */
+	            ,  FROM_CUSTKEY        /* FROM 거래처코드(발신거래처코드) */
+	            ,  FROM_CUSTNAME       /* FROM 거래처명(발신거래처명) */
+	            ,  MEMO1               /* 메모1(비고) */
+	            ,  IF_ID               /* 인터페이스ID */
+	            ,  IF_FLAG             /* I/F구분 */
+	            ,  IF_DESTINATION      /* I/F목적지 */
+	            ,  TPL_TYPE            /* 3자물류 주문유형 */
+	            ,  TPL_DTL_TYPE        /* 3자물류 주문상세유형 */
+	            ,  TPL_BCNR_ID         /* 3자물류 협력사ID */
+	            ,  OTCO_GRPCD          /* 타사주문그룹 */
+	            ,  ADDWHO              /* 최초등록자 */
+	            ,  EDITWHO             /* 최종변경자 */
+	            ,  ADDDATE             /* 최초등록시간 */
+	            ,  EDITDATE            /* 최종변경시간 */
+	            , TO_BILLTOKEY
+	            , FROM_BILLTOKEY
+	    ) VALUES (
+	               LOGISONESVC.SEQ_IF_DM_EXDC_DOCUMENT_H_01.NEXTVAL   /* 데이터번호 */
+	            ,  #{docNo}                                    /* 문서번호 */
+	            ,  #{docdt}                                    /* 문서일자 */
+	            ,  #{docType}                                  /* 문서유형 */
+	            ,  #{orderType}                                /* 고객사주문유형 */
+	            ,  #{dcCode}                                   /* 센터코드 */
+	            ,  #{gStorerkey}                                /* 고객사코드(화주코드) */
+	            ,  #{organize}                                 /* 조직코드(창고코드) */
+	            ,  #{workProcessCode}                          /* 작업 전략 코드 */
+	            ,  #{deliveryDate}                             /* 배송일자(인도예정일자) */
+	            ,  #{slipDt}                                   /* 전표일자(입고예정일자) */
+	            ,  #{toCustKey}                                /* TO 거래처코드(수신거래처코드) */
+	            ,  #{toCustName}                               /* TO 거래처명(수신거래처명) */
+	            ,  #{custType}                                 /* TO 거래처 유형 */
+	            ,  #{fromCustKey}                              /* FROM 거래처코드(발신거래처코드) */
+	            ,  #{fromCustName}                             /* FROM 거래처명(발신거래처명) */
+	            ,  #{rmk}                                      /* 메모1(비고) */
+	            ,  #{ifId}                                     /* 인터페이스ID */
+	            ,  'N'                                         /* I/F구분 */
+	            ,  #{ifDestination}                            /* I/F목적지 */
+	            ,  #{tplType}                                  /* 3자물류 주문유형 */
+	            ,  #{tplDtlType}                               /* 3자물류 주문상세유형 */
+	            ,  #{tplBcnrId}                                /* 3자물류 협력사ID */
+	            ,  #{otcoGrpcd}                                /* 타사주문그룹 */
+	            ,  #{gUserId}                                  /* 최초등록자 */
+	            ,  #{gUserId}                                  /* 최종변경자 */
+	            ,  SYSDATE                                     /* 최초등록시간 */
+	            ,  SYSDATE                                     /* 최종변경시간 */
+	            ,  #{toCustKey}   
+	            ,  #{fromCustKey} 
+	    )
+	    ]]>
+	</insert>
+
+	<insert id="insertDmDocumentD" parameterType="map">
+	    <![CDATA[
+	    INSERT INTO IF_DM_EXDC_DOCUMENT_D (    /* [stTplReceiptReqService][insertDmDocumentD][IF_DM_EXDC_DOCUMENT_D 라인 INSERT][ParkJinWoo][20251103] */
+	               SERIALKEY           /* 데이터번호 */
+	            ,  DOCDT               /* 문서일자 */
+	            ,  DOCTYPE             /* 문서유형 */
+	            ,  DOCNO               /* 문서번호 */
+	            ,  DOCLINE             /* 문서라인 */
+	            ,  DCCODE              /* 센터코드 */
+	            ,  STORERKEY           /* 고객사코드(화주코드) */
+	            ,  ORGANIZE            /* 조직코드(창고코드) */
+	            ,  ORDERTYPE           /* 주문유형 */
+	            ,  STORERORDERQTY      /* 수량 */    
+	            ,  IOTYPE              /* 재고 IN,OUT,INOUT */
+	            ,  SKU                 /* 상품코드 */
+	            ,  UOM                 /* 오더단위(기준단위로 세팅) */
+	            ,  ORDERQTY            /* 고객최초주문수량 */
+	            ,  LOTTABLE01          /* 로트구분값 1(기준일자) */
+	            ,  STOCKID             /* 재고 구분 ID */
+	            ,  SERIALNO            /* 유통이력번호(시리얼) */
+	            ,  CONVSERIALNO        /* BL번호(컨버전) */
+	            ,  SLIPDT              /* 전표일자(입고예정일자) */
+	            ,  DELIVERYDATE        /* 배송완료일자(인도예정일자로 세팅) */
+	            ,  WORKPROCESSCODE     /* 작업 전략 코드 */
+	            ,  MEMO1               /* 메모1(비고) */
+	            ,  STORERUOM
+	            ,  PLANT
+	            ,  IF_ID               /* 인터페이스ID */
+	            ,  IF_FLAG             /* I/F구분 */
+	            ,  IF_DESTINATION      /* I/F목적지 */
+	            ,  OPEN_TIME
+	            ,  CHANNEL
+	            ,  ADDWHO              /* 최초등록자 */
+	            ,  EDITWHO             /* 최종변경자 */
+	            ,  ADDDATE             /* 최초등록시간 */
+	            ,  EDITDATE            /* 최종변경시간 */
+	            ,  POLINE
+	            , INVOICETYPE
+	            , IF_SEND_TYPE
+	    ) VALUES (
+	               LOGISONESVC.SEQ_IF_DM_EXDC_DOCUMENT_D_01.NEXTVAL /* 데이터번호 */
+	            ,  #{docdt}                                  /* 문서일자 */
+	            ,  #{docType}                                /* 문서유형 */
+	            ,  #{docNo}                                  /* 문서번호 */
+	            ,  #{docLine}                                /* 문서라인 */
+	            ,  #{dcCode}                                 /* 센터코드 */
+	            ,  #{gStorerkey}                             /* 고객사코드(화주코드) */
+	            ,  #{organize}                               /* 조직코드(창고코드) */
+	            ,  #{orderType}                              /* 주문유형 */  
+	            ,  #{orderQty}                               /* 화주주문수량 */
+	            ,  #{ioType}                                 /* 재고 IN,OUT,INOUT */
+	            ,  #{sku}                                    /* 상품코드 */
+	            ,  #{baseUom}                                /* 오더단위(기준단위) */
+	            ,  #{orderQty}                               /* 고객최초주문수량 */
+	            ,  #{lottable01}                             /* 로트구분값 1(기준일자) */
+	            ,  #{stockId}                                /* 재고 구분 ID */
+	            ,  #{serialNo}                               /* 유통이력번호(시리얼) */
+	            ,  #{convSerialNo}                           /* BL번호(컨버전) */
+	            ,  #{slipDt}                                 /* 전표일자(입고예정일자) */
+	            ,  #{deliveryDate}                           /* 배송완료일자(인도예정일자) */
+	            ,  #{workProcessCode}                        /* 작업 전략 코드 */
+	            ,  #{rmk}                                    /* 메모1(비고) */
+	            ,  #{baseUom}                                /* 단위 */
+	            ,  #{dcCode}                                 /* 물류센터 */ 
+	            ,  #{ifId}                                   /* 인터페이스ID */
+	            ,  'N'                                       /* I/F구분 */
+	            ,  #{ifDestination}                          /* I/F목적지 */
+	            ,  #{openTime}
+	            ,  '1'	
+	            ,  #{gUserId}                                /* 최초등록자 */
+	            ,  #{gUserId}                                /* 최종변경자 */
+	            ,  SYSDATE                                   /* 최초등록시간 */
+	            ,  SYSDATE                                   /* 최종변경시간 */
+	            ,  #{docLine}
+	            , 'STD'
+	            , 'PO'
+	    )
+	    ]]>
+	</insert>
+
+	<insert id="insertIfStStockSerialinfoR" parameterType="map">
+	    <![CDATA[
+	    INSERT INTO /* [stTplReceiptReqService][insertIfStStockSerialinfoR][IF_ST_EXDC_STOCK_SERIALINFO_R INSERT(필수필드 최소매핑)][ParkJinWoo][20251104] */
+	       IF_ST_EXDC_STOCK_SERIALINFO_R (
+	               SERIALKEY             /* 데이터번호 */
+	            ,  DCCODE                /* 센터코드 */
+	            ,  STORERKEY             /* 고객사코드 */
+	            ,  ORGANIZE              /* 조직코드 */
+	            ,  SKU                   /* 상품코드 */
+	            ,  STOCKID               /* 포장ID */
+	            ,  SERIALNO              /* 개체식별번호/유통이력번호 */
+	            ,  CONVSERIALNO          /* BL번호 */
+	            ,  PLANT                 /* SAP플랜트 */
+	            ,  VENDOR                /* 벤더코드 */
+	            ,  LOTTABLE01            /* 유통기한 */
+	            ,  UOM                   /* 단위 */
+	            ,  ORDERQTY              /* 주문수량 */
+	            ,  DP_CUSTKEY            /* 입고거래처 */
+	            ,  DP_DOCTYPE            /* 입고문서유형 */
+	            ,  DP_DOCDT              /* 입고문서일자 */
+	            ,  DP_DOCNO              /* 입고문서번호 */
+	            ,  DP_DOCLINE            /* 입고문서라인 */
+	            ,  IF_ID                 /* I/F구분 */
+	            ,  IF_FLAG               /* I/F플래그 */
+	            ,  DEL_YN                /* 삭제여부 */
+	            ,  ADDDATE               /* 최초등록일자 */
+	            ,  EDITDATE              /* 최종변경시간 */
+	            ,  ADDWHO                /* 최초등록자 */
+	            ,  EDITWHO               /* 최종변경자 */
+	       ) VALUES (
+	               LOGISONESVC.SEQ_IF_ST_EXDC_STOCK_SERIALINFO_R_01.NEXTVAL    /* 데이터번호 */
+	            ,  #{dcCode}                                           /* 센터코드 */
+	            ,  #{gStorerkey}                                       /* 고객사코드 */
+	            ,  #{organize}                                         /* 조직코드 */
+	            ,  #{sku}                                              /* 상품코드 */
+	            ,  #{stockId}                                          /* 포장ID */
+	            ,  #{serialNo}                                         /* 개체식별번호/유통이력번호 */
+	            ,  #{convSerialNo}                                     /* BL번호 */
+	            ,  #{dcCode}                                           /* SAP플랜트 */
+	            ,  #{sku}                                              /* 벤더코드 */
+	            ,  NVL(TRIM(#{lottable01}), 'STD')                     /* 유통기한 */
+	            ,  #{baseUom}                                          /* 단위 */
+	            ,  #{orderQty}                                         /* 주문수량 */
+	            ,  #{fromCustKey}                                      /* 입고거래처 */
+	            ,  #{docType}                                          /* 입고문서유형 */
+	            ,  #{docdt}                                            /* 입고문서일자 */
+	            ,  #{docNo}                                            /* 입고문서번호 */
+	            ,  #{docLine}                                          /* 입고문서라인 */
+	            ,  #{ifId}                                             /* 인터페이스ID */
+	            ,  'N'                                                 /* I/F플래그 */
+	            ,  'N'                                                 /* 삭제여부 */
+	            ,  SYSDATE                                             /* 최초등록일자 */
+	            ,  SYSDATE                                             /* 최종변경시간 */
+	            ,  #{gUserId}                                          /* 최초등록자 */
+	            ,  #{gUserId}                                          /* 최종변경자 */
+	    )
+	    ]]>
+	</insert>
+
+	<select id = "getDocNo" resultType = "cjfw.wms.st.dto.StTplReceiptReqResDto">
+        SELECT 'D'||LPAD(SEQ_DM_DOCUMENT_H_D.NEXTVAL, 9, '0') AS DOCNO
+        FROM DUAL
+	</select>
+	    
+	<select id = "getStockId" resultType = "cjfw.wms.st.dto.StTplReceiptReqResDto">
+        SELECT  'EC'||TO_CHAR(SYSDATE,'YYYYMMDD')||LPAD(SEQ_IF_TEMP_EXDC.NEXTVAL,12,0) AS STOCKID
+        FROM DUAL
+	</select>
+	    
+    <select id="saveDmDocument" statementType="CALLABLE" parameterType="Map" resultType="Map" timeout="240">
+        { CALL SPIF_RECEIVEDATA_EXDC.P_IF_DM_DOCUMENT( /* [stTplReceiptReqService.sqlx][CallIfStExdcApiStock][외부창고재고 인터페이스 정보를 본 테이블에 저장][sunho.kim][2025.10.10] */
+                #{AVC_IFID,       mode=IN, jdbcType=VARCHAR}
+              , #{AVC_IFMESSAGE,   mode=OUT, jdbcType=VARCHAR}
+              , #{AVC_IFRESULT,   mode=OUT, jdbcType=VARCHAR}
+        ) }
+    </select>
+    
+    <select id="saveSerialInfo" statementType="CALLABLE" parameterType="Map" resultType="Map" timeout="240">
+        { CALL SPIF_RECEIVEDATA_EXDC.P_IF_SERIALINFO( /* [stTplReceiptReqService.sqlx][CallIfStExdcApiStock][외부창고재고 인터페이스 정보를 본 테이블에 저장][sunho.kim][2025.10.10] */
+                #{AVC_IFID,       mode=IN, jdbcType=VARCHAR}
+              , #{AVC_IFMESSAGE,   mode=OUT, jdbcType=VARCHAR}
+              , #{AVC_IFRESULT,   mode=OUT, jdbcType=VARCHAR}
+        ) }
+    </select>
+    
+    <update id="updateTplReceiptReqSoftDeleteConfirmedBySerialkeys">
+        UPDATE      /* [stTplReceiptReqService.sqlx][stTplReceiptReqService.updateTplReceiptReqSoftDeleteConfirmedBySerialkeys][신규: 확정 파일 소프트 삭제(선택 행)][ParkJinWoo][20251103] */
+        ST_CONSIGN_FILE
+           SET DEL_YN   = 'Y'
+             , EDITWHO  = #{gUserNo}
+             , EDITDATE = SYSDATE
+         WHERE DOCNO = #{docNo}
+           AND DOC_NAME = 'CRMRECEIPTREQ_FILE'
+           <!-- AND DOCTYPE = #{docType} -->
+           AND DEL_YN   = 'N'
+           AND SERIALKEY IN
+           <foreach collection="serialkeys" item="k" open="(" separator="," close=")">
+             #{k}
+           </foreach>
+    </update>
+    
+    <select id="selectTplReceiptReqFilesBySerialkeys" resultType="Hmap">
+        SELECT     /* [stTplReceiptReqService.sqlx][stTplReceiptReqService.selectTplReceiptReqFilesBySerialkeys][임시/확정 공통: 파일행 조회(삭제/검증용)][ParkJinWoo][20251103] */
+             SERIALKEY, DOCNO, STATUS, DEL_YN, FILE_LOCATION
+        FROM ST_CONSIGN_FILE
+        WHERE DOCNO = #{docNo}
+           AND DOC_NAME = 'CRMRECEIPTREQ_FILE'
+           <!-- AND DOCTYPE = #{docType} -->
+           AND DEL_YN = 'N'
+           AND SERIALKEY IN
+           <foreach collection="serialkeys" item="k" open="(" separator="," close=")">
+             #{k}
+           </foreach>
+    </select>
+    
+    <update id="updateTplReceiptReqFileConfirm">
+        UPDATE     /* [stTplReceiptReqService.sqlx][stTplReceiptReqService.updateTplReceiptReqFileConfirm][확정(EDMS) 업데이트][ParkJinWoo][20251103] */ 
+        ST_CONSIGN_FILE
+           SET UPLOAD_RES_DOC_ID   = #{uploadResDocId}
+             , UPLOAD_FILE_NAME    = #{uploadFileName}
+             , UPLOAD_WORKPLACE_ID = #{uploadWorkplaceId}
+             , STATUS              = 'Y'
+             , EDITWHO             = #{gUserNo}
+             , EDITDATE            = SYSDATE
+         WHERE DOCNO    = #{docNo}
+           AND SERIALKEY  = #{serialkey}
+           AND STATUS     = 'N'
+           AND DEL_YN     = 'N'
+    </update>
+    
+    <select id="selectTplReceiptReqTempFilesBySerialkeys" resultType="Hmap">
+        SELECT   /* [stTplReceiptReqService.sqlx][stTplReceiptReqService.selectTplReceiptReqTempFilesBySerialkeys][임시저장 파일 조회][ParkJinWoo][20251103] */ 
+            SERIALKEY, DOCNO, FILE_LOCATION, TRANS_FILE_NAME, FILE_NAME 
+        FROM ST_CONSIGN_FILE
+        WHERE DOCNO = #{docNo}
+           AND STATUS = 'N'
+           AND DEL_YN = 'N'
+           <if test="serialkeys != null and serialkeys != ''"> 
+           AND SERIALKEY IN
+             <foreach collection="serialkeys" item="k" open="(" separator="," close=")">
+             #{k}
+             </foreach>
+           </if>
+    </select>
+
+    <insert id="insertTplReceiptReqFile">
+        INSERT /* [stTplReceiptReqService.sqlx][stTplReceiptReqService.insertTplReceiptReqFile][고객배송조건 첨부 임시저장][ParkJinWoo][20251103] */
+               INTO ST_CONSIGN_FILE
+               (
+                 SERIALKEY
+               , DOCNO
+               , DOCTYPE
+               , DOC_NAME
+               , FILE_NAME
+               , FILE_EXTENSION
+               , FILE_LOCATION
+               , FILE_SIZE_BYTES
+               , TRANS_FILE_NAME
+               , UPLOAD_RES_DOC_ID
+               , UPLOAD_FILE_NAME
+               , UPLOAD_WORKPLACE_ID
+               , UPLOAD_LOCATION
+               , DOWNLOAD_COUNT
+               , FILE_CONTENT
+               , FILE_TYPE
+               , STATUS
+               , DEL_YN
+               , ADDWHO
+               , ADDDATE
+               , EDITWHO
+               , EDITDATE
+               )
+        VALUES
+               (
+                 SEQ_ST_CONSIGN_FILE_01.NEXTVAL
+               , #{docNo}
+               , #{docType}
+               , 'CRMRECEIPTREQ_FILE'
+               , #{fileName}
+               , #{fileExtension}
+               , #{fileLocation}
+               , to_number(#{fileSizeBytes})
+               , #{transFileName}
+               , ''
+               , ''
+               , ''
+               , #{uploadLocation}
+               , '0'
+               , ''
+               , 'HTTP'
+               , 'N'
+               , 'N'
+               , #{gUserId}
+               , SYSDATE
+               , #{gUserId}
+               , SYSDATE
+               )
+    </insert>
+    
+      <!-- 파일 정보 불러오기 -->
+	<select id="getUploadFileList" resultType="StTplReceiptReqUploadFileResDto">
+	    SELECT /* [stTplReceiptReqService.sqlx][stTplReceiptReqService.getPopupUploadFileList][고객배송조건 Upload File List][JeongHyeongCheol][20251010] */
+	            '0'                  AS CHECKYN
+	           ,SERIALKEY            AS SERIALKEY
+	           ,DOCNO              AS DOCNO
+	           ,DOCTYPE             AS DOCTYPE
+	           ,DOC_NAME             AS DOC_NAME
+	           ,FILE_NAME            AS FILE_NAME
+	           ,FILE_EXTENSION       AS FILE_EXTENSION
+	           ,FILE_LOCATION        AS FILE_LOCATION
+	           ,FILE_SIZE_BYTES      AS FILE_SIZE_BYTES
+	           ,TRANS_FILE_NAME      AS TRANS_FILE_NAME
+	           ,UPLOAD_HASH_ID       AS UPLOAD_HASH_ID
+	           ,UPLOAD_RES_DOC_ID    AS UPLOAD_RES_DOC_ID
+	           ,UPLOAD_FILE_NAME     AS UPLOAD_FILE_NAME
+	           ,UPLOAD_WORKPLACE_ID  AS UPLOAD_WORKPLACE_ID
+	           ,UPLOAD_LOCATION      AS UPLOAD_LOCATION
+	           ,DOWNLOAD_COUNT       AS DOWNLOAD_COUNT
+	           ,FILE_TYPE            AS FILE_TYPE
+	           ,STATUS               AS STATUS
+	           ,ADDWHO               AS ADDWHO
+	           ,ADDDATE              AS ADDDATE
+	           ,EDITWHO              AS EDITWHO
+	           ,EDITDATE             AS EDITDATE
+	    FROM    ST_CONSIGN_FILE
+	    WHERE   DOC_NAME = 'CRMRECEIPTREQ_FILE'
+	    AND     DOCNO  = #{docNo}
+	    <!-- AND     DOCTYPE = #{docType} -->
+    	AND     DEL_YN   = 'N'
+	</select>
+	 <!-- 추후 변경 예정 (컬럼 변경 사유 및 요건사항 변경 이유)-->
+	
+	<select id="getExcelCheck"  resultType="StTplReceiptReqResDto">
+		SELECT /* [StTplReceiptReq.sqlx][StTplReceiptReq.getExcelCheck][엑셀업로드 데이터 체크][AhnKihyeong][20160525] */
+		       CASE
+		         WHEN #{orderQty} IS NULL OR #{orderQty}	   = '' THEN '필수값 에러 : 입고수량' /* 오류메시지 */
+		         WHEN #{orderQty} <![CDATA[<=]]> 0	 THEN '필수값 에러 : 입고 수량이 0보다 작음' /* 오류메시지 */
+		         WHEN #{sku}         IS NULL OR #{sku}         = '' THEN '필수값 에러 : 상품 KEY'         /* 오류메시지 */
+		         WHEN #{deliveryDate} IS NULL THEN '필수값 에러 : 입고예정일'                      /* 오류메시지 */
+		
+		
+		         WHEN (#{sku} IS NOT NULL AND #{sku} <![CDATA[<>]]> '') AND SKU_NAME IS NULL THEN '상품코드 에러'         /* 오류메시지 */
+		         WHEN #{convSerialNo} IS NULL OR #{convSerialNo}	   = '' THEN '필수값 에러 : BL번호' /* 오류메시지 */
+		         WHEN (SELECT COUNT(*)
+		         		 FROM MS_EXDCRATE
+		         		 JOIN MS_SKU
+		         		   ON MS_SKU.STORERKEY = MS_EXDCRATE.STORERKEY
+		         		  AND MS_SKU.SKU = MS_EXDCRATE.SKU
+		         		 WHERE 1=1
+		         		   AND MS_EXDCRATE.CUSTKEY = #{custKey}) <![CDATA[=]]> 0 THEN '해당 상품은 요율에 등록되지 않은 상품입니다.'
+				
+				    -- 2) 에러 메시지: 범위 밖이면 메시지, 아니면 NULL
+			    
+			       WHEN TRIM(OPEN_TIME) IS NOT NULL
+		          AND (
+		                 TO_NUMBER(SUBSTR(LPAD(REGEXP_REPLACE(OPEN_TIME, '[^0-9]', ''), 4, '0'), 1, 2)) NOT BETWEEN 0 AND 23
+		              OR TO_NUMBER(SUBSTR(LPAD(REGEXP_REPLACE(OPEN_TIME, '[^0-9]', ''), 4, '0'), 3, 2)) NOT BETWEEN 0 AND 59
+		          )
+		         THEN '시간은 0000 ~ 2359 범위의 숫자로 입력해주세요.'                 /* 오류메시지 */
+		   			 
+		   			 
+		         ELSE ''                                                                                   /* 오류메시지 */
+		       
+		       END                               AS ERRMSG        /* 오류메시지 */
+		     , SKU_NAME                       AS SKU_NAME   /* 창고명 */
+		     , SKU                          AS SKU      /* 상품명 */
+		     , BASEUOM
+		     , BOXQTY
+		     , PLTQTY                         AS PLTQTY     /* 상품스펙코드 */
+			 , OPEN_TIME					
+		      ,'I' AS ROWSTATUS  
+		     ,CASE
+		        WHEN NVL(TRIM(LOTTABLE01), '') = '' THEN LOTTABLE01
+		        ELSE
+		            CASE 
+		              WHEN DURATIONTYPE = '1' THEN
+		                   TO_CHAR(
+		                       TO_DATE(SUBSTR(REGEXP_REPLACE(LOTTABLE01, '[^0-9]', ''), 1, 8), 'YYYYMMDD')
+		                       - NVL(DURATION, 0),
+		                       'YYYYMMDD'
+		                   )
+		              ELSE 
+		                   TO_CHAR(
+		                       TO_DATE(SUBSTR(REGEXP_REPLACE(LOTTABLE01, '[^0-9]', ''), 1, 8), 'YYYYMMDD'),
+		                       'YYYYMMDD'
+		                   )
+		            END 
+		      END AS DURATIONFROM
+		     ,CASE
+		        WHEN UPPER(TRIM(LOTTABLE01)) = 'STD' THEN 'STD'
+		        WHEN DURATIONTYPE = '2' THEN
+		             TO_CHAR(
+		               TO_DATE(SUBSTR(REGEXP_REPLACE(LOTTABLE01, '[^0-9]', ''), 1, 8), 'YYYYMMDD')
+		               + NVL(DURATION, 0),
+		               'YYYYMMDD'
+		             )
+		        ELSE
+		             TO_CHAR(
+		               TO_DATE(SUBSTR(REGEXP_REPLACE(LOTTABLE01, '[^0-9]', ''), 1, 8), 'YYYYMMDD'),
+		               'YYYYMMDD'
+		             )
+		      END AS DURATIONTO
+			, DURATIONTYPE
+		    ,#{orderQty}  AS ORDERQTY
+		    ,REPLACE(LOTTABLE01, '-', '')		AS LOTTABLE01
+		    ,#{tplBcnrId}						as tplBcnrId
+		    ,#{fromCustKey}						as fromCustKey
+		    ,REPLACE(#{deliveryDate}, '-', '')		AS DELIVERYDATE
+		    ,#{dcCode}							as DCCODE
+		    ,#{organize}						AS ORGANIZE
+		FROM (
+		    SELECT
+		          (SELECT MAX(DESCRIPTION)
+		              FROM MS_SKU
+		             WHERE STORERKEY <![CDATA[=]]> #{gStorerkey}
+		               AND SKU       <![CDATA[=]]> #{sku})                                       AS SKU_NAME        /* 상품명 */
+		          , (SELECT MAX(DURATIONTYPE)
+		              FROM MS_SKU
+		             WHERE STORERKEY <![CDATA[=]]> #{gStorerkey}
+		               AND SKU       <![CDATA[=]]> #{sku})                                       AS DURATIONTYPE        		/* 상품코드 */     
+		            , (SELECT MAX(DURATION)
+		              FROM MS_SKU
+		             WHERE STORERKEY <![CDATA[=]]> #{gStorerkey}
+		               AND SKU       <![CDATA[=]]> #{sku})                                       AS DURATION        		/* 상품코드 */     
+		          , (SELECT MAX(SKU)
+		              FROM MS_SKU
+		             WHERE STORERKEY <![CDATA[=]]> #{gStorerkey}
+		               AND SKU       <![CDATA[=]]> #{sku})                                       AS SKU        		/* 상품코드 */      
+				 , (SELECT MAX(BASEUOM) 
+		              FROM MS_SKU
+		             WHERE STORERKEY <![CDATA[=]]> #{gStorerkey}
+		               AND SKU       <![CDATA[=]]> #{sku})                                       AS BASEUOM        		/* 상품단위 */
+				 , (SELECT MAX(QTYPERBOX)
+		              FROM MS_SKU
+		             WHERE STORERKEY <![CDATA[=]]> #{gStorerkey}
+		               AND SKU       <![CDATA[=]]> #{sku})                                       AS BOXQTY        		/* 박스입수 */
+		            , (SELECT CASE 
+		                     WHEN MAX(SKU) IS NOT NULL THEN
+		                          ROUND(
+		                              FN_CONV_UOM(
+		                                  #{gStorerkey}    
+		                                , MAX(SKU)
+		                                , MAX(BASEUOM)
+		                                , 'BOX'
+		                                , #{orderQty} / TO_NUMBER(MAX(QTYPERBOX))  
+		                              )
+		                          )
+		                     ELSE 0
+		                   END
+		              FROM MS_SKU
+		             WHERE STORERKEY <![CDATA[=]]> #{gStorerkey}
+		               AND SKU       <![CDATA[=]]> #{sku}
+		           )                                   AS PLTQTY         /* PLT수량 */
+		             , CASE WHEN (SELECT MAX(DURATIONTYPE)
+		              FROM MS_SKU
+		             WHERE STORERKEY <![CDATA[=]]> #{gStorerkey}
+		               AND SKU       <![CDATA[=]]> #{sku}) = '1'
+		            THEN #{durationTo}
+		            ELSE #{durationFrom} END AS LOTTABLE01      
+		     ,  CASE
+		        WHEN TRIM(#{openTime}) IS NULL THEN NULL
+		        ELSE LPAD(REGEXP_REPLACE(#{openTime}, '[^0-9]', ''), 4, '0')
+		    END AS OPEN_TIME   
+		        
+		    FROM DUAL
+		) X
+	</select>
+</mapper>

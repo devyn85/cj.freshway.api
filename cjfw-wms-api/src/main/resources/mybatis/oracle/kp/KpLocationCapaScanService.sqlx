@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+ * Copyright 2025. CJ OliveNetworks Co. all rights reserved.
+ *
+ * @author      : KimDongHan (liop0123@cj.net)
+ * @date        : 2025.09.09
+ * @description : 지표 > 재고 운영 > 물류센터 Capa 스캔 현황 SQL
+ * @issues      :
+-->
+
+<mapper namespace="kpLocationCapaScanService">
+
+    <select id="getPickingZoneList" resultType="cjfw.wms.kp.dto.KpLocationCapaScanResT1Dto">
+		SELECT /* [KpLocationCapaScanService.sqlx][KpLocationCapaScanService.getPickingZoneList][지표 > 재고 운영 > 물류센터 Capa 스캔 현황 피킹존 조회][KimDongHan][2025-09-09] */
+		       DISTINCT MS_LOCATION.ZONE    AS COM_CD
+		     , MS_LOCATION.ZONE				AS CD_NM
+		  FROM ST_STOCK
+		  JOIN MS_LOCATION
+		    ON MS_LOCATION.DCCODE  = ST_STOCK.DCCODE
+		   AND MS_LOCATION.LOC     = ST_STOCK.LOC
+		   AND MS_LOCATION.DEL_YN  = 'N'
+		   AND ST_STOCK.DCCODE 	   = #{fixdccode}	
+		   AND ST_STOCK.STORERKEY 	= #{gStorerkey} 
+		<if test="gOrganize != null and gOrganize != '' ">
+		   AND ST_STOCK.ORGANIZE 	= #{gOrganize} 	
+		</if>
+		<if test="gArea != null and gArea != ''">
+		   AND ST_STOCK.AREA 		= #{gArea} 		
+		</if>
+		 GROUP BY MS_LOCATION.DCCODE
+		        , MS_LOCATION.ZONE
+		        , MS_LOCATION.RACKLINE
+		        , MS_LOCATION.RACKCOLUMN
+		        , MS_LOCATION.LOC
+		 ORDER BY MS_LOCATION.ZONE  
+    </select>
+    
+    <select id="getMasterT1List" resultType="cjfw.wms.kp.dto.KpLocationCapaScanResT1Dto">
+		SELECT /* [KpLocationCapaScanService.sqlx][KpLocationCapaScanService.getMasterT1List][지표 > 재고 운영 > 물류센터 Capa 스캔 현황 요약_탭 조회][KimDongHan][2025-09-09] */
+		       T.DCCODE                                                                                                                                                        AS DCCODE       /* 01. 물류센터 */
+		     , FN_GETDCNAME(T.DCCODE)                                                                                                                                          AS DCNAME       /* 02. 물류센터명 */
+		     , FN_CODEDESCR(#{gStorerkey}, 'STORAGETYPE', T.STORAGETYPE) 	                                                                                                   AS STORAGETYPE  /* 03. 저장조건 */	 
+		     , T.ZONE_NM                                                                                                                                                       AS ZONE_NM	   /* 04. 피킹존 */
+		     , T.LOC_ZONE                                                                                                                                                      AS LOC_ZONE     /* 05. ZONE세부 */
+		     , T.LOC_TYPE                                                                                                                                                      AS LOC_TYPE     /* 06. 피킹/보관 */
+		     , (SELECT  COUNT(1) FROM LOGISONE.MS_LOCATION A WHERE A.ZONE = T.LOC_ZONE AND A.CAPA_LOCTYPE = T.LOC_TYPE AND A.CAPA_YN = 'Y' AND A.DEL_YN = 'N')                 AS TOT_CNT	   /* 07. 전체 CAPA */
+		     , T.STATUS_CNT                                                                                                                                                    AS STATUS_CNT   /* 08. 잔여 CAPA(스캔내역) */
+		     , ((SELECT COUNT(1) FROM LOGISONE.MS_LOCATION A WHERE A.ZONE = T.LOC_ZONE AND A.CAPA_LOCTYPE = T.LOC_TYPE AND A.CAPA_YN = 'Y' AND A.DEL_YN = 'N')- T.STATUS_CNT)  AS KEEP_CNT     /* 09. 현재보관 */
+		  FROM ( SELECT KP_DAILYLOCATION_CON.DCCODE            AS DCCODE
+		              , MS_LOCATION.ZONE                       AS LOC_ZONE
+		              , SUBSTR(MS_LOCATION.ZONE, 0, 1)         AS ZONE_NM
+		              , MS_ZONE.STORAGETYPE                    AS STORAGETYPE
+		              , MS_LOCATION.CAPA_LOCTYPE               AS LOC_TYPE
+		              , COUNT(KP_DAILYLOCATION_CON.STATUS)     AS STATUS_CNT
+		           FROM KP_DAILYLOCATION_CON
+		           JOIN MS_LOCATION
+		             ON KP_DAILYLOCATION_CON.DCCODE  = MS_LOCATION.DCCODE
+		            AND KP_DAILYLOCATION_CON.LOC     = MS_LOCATION.LOC
+		            AND MS_LOCATION.DEL_YN      	 = 'N'
+		            AND MS_LOCATION.CAPA_YN          = 'Y'
+		           JOIN MS_ZONE
+		             ON MS_LOCATION.DCCODE           = MS_ZONE.DCCODE
+		            AND MS_LOCATION.ZONE             = MS_ZONE.ZONE
+		            AND MS_ZONE.DEL_YN               = 'N'
+		          WHERE 1=1
+				<if test="smydt != null and smydt != ''">  
+		            AND KP_DAILYLOCATION_CON.CONFIRM_DATE = #{smydt}
+				</if>
+				
+				    <!-- START.다중센터 -->
+				    <choose>   
+				        <when test="fixdccodeMulti != null and fixdccodeMulti != ''">
+				         AND KP_DAILYLOCATION_CON.DCCODE IN
+				         <foreach collection="fixdccodeMulti" item="code" open="(" close=")" separator=",">
+				           #{code}
+				         </foreach>
+				        </when>
+				    <otherwise>
+				       AND 1=2 /*full방지*/
+				    </otherwise>			    
+				    </choose>
+				    <!-- END.다중센터 --> 		            
+		            
+		            AND KP_DAILYLOCATION_CON.STATUS = '0'
+		          GROUP BY KP_DAILYLOCATION_CON.DCCODE
+		                 , MS_LOCATION.ZONE
+		                 , MS_ZONE.STORAGETYPE
+		                 , MS_LOCATION.CAPA_LOCTYPE ) T
+		 ORDER BY T.DCCODE
+		        , T.STORAGETYPE
+				, T.ZONE_NM
+				, T.LOC_ZONE
+				, T.LOC_TYPE    
+    </select>
+    
+    <select id="getMasterT2List" resultType="cjfw.wms.kp.dto.KpLocationCapaScanResT2Dto">
+		SELECT /* [KpLocationCapaScanService.sqlx][KpLocationCapaScanService.getMasterT2List][지표 > 재고 운영 > 물류센터 Capa 스캔 현황 센터별 상세_탭 조회][KimDongHan][2025-09-09] */
+		       KP_DAILYLOCATION_CON.CONFIRM_DATE                                    AS CONFIRM_DATE     /* 01. 일자 */
+		     , KP_DAILYLOCATION_CON.DCCODE                                          AS DCCODE           /* 02. 물류센터 */
+		     , FN_GETDCNAME(KP_DAILYLOCATION_CON.DCCODE)                            AS DCNAME           /* 02. 물류센터명 */
+			 , MS_LOCATION.ZONE                                                     AS LOC_ZONE         /* 03. 피킹존 */
+		     , KP_DAILYLOCATION_CON.LOC                                             AS LOC              /* 04. 로케이션 */
+		     , KP_DAILYLOCATION_CON.STATUS                                          AS STATUS           /* 05. 상태 */
+		     , ''                                                                   AS STATUS_NM        /* 06. 상태명 '0' 이면 빈랙 아니면 사용랙 */
+		     , FN_CODEDESCR(#{gStorerkey}, 'STORAGETYPE_ZONE', MS_ZONE.STORAGETYPE) AS STORAGETYPE      /* 07. 저장조건 */
+		     <!--, KP_DAILYLOCATION_CON.CONFIRM_USER                                    AS CONFIRM_USER     /* 08. 확정자 */-->
+		     , USER1.USER_NM                                                        AS CONFIRM_USER 
+		     , TO_CHAR(KP_DAILYLOCATION_CON.EDITDATE,'YYYY-MM-DD HH24:MI:SS')       AS CONFIRM_DATE2    /* 09. 확정일시 */
+		  FROM KP_DAILYLOCATION_CON
+		  JOIN MS_LOCATION
+		    ON 1=1
+		   AND KP_DAILYLOCATION_CON.DCCODE  = MS_LOCATION.DCCODE
+		   AND KP_DAILYLOCATION_CON.LOC     = MS_LOCATION.LOC
+		   AND MS_LOCATION.DEL_YN      	    = 'N'
+		  JOIN MS_ZONE
+		    ON 1=1
+		   AND MS_LOCATION.DCCODE           = MS_ZONE.DCCODE
+		   AND MS_LOCATION.ZONE             = MS_ZONE.ZONE
+		   AND MS_ZONE.DEL_YN               = 'N'
+          LEFT OUTER JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = KP_DAILYLOCATION_CON.CONFIRM_USER   /*등록자명*/
+		 WHERE 1=1
+		   AND KP_DAILYLOCATION_CON.STATUS = '0'
+		<if test="storagetype != null and storagetype != ''">   
+		   AND MS_LOCATION.STORAGETYPE =  #{storagetype}          
+		</if>
+		<if test="zone != null and zone != ''">   
+		   AND MS_LOCATION.ZONE =  #{zone}        
+		</if>
+		<if test="loc != null and loc != ''">    	
+		   AND KP_DAILYLOCATION_CON.LOC		LIKE  #{loc}||'%'
+		</if>
+		
+	    <!-- START.다중센터 -->
+	    <choose>   
+	        <when test="fixdccodeMulti != null and fixdccodeMulti != ''">
+	         AND KP_DAILYLOCATION_CON.DCCODE IN
+	         <foreach collection="fixdccodeMulti" item="code" open="(" close=")" separator=",">
+	           #{code}
+	         </foreach>
+	        </when>
+	    <otherwise>
+	       AND 1=2 /*full방지*/
+	    </otherwise>			    
+	    </choose>
+	    <!-- END.다중센터 --> 	
+	    		
+		<if test="fromSlipdt != null and fromSlipdt != ''">     
+		   AND KP_DAILYLOCATION_CON.CONFIRM_DATE	     <![CDATA[>=]]>  #{fromSlipdt}      
+		</if>
+		<if test="toSlipdt != null and toSlipdt != ''">       
+		   AND KP_DAILYLOCATION_CON.CONFIRM_DATE	     <![CDATA[<=]]>  #{toSlipdt}        
+		</if>
+		 ORDER BY KP_DAILYLOCATION_CON.CONFIRM_DATE DESC
+		        , KP_DAILYLOCATION_CON.DCCODE
+		        , KP_DAILYLOCATION_CON.LOC
+    </select>
+
+
+</mapper>

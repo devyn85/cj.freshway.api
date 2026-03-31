@@ -1,0 +1,832 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+ * Copyright 2025. CJ OliveNetworks Co. all rights reserved.
+ *
+ * @author      : KimDongHan (liop0123@cj.net)
+ * @date        : 2025.12.02
+ * @description : 지표/모니터링 > 센터운영지표 > 출고결품실적 SQL
+ * @issues      :
+-->
+
+<mapper namespace="kpWdShortageResultService">
+
+	<select id="getColList" resultType="cjfw.wms.kp.dto.KpWdShortageResultResT1Dto">
+		SELECT LPAD(LEVEL,2,'0')             AS COL_VALUE
+		     , TO_NUMBER(LPAD(LEVEL,2,'0'))  AS COL_HEADER
+		     , 'day'||LPAD(LEVEL,2,'0')      AS COL_FIELD
+		  FROM DUAL
+		CONNECT BY LEVEL <![CDATA[<=]]> TO_NUMBER(TO_CHAR(LAST_DAY(TO_DATE(#{docdt},'YYYYMM')),'DD'))
+		  ORDER BY COL_VALUE
+	</select>
+
+    <select id="getMasterT1List" resultType="cjfw.wms.kp.dto.KpWdShortageResultResT1Dto">
+		 WITH T_KPSKUTYPE AS ( SELECT '01' AS BASECODE FROM DUAL 
+		                        UNION ALL
+		                       SELECT '02' AS BASECODE FROM DUAL 
+		 					    UNION ALL
+		                       SELECT '03' AS BASECODE FROM DUAL 
+		                        UNION ALL
+		                       SELECT '04' AS BASECODE FROM DUAL 
+		                        UNION ALL
+		                       SELECT '05' AS BASECODE FROM DUAL 
+		                        UNION ALL
+		                       SELECT '06' AS BASECODE FROM DUAL 
+		                        UNION ALL
+		                       SELECT '07' AS BASECODE FROM DUAL )
+		SELECT MS_KPIVALMGT.KPINVAL01      AS GOAL    
+		     , #{docdt}                    AS DOCDT
+		     , #{gStorerkey}               AS STORERKEY
+		     , #{dccode}                   AS DCCODE
+		     , FN_GETDCNAME(#{dccode})     AS DCNAME
+		     , Z.SKUPART                   AS SKUPART
+		     , Z.SKUPARTNAME               AS SKUPARTNAME
+		     , Z.TOTAL                     AS TOTAL
+		     , TRUNC(Z.AVERAGE,2)          AS AVERAGE
+		<foreach collection="days" item="day" open="," separator=",">
+		        DAY${day}                   AS DAY${day}
+		</foreach>
+		  FROM ( SELECT T_KPSKUTYPE.BASECODE        AS SKUPART
+		              , ''                          AS SKUPARTNAME
+		              , SUM(CASE WHEN DELIVERYDATE = '00' AND T_KPSKUTYPE.BASECODE = '01' THEN CANCELCNT 
+		                         WHEN DELIVERYDATE = '00' AND T_KPSKUTYPE.BASECODE = '02' THEN STORAGECNT 
+		                         WHEN DELIVERYDATE = '00' AND T_KPSKUTYPE.BASECODE = '03' THEN ILBAECNT 
+		                         WHEN DELIVERYDATE = '00' AND T_KPSKUTYPE.BASECODE = '04' THEN CHAINCNT 
+		                         WHEN DELIVERYDATE = '00' AND T_KPSKUTYPE.BASECODE = '05' THEN JEDANGCNT 
+		                         WHEN DELIVERYDATE = '00' AND T_KPSKUTYPE.BASECODE = '06' THEN TOTCNT 
+		                         WHEN DELIVERYDATE = '00' AND T_KPSKUTYPE.BASECODE = '07' THEN CANCEL_RATE END )                                           AS TOTAL
+		              , SUM(CASE WHEN DELIVERYDATE = '00' AND T_KPSKUTYPE.BASECODE = '01' THEN CANCELCNT / DAYCNT
+		                         WHEN DELIVERYDATE = '00' AND T_KPSKUTYPE.BASECODE = '02' THEN STORAGECNT / DAYCNT 
+		                         WHEN DELIVERYDATE = '00' AND T_KPSKUTYPE.BASECODE = '03' THEN ILBAECNT  / DAYCNT
+		                         WHEN DELIVERYDATE = '00' AND T_KPSKUTYPE.BASECODE = '04' THEN CHAINCNT  / DAYCNT
+		                         WHEN DELIVERYDATE = '00' AND T_KPSKUTYPE.BASECODE = '05' THEN JEDANGCNT  / DAYCNT
+		                         WHEN DELIVERYDATE = '00' AND T_KPSKUTYPE.BASECODE = '06' THEN TOTCNT  / DAYCNT
+		                         WHEN DELIVERYDATE = '00' AND T_KPSKUTYPE.BASECODE = '07' THEN TRUNC((CANCELCNT / DAYCNT) / (TOTCNT  / DAYCNT)*100,2) END ) AS AVERAGE
+					<foreach collection="days" item="day" open="," separator=",">						 
+		                SUM(CASE WHEN DELIVERYDATE = #{day} AND T_KPSKUTYPE.BASECODE = '01' THEN CANCELCNT 
+		                         WHEN DELIVERYDATE = #{day} AND T_KPSKUTYPE.BASECODE = '02' THEN STORAGECNT 
+		                         WHEN DELIVERYDATE = #{day} AND T_KPSKUTYPE.BASECODE = '03' THEN ILBAECNT 
+		                         WHEN DELIVERYDATE = #{day} AND T_KPSKUTYPE.BASECODE = '04' THEN CHAINCNT 
+		                         WHEN DELIVERYDATE = #{day} AND T_KPSKUTYPE.BASECODE = '05' THEN JEDANGCNT 
+		                         WHEN DELIVERYDATE = #{day} AND T_KPSKUTYPE.BASECODE = '06' THEN TOTCNT 
+		                         WHEN DELIVERYDATE = #{day} AND T_KPSKUTYPE.BASECODE = '07' THEN CANCEL_RATE END )                                          AS DAY${day}
+					</foreach>						 
+		           FROM ( SELECT X.DELIVERYDATE
+		                       , X.CANCELCNT
+		                       , X.STORAGECNT
+		                       , X.ILBAECNT
+		                       , X.CHAINCNT
+		                       , X.JEDANGCNT
+		                       , X.TOTCNT
+		                       , X.DAYCNT
+		                       , X.CANCEL_RATE
+		                       , AVG(X.CANCEL_RATE) OVER() AS AVG_CENCEL_RATE
+		                    FROM ( SELECT NVL(RIGHT(DM_DOCUMENT_D.DELIVERYDATE, 2),'00')                                                                  AS DELIVERYDATE
+		                                , SUM(CASE WHEN DM_DOCUMENT_D.CANCELQTY > 0
+										<if test="exReasoncodeYn == '1'.toString()">
+		                                  AND NVL(EX_REASON.DATA1,'N') = 'N'
+										</if> 
+		                                  THEN 1 ELSE 0 END)                                                                                              AS CANCELCNT
+		                                , SUM(CASE WHEN DM_DOCUMENT_D.CANCELQTY > 0 
+										<if test="exReasoncodeYn == '1'.toString()">
+		                                  AND NVL(EX_REASON.DATA1,'N') = 'N'
+										</if>
+		                                  AND DM_DOCUMENT_D.CHANNEL = '1' 
+		                                  AND (NVL(MS_SKU.REFERENCE02, 'X') <![CDATA[<>]]> 'Y' AND MS_SKU.PRODUCT <![CDATA[<>]]> '10') THEN 1 ELSE 0 END) AS STORAGECNT
+		                                , SUM(CASE WHEN DM_DOCUMENT_D.CANCELQTY > 0
+										<if test="exReasoncodeYn == '1'.toString()">
+		                                  AND NVL(EX_REASON.DATA1,'N') = 'N'
+										</if> 
+		                                  AND DM_DOCUMENT_D.CHANNEL IN ('2', '3') THEN 1 ELSE 0 END)                                                      AS ILBAECNT
+		                                , SUM(CASE WHEN DM_DOCUMENT_D.CANCELQTY > 0 
+										<if test="exReasoncodeYn == '1'.toString()">
+		                                  AND NVL(EX_REASON.DATA1,'N') = 'N'
+										</if>
+		                                  AND DM_DOCUMENT_D.CHANNEL = '1' 
+		                                  AND NVL(MS_SKU.REFERENCE02, 'X') = 'Y' THEN 1 ELSE 0 END)                                                       AS CHAINCNT
+		                                , SUM(CASE WHEN DM_DOCUMENT_D.CANCELQTY > 0 
+										<if test="exReasoncodeYn == '1'.toString()">
+		                                  AND NVL(EX_REASON.DATA1,'N') = 'N'
+										</if>
+		                                  AND DM_DOCUMENT_D.CHANNEL = '1'
+		                                  AND NVL(MS_SKU.REFERENCE02, 'X') <![CDATA[<>]]> 'Y' 
+		                                  AND MS_SKU.PRODUCT = '10' THEN 1 ELSE 0 END)                                                                    AS JEDANGCNT
+		                                , COUNT(DM_DOCUMENT_D.SKU)                                                                                        AS TOTCNT
+		                                , COUNT(DISTINCT DM_DOCUMENT_D.DELIVERYDATE) OVER()                                                               AS DAYCNT
+		                                , TRUNC(SUM(CASE WHEN DM_DOCUMENT_D.CANCELQTY > 0
+										<if test="exReasoncodeYn == '1'.toString()">
+		                                  AND NVL(EX_REASON.DATA1,'N') = 'N'
+										</if> 
+		                                  THEN 1 ELSE 0 END) / COUNT(DM_DOCUMENT_D.SKU) *100,2)                                                           AS CANCEL_RATE
+		                             FROM DM_DOCUMENT_D
+		                             JOIN DM_DOCUMENT_H 
+		                               ON DM_DOCUMENT_H.DCCODE           = DM_DOCUMENT_D.DCCODE
+		                              AND DM_DOCUMENT_H.DOCTYPE          = DM_DOCUMENT_D.DOCTYPE
+		                              AND DM_DOCUMENT_H.DELIVERYDATE     = DM_DOCUMENT_D.DELIVERYDATE 
+		                              AND DM_DOCUMENT_H.DOCNO            = DM_DOCUMENT_D.DOCNO							  
+			                          AND DM_DOCUMENT_H.DEL_YN           = 'N'
+		                             JOIN MS_SKU 
+									   ON MS_SKU.STORERKEY           = DM_DOCUMENT_D.STORERKEY
+		                              AND MS_SKU.SKU                 = DM_DOCUMENT_D.SKU
+		                             LEFT OUTER JOIN CM_CODE EX_REASON     
+									   ON DM_DOCUMENT_D.STORERKEY    = EX_REASON.STORERKEY
+		                              AND 'REASONCODE_WD'            = EX_REASON.CODELIST
+		                              AND DM_DOCUMENT_D.REASONCODE   = EX_REASON.BASECODE
+		                            WHERE 1 = 1
+		                              AND DM_DOCUMENT_D.STORERKEY        = #{gStorerkey}        
+		                              AND DM_DOCUMENT_D.STATUS           = '90'
+		                              AND DM_DOCUMENT_D.DEL_YN           = 'N'
+		                              AND DM_DOCUMENT_D.DOCTYPE          = 'WD'
+		                              AND DM_DOCUMENT_D.WORKPROCESSCODE <![CDATA[<>]]>'STO'							  
+									<if test="dccode != null and dccode != ''">          
+		                              AND DM_DOCUMENT_D.DCCODE           =      #{dccode}          
+									</if>
+									<if test="reasoncode != null and reasoncode != ''">      
+		                              AND DM_DOCUMENT_D.REASONCODE       =      #{reasoncode}      
+									</if>
+									<if test="reasontype != null and reasontype != ''">      
+		                              AND DM_DOCUMENT_D.OTHER01          =      #{reasontype}      
+									</if>
+									<if test="channel != null and channel != ''">         
+		                              AND DM_DOCUMENT_D.CHANNEL          =      #{channel}         
+									</if>
+		                              AND DM_DOCUMENT_D.DELIVERYDATE <![CDATA[>=]]> #{docdt}||'01'
+		                              AND DM_DOCUMENT_D.DELIVERYDATE <![CDATA[<=]]> #{docdt}||'31'
+		                            GROUP BY ROLLUP((DM_DOCUMENT_D.DELIVERYDATE)) )X  ) T
+		           JOIN T_KPSKUTYPE 
+				     ON 1=1
+		          GROUP BY T_KPSKUTYPE.BASECODE ) Z
+		  LEFT OUTER JOIN MS_KPIVALMGT
+		    ON MS_KPIVALMGT.STORERKEY   = #{gStorerkey} 
+		   AND MS_KPIVALMGT.KPITYPE     = 'SKUPART' 
+		   AND MS_KPIVALMGT.KPIDT       = #{docdt}
+		   AND MS_KPIVALMGT.KPICLASS    = Z.SKUPART
+		 ORDER BY Z.SKUPART
+    </select>
+    
+     <select id="getDetailT1List_backup" resultType="cjfw.wms.kp.dto.KpWdShortageResultResT1Dto">
+		SELECT /* [kpChartView_WD_Service.sqlx][WdShortageResultMonthDetail][출고결품실적(월요약상세)][ParkSangYong][20150716] */
+		       X.STORERKEY                  AS STORERKEY
+			 , X.REASONCODE                 AS REASONCODE
+			 , ''                           AS REASONCODENAME
+		     , X.DAYCNT                     AS DAYCNT
+		     , MS_KPIVALMGT.KPINVAL01       AS GOAL
+		     , #{docdt}                     AS DOCDT       
+		     , #{gStorerkey}                AS STORERKEY
+		     , #{dccode}                    AS DCCODE
+		     , #{skupart}                   AS SKUPART
+		     , X.TOTAL_REASON               AS TOTAL
+		     , X.AVG_REASON                 AS AVERAGE
+			<foreach collection="days" item="day" open="," separator=",">
+		       X.DAY${day}                   AS DAY${day}
+			</foreach>	 
+		  FROM ( SELECT STORERKEY
+		              , REASONCODE
+		              , DAYCNT
+		              , CASE WHEN REASONCODE ='Z99' 
+					         THEN TRUNC(SUM(CASE WHEN REASONCODE NOT IN ('Z98','Z99') THEN TOTAL_REASON END) OVER() / SUM(CASE WHEN REASONCODE ='Z98' THEN TOTAL_REASON END) OVER()*100, 2)
+		                     ELSE TOTAL_REASON
+		                      END AS TOTAL_REASON
+		              , CASE WHEN REASONCODE ='Z99' 
+					         THEN TRUNC(SUM(CASE WHEN REASONCODE NOT IN ('Z98','Z99') THEN AVG_REASON END) OVER() / SUM(CASE WHEN REASONCODE ='Z98' THEN AVG_REASON END) OVER()*100, 2)
+		                     ELSE AVG_REASON
+		                      END AS AVG_REASON
+			<foreach collection="days" item="day" open="," separator=",">
+		                DAY${day}
+			</foreach>					  
+		           FROM ( SELECT T.DELIVERYDATE
+		                       , T.STORERKEY
+		                       , T.REASONCODE
+		                       , T.CANCELCNT
+		                       , T.DAYCNT
+		                       , TRUNC(SUM(T.CANCELCNT) OVER(PARTITION BY T.REASONCODE),2) AS TOTAL_REASON
+		                       , TRUNC(SUM(T.CANCELCNT) OVER(PARTITION BY T.REASONCODE)/T.DAYCNT,4) AS AVG_REASON
+		                    FROM ( SELECT NVL(RIGHT(DM_DOCUMENT_D.DELIVERYDATE, 2),'00')                           AS DELIVERYDATE
+		                                , MAX(DM_DOCUMENT_D.STORERKEY)                                             AS STORERKEY
+		                                , NVL(DM_DOCUMENT_D.REASONCODE, '00')                                      AS REASONCODE
+		                                , SUM(CASE WHEN DM_DOCUMENT_D.CANCELQTY > 0 THEN 1 ELSE 0 END)             AS CANCELCNT
+		                                , COUNT(DISTINCT DM_DOCUMENT_D.DELIVERYDATE) OVER()                        AS DAYCNT
+		                             FROM DM_DOCUMENT_D
+		                             JOIN DM_DOCUMENT_H 
+		                               ON DM_DOCUMENT_H.DCCODE           = DM_DOCUMENT_D.DCCODE
+		                              AND DM_DOCUMENT_H.DOCTYPE          = DM_DOCUMENT_D.DOCTYPE
+		                              AND DM_DOCUMENT_H.DELIVERYDATE     = DM_DOCUMENT_D.DELIVERYDATE 
+		                              AND DM_DOCUMENT_H.DOCNO            = DM_DOCUMENT_D.DOCNO							  
+		                              AND DM_DOCUMENT_H.DEL_YN           = 'N'
+		                             JOIN MS_SKU 
+									   ON MS_SKU.STORERKEY = DM_DOCUMENT_D.STORERKEY
+		                              AND MS_SKU.SKU       = DM_DOCUMENT_D.SKU
+		                            WHERE 1 = 1
+		                              AND DM_DOCUMENT_D.STORERKEY = #{gStorerkey}
+		                              AND DM_DOCUMENT_D.STATUS    = '90'
+		                              AND DM_DOCUMENT_D.DEL_YN    = 'N'
+		                              AND DM_DOCUMENT_D.DOCTYPE   = 'WD'
+		                              AND DM_DOCUMENT_D.CANCELQTY > 0
+		                              AND DM_DOCUMENT_D.WORKPROCESSCODE <![CDATA[<>]]> 'STO'
+									<if test="dccode != null and dccode != ''">          
+		                              AND DM_DOCUMENT_D.DCCODE           =      #{dccode}          
+									</if>
+									<if test="reasoncode != null and reasoncode != ''">      
+		                              AND DM_DOCUMENT_D.REASONCODE       =      #{reasoncode}      
+									</if>
+									<if test="reasontype != null and reasontype != ''">      
+		                              AND DM_DOCUMENT_D.OTHER01          = #{reasontype}      
+									</if>
+									<if test="channel != null and channel != ''">
+		                              AND DM_DOCUMENT_D.CHANNEL          = #{channel}
+									</if>
+									<if test="exReasoncodeYn == '1'.toString()">
+		                              AND NOT EXISTS (SELECT 1
+		                                                FROM CM_CODE T
+		                                               WHERE T.STORERKEY = #{gStorerkey}
+		                                                 AND T.CODELIST  = 'REASONCODE_WD'
+		                                                 AND T.DATA1     = 'Y'
+		                                                 AND T.BASECODE  = DM_DOCUMENT_D.REASONCODE)
+									</if>
+									<!-- 저장 -->
+									<if test="skupart == '02'">
+		                              AND DM_DOCUMENT_D.CHANNEL      = '1'
+		                              AND (NVL(MS_SKU.REFERENCE02, 'X') <![CDATA[<>]]> 'Y' AND MS_SKU.PRODUCT <![CDATA[<>]]> '10')        	
+									</if>
+									<!-- 일배 -->
+									<if test="skupart == '03'">
+		                              AND DM_DOCUMENT_D.CHANNEL     <![CDATA[<>]]> '1'
+									</if>
+									<!-- 체인 -->
+									<if test="skupart == '04'">
+		                              AND DM_DOCUMENT_D.CHANNEL        = '1'
+		                              AND NVL(MS_SKU.REFERENCE02, 'X') = 'Y'
+									</if>
+									<!-- 제당 -->
+									<if test="skupart == '05'">
+		                              AND DM_DOCUMENT_D.CHANNEL      = '1'
+		                              AND NVL(MS_SKU.REFERENCE02, 'X') <![CDATA[<>]]> 'Y'
+		                              AND MS_SKU.PRODUCT             = '10'
+									</if>           
+		                              AND DM_DOCUMENT_D.DELIVERYDATE <![CDATA[>=]]> #{docdt}||'01'
+		                              AND DM_DOCUMENT_D.DELIVERYDATE <![CDATA[<=]]> #{docdt}||'31'
+		                            GROUP BY DM_DOCUMENT_D.REASONCODE
+									       , DM_DOCUMENT_D.DELIVERYDATE
+		                            UNION ALL
+		                           SELECT RIGHT(DM_DOCUMENT_D.DELIVERYDATE,2)               AS DELIVERYDATE
+		                                , MAX(DM_DOCUMENT_D.STORERKEY)                      AS STORERKEY          
+		                                , 'Z98'                                             AS REASONCODE          
+		                                , COUNT(DM_DOCUMENT_D.SKU)                          AS CANCELCNT          
+		                                , COUNT(DISTINCT DM_DOCUMENT_D.DELIVERYDATE) OVER() AS DAYCNT   
+		                             FROM DM_DOCUMENT_D
+		                             JOIN DM_DOCUMENT_H 
+		                               ON DM_DOCUMENT_H.DCCODE           = DM_DOCUMENT_D.DCCODE
+		                              AND DM_DOCUMENT_H.DOCTYPE          = DM_DOCUMENT_D.DOCTYPE
+		                              AND DM_DOCUMENT_H.DELIVERYDATE     = DM_DOCUMENT_D.DELIVERYDATE 
+		                              AND DM_DOCUMENT_H.DOCNO            = DM_DOCUMENT_D.DOCNO							  
+		                              AND DM_DOCUMENT_H.DEL_YN           = 'N'
+		                             JOIN MS_SKU 
+									   ON MS_SKU.STORERKEY = DM_DOCUMENT_D.STORERKEY
+		                              AND MS_SKU.SKU       = DM_DOCUMENT_D.SKU
+		                            WHERE 1=1   
+		                              AND DM_DOCUMENT_D.STORERKEY        =  #{gStorerkey}
+		                              AND DM_DOCUMENT_D.STATUS           = '90'   
+		                              AND DM_DOCUMENT_D.DEL_YN           = 'N'   
+		                              AND DM_DOCUMENT_D.DOCTYPE          = 'WD'   
+		                              AND DM_DOCUMENT_D.WORKPROCESSCODE <![CDATA[<>]]> 'STO' 
+									<if test="dccode != null and dccode != ''">          
+		                              AND DM_DOCUMENT_D.DCCODE           =      #{dccode}          
+									</if>
+									<if test="reasoncode != null and reasoncode != ''">      
+		                              AND DM_DOCUMENT_D.REASONCODE       =      #{reasoncode}      
+									</if>
+									<if test="reasontype != null and reasontype != ''">      
+		                              AND DM_DOCUMENT_D.OTHER01          =      #{reasontype}      
+									</if>
+									<if test="channel != null and channel != ''">         
+		                              AND DM_DOCUMENT_D.CHANNEL            =      #{channel}         
+									</if>
+									<!-- 저장 -->
+									<if test="skupart == '02'">
+		                              AND DM_DOCUMENT_D.CHANNEL      = '1'
+		                              AND (NVL(MS_SKU.REFERENCE02, 'X') <![CDATA[<>]]> 'Y' AND ms_sku.product <![CDATA[<>]]> '10')        	
+									</if>
+									<!-- 일배 -->
+									<if test="skupart == '03'">
+		                              AND DM_DOCUMENT_D.CHANNEL     <![CDATA[<>]]> '1'
+									</if>
+									<!-- 체인 -->
+									<if test="skupart == '04'">
+		                              AND DM_DOCUMENT_D.CHANNEL        = '1'
+		                              AND NVL(MS_SKU.REFERENCE02, 'X') = 'Y'
+									</if>
+									<!-- 제당 -->
+									<if test="skupart == '05'">
+		                              AND DM_DOCUMENT_D.CHANNEL      = '1'
+		                              AND NVL(MS_SKU.REFERENCE02, 'X') <![CDATA[<>]]> 'Y'
+		                              AND MS_SKU.PRODUCT             = '10'
+									</if>                               
+		                              AND DM_DOCUMENT_D.DELIVERYDATE <![CDATA[>=]]> #{docdt}||'01'
+		                              AND DM_DOCUMENT_D.DELIVERYDATE <![CDATA[<=]]> #{docdt}||'31'
+		                            GROUP BY DM_DOCUMENT_D.DELIVERYDATE 
+		                            UNION ALL
+		                           SELECT RIGHT(DM_DOCUMENT_D.DELIVERYDATE,2) AS DELIVERYDATE
+		                                , MAX(DM_DOCUMENT_D.STORERKEY)        AS STORERKEY
+		                                , 'Z99'                               AS REASONCODE
+		                                , TRUNC(SUM(CASE WHEN DM_DOCUMENT_D.CANCELQTY > 0
+										<if test="exReasoncodeYn == '1'.toString()">
+		                                  AND NVL(EX_REASON.DATA1,'N') = 'N'
+										</if> 
+		                                  THEN 1 ELSE 0 END)/COUNT(DM_DOCUMENT_D.SKU)*100,  2) AS CANCELCNT
+		                                , COUNT(DISTINCT DM_DOCUMENT_D.DELIVERYDATE) OVER() AS DAYCNT 
+		                             FROM DM_DOCUMENT_D
+		                             JOIN DM_DOCUMENT_H 
+		                               ON DM_DOCUMENT_H.DCCODE           = DM_DOCUMENT_D.DCCODE
+		                              AND DM_DOCUMENT_H.DOCTYPE          = DM_DOCUMENT_D.DOCTYPE
+		                              AND DM_DOCUMENT_H.DELIVERYDATE     = DM_DOCUMENT_D.DELIVERYDATE 
+		                              AND DM_DOCUMENT_H.DOCNO            = DM_DOCUMENT_D.DOCNO							  
+		                              AND DM_DOCUMENT_H.DEL_YN           = 'N'
+		                             JOIN MS_SKU 
+									   ON MS_SKU.STORERKEY = DM_DOCUMENT_D.STORERKEY
+		                              AND MS_SKU.SKU       = DM_DOCUMENT_D.SKU
+		                             LEFT OUTER JOIN CM_CODE EX_REASON     
+									   ON DM_DOCUMENT_D.STORERKEY  = EX_REASON.STORERKEY
+		                              AND 'REASONCODE_WD'          = EX_REASON.CODELIST
+		                              AND DM_DOCUMENT_D.REASONCODE = EX_REASON.BASECODE
+		                            WHERE 1=1   
+		                              AND DM_DOCUMENT_D.STORERKEY        =  #{gStorerkey}
+		                              AND DM_DOCUMENT_D.STATUS           = '90'   
+		                              AND DM_DOCUMENT_D.DEL_YN           = 'N'   
+		                              AND DM_DOCUMENT_D.DOCTYPE          = 'WD'   
+		                              AND DM_DOCUMENT_D.WORKPROCESSCODE <![CDATA[<>]]>'STO' 
+									<if test="dccode != null and dccode != ''">          
+		                              AND DM_DOCUMENT_D.DCCODE           =      #{dccode}          
+									</if>
+									<if test="reasoncode != null and reasoncode != ''">      
+		                              AND DM_DOCUMENT_D.REASONCODE       =      #{reasoncode}      
+									</if>
+									<if test="reasontype != null and reasontype != ''">      
+		                              AND DM_DOCUMENT_D.OTHER01          =      #{reasontype}      
+									</if>
+									<if test="channel != null and channel != ''">         
+		                              AND DM_DOCUMENT_D.CHANNEL            =      #{channel}         
+									</if>
+									<!-- 저장 -->
+									<if test="skupart == '02'">
+		                              AND DM_DOCUMENT_D.CHANNEL      = '1'
+		                              AND (NVL(MS_SKU.REFERENCE02, 'X') <![CDATA[<>]]> 'Y' AND ms_sku.product <![CDATA[<>]]> '10')        	
+									</if>
+									<!-- 일배 -->
+									<if test="skupart == '03'">
+		                              AND DM_DOCUMENT_D.CHANNEL     <![CDATA[<>]]> '1'
+									</if>
+									<!-- 체인 -->
+									<if test="skupart == '04'">
+		                              AND DM_DOCUMENT_D.CHANNEL        = '1'
+		                              AND NVL(MS_SKU.REFERENCE02, 'X') = 'Y'
+									</if>
+									<!-- 제당 -->
+									<if test="skupart == '05'">
+		                              AND DM_DOCUMENT_D.CHANNEL      = '1'
+		                              AND NVL(MS_SKU.REFERENCE02, 'X') <![CDATA[<>]]> 'Y'
+		                              AND MS_SKU.PRODUCT             = '10'
+									</if>
+		                              AND DM_DOCUMENT_D.DELIVERYDATE <![CDATA[>=]]> #{docdt}||'01'
+		                              AND DM_DOCUMENT_D.DELIVERYDATE <![CDATA[<=]]> #{docdt}||'31'
+		                            GROUP BY DM_DOCUMENT_D.DELIVERYDATE ) T  ) TT
+		          PIVOT (SUM(CANCELCNT) FOR DELIVERYDATE IN (
+													<foreach collection="days" item="day" separator=",">		  
+		                                                      #{day} AS DAY${day}
+														</foreach>		  
+		                                                     ))) X
+		  LEFT OUTER JOIN MS_KPIVALMGT   
+		    ON MS_KPIVALMGT.STORERKEY   = #{gStorerkey}
+		   AND MS_KPIVALMGT.KPITYPE     = 'REASONCODE' 
+		   AND MS_KPIVALMGT.KPIDT       = #{docdt}
+		   AND MS_KPIVALMGT.KPICLASS    = X.REASONCODE       
+		   AND MS_KPIVALMGT.KPISVAL01   = #{skupart}
+		 ORDER BY X.REASONCODE
+     </select>
+     
+     <select id="getDetailT1List" resultType="cjfw.wms.kp.dto.KpWdShortageResultResT1Dto">
+		SELECT /* [kpChartView_WD_Service.sqlx][WdShortageResultMonthDetail][출고결품실적(월요약상세)][ParkSangYong][20150716] */
+		       X.STORERKEY                  AS STORERKEY
+			 , X.REASONCODE                 AS REASONCODE
+			 , ''                           AS REASONCODENAME
+		     , X.DAYCNT                     AS DAYCNT
+		     , MS_KPIVALMGT.KPINVAL01       AS GOAL
+		     , #{docdt}                     AS DOCDT       
+		     , #{gStorerkey}                AS STORERKEY
+		     , #{dccode}                    AS DCCODE
+		     , #{skupart}                   AS SKUPART
+		     , X.TOTAL_REASON               AS TOTAL
+		     , X.AVG_REASON                 AS AVERAGE
+             , X.DAY01
+             , X.DAY02
+             , X.DAY03
+             , X.DAY04
+             , X.DAY05
+             , X.DAY06
+             , X.DAY07
+             , X.DAY08
+             , X.DAY09
+             , X.DAY10
+             , X.DAY11
+             , X.DAY12
+             , X.DAY13
+             , X.DAY14
+             , X.DAY15
+             , X.DAY16
+             , X.DAY17
+             , X.DAY18
+             , X.DAY19
+             , X.DAY20
+             , X.DAY21
+             , X.DAY22
+             , X.DAY23
+             , X.DAY24
+             , X.DAY25
+             , X.DAY26
+             , X.DAY27
+             , X.DAY28
+             , X.DAY29
+             , X.DAY30
+             , X.DAY31	
+		  FROM ( SELECT STORERKEY
+		              , REASONCODE
+		              , DAYCNT
+		              , CASE WHEN REASONCODE ='Z99' 
+					         THEN TRUNC(SUM(CASE WHEN REASONCODE NOT IN ('Z98','Z99') THEN TOTAL_REASON END) OVER() / SUM(CASE WHEN REASONCODE ='Z98' THEN TOTAL_REASON END) OVER()*100, 2)
+		                     ELSE TOTAL_REASON
+		                      END AS TOTAL_REASON
+		              , CASE WHEN REASONCODE ='Z99' 
+					         THEN TRUNC(SUM(CASE WHEN REASONCODE NOT IN ('Z98','Z99') THEN AVG_REASON END) OVER() / SUM(CASE WHEN REASONCODE ='Z98' THEN AVG_REASON END) OVER()*100, 2)
+		                     ELSE AVG_REASON
+		                      END AS AVG_REASON
+                      , DAY01
+                      , DAY02
+                      , DAY03
+                      , DAY04
+                      , DAY05
+                      , DAY06
+                      , DAY07
+                      , DAY08
+                      , DAY09
+                      , DAY10
+                      , DAY11
+                      , DAY12
+                      , DAY13
+                      , DAY14
+                      , DAY15
+                      , DAY16
+                      , DAY17
+                      , DAY18
+                      , DAY19
+                      , DAY20
+                      , DAY21
+                      , DAY22
+                      , DAY23
+                      , DAY24
+                      , DAY25
+                      , DAY26
+                      , DAY27
+                      , DAY28
+                      , DAY29
+                      , DAY30
+                      , DAY31	  
+		           FROM ( SELECT T.DELIVERYDATE
+		                       , T.STORERKEY
+		                       , T.REASONCODE
+		                       , T.CANCELCNT
+		                       , T.DAYCNT
+		                       , TRUNC(SUM(T.CANCELCNT) OVER(PARTITION BY T.REASONCODE),2) AS TOTAL_REASON
+		                       , TRUNC(SUM(T.CANCELCNT) OVER(PARTITION BY T.REASONCODE)/T.DAYCNT,4) AS AVG_REASON
+		                    FROM ( SELECT NVL(RIGHT(DM_DOCUMENT_D.DELIVERYDATE, 2),'00')                           AS DELIVERYDATE
+		                                , MAX(DM_DOCUMENT_D.STORERKEY)                                             AS STORERKEY
+		                                , NVL(DM_DOCUMENT_D.REASONCODE, '00')                                      AS REASONCODE
+		                                , SUM(CASE WHEN DM_DOCUMENT_D.CANCELQTY > 0 THEN 1 ELSE 0 END)             AS CANCELCNT
+		                                , COUNT(DISTINCT DM_DOCUMENT_D.DELIVERYDATE) OVER()                        AS DAYCNT
+		                             FROM DM_DOCUMENT_D
+		                             JOIN DM_DOCUMENT_H 
+		                               ON DM_DOCUMENT_H.DCCODE           = DM_DOCUMENT_D.DCCODE
+		                              AND DM_DOCUMENT_H.DOCTYPE          = DM_DOCUMENT_D.DOCTYPE
+		                              AND DM_DOCUMENT_H.DELIVERYDATE     = DM_DOCUMENT_D.DELIVERYDATE 
+		                              AND DM_DOCUMENT_H.DOCNO            = DM_DOCUMENT_D.DOCNO							  
+		                              AND DM_DOCUMENT_H.DEL_YN           = 'N'
+		                             JOIN MS_SKU 
+									   ON MS_SKU.STORERKEY = DM_DOCUMENT_D.STORERKEY
+		                              AND MS_SKU.SKU       = DM_DOCUMENT_D.SKU
+		                            WHERE 1 = 1
+		                              AND DM_DOCUMENT_D.STORERKEY = #{gStorerkey}
+		                              AND DM_DOCUMENT_D.STATUS    = '90'
+		                              AND DM_DOCUMENT_D.DEL_YN    = 'N'
+		                              AND DM_DOCUMENT_D.DOCTYPE   = 'WD'
+		                              AND DM_DOCUMENT_D.CANCELQTY > 0
+		                              AND DM_DOCUMENT_D.WORKPROCESSCODE <![CDATA[<>]]> 'STO'
+									<if test="dccode != null and dccode != ''">          
+		                              AND DM_DOCUMENT_D.DCCODE           =      #{dccode}          
+									</if>
+									<if test="reasoncode != null and reasoncode != ''">      
+		                              AND DM_DOCUMENT_D.REASONCODE       =      #{reasoncode}      
+									</if>
+									<if test="reasontype != null and reasontype != ''">      
+		                              AND DM_DOCUMENT_D.OTHER01          = #{reasontype}      
+									</if>
+									<if test="channel != null and channel != ''">
+		                              AND DM_DOCUMENT_D.CHANNEL          = #{channel}
+									</if>
+									<if test="exReasoncodeYn == '1'.toString()">
+		                              AND NOT EXISTS (SELECT 1
+		                                                FROM CM_CODE T
+		                                               WHERE T.STORERKEY = #{gStorerkey}
+		                                                 AND T.CODELIST  = 'REASONCODE_WD'
+		                                                 AND T.DATA1     = 'Y'
+		                                                 AND T.BASECODE  = DM_DOCUMENT_D.REASONCODE)
+									</if>
+									<!-- 저장 -->
+									<if test="skupart == '02'">
+		                              AND DM_DOCUMENT_D.CHANNEL      = '1'
+		                              AND (NVL(MS_SKU.REFERENCE02, 'X') <![CDATA[<>]]> 'Y' AND MS_SKU.PRODUCT <![CDATA[<>]]> '10')        	
+									</if>
+									<!-- 일배 -->
+									<if test="skupart == '03'">
+		                              AND DM_DOCUMENT_D.CHANNEL     <![CDATA[<>]]> '1'
+									</if>
+									<!-- 체인 -->
+									<if test="skupart == '04'">
+		                              AND DM_DOCUMENT_D.CHANNEL        = '1'
+		                              AND NVL(MS_SKU.REFERENCE02, 'X') = 'Y'
+									</if>
+									<!-- 제당 -->
+									<if test="skupart == '05'">
+		                              AND DM_DOCUMENT_D.CHANNEL      = '1'
+		                              AND NVL(MS_SKU.REFERENCE02, 'X') <![CDATA[<>]]> 'Y'
+		                              AND MS_SKU.PRODUCT             = '10'
+									</if>           
+		                              AND DM_DOCUMENT_D.DELIVERYDATE <![CDATA[>=]]> #{docdt}||'01'
+		                              AND DM_DOCUMENT_D.DELIVERYDATE <![CDATA[<=]]> #{docdt}||'31'
+		                            GROUP BY DM_DOCUMENT_D.REASONCODE
+									       , DM_DOCUMENT_D.DELIVERYDATE
+		                            UNION ALL
+		                           SELECT RIGHT(DM_DOCUMENT_D.DELIVERYDATE,2)               AS DELIVERYDATE
+		                                , MAX(DM_DOCUMENT_D.STORERKEY)                      AS STORERKEY          
+		                                , 'Z98'                                             AS REASONCODE          
+		                                , COUNT(DM_DOCUMENT_D.SKU)                          AS CANCELCNT          
+		                                , COUNT(DISTINCT DM_DOCUMENT_D.DELIVERYDATE) OVER() AS DAYCNT   
+		                             FROM DM_DOCUMENT_D
+		                             JOIN DM_DOCUMENT_H 
+		                               ON DM_DOCUMENT_H.DCCODE           = DM_DOCUMENT_D.DCCODE
+		                              AND DM_DOCUMENT_H.DOCTYPE          = DM_DOCUMENT_D.DOCTYPE
+		                              AND DM_DOCUMENT_H.DELIVERYDATE     = DM_DOCUMENT_D.DELIVERYDATE 
+		                              AND DM_DOCUMENT_H.DOCNO            = DM_DOCUMENT_D.DOCNO							  
+		                              AND DM_DOCUMENT_H.DEL_YN           = 'N'
+		                             JOIN MS_SKU 
+									   ON MS_SKU.STORERKEY = DM_DOCUMENT_D.STORERKEY
+		                              AND MS_SKU.SKU       = DM_DOCUMENT_D.SKU
+		                            WHERE 1=1   
+		                              AND DM_DOCUMENT_D.STORERKEY        =  #{gStorerkey}
+		                              AND DM_DOCUMENT_D.STATUS           = '90'   
+		                              AND DM_DOCUMENT_D.DEL_YN           = 'N'   
+		                              AND DM_DOCUMENT_D.DOCTYPE          = 'WD'   
+		                              AND DM_DOCUMENT_D.WORKPROCESSCODE <![CDATA[<>]]> 'STO' 
+									<if test="dccode != null and dccode != ''">          
+		                              AND DM_DOCUMENT_D.DCCODE           =      #{dccode}          
+									</if>
+									<if test="reasoncode != null and reasoncode != ''">      
+		                              AND DM_DOCUMENT_D.REASONCODE       =      #{reasoncode}      
+									</if>
+									<if test="reasontype != null and reasontype != ''">      
+		                              AND DM_DOCUMENT_D.OTHER01          =      #{reasontype}      
+									</if>
+									<if test="channel != null and channel != ''">         
+		                              AND DM_DOCUMENT_D.CHANNEL            =      #{channel}         
+									</if>
+									<!-- 저장 -->
+									<if test="skupart == '02'">
+		                              AND DM_DOCUMENT_D.CHANNEL      = '1'
+		                              AND (NVL(MS_SKU.REFERENCE02, 'X') <![CDATA[<>]]> 'Y' AND ms_sku.product <![CDATA[<>]]> '10')        	
+									</if>
+									<!-- 일배 -->
+									<if test="skupart == '03'">
+		                              AND DM_DOCUMENT_D.CHANNEL     <![CDATA[<>]]> '1'
+									</if>
+									<!-- 체인 -->
+									<if test="skupart == '04'">
+		                              AND DM_DOCUMENT_D.CHANNEL        = '1'
+		                              AND NVL(MS_SKU.REFERENCE02, 'X') = 'Y'
+									</if>
+									<!-- 제당 -->
+									<if test="skupart == '05'">
+		                              AND DM_DOCUMENT_D.CHANNEL      = '1'
+		                              AND NVL(MS_SKU.REFERENCE02, 'X') <![CDATA[<>]]> 'Y'
+		                              AND MS_SKU.PRODUCT             = '10'
+									</if>                               
+		                              AND DM_DOCUMENT_D.DELIVERYDATE <![CDATA[>=]]> #{docdt}||'01'
+		                              AND DM_DOCUMENT_D.DELIVERYDATE <![CDATA[<=]]> #{docdt}||'31'
+		                            GROUP BY DM_DOCUMENT_D.DELIVERYDATE 
+		                            UNION ALL
+		                           SELECT RIGHT(DM_DOCUMENT_D.DELIVERYDATE,2) AS DELIVERYDATE
+		                                , MAX(DM_DOCUMENT_D.STORERKEY)        AS STORERKEY
+		                                , 'Z99'                               AS REASONCODE
+		                                , TRUNC(SUM(CASE WHEN DM_DOCUMENT_D.CANCELQTY > 0
+										<if test="exReasoncodeYn == '1'.toString()">
+		                                  AND NVL(EX_REASON.DATA1,'N') = 'N'
+										</if> 
+		                                  THEN 1 ELSE 0 END)/COUNT(DM_DOCUMENT_D.SKU)*100,  2) AS CANCELCNT
+		                                , COUNT(DISTINCT DM_DOCUMENT_D.DELIVERYDATE) OVER() AS DAYCNT 
+		                             FROM DM_DOCUMENT_D
+		                             JOIN DM_DOCUMENT_H 
+		                               ON DM_DOCUMENT_H.DCCODE           = DM_DOCUMENT_D.DCCODE
+		                              AND DM_DOCUMENT_H.DOCTYPE          = DM_DOCUMENT_D.DOCTYPE
+		                              AND DM_DOCUMENT_H.DELIVERYDATE     = DM_DOCUMENT_D.DELIVERYDATE 
+		                              AND DM_DOCUMENT_H.DOCNO            = DM_DOCUMENT_D.DOCNO							  
+		                              AND DM_DOCUMENT_H.DEL_YN           = 'N'
+		                             JOIN MS_SKU 
+									   ON MS_SKU.STORERKEY = DM_DOCUMENT_D.STORERKEY
+		                              AND MS_SKU.SKU       = DM_DOCUMENT_D.SKU
+		                             LEFT OUTER JOIN CM_CODE EX_REASON     
+									   ON DM_DOCUMENT_D.STORERKEY  = EX_REASON.STORERKEY
+		                              AND 'REASONCODE_WD'          = EX_REASON.CODELIST
+		                              AND DM_DOCUMENT_D.REASONCODE = EX_REASON.BASECODE
+		                            WHERE 1=1   
+		                              AND DM_DOCUMENT_D.STORERKEY        =  #{gStorerkey}
+		                              AND DM_DOCUMENT_D.STATUS           = '90'   
+		                              AND DM_DOCUMENT_D.DEL_YN           = 'N'   
+		                              AND DM_DOCUMENT_D.DOCTYPE          = 'WD'   
+		                              AND DM_DOCUMENT_D.WORKPROCESSCODE <![CDATA[<>]]>'STO' 
+									<if test="dccode != null and dccode != ''">          
+		                              AND DM_DOCUMENT_D.DCCODE           =      #{dccode}          
+									</if>
+									<if test="reasoncode != null and reasoncode != ''">      
+		                              AND DM_DOCUMENT_D.REASONCODE       =      #{reasoncode}      
+									</if>
+									<if test="reasontype != null and reasontype != ''">      
+		                              AND DM_DOCUMENT_D.OTHER01          =      #{reasontype}      
+									</if>
+									<if test="channel != null and channel != ''">         
+		                              AND DM_DOCUMENT_D.CHANNEL            =      #{channel}         
+									</if>
+									<!-- 저장 -->
+									<if test="skupart == '02'">
+		                              AND DM_DOCUMENT_D.CHANNEL      = '1'
+		                              AND (NVL(MS_SKU.REFERENCE02, 'X') <![CDATA[<>]]> 'Y' AND ms_sku.product <![CDATA[<>]]> '10')        	
+									</if>
+									<!-- 일배 -->
+									<if test="skupart == '03'">
+		                              AND DM_DOCUMENT_D.CHANNEL     <![CDATA[<>]]> '1'
+									</if>
+									<!-- 체인 -->
+									<if test="skupart == '04'">
+		                              AND DM_DOCUMENT_D.CHANNEL        = '1'
+		                              AND NVL(MS_SKU.REFERENCE02, 'X') = 'Y'
+									</if>
+									<!-- 제당 -->
+									<if test="skupart == '05'">
+		                              AND DM_DOCUMENT_D.CHANNEL      = '1'
+		                              AND NVL(MS_SKU.REFERENCE02, 'X') <![CDATA[<>]]> 'Y'
+		                              AND MS_SKU.PRODUCT             = '10'
+									</if>
+		                              AND DM_DOCUMENT_D.DELIVERYDATE <![CDATA[>=]]> #{docdt}||'01'
+		                              AND DM_DOCUMENT_D.DELIVERYDATE <![CDATA[<=]]> #{docdt}||'31'
+		                            GROUP BY DM_DOCUMENT_D.DELIVERYDATE ) T  ) TT
+		          PIVOT (SUM(CANCELCNT) FOR DELIVERYDATE IN (
+                                                              '01' AS DAY01
+                                                            , '02' AS DAY02
+                                                            , '03' AS DAY03
+                                                            , '04' AS DAY04
+                                                            , '05' AS DAY05
+                                                            , '06' AS DAY06
+                                                            , '07' AS DAY07
+                                                            , '08' AS DAY08
+                                                            , '09' AS DAY09
+                                                            , '10' AS DAY10
+                                                            , '11' AS DAY11
+                                                            , '12' AS DAY12
+                                                            , '13' AS DAY13
+                                                            , '14' AS DAY14
+                                                            , '15' AS DAY15
+                                                            , '16' AS DAY16
+                                                            , '17' AS DAY17
+                                                            , '18' AS DAY18
+                                                            , '19' AS DAY19
+                                                            , '20' AS DAY20
+                                                            , '21' AS DAY21
+                                                            , '22' AS DAY22
+                                                            , '23' AS DAY23
+                                                            , '24' AS DAY24
+                                                            , '25' AS DAY25
+                                                            , '26' AS DAY26
+                                                            , '27' AS DAY27
+                                                            , '27' AS DAY28
+                                                            , '29' AS DAY29
+                                                            , '30' AS DAY30
+                                                            , '31' AS DAY31  
+		                                                     ))) X
+		  LEFT OUTER JOIN MS_KPIVALMGT   
+		    ON MS_KPIVALMGT.STORERKEY   = #{gStorerkey}
+		   AND MS_KPIVALMGT.KPITYPE     = 'REASONCODE' 
+		   AND MS_KPIVALMGT.KPIDT       = #{docdt}
+		   AND MS_KPIVALMGT.KPICLASS    = X.REASONCODE       
+		   AND MS_KPIVALMGT.KPISVAL01   = #{skupart}
+		 ORDER BY X.REASONCODE
+     </select>
+     
+     <select id="getMasterT2List" resultType="cjfw.wms.kp.dto.KpWdShortageResultResT2Dto">
+         SELECT /* [kpWdShortageResultService.sqlx][kpWdShortageResultService.getMasterListTab2][출고결품실적일요약][공두경][2026.03.23] */
+                 WD_INPLAN.SLIPDT                                                             AS SLIPDT            /**/
+                ,FN_GETDCNAME(WD_INPLAN.DCCODE)                                               AS DCCODE            /**/
+                ,WD_INPLAN.STORERKEY                                                          AS STORERKEY         /**/
+                ,WD_INPLAN.ORGANIZE                                                           AS ORGANIZE          /**/
+                ,WD_INPLAN.DOCDT                                                              AS DOCDT             /**/
+                ,WD_INPLAN.DOCNO                                                              AS DOCNO             /**/
+                ,MS_CUST.OTHER04                                                              AS SALEORGANIZE      /**/
+                ,MS_CUST.BILLTOCUSTKEY                                                        AS BILLTOCUSTKEY     /**/
+                ,MS_CUST_BILL.DESCRIPTION                                                     AS BILLTOCUSTNAME    /**/
+                ,DM_DOCUMENT_H.TO_CUSTKEY                                                     AS CUSTKEY           /**/
+                ,MS_CUST.DESCRIPTION                                                          AS CUSTNAME          /**/
+                ,WD_INPLAN.DELIVERYGROUP                                                      AS DELIERYGROUP      /**/
+                ,WD_INPLAN.CARNO                                                              AS CARNO             /**/
+                ,FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY,'PUTAWAYTYPE',DM_DOCUMENT_D.CHANNEL)    AS CHANNEL           /**/
+                ,FN_CODEDESCR(MS_SKU.STORERKEY,'STORAGETYPE',MS_SKU.STORAGETYPE)              AS STORAGETYPE       /**/
+                ,WD_INPLAN.SKU                                                                AS SKU               /**/
+                ,MS_SKU.DESCRIPTION                                                           AS SKUNAME           /**/
+                ,DM_DOCUMENT_D.STORERUOM                                                      AS STORERUOM         /**/
+                ,DM_DOCUMENT_D.STOREROPENQTY                                                  AS STOREROPENQTY     /**/
+                ,DM_DOCUMENT_D.STORERCONFIRMQTY                                               AS STORERCONFIRMQTY  /**/
+                ,FN_UOMCAL(DM_DOCUMENT_D.BUNMO, DM_DOCUMENT_D.BUNJA, DM_DOCUMENT_D.CANCELQTY) AS STORERCANCELQTY   /**/
+                ,FN_CODEDESCR(WD_INPLAN.STORERKEY, 'REASONCODE_WD', WD_INPLAN.REASONCODE)     AS REASONCODE        /**/
+                ,DM_DOCUMENT_H_PO.FROM_CUSTKEY                                                AS VENDOR            /**/
+                ,DM_DOCUMENT_H_PO.FROM_CUSTNAME                                               AS VENDORNAME        /**/
+                ,left(MS_CUST.MA,length(MS_CUST.MA)-1)                                        AS MANAME            /**/
+                ,MS_SKU.SOMDNAME                                                              AS MDNAME            /**/
+                ,FN_PURCHASECUST(DM_DOCUMENT_D.DCCODE,DM_DOCUMENT_D.STORERKEY,DM_DOCUMENT_D.SKU,DM_DOCUMENT_D.PLANT,DM_DOCUMENT_D.DELIVERYDATE, 'BUYERNAME') AS POMDCODE /**/          
+            FROM WD_INPLAN
+            JOIN DM_DOCUMENT_D
+            ON   DM_DOCUMENT_D.DCCODE       = WD_INPLAN.DCCODE
+            AND  DM_DOCUMENT_D.STORERKEY    = WD_INPLAN.STORERKEY
+            AND  DM_DOCUMENT_D.ORGANIZE     = WD_INPLAN.ORGANIZE
+            AND  DM_DOCUMENT_D.AREA         = WD_INPLAN.AREA
+            AND  DM_DOCUMENT_D.DELIVERYDATE = WD_INPLAN.SLIPDT
+            AND  DM_DOCUMENT_D.DOCTYPE      = WD_INPLAN.DOCTYPE
+            AND  DM_DOCUMENT_D.DOCNO        = WD_INPLAN.DOCNO
+            AND  DM_DOCUMENT_D.DOCLINE      = WD_INPLAN.DOCLINE
+            AND  DM_DOCUMENT_D.WORKPROCESSCODE <![CDATA[<>]]>'STO'   
+            AND  DM_DOCUMENT_D.DEL_YN       = 'N'
+            <if test="reasoncode != null and reasoncode != ''"> AND DM_DOCUMENT_D.REASONCODE  = #{reasoncode} </if>
+            <if test="reasontype != null and reasontype != ''"> AND DM_DOCUMENT_D.OTHER01  = #{reasontype} </if>
+            <if test="channel != null and channel != ''"> AND DM_DOCUMENT_D.CHANNEL  = #{channel} </if>
+            <if test="exReasoncodeYn == '1'.toString()">           
+                AND NOT EXISTS (SELECT 1
+                                FROM   cm_code t
+                                WHERE  t.STORERKEY = #{gStorerkey}
+                                AND    t.codelist  = 'REASONCODE_WD'
+                                AND    t.DATA1     = 'Y'
+                                AND    t.BASECODE  = DM_DOCUMENT_D.REASONCODE)
+            </if>
+            JOIN DM_DOCUMENT_H
+            ON   DM_DOCUMENT_H.DCCODE       = DM_DOCUMENT_D.DCCODE
+            AND  DM_DOCUMENT_H.STORERKEY    = DM_DOCUMENT_D.STORERKEY
+            AND  DM_DOCUMENT_H.DELIVERYDATE = DM_DOCUMENT_D.DELIVERYDATE
+            AND  DM_DOCUMENT_H.DOCTYPE      = DM_DOCUMENT_D.DOCTYPE
+            AND  DM_DOCUMENT_H.DOCNO        = DM_DOCUMENT_D.DOCNO
+            AND  DM_DOCUMENT_H.DEL_YN       = 'N'
+            JOIN MS_SKU
+            ON   MS_SKU.STORERKEY           = WD_INPLAN.STORERKEY
+            AND  MS_SKU.SKU                 = WD_INPLAN.SKU
+            JOIN MS_CUST
+            ON   MS_CUST.STORERKEY          = DM_DOCUMENT_H.STORERKEY
+            AND  MS_CUST.CUSTTYPE           = 'C'
+            AND  MS_CUST.CUSTKEY            = DM_DOCUMENT_H.TO_CUSTKEY
+            LEFT JOIN MS_CUST MS_CUST_BILL
+            ON   MS_CUST_BILL.STORERKEY     = MS_CUST.STORERKEY
+            AND  MS_CUST_BILL.CUSTTYPE      = MS_CUST.CUSTTYPE
+            AND  MS_CUST_BILL.CUSTKEY       = MS_CUST.CUSTKEY
+            LEFT JOIN DM_DOCUMENT_D DM_DOCUMENT_D_PO
+            ON   DM_DOCUMENT_D_PO.DCCODE       = DM_DOCUMENT_D.DCCODE
+            AND  DM_DOCUMENT_D_PO.STORERKEY    = DM_DOCUMENT_D.STORERKEY
+            AND  DM_DOCUMENT_D_PO.ORGANIZE     = DM_DOCUMENT_D.ORGANIZE
+            AND  DM_DOCUMENT_D_PO.AREA         = DM_DOCUMENT_D.AREA
+            AND  DM_DOCUMENT_D_PO.DOCTYPE      = 'DP'
+            AND  DM_DOCUMENT_D_PO.DOCNO        = DM_DOCUMENT_D.POKEY
+            AND  DM_DOCUMENT_D_PO.DOCLINE      = DM_DOCUMENT_D.POLINE
+            AND  DM_DOCUMENT_D_PO.DEL_YN       = 'N'
+            LEFT JOIN DM_DOCUMENT_H DM_DOCUMENT_H_PO
+            ON   DM_DOCUMENT_H_PO.DCCODE       = DM_DOCUMENT_D_PO.DCCODE
+            AND  DM_DOCUMENT_H_PO.STORERKEY    = DM_DOCUMENT_D_PO.STORERKEY
+            AND  DM_DOCUMENT_H_PO.DELIVERYDATE = DM_DOCUMENT_D_PO.DELIVERYDATE
+            AND  DM_DOCUMENT_H_PO.DOCTYPE      = DM_DOCUMENT_D_PO.DOCTYPE
+            AND  DM_DOCUMENT_H_PO.DOCNO        = DM_DOCUMENT_D_PO.DOCNO
+            AND  DM_DOCUMENT_H_PO.DEL_YN       = 'N'
+            WHERE 1=1
+            AND  WD_INPLAN.CANCELQTY           > 0
+            AND  WD_INPLAN.SLIPDT              = #{slipdt}
+            AND  WD_INPLAN.DOCTYPE             = 'WD'
+            AND  WD_INPLAN.STORERKEY           = #{gStorerkey}
+            <if test="dccode != null and dccode != ''"> AND WD_INPLAN.DCCODE  = #{dccode} </if>
+            <if test="vendorMulti != null and vendorMulti != '' ">
+                <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                    <foreach collection="vendorMulti" item="item">
+                        OR DM_DOCUMENT_H_PO.FROM_CUSTKEY IN
+                        <foreach collection="item" item="code" open="(" close=")" separator=",">
+                            #{code}      
+                        </foreach>
+                    </foreach>
+                </trim>                                             
+            </if>  
+    </select>
+</mapper>

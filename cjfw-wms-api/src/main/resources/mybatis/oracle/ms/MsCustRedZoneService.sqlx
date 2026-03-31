@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="msCustRedzone">
+    <!-- 특별관리고객현황 조회 -->
+    <select id="getMasterList" parameterType="cjfw.wms.ms.dto.MsCustRedzoneReqDto" resultType="cjfw.wms.ms.dto.MsCustRedzoneResDto">
+        SELECT /* [MsCustRedZoneService.sqlx][getMasterList][특별관리고객현황 조회][YeoSeungCheol][2025.06.23] */
+            MS_CUST_REDZONE_SRM.SERIALKEY
+            ,MS_CUST_REDZONE_SRM.STORERKEY
+              ,MS_CUST_REDZONE_SRM.CUSTKEY
+              ,MS_CUST.DESCRIPTION                                               AS CUSTNM
+              ,MS_CUST_REDZONE_SRM.MARK_WORD
+            ,(
+                SELECT CM_CODE.BASEDESCR FROM CM_CODE
+                    WHERE CM_CODE.STORERKEY IN ('FW00', 'STD')
+                      AND CM_CODE.CODELIST    = 'MARKWORD_SRM'
+                      AND CM_CODE.BASECODE  = trim(MS_CUST_REDZONE_SRM.MARK_WORD)
+            )    AS MARK_WORD_NM
+            ,(SELECT COALESCE(MAX(U.USER_NM), 'UNKNOWN')
+                FROM FRAMEONE_USER U
+                    WHERE U.USER_ID = MS_CUST_REDZONE_SRM.SRM_REG_ID) || '[' || MS_CUST_REDZONE_SRM.SRM_REG_ID || ']' AS REG_ID
+              ,TO_CHAR(TO_TIMESTAMP
+                          (MS_CUST_REDZONE_SRM.SRM_REG_DATE, 'YYYYMMDDHH24MISS'),
+                          'YYYY-MM-DD HH24:MI:SS' 
+                    )                                                        AS REG_DATE
+              ,MS_CUST_REDZONE_SRM.EDITWHO                                    AS EDIT_WHO
+              ,MS_CUST_REDZONE_SRM.EDITDATE                                    AS EDIT_DATE
+              ,MS_CUST_REDZONE_SRM.DEL_YN
+            ,(SELECT NVL(MAX(CM2.BASEDESCR), MS_CUST.CUSTSTRATEGY4)
+                FROM CM_CODE_STORER CM2
+                    WHERE CM2.STORERKEY = MS_CUST.STORERKEY
+                        AND CM2.CODELIST  = 'CUSTORDERCLOSETYPE'
+                        AND CM2.BASECODE  = MS_CUST.CUSTSTRATEGY4
+            )                                                                AS CUSTORDERCLOSETYPE
+            
+          FROM
+              MS_CUST_REDZONE_SRM
+          JOIN    MS_CUST
+          ON         MS_CUST_REDZONE_SRM.CUSTKEY        =     MS_CUST.CUSTKEY
+          AND        MS_CUST_REDZONE_SRM.STORERKEY    =     MS_CUST.STORERKEY 
+        AND        MS_CUST.DEL_YN                    =     'N'
+        
+        WHERE MS_CUST_REDZONE_SRM.DEL_YN = 'N'
+        
+
+        <!-- 코드 또는 명으로 검색 -->
+        <if test="custCode != null and custCode != ''">
+            AND (
+                MS_CUST_REDZONE_SRM.CUSTKEY IN (
+                    SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS VAL
+                        FROM (SELECT #{custCode} AS VAL FROM DUAL) A
+                    CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0
+                )
+                <!-- OR MS_CUST_REDZONE_SRM.CUSTKEY LIKE '%' || #{custCode} || '%'
+                OR MS_CUST.DESCRIPTION     LIKE '%' || #{custCode} || '%' -->
+            )
+        </if>
+
+        <if test="markWord != null and markWord != ''">
+            AND MS_CUST_REDZONE_SRM.MARK_WORD = #{markWord}
+        </if>
+        
+        ORDER BY MS_CUST_REDZONE_SRM.CUSTKEY
+  </select>
+  <select id="getCustPopupPagingList" resultType="CmCustPopupResDto">
+     SELECT L3.CUSTKEY AS MNG_CUSTKEY,
+            L3.DESCRIPTION AS MNG_NAME,
+            L3.DLV_DCCODE   AS DLV_DCCODE,
+            L3.CUSTKEY      AS CODE,
+            L3.DESCRIPTION  AS NAME,
+            L3.ADDRESS1     AS ADDRESS1,
+            L3.CUSTKEY      AS DLVCUSTKEY,
+            L3.DESCRIPTION  AS DLVDESCRIPTION,
+            L3.ADDRESS1     AS DLVADDRESS1,
+            FN_CODEDESCR(L3.STORERKEY, 'CUSTTYPE', L3.CUSTTYPE) AS CUSTTYPE,
+            L3.ADDRESS1 || ' ' || L3.ADDRESS2 AS ADDRESS
+        FROM MS_CUST L3 
+        JOIN MS_CUST_REDZONE_SRM L4
+          ON L4.CUSTKEY        =     L3.CUSTKEY 
+         AND L4.STORERKEY    =     L3.STORERKEY 
+         AND L3.DEL_YN                    =     'N'
+         AND L4.DEL_YN     =     'N'
+       WHERE 1=1
+         AND L3.STORERKEY = 'FW00'
+         AND L3.CUSTTYPE = 'C'
+          <if test="multiSelect != null and multiSelect != ''">
+        <choose>
+				  	  <when test="multiSelect.indexOf('%') > -1">
+					  	  AND (
+					          	 L3.CUSTKEY         	LIKE  #{multiSelect}
+					          OR L3.DESCRIPTION     	LIKE  #{multiSelect} 
+					      )
+					  </when>
+					  <when test="multiSelect.indexOf(',') > -1">
+					  	  AND L3.CUSTKEY IN (
+							SELECT TRIM(
+								REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)
+							) AS VAL
+							FROM (SELECT #{multiSelect} AS VAL FROM DUAL) A
+							CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0
+						  )
+					  </when>				  
+					  <when test="multiSelect.indexOf(',') == -1">
+					  	  AND (
+					          	 L3.CUSTKEY         	LIKE  '%'||#{multiSelect}||'%'
+					          OR L3.DESCRIPTION     	LIKE  '%'||#{multiSelect}||'%' 
+					      )
+					  </when>					  
+				  </choose>	
+				   </if>
+				   <if test='name != null and name !=""'>
+		      AND (
+		          	 L3.CUSTKEY         	LIKE  '%'||#{name}||'%'
+		          OR L3.DESCRIPTION     	LIKE  '%'||#{name}||'%' 
+		      )
+	        </if>
+       ORDER BY MNG_CUSTKEY
+  </select>
+</mapper>

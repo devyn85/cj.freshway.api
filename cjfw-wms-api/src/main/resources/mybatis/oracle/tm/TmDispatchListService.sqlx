@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cjfw.wms.tm.mapper.TmDispatchListMapper">
+
+    <select id="selectDispatchList" resultType="TmDispatchInfoListResDto">
+        SELECT /* [TmDispatchListService.sqlx][selectDispatchList][배차 계획 목록 조회][20250924] */
+              TM_INPLAN.DCCODE
+            , TM_INPLAN.DELIVERYDT
+            -- AS-IS에 관리되지 않은 권역, 권역그룹 코드가 존재함
+            , MS_DLV_DISTRICTGROUP.DLVGROUP_ID                                         AS DISTRICTGROUP
+            , MS_DLV_DISTRICTGROUP.DLVGROUP_NM                                         AS DISTRICTGROUP_NM
+            , MS_DLV_DISTRICT.DLVDISTRICT_ID                                           AS DISTRICTCODE
+            , MS_DLV_DISTRICT.DLVDISTRICT_NM                                           AS DISTRICTCODE_NM
+            , TM_INPLAN.DELIVERYGROUP                                                  AS POP
+            , TM_INPLAN.CARNO
+            -- 매핑되지 않는 운송사, 2차운송사 정보가 존재함
+            , COURIER.CARRIERKEY                                                       AS COURIER
+            , COURIER.DESCRIPTION                                                      AS COURIERNAME
+            , CARAGENT.CARRIERKEY                                                      AS CARAGENTKEY
+            , CARAGENT.DESCRIPTION                                                     AS CARAGENTNAME
+            , TM_INPLAN.STATUS
+            , TM_INPLAN.CONTRACTTYPE                                                   AS CONTRACT_TYPE
+            , FN_CODEDESCR('STD', 'STATUS_TM', TM_INPLAN.STATUS)                       AS DISPATCH_STATUS
+            , TM_INPLAN.PRIORITY
+            , TM_INPLAN.DELIVERYGROUP                                                  AS ORI_POP
+            , TM_INPLAN.CARNO                                                          AS ORI_CARNO
+            , COUNT(DISTINCT TM_INPLAN.TRUTHCUSTKEY)                                   AS DESTINATION_COUNT
+            , SUM(CASE WHEN TM_INPLAN.DOCTYPE = 'RT' THEN 0 ELSE TM_INPLAN.WEIGHT END) AS TOTAL_WEIGHT_KG
+            , SUM(CASE WHEN TM_INPLAN.DOCTYPE = 'RT' THEN 0 ELSE TM_INPLAN.CUBE   END) AS TOTAL_CBM
+            , MAX(TM_INPLAN.REASONCODE)                                                AS REASON_CAR_NO
+            , MAX(TM_INPLAN.REASONMSG)                                                 AS REASON_MSG
+            , MIN(TM_DELIVERYTYPE)                                                     AS TM_DELIVERYTYPE
+        FROM (
+            -- 배송
+            SELECT
+                 STORERKEY
+               , DCCODE
+               , DOCTYPE
+               , DELIVERYDT
+               , SLIPDT
+               , DISTRICTGROUP
+               , DISTRICTCODE
+               , DELIVERYGROUP
+               , CARNO
+               , COURIER
+               , CARAGENTKEY
+               , CONTRACTTYPE
+               , PRIORITY
+               , TRUTHCUSTKEY
+               , WEIGHT
+               , CUBE
+               , REASONCODE
+               , REASONMSG
+               , STATUS
+               , TM_DELIVERYTYPE
+               , CUSTTYPE
+            FROM TM_INPLAN
+            WHERE SPLIT_DELIVERY_YN = 'N'
+              AND DEL_YN = 'N'
+            UNION ALL
+            SELECT
+                 STORERKEY
+               , DCCODE
+               , DOCTYPE
+               , DELIVERYDT
+               , SLIPDT
+               , DISTRICTGROUP
+               , DISTRICTCODE
+               , DELIVERYGROUP
+               , CARNO
+               , COURIER
+               , CARAGENTKEY
+               , CONTRACTTYPE
+               , PRIORITY
+               , TRUTHCUSTKEY
+               , WEIGHT
+               , CUBE
+               , REASONCODE
+               , REASONMSG
+               , STATUS
+               , TM_DELIVERYTYPE
+               , CUSTTYPE
+            FROM TM_INPLAN_SPLIT
+            WHERE DEL_YN = 'N'
+        ) TM_INPLAN
+        INNER JOIN MS_CUSTDLVINFO -- 거래처와 맵핑되지 않는 배차예정 삭제
+        ON  TM_INPLAN.STORERKEY  = MS_CUSTDLVINFO.STORERKEY
+        AND TM_INPLAN.CUSTTYPE  = MS_CUSTDLVINFO.CUSTTYPE
+        AND TM_INPLAN.TRUTHCUSTKEY = MS_CUSTDLVINFO.DLVCUSTKEY
+        LEFT JOIN MS_CARRIER COURIER
+            ON  COURIER.STORERKEY   = TM_INPLAN.STORERKEY
+            AND COURIER.CARRIERKEY  = TM_INPLAN.COURIER
+            AND COURIER.CARRIERTYPE = 'LOCAL'
+        LEFT JOIN MS_CARRIER CARAGENT
+            ON  CARAGENT.STORERKEY   = TM_INPLAN.STORERKEY
+            AND CARAGENT.CARRIERKEY  = TM_INPLAN.CARAGENTKEY
+            AND CARAGENT.CARRIERTYPE = 'SUBC'
+        LEFT JOIN MS_DLV_DISTRICT
+            ON  MS_DLV_DISTRICT.DCCODE         = TM_INPLAN.DCCODE
+            AND MS_DLV_DISTRICT.DLVDISTRICT_ID = TM_INPLAN.DISTRICTCODE
+        LEFT JOIN MS_DLV_DISTRICTGROUP
+            ON  MS_DLV_DISTRICTGROUP.DCCODE      = TM_INPLAN.DCCODE
+            AND MS_DLV_DISTRICTGROUP.DLVGROUP_ID = TM_INPLAN.DISTRICTGROUP
+        WHERE TM_INPLAN.DCCODE          = #{dccode}
+          AND TM_INPLAN.DELIVERYDT      = #{deliveryDate}
+          AND TM_INPLAN.SLIPDT          BETWEEN TO_CHAR(TRUNC(ADD_MONTHS(TO_DATE(#{deliveryDate}, 'YYYYMMDD'), -1), 'MM'), 'YYYYMMDD')
+                                            AND #{deliveryDate}
+          <choose>
+              <when test='deliveryType == "1"'>
+                  AND TM_INPLAN.DOCTYPE IN ('WD', 'RT')
+                  AND TM_INPLAN.TM_DELIVERYTYPE IN ('1', '2')
+              </when>
+              <when test='deliveryType == "3"'>
+                  AND TM_INPLAN.DOCTYPE = 'DP'
+                  AND TM_INPLAN.TM_DELIVERYTYPE = '3'
+              </when>
+              <when test='deliveryType == "4"'>
+                  AND TM_INPLAN.DOCTYPE = 'DP'
+                  AND TM_INPLAN.TM_DELIVERYTYPE = '4'
+              </when>
+              <when test='deliveryType == "6"'>
+                  AND TM_INPLAN.DOCTYPE = 'WD'
+                  AND TM_INPLAN.TM_DELIVERYTYPE = '6'
+              </when>
+              <otherwise>
+                  AND TM_INPLAN.DOCTYPE = NULL
+                  AND TM_INPLAN.TM_DELIVERYTYPE = '0'
+              </otherwise>
+          </choose>
+          <if test="dispatchStatus != null and dispatchStatus != ''">
+             AND TM_INPLAN.STATUS = #{dispatchStatus}
+          </if>
+		  <if test="carnoSearch != null and carnoSearch != ''">
+    	 	 AND TM_INPLAN.CARNO IN
+    	 	 <foreach collection="carnoSearch.split(',')" item="item" open="(" separator="," close=")">
+    	 	 	#{item}
+    	 	 </foreach>
+   	      </if>
+		  <if test="regionCode != null and regionCode != ''">
+    	  AND ( TM_INPLAN.DISTRICTCODE  LIKE '%' || #{regionCode} || '%'
+    	 	 OR TM_INPLAN.DISTRICTGROUP LIKE '%' || #{regionCode} || '%')
+   	      </if>
+        GROUP BY
+              TM_INPLAN.DCCODE
+            , TM_INPLAN.DELIVERYDT
+            , MS_DLV_DISTRICTGROUP.DLVGROUP_ID
+            , MS_DLV_DISTRICTGROUP.DLVGROUP_NM
+            , MS_DLV_DISTRICT.DLVDISTRICT_ID
+            , MS_DLV_DISTRICT.DLVDISTRICT_NM
+            , TM_INPLAN.DELIVERYGROUP
+            , TM_INPLAN.CARNO
+            , COURIER.CARRIERKEY
+            , COURIER.DESCRIPTION
+            , CARAGENT.CARRIERKEY
+            , CARAGENT.DESCRIPTION
+            , TM_INPLAN.STATUS
+            , TM_INPLAN.CONTRACTTYPE
+            , TM_INPLAN.PRIORITY
+        ORDER BY
+              TM_INPLAN.CARNO
+            , TM_INPLAN.PRIORITY
+    </select>
+</mapper>

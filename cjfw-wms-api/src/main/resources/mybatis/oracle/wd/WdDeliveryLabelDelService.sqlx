@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="wdDeliveryLabelDelService">
+	<select id="getMasterList" resultType="WdDeliveryLabelDelResDto">		
+		SELECT /* [WdDeliveryLabelDelService.sqlx][getMasterList][배송라벨삭제현황 목록 조회][공두경][2025.06.23] */
+			   MAX(WD_INVOICE.DCCODE) 										AS DCCODE			/*물류센터*/
+              ,LEFT(WD_INVOICE.INVOICENO, 19) ||
+               LPAD(SUM(WD_INVOICE.ORDERQTY) * 100 *MAX(DM_DOCUMENT_D.BUNMO) /MAX(DM_DOCUMENT_D.BUNJA),6,'0') || 
+               RIGHT(WD_INVOICE.INVOICENO, 3) 								AS INVOICENO		/*인보이스번호*/
+              ,MAX(WD_INVOICE.DOCNO) 										AS DOCNO_WD			/*주문번호*/
+              ,MAX(WD_INVOICE.DOCLINE) 										AS DOCLINE			/*품목번호*/
+              ,MAX(WD_INVOICE.PICK_LIST_NO) 								AS PICK_LIST_NO		/*피킹리스트번호*/
+              ,MAX(DM_DOCUMENT_H.TO_CUSTKEY) 								AS TO_CUSTKEY_WD	/*관리처코드*/
+              ,MAX(NVL(MS_CUST.DESCRIPTION,DM_DOCUMENT_H.TO_CUSTNAME)) 		AS TO_CUSTNAME		/*배송인도처명*/
+              ,MAX(MS_SKU.SKU) 												AS SKU				/*상품코드*/
+              ,MAX(MS_SKU.DESCRIPTION) 										AS SKUNAME			/*상품명칭*/
+              ,MAX(DM_DOCUMENT_D.STORERUOM) 								AS STORERUOM		/*주문단위*/
+              ,SUM(WD_INVOICE.ORDERQTY) * MAX(DM_DOCUMENT_D.BUNMO) / MAX(DM_DOCUMENT_D.BUNJA) 	AS ORDERQTY	/*주문수량*/
+              ,SUM(WD_INVOICE.OPENQTY) * MAX(DM_DOCUMENT_D.BUNMO) / MAX(DM_DOCUMENT_D.BUNJA)									AS OPENQTY		/*마감수량*/
+              ,SUM(WD_INVOICE.ORDERQTY - WD_INVOICE.OPENQTY) * MAX(DM_DOCUMENT_D.BUNMO) / MAX(DM_DOCUMENT_D.BUNJA)				AS DIFFQTY			/*차이수량*/
+              ,MAX(WD_INPLAN.DELIVERYGROUP) 								AS DELIVERYGROUP	/*POP번호*/
+              ,MAX(WD_INPLAN.CARNO) 										AS CARNO			/*차량번호*/
+              ,TO_CHAR(MAX(WD_INVOICE.PRINT_DATE),'YYYY-MM-DD HH24:MI:SS') 	AS PRINTTIME		/*출력시간*/
+              ,MAX(WD_INVOICE.PRINT_CNT) 									AS PRINTQTY			/*출력수량*/
+          FROM DM_DOCUMENT_D
+          JOIN DM_DOCUMENT_H
+            ON DM_DOCUMENT_H.DCCODE 	= DM_DOCUMENT_D.DCCODE
+           AND DM_DOCUMENT_H.STORERKEY 	= DM_DOCUMENT_D.STORERKEY
+           AND DM_DOCUMENT_H.DOCTYPE 	= DM_DOCUMENT_D.DOCTYPE
+           AND DM_DOCUMENT_H.DOCDT 		= DM_DOCUMENT_D.DOCDT
+           AND DM_DOCUMENT_H.DOCNO 		= DM_DOCUMENT_D.DOCNO
+           AND DM_DOCUMENT_H.DELIVERYDATE = DM_DOCUMENT_D.DELIVERYDATE
+           <if test="toCustkeyMulti != null and toCustkeyMulti != '' ">
+		    	<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+		    		<foreach collection="toCustkeyMulti" item="item">
+		    			OR DM_DOCUMENT_H.TO_CUSTKEY IN
+		    			<foreach collection="item" item="code" open="(" close=")" separator=",">
+		    				#{code} 	 
+		          		</foreach>
+		        	</foreach>
+		      	</trim>			                                    
+            </if>
+          JOIN WD_INPLAN
+            ON WD_INPLAN.DCCODE 		= DM_DOCUMENT_D.DCCODE
+           AND WD_INPLAN.STORERKEY 		= DM_DOCUMENT_D.STORERKEY
+           AND WD_INPLAN.ORGANIZE 		= DM_DOCUMENT_D.ORGANIZE
+           AND WD_INPLAN.AREA 			= DM_DOCUMENT_D.AREA
+           AND WD_INPLAN.DOCTYPE 		= DM_DOCUMENT_D.DOCTYPE
+           AND WD_INPLAN.SLIPDT 		= DM_DOCUMENT_D.DELIVERYDATE
+           AND WD_INPLAN.DOCNO 			= DM_DOCUMENT_D.DOCNO
+           AND WD_INPLAN.DOCLINE 		= DM_DOCUMENT_D.DOCLINE
+          JOIN WD_INVOICE
+            ON WD_INVOICE.DCCODE = WD_INPLAN.DCCODE
+           AND WD_INVOICE.STORERKEY = WD_INPLAN.STORERKEY
+           AND WD_INVOICE.ORGANIZE = WD_INPLAN.ORGANIZE
+           AND WD_INVOICE.SLIPDT = WD_INPLAN.SLIPDT
+           AND WD_INVOICE.SLIPNO = WD_INPLAN.SLIPNO
+           AND WD_INVOICE.SLIPLINE = WD_INPLAN.SLIPLINE
+           AND WD_INVOICE.PICK_LIST_NO IS NOT NULL
+           AND WD_INVOICE.INVOICETYPE = 'DELIVERYLABEL'
+           AND WD_INVOICE.LABELSTATUS IN ('M','D') --20251014 공두경 수정건도 조회에 포함
+           AND WD_INVOICE.PRINT_CNT > 0
+           <if test="deletelabelstatus == '2'.toString()">     AND WD_INVOICE.OPENQTY <![CDATA[>]]> 0        </if>  /*부분삭제*/
+           <if test="deletelabelstatus == '3'.toString()">     AND WD_INVOICE.OPENQTY = 0                    </if>  /*전체삭제*/
+          LEFT JOIN MS_CUST
+            ON MS_CUST.STORERKEY = DM_DOCUMENT_H.STORERKEY
+           AND MS_CUST.CUSTTYPE  = DM_DOCUMENT_H.TO_CUSTTYPE
+           AND MS_CUST.CUSTKEY   = DM_DOCUMENT_H.TO_CUSTKEY
+          JOIN MS_SKU
+            ON MS_SKU.STORERKEY = DM_DOCUMENT_D.STORERKEY
+           AND MS_SKU.SKU 		= DM_DOCUMENT_D.SKU
+         WHERE DM_DOCUMENT_D.DCCODE 		= #{fixdccode}
+           AND DM_DOCUMENT_D.STORERKEY 		= #{gStorerkey}
+           AND DM_DOCUMENT_D.DOCTYPE 		= 'WD'
+           AND DM_DOCUMENT_D.DELIVERYDATE 	= #{slipdt}
+           AND DM_DOCUMENT_D.CHANNEL 		= '1'   
+           <if test="docnoMulti != null and docnoMulti != ''">
+		       AND DM_DOCUMENT_D.DOCNO IN
+		       <foreach collection="docnoMulti" item="code" open="(" close=")" separator=",">
+		         #{code}
+		       </foreach>   
+	        </if>
+           <!-- 상품 다중선택 -->
+		   <if test="sku != null and sku != '' ">
+				<if test="skuMulti != null and skuMulti.size() > 0">
+					<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+						<foreach collection="skuMulti" item="item">
+							OR DM_DOCUMENT_D.SKU IN
+							<foreach collection="item" item="code" open="(" close=")" separator=",">
+								#{code} 	 
+				      		</foreach>
+				    	</foreach>
+				  	</trim>			                                    
+		    	</if>
+	        </if>
+         GROUP BY WD_INVOICE.INVOICENO
+         ORDER BY WD_INVOICE.INVOICENO
+    </select>
+    
+</mapper>

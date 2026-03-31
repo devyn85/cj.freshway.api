@@ -1,0 +1,783 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="omAutoOrderSetupService">
+    
+    <!-- 자동발주관리 마스터 조회 (목록) -->
+	<select id="getMasterList" resultType="OmAutoOrderSetupResDto">
+		SELECT	/* [omAutoOrderSetupService.sqlx][omAutoOrderSetupService.getMasterList][자동발주관리 마스터 조회 (목록)][JeongHyeongCheol][20250724] */ 
+			   OM_AUTO_ORD.STORERKEY
+			  ,OM_AUTO_ORD.PURCHASE_CD 
+		      ,OM_AUTO_ORD.PURCHASE_NAME
+		      ,'유효기간:'||OM_AUTO_ORD.FROMDATE||'~'||OM_AUTO_ORD.TODATE as PURCHASE_INFO
+			  ,(SELECT COUNT(1)
+			  	FROM   OM_AUTO_ORD_SKU
+			  	WHERE  OM_AUTO_ORD_SKU.STORERKEY   = OM_AUTO_ORD.STORERKEY
+			  	AND    OM_AUTO_ORD_SKU.PURCHASE_CD = OM_AUTO_ORD.PURCHASE_CD
+			  	AND    OM_AUTO_ORD_SKU.DEL_YN      = 'N') AS SKU_CNT
+			  ,OM_AUTO_ORD.DEL_YN
+		      ,OM_AUTO_ORD.ORD_QTY_DIV_CD
+		FROM   OM_AUTO_ORD
+		WHERE  OM_AUTO_ORD.STORERKEY = 'FW00'
+		<if test='delYn != null and delYn != ""'>
+			AND OM_AUTO_ORD.DEL_YN = #{delYn}
+		</if>
+		<if test='purchaseTxt != null and purchaseTxt != ""'>
+			AND (OM_AUTO_ORD.PURCHASE_CD like '%'||#{purchaseTxt}||'%'  OR  OM_AUTO_ORD.PURCHASE_NAME like '%'||#{purchaseTxt}||'%')
+		</if>
+		<if test='frDccodeMulti != null and frDccodeMulti != ""'>
+			AND OM_AUTO_ORD.FROM_DCCODE IN 
+			<foreach collection="frDccodeMulti" item="item" open="(" close=")" separator="," >
+	            #{item}
+	        </foreach>
+		</if>
+		<if test='toDccodeMulti != null and toDccodeMulti != ""'>
+			AND OM_AUTO_ORD.TO_DCCODE IN 
+			<foreach collection="toDccodeMulti" item="item" open="(" close=")" separator="," >
+	            #{item}
+	        </foreach>
+		</if>
+		<if test='skuMulti != null and skuMulti != ""'>
+			AND	EXISTS(SELECT 1
+	                  FROM   OM_AUTO_ORD_SKU
+	                  WHERE  OM_AUTO_ORD_SKU.STORERKEY   = OM_AUTO_ORD.STORERKEY
+	                  AND    OM_AUTO_ORD_SKU.PURCHASE_CD = OM_AUTO_ORD.PURCHASE_CD
+	                  AND    OM_AUTO_ORD_SKU.DEL_YN      = 'N'
+			          <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+		                <foreach collection="skuMulti" item="item">
+		                    OR OM_AUTO_ORD_SKU.SKU IN
+		                    <foreach collection="item" item="code" open="(" close=")" separator=",">
+		                        #{code}
+		                    </foreach>
+		                </foreach>
+		              </trim>	
+					  )
+		</if>			  	  
+		ORDER BY OM_AUTO_ORD.PURCHASE_CD
+    </select>
+	
+	<!-- 자동발주관리 상품 조회 (Sku) -->
+	<select id="getDetailList" resultType="OmAutoOrderSetupDetailResDto">
+		SELECT /* [omAutoOrderSetupService.sqlx][omAutoOrderSetupService.getDetailList][자동발주관리 상품 조회][JeongHyeongCheol][20250724] */
+		       OM_AUTO_ORD_SKU.STORERKEY   AS STORERKEY
+		      ,OM_AUTO_ORD_SKU.PURCHASE_CD AS PURCHASE_CD
+		      ,OM_AUTO_ORD_SKU.SKU 	       AS SKU
+		      ,MS_SKU.DESCRIPTION          AS SKU_NAME
+		      ,OM_AUTO_ORD_SKU.UOM_DIV_CD  AS UOM_DIV_CD
+		      ,case when OM_AUTO_ORD.ORD_QTY_DIV_CD = '2' then 
+					       nvl((select max(ROUND(  MS_PURCHASESTATS.STOCKAVGDAY 
+			                                     * (  NVL(MS_PURCHASEMST.PURINTERVAL,1)
+			                                        + NVL(MS_PURCHASEMST.LEADTIME,   1) ) 
+			                                     + (  ( 3 * MS_PURCHASESTATS.STDDEVIATION )
+			                                        * POWER((  NVL(MS_PURCHASEMST.PURINTERVAL,1)
+			                                                 + NVL(MS_PURCHASEMST.LEADTIME   ,1))
+			                                                ,1/2) )
+			                                     )) as STOCKGOAL
+			                    from   MS_PURCHASESTATS
+			                    LEFT OUTER JOIN MS_PURCHASEMST
+			                    ON     MS_PURCHASEMST.STORERKEY   = MS_PURCHASESTATS.STORERKEY
+			                    AND    MS_PURCHASEMST.DCCODE      = MS_PURCHASESTATS.DCCODE
+			                    AND    MS_PURCHASEMST.CUSTTYPE    = 'P' /*업체매입건을 대상으로 한정, 20171114 함일수님과 합의*/
+			                    AND    MS_PURCHASEMST.SKU         = MS_PURCHASESTATS.SKU
+			                    where  MS_PURCHASESTATS.DCCODE    = OM_AUTO_ORD.TO_DCCODE 
+			                    AND    MS_PURCHASESTATS.STORERKEY = OM_AUTO_ORD.STORERKEY
+			                    AND    MS_PURCHASESTATS.SKU       = OM_AUTO_ORD_SKU.SKU
+			                    AND    MS_PURCHASESTATS.PLANT     = OM_AUTO_ORD.TO_DCCODE 
+			                    AND    MS_PURCHASESTATS.STATSDT   = TO_CHAR(SYSDATE,'YYYYMMDD')),0)
+			        else 0
+			   end                         AS QTY
+		      ,OM_AUTO_ORD.ORD_QTY_DIV_CD  AS ORD_QTY_DIV_CD
+		FROM   OM_AUTO_ORD_SKU 
+		JOIN   MS_SKU ON  OM_AUTO_ORD_SKU.STORERKEY = MS_SKU.STORERKEY
+					  AND OM_AUTO_ORD_SKU.SKU	    = MS_SKU.SKU
+		JOIN   OM_AUTO_ORD ON  OM_AUTO_ORD.STORERKEY   = OM_AUTO_ORD_SKU.STORERKEY
+		                   AND OM_AUTO_ORD.PURCHASE_CD = OM_AUTO_ORD_SKU.PURCHASE_CD
+		WHERE  OM_AUTO_ORD_SKU.STORERKEY   = 'FW00'
+		AND    OM_AUTO_ORD_SKU.PURCHASE_CD = #{purchaseCd}
+		AND    OM_AUTO_ORD_SKU.DEL_YN      = 'N'
+		ORDER BY OM_AUTO_ORD_SKU.PURCHASE_CD
+		        ,OM_AUTO_ORD_SKU.SKU
+	</select>
+	
+	<!-- 자동발주관리 이력 조회 (History) -->
+	<select id="getHistoryList" resultType="OmAutoOrderSetupHistoryResDto">
+		SELECT /* [omAutoOrderSetupService.sqlx][omAutoOrderSetupService.getHistoryList][자동발주관리 이력 조회 (History)][JeongHyeongCheol][20250724] */
+		       OM_AUTO_ORD_HISTORY.RUNDT
+			  ,OM_AUTO_ORD_HISTORY.PURCHASE_CD
+			  ,OM_AUTO_ORD_HISTORY.RUNMODE
+			  ,OM_AUTO_ORD_HISTORY.ORDER_DT
+			  ,OM_AUTO_ORD_HISTORY.PURCHASE_DT
+			  ,OM_AUTO_ORD_HISTORY.PURCHASE_DT AS DOCDT
+			  ,OM_AUTO_ORD_HISTORY.DOCNO
+			  ,OM_AUTO_ORD_HISTORY.RESULT_CHK_YN
+			  ,OM_AUTO_ORD_HISTORY.RESULT_CHK_TERM
+			  ,OM_AUTO_ORD_HISTORY.RESULT_SEND_YN
+			  ,to_char(OM_AUTO_ORD_HISTORY.RESULT_SEND_DATE, 'yyyy-mm-dd hh24:mi:ss') as RESULT_SEND_DATE
+			  ,to_char(OM_AUTO_ORD_HISTORY.STARTDATE, 'yyyy-mm-dd hh24:mi:ss') as STARTDATE
+			  ,to_char(OM_AUTO_ORD_HISTORY.ENDDATE, 'yyyy-mm-dd hh24:mi:ss') as ENDDATE
+			  ,OM_AUTO_ORD_HISTORY.STATUS
+			  ,OM_AUTO_ORD_HISTORY.PROCRMSG
+			  ,OM_AUTO_ORD_HISTORY.ADDWHO
+			  ,USER1.USER_NM							AS REG_NM
+		FROM   OM_AUTO_ORD_HISTORY 
+   LEFT JOIN  FRAMEONE_USER USER1 
+	      ON  USER1.USER_ID = OM_AUTO_ORD_HISTORY.ADDWHO
+	   WHERE  OM_AUTO_ORD_HISTORY.PURCHASE_CD = #{purchaseCd}
+		 AND  OM_AUTO_ORD_HISTORY.RUNDT       > to_char(SYSDATE-7,'yyyymmdd')
+	ORDER BY  OM_AUTO_ORD_HISTORY.PURCHASE_CD
+		      ,OM_AUTO_ORD_HISTORY.RUNDT DESC
+		      ,OM_AUTO_ORD_HISTORY.STARTDATE DESC
+	</select>
+	
+	<!-- 자동발주관리 상세 조회 (Detail) -->
+	<select id="getMasterInfo" resultType="OmAutoOrderSetupInfoResDto">
+		SELECT /* [omAutoOrderSetupService.sqlx][omAutoOrderSetupService.getDataDetaillist][자동발주관리 상세 조회 (Detail)][JeongHyeongCheol][20250724] */
+			   OM_AUTO_ORD.STORERKEY
+		      ,OM_AUTO_ORD.PURCHASE_CD
+			  ,OM_AUTO_ORD.PURCHASE_NAME
+			  ,OM_AUTO_ORD.PURCHASE_CONTS
+			  ,OM_AUTO_ORD.FROM_DCCODE
+			  ,OM_AUTO_ORD.ORGANIZE
+			  ,OM_AUTO_ORD.TO_DCCODE
+			  ,OM_AUTO_ORD.ORD_DAY
+			  ,OM_AUTO_ORD.CALENDAR_ID
+			  ,OM_AUTO_ORD.PURCHASE_DAY
+			  ,OM_AUTO_ORD.PURCHASE_HOLIYDAY_CD
+			  ,OM_AUTO_ORD.ORD_QTY_DIV_CD
+			  ,OM_AUTO_ORD.CHD_DC_YN
+			  ,OM_AUTO_ORD.ST_YN
+			  ,OM_AUTO_ORD.ST_DIV_CD
+			  ,OM_AUTO_ORD.DP_YN
+			  ,OM_AUTO_ORD.DP_PO_YN
+			  ,OM_AUTO_ORD.DP_FWSTO_YN
+			  ,OM_AUTO_ORD.DP_KXSTO_YN
+			  ,OM_AUTO_ORD.INC_CUSTKEY_YN
+			  ,OM_AUTO_ORD.INC_CLOSETYPE_YN
+			  ,OM_AUTO_ORD.INC_DISTANCETYPE_YN
+			  ,OM_AUTO_ORD.EX_SERIAL_YN
+			  ,OM_AUTO_ORD.RUN_DIV_CD
+			  ,OM_AUTO_ORD.RUN_YYYY
+			  ,OM_AUTO_ORD.RUN_MM
+			  ,OM_AUTO_ORD.RUN_DD
+			  ,OM_AUTO_ORD.RUN_HH
+			  ,OM_AUTO_ORD.RUN_MI
+			  ,OM_AUTO_ORD.RUN_MON_YN
+			  ,OM_AUTO_ORD.RUN_TUE_YN
+			  ,OM_AUTO_ORD.RUN_WED_YN
+			  ,OM_AUTO_ORD.RUN_THU_YN
+			  ,OM_AUTO_ORD.RUN_FRI_YN
+			  ,OM_AUTO_ORD.RUN_SAT_YN
+			  ,OM_AUTO_ORD.RUN_SUN_YN
+			  ,OM_AUTO_ORD.FROMDATE
+			  ,OM_AUTO_ORD.TODATE
+			  ,OM_AUTO_ORD.RUN_HOLIDAYCHK_YN
+			  ,OM_AUTO_ORD.PROC_CHK_YN
+			  ,OM_AUTO_ORD.RESULT_CHK_YN
+			  ,OM_AUTO_ORD.RESULT_CHK_TERM
+			  ,OM_AUTO_ORD.RECV_NAME1
+			  ,OM_AUTO_ORD.RECV_TEL1
+			  ,OM_AUTO_ORD.RECV_NAME2
+			  ,OM_AUTO_ORD.RECV_TEL2
+			  ,OM_AUTO_ORD.RECV_NAME3
+			  ,OM_AUTO_ORD.RECV_TEL3
+			  ,OM_AUTO_ORD.OTHER01
+			  ,OM_AUTO_ORD.OTHER02
+			  ,OM_AUTO_ORD.OTHER03
+			  ,OM_AUTO_ORD.OTHER04
+			  ,OM_AUTO_ORD.OTHER05
+			  ,OM_AUTO_ORD.REFERENCE01
+			  ,OM_AUTO_ORD.REFERENCE02
+			  ,OM_AUTO_ORD.REFERENCE03
+			  ,OM_AUTO_ORD.REFERENCE04
+			  ,OM_AUTO_ORD.REFERENCE05
+			  ,OM_AUTO_ORD.DEL_YN
+			  ,OM_AUTO_ORD.ADDDATE
+			  ,OM_AUTO_ORD.EDITDATE
+			  ,OM_AUTO_ORD.ADDWHO
+			  ,OM_AUTO_ORD.EDITWHO
+			  ,USER1.USER_NM 							AS REG_NM	
+			  ,USER2.USER_NM 							AS UPD_NM		
+		FROM   OM_AUTO_ORD
+   LEFT JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = OM_AUTO_ORD.ADDWHO  /*등록자명*/
+   LEFT JOIN FRAMEONE_USER USER2 ON USER2.USER_ID = OM_AUTO_ORD.EDITWHO  /*수정자명*/
+		WHERE  OM_AUTO_ORD.STORERKEY   = 'FW00'
+		AND    OM_AUTO_ORD.PURCHASE_CD = #{purchaseCd}
+		ORDER BY OM_AUTO_ORD.PURCHASE_CD
+	</select>
+	
+	<!-- 자동발주 상품내역 DELETE -->
+    <delete id="deleteDetailList">
+    	/* [omAutoOrderSetupService.sqlx][omAutoOrderSetupService.deleteDetailList][자동발주 상품내역 DELETE][JeongHyeongCheol][20250724] */
+		UPDATE OM_AUTO_ORD_SKU
+		SET    DEL_YN = 'Y'
+              ,EDITDATE  = SYSDATE
+              ,EDITWHO   = #{gUserId}
+		WHERE STORERKEY   = 'FW00'
+		AND   PURCHASE_CD = #{purchaseCd}
+		AND   SKU         = #{sku}
+    </delete>
+	
+	<!-- 자동발주 등록상품 내역확인 SELECT -->
+    <select id="validateSkuDetail" resultType="OmAutoOrderSetupDetailResDto">
+    	WITH /* [omAutoOrderSetupService.sqlx][omAutoOrderSetupService.validateSkuDetail][자동발주 등록상품 내역확인 SELECT][JeongHyeongCheol][20250724] */
+			V AS (
+		        SELECT
+		             #{sku}								AS SKU
+					,#{uomDivCd}						AS UOM_DIV_CD
+					,#{qty}								AS QTY						
+					,#{purchaseCd}						AS PURCHASE_CD	
+		            ,ROW_NUMBER() OVER(ORDER BY 1) 		AS RN 
+		        FROM DUAL
+		    )
+		    
+		    SELECT 
+		         V.SKU 								AS SKU
+		        ,V.UOM_DIV_CD						AS UOM_DIV_CD
+				,V.QTY								AS QTY				
+								
+		        ,CASE 
+		        	WHEN T1.BASECODE IS NOT NULL 
+		        	THEN 'Y' ELSE 'N' 
+		         END 								AS CODE_CHK
+		        ,CASE 
+		        	WHEN T2.SKU IS NOT NULL 
+		        	THEN 'Y' ELSE 'N' 
+		         END 								AS SKU_CHK
+				,CASE 					
+		        	WHEN T3.SKU IS NOT NULL 
+		        	THEN 'Y' ELSE 'N' 
+		         END 								AS SKU_DUP_CHK	
+		    FROM V
+		    
+		    LEFT JOIN CM_CODE T1 
+		    	   ON T1.CODELIST 		= 'AUTO_ORD_UOM_DIV'
+		          AND T1.STORERKEY 		= 'FW00'
+				  AND T1.BASECODE 		= V.UOM_DIV_CD
+		    
+			LEFT JOIN MS_SKU T2 
+		    	   ON T2.STORERKEY 		= 'FW00'
+		          AND T2.SKU 	= V.SKU			
+		    
+			LEFT JOIN OM_AUTO_ORD_SKU T3 
+		    	   ON T3.STORERKEY 		='FW00'
+				  AND T3.PURCHASE_CD 	= V.PURCHASE_CD
+				  AND T3.SKU 			= V.SKU
+				  AND T3.DEL_YN 		= 'N'
+				  
+		    ORDER BY V.RN
+    </select>
+    
+    <!-- 엑셀 리스트 validation -->
+    <select id="validateSkuExcelDetail" resultType="OmAutoOrderSetupDetailResDto">
+    	WITH /* [omAutoOrderSetupService.sqlx][omAutoOrderSetupService.validateSkuExcelDetail][자동발주 등록상품 내역확인 SELECT][JeongHyeongCheol][20250724] */
+			V AS (
+				<foreach collection="list" item="item" separator="UNION ALL">
+			        SELECT
+			             #{item.sku}							AS SKU
+						,#{item.uomDivCd}						AS UOM_DIV_CD
+						,#{item.qty}							AS QTY						
+						,#{item.purchaseCd}						AS PURCHASE_CD	
+			            ,ROW_NUMBER() OVER(ORDER BY 1) 			AS RN 
+			        FROM DUAL
+		        </foreach>
+		    )
+		    
+		    SELECT 
+		         V.SKU 								AS SKU
+		        ,V.UOM_DIV_CD						AS UOM_DIV_CD
+				,V.QTY								AS QTY				
+								
+		        ,CASE 
+		        	WHEN T1.BASECODE IS NOT NULL 
+		        	THEN 'Y' ELSE 'N' 
+		         END 								AS CODE_CHK
+		        ,CASE 
+		        	WHEN T2.SKU IS NOT NULL 
+		        	THEN 'Y' ELSE 'N' 
+		         END 								AS SKU_CHK
+				,CASE 					
+		        	WHEN T3.SKU IS NOT NULL 
+		        	THEN 'Y' ELSE 'N' 
+		         END 								AS SKU_DUP_CHK	
+		    FROM V
+		    
+		    LEFT JOIN CM_CODE T1 
+		    	   ON T1.CODELIST 		= 'AUTO_ORD_UOM_DIV'
+		          AND T1.STORERKEY 		= 'FW00'
+				  AND T1.BASECODE 		= V.UOM_DIV_CD
+		    
+			LEFT JOIN MS_SKU T2 
+		    	   ON T2.STORERKEY 		= 'FW00'
+		          AND T2.SKU 	= V.SKU			
+		    
+			LEFT JOIN OM_AUTO_ORD_SKU T3 
+		    	   ON T3.STORERKEY 		='FW00'
+				  AND T3.PURCHASE_CD 	= V.PURCHASE_CD
+				  AND T3.SKU 			= V.SKU
+				  AND T3.DEL_YN 		= 'N'
+				  
+		    ORDER BY V.RN
+    </select>
+    
+    <!-- 자동발주 상품내역 INSERT -->
+    <insert id="insertDetailList">
+    	/* [omAutoOrderSetupService.sqlx][omAutoOrderSetupService.insertDetailList][자동발주 상품내역 INSERT][JeongHyeongCheol][20250724] */
+	    <![CDATA[
+	    	MERGE INTO OM_AUTO_ORD_SKU USING (SELECT 'FW00'   AS STORERKEY
+	    	                                        ,#{purchaseCd} AS PURCHASE_CD
+	    	                                        ,#{sku}         AS SKU
+	    	                                  FROM   DUAL) T
+	    	                            ON  (    OM_AUTO_ORD_SKU.STORERKEY   = T.STORERKEY
+	    	                                 AND OM_AUTO_ORD_SKU.PURCHASE_CD = T.PURCHASE_CD
+	    	                                 AND OM_AUTO_ORD_SKU.SKU         = T.SKU )
+			WHEN MATCHED THEN
+			 	UPDATE SET UOM_DIV_CD = #{uomDivCd}
+			 	          ,QTY        = nvl(#{qty},0)
+			 	          ,DEL_YN     = 'N'
+			              ,EDITDATE   = SYSDATE
+			              ,EDITWHO    = #{gUserId}
+			WHEN NOT MATCHED THEN
+				INSERT 
+				    (STORERKEY
+				    ,PURCHASE_CD
+				    ,SKU
+				    ,UOM_DIV_CD
+				    ,QTY
+				    ,DEL_YN
+				    ,ADDDATE
+				    ,EDITDATE
+				    ,ADDWHO
+				    ,EDITWHO)
+				VALUES
+				    ('FW00'
+				    ,#{purchaseCd}
+				    ,#{sku}
+				    ,#{uomDivCd}
+				    ,nvl(#{qty},0)
+				    ,'N'
+				    ,SYSDATE
+				    ,SYSDATE
+				    ,#{gUserId}
+				    ,#{gUserId})
+	    ]]>
+    </insert>
+	
+	<!-- 자동발주 상품내역 UPDATE -->
+    <update id="updateDetailList">
+    	/* [omAutoOrderSetupService.sqlx][omAutoOrderSetupService.updateDetailList][자동발주 상품내역 UPDATE][JeongHyeongCheol][20250724] */
+    	<![CDATA[
+			UPDATE OM_AUTO_ORD_SKU
+			SET    UOM_DIV_CD  = #{uomDivCd}
+			      ,QTY         = nvl(#{qty},0)
+			      ,EDITDATE    = SYSDATE
+			      ,EDITWHO     = #{gUserId}
+			WHERE STORERKEY   = 'FW00'
+			AND   PURCHASE_CD = #{purchaseCd}
+			AND   SKU         = #{sku}
+		]]>
+    </update>
+    
+    <!-- 자동발주 상세내역 확인 SELECT -->
+    <select id="validateSkuInfo" resultType="OmAutoOrderSetupInfoResDto">
+    	/* [omAutoOrderSetupService.sqlx][omAutoOrderSetupService.validateSkuInfo][자동발주 상세내역 확인 SELECT][JeongHyeongCheol][20250724] */
+		SELECT (SELECT COUNT(1)
+				FROM   CM_ORGANIZE
+				WHERE  CM_ORGANIZE.ORGANIZE = #{organize} ) AS ORGANIZE_CHK
+		FROM   DUAL
+    </select>
+    
+    <!-- 자동발주 상세내역 INSERT -->
+    <insert id="insertMasterInfo">
+		/* [omAutoOrderSetupService.sqlx][omAutoOrderSetupService.insertMasterInfo][자동발주 상세내역 INSERT][JeongHyeongCheol][20250724] */ 
+	    <![CDATA[
+			INSERT INTO OM_AUTO_ORD
+				    (STORERKEY
+				    ,PURCHASE_CD
+				    ,PURCHASE_NAME
+				    ,PURCHASE_CONTS
+				    ,FROM_DCCODE
+				    ,ORGANIZE
+				    ,TO_DCCODE
+				    ,ORD_DAY
+				    ,CALENDAR_ID
+				    ,PURCHASE_DAY
+				    ,PURCHASE_HOLIYDAY_CD
+				    ,ORD_QTY_DIV_CD
+				    ,CHD_DC_YN
+				    ,ST_YN
+				    ,ST_DIV_CD
+				    ,DP_YN
+				    ,DP_PO_YN
+				    ,DP_FWSTO_YN
+				    ,DP_KXSTO_YN
+					,INC_CUSTKEY_YN
+					,INC_CLOSETYPE_YN
+					,INC_DISTANCETYPE_YN
+				    ,EX_SERIAL_YN
+				    ,RUN_DIV_CD
+				    ,RUN_YYYY
+				    ,RUN_MM
+				    ,RUN_DD
+				    ,RUN_HH
+				    ,RUN_MI
+				    ,RUN_MON_YN
+				    ,RUN_TUE_YN
+				    ,RUN_WED_YN
+				    ,RUN_THU_YN
+				    ,RUN_FRI_YN
+				    ,RUN_SAT_YN
+				    ,RUN_SUN_YN
+				    ,FROMDATE
+				    ,TODATE
+				    ,RUN_HOLIDAYCHK_YN
+				    ,PROC_CHK_YN
+				    ,RESULT_CHK_YN
+				    ,RESULT_CHK_TERM
+				    ,RECV_NAME1
+				    ,RECV_TEL1
+				    ,RECV_NAME2
+				    ,RECV_TEL2
+				    ,RECV_NAME3
+				    ,RECV_TEL3
+				    ,OTHER01
+				    ,OTHER02
+				    ,OTHER03
+				    ,OTHER04
+				    ,OTHER05
+				    ,REFERENCE01
+				    ,REFERENCE02
+				    ,REFERENCE03
+				    ,REFERENCE04
+				    ,REFERENCE05
+				    ,DEL_YN
+				    ,ADDDATE
+				    ,EDITDATE
+				    ,ADDWHO
+				    ,EDITWHO)
+				SELECT 
+					 'FW00'
+					,#{purchaseCd}
+					,#{purchaseName}
+					,#{purchaseConts}
+					,#{fromDccode}
+					,#{organize}
+					,#{toDccode}
+					,#{ordDay}
+					,nvl(#{calendarId},'STD')
+					,#{purchaseDay}
+					,#{purchaseHoliydayCd}
+					,#{ordQtyDivCd}
+					,#{chdDcYn}
+					,#{stYn}
+					,#{stDivCd}
+					,#{dpYn}
+					,#{dpPoYn}
+					,#{dpFwstoYn}
+					,#{dpKxstoYn}
+					,#{incCustkeyYn}
+					,#{incClosetypeYn}
+					,#{incDistancetypeYn}
+					,#{exSerialYn}
+					,#{runDivCd}
+					,#{runYyyy}
+					,#{runMm}
+					,#{runDd}
+					,#{runHh}
+					,#{runMi}
+					,#{runMonYn}
+					,#{runTueYn}
+					,#{runWedYn}
+					,#{runThuYn}
+					,#{runFriYn}
+					,#{runSatYn}
+					,#{runSunYn}
+					,#{fromdate}
+					,#{todate}
+					,#{runHolidaychkYn}
+					,#{procChkYn}
+					,#{resultChkYn}
+					,#{resultChkTerm}
+					,#{recvName1}
+					,#{recvTel1}
+					,#{recvName2}
+					,#{recvTel2}
+					,#{recvName3}
+					,#{recvTel3}
+					,#{other01}
+					,#{other02}
+					,#{other03}
+					,#{other04}
+					,#{other05}
+					,#{reference01}
+					,#{reference02}
+					,#{reference03}
+					,#{reference04}
+					,#{reference05}
+					,#{delYn}
+					,SYSDATE
+					,SYSDATE
+					,#{gUserId}
+					,#{gUserId}
+				  FROM DUAL
+		 ]]>
+    </insert>
+    
+    <!-- 자동발주 상세내역 UPDATE -->    
+	<select id="updateMasterInfo" statementType="CALLABLE" resultType="OmAutoOrderSetupEntity">
+        <![CDATA[
+        {
+        	CALL  /* [omAutoOrderSetupService.sqlx][omAutoOrderSetupService.updateMasterInfo][자동발주 상세내역 UPDAT][JeongHyeongCheol][20250724] */
+        	DECLARE
+                V_AFTER     OM_AUTO_ORD%rowtype;
+                O_SUCCESS   NUMBER         :=  1;      /* 성공여부(1이면 성공) */
+                O_ERRCODE   NUMBER         :=  0;      /* 오류 코드 */
+                O_ERRMSG    VARCHAR2(4000) := '';      /* 오류 메세지 */
+            BEGIN
+                SELECT  *
+                INTO    V_AFTER
+                FROM    OM_AUTO_ORD
+                WHERE   STORERKEY 		= 'FW00'
+                AND		PURCHASE_CD		= #{purchaseCd};
+    
+    			V_AFTER.PURCHASE_NAME        := #{purchaseName};
+				V_AFTER.PURCHASE_CONTS       := #{purchaseConts};
+				V_AFTER.FROM_DCCODE          := #{fromDccode};
+				V_AFTER.ORGANIZE             := #{organize};
+				V_AFTER.TO_DCCODE            := #{toDccode};
+				V_AFTER.ORD_DAY              := #{ordDay};
+				V_AFTER.CALENDAR_ID          := #{calendarId};
+				V_AFTER.PURCHASE_DAY         := #{purchaseDay};
+				V_AFTER.PURCHASE_HOLIYDAY_CD := #{purchaseHoliydayCd};
+				V_AFTER.ORD_QTY_DIV_CD       := #{ordQtyDivCd};
+				V_AFTER.CHD_DC_YN            := #{chdDcYn};
+				V_AFTER.ST_YN                := #{stYn};
+				V_AFTER.ST_DIV_CD            := #{stDivCd};
+				V_AFTER.DP_YN                := #{dpYn};
+				V_AFTER.DP_PO_YN             := #{dpPoYn};
+				V_AFTER.DP_FWSTO_YN          := #{dpFwstoYn};
+				V_AFTER.DP_KXSTO_YN          := #{dpKxstoYn};
+				V_AFTER.INC_CUSTKEY_YN       := #{incCustkeyYn};
+				V_AFTER.INC_CLOSETYPE_YN     := #{incClosetypeYn};
+				V_AFTER.INC_DISTANCETYPE_YN  := #{incDistancetypeYn};
+				V_AFTER.EX_SERIAL_YN         := #{exSerialYn};
+				V_AFTER.RUN_DIV_CD           := #{runDivCd};
+				V_AFTER.RUN_YYYY             := #{runYyyy};
+				V_AFTER.RUN_MM               := #{runMm};
+				V_AFTER.RUN_DD               := #{runDd};
+				V_AFTER.RUN_HH               := #{runHh};
+				V_AFTER.RUN_MI               := #{runMi};
+				V_AFTER.RUN_MON_YN           := #{runMonYn};
+				V_AFTER.RUN_TUE_YN           := #{runTueYn};
+				V_AFTER.RUN_WED_YN           := #{runWedYn};
+				V_AFTER.RUN_THU_YN           := #{runThuYn};
+				V_AFTER.RUN_FRI_YN           := #{runFriYn};
+				V_AFTER.RUN_SAT_YN           := #{runSatYn};
+				V_AFTER.RUN_SUN_YN           := #{runSunYn};
+				V_AFTER.FROMDATE             := #{fromdate};
+				V_AFTER.TODATE               := #{todate};
+				V_AFTER.RUN_HOLIDAYCHK_YN    := #{runHolidaychkYn};
+				V_AFTER.PROC_CHK_YN          := #{procChkYn};
+				V_AFTER.RESULT_CHK_YN        := #{resultChkYn};
+				V_AFTER.RESULT_CHK_TERM      := #{resultChkTerm};
+				V_AFTER.RECV_NAME1           := #{recvName1};
+				V_AFTER.RECV_TEL1            := #{recvTel1};
+				V_AFTER.RECV_NAME2           := #{recvName2};
+				V_AFTER.RECV_TEL2            := #{recvTel2};
+				V_AFTER.RECV_NAME3           := #{recvName3};
+				V_AFTER.RECV_TEL3            := #{recvTel3};
+				V_AFTER.OTHER01              := #{other01};
+				V_AFTER.OTHER02              := #{other02};
+				V_AFTER.OTHER03              := #{other03};
+				V_AFTER.OTHER04              := #{other04};
+				V_AFTER.OTHER05              := #{other05};
+				V_AFTER.REFERENCE01          := #{reference01};
+				V_AFTER.REFERENCE02          := #{reference02};
+				V_AFTER.REFERENCE03          := #{reference03};
+				V_AFTER.REFERENCE04          := #{reference04};
+				V_AFTER.REFERENCE05          := #{reference05};
+				V_AFTER.DEL_YN               := #{delYn};
+				V_AFTER.EDITDATE             := SYSDATE;
+				V_AFTER.EDITWHO              := #{gUserId};
+
+                TROM_AUTO_ORD.TR_UPDATE(
+                         V_AFTER
+                     ,   O_SUCCESS
+                     ,   O_ERRCODE
+                     ,   O_ERRMSG
+                );
+                
+				#{success, mode=OUT, jdbcType=INTEGER, javaType=int}    :=  O_SUCCESS;
+				#{err, mode=OUT, jdbcType=INTEGER, javaType=int}        :=  O_ERRCODE;
+				#{errmsg, mode=OUT, jdbcType=VARCHAR, javaType=String}  :=  O_ERRMSG;
+                
+        	END
+        }
+        ]]>        
+    </select>
+
+	<!-- 발주 예정량 조회 -->
+	<select id="getDataCalcRsltlist" resultType="OmAutoOrderSetupHistoryResDto">
+		SELECT /* [omAutoOrderSetupService.sqlx][omAutoOrderSetupService.getDataCalcRsltlist][발주 예정량 조회][JeongHyeongCheol][20250724] */
+		       SY_PROCESSTEMP_ST.FROM_DCCODE
+		      ,SY_PROCESSTEMP_ST.FROM_ORGANIZE
+		      ,SY_PROCESSTEMP_ST.TO_DCCODE
+		      ,SY_PROCESSTEMP_ST.TO_ORGANIZE
+		      ,SY_PROCESSTEMP_ST.TO_SKU
+		      ,MS_SKU.DESCRIPTION              AS SKUNAME
+		      ,SY_PROCESSTEMP_ST.TO_UOM
+		      ,SY_PROCESSTEMP_ST.TO_ORDERQTY
+		      ,SY_PROCESSTEMP_ST.SRCSERIALKEY1 AS RECEIVEDT
+		FROM   SY_PROCESSTEMP_ST JOIN MS_SKU ON  SY_PROCESSTEMP_ST.FROM_STORERKEY = MS_SKU.STORERKEY
+										     AND SY_PROCESSTEMP_ST.TO_SKU         = MS_SKU.SKU
+		WHERE  SY_PROCESSTEMP_ST.PROCESSTYPE    = #{processtype}
+		AND    SY_PROCESSTEMP_ST.PROCESSCREATOR = #{gUserId}
+		AND    SY_PROCESSTEMP_ST.SPID           = #{gSpid}
+		ORDER BY SY_PROCESSTEMP_ST.SERIALKEY
+	</select>
+	
+	<!-- 자동발주관리 상세설정 조회 (Detail SETUP) -->
+	<select id="getMasterInfoSetupList" resultType="OmAutoOrderSetupInfoResDto">
+		SELECT /* [omAutoOrderSetupService.sqlx][omAutoOrderSetupService.getMasterInfoSetupList][자동발주관리 상세설정 조회 (DetailSetup)][JeongHyeongCheol][20250724] */
+			   '0' as CHECKYN
+			  ,OM_AUTO_ORD_CONF.STORERKEY
+		      ,OM_AUTO_ORD_CONF.PURCHASE_CD
+			  ,OM_AUTO_ORD_CONF.PURCHASE_CONF_CD
+			  ,OM_AUTO_ORD_CONF.CONF_CD
+			  ,MS_CUST.DESCRIPTION AS CONF_NM	/* 고객명 */
+			  ,OM_AUTO_ORD_CONF.DEL_YN
+			  ,OM_AUTO_ORD_CONF.ADDWHO
+			  ,to_char(OM_AUTO_ORD_CONF.ADDDATE,'yyyy-mm-dd hh24:mi:ss') as ADDDATE
+			  ,OM_AUTO_ORD_CONF.EDITWHO
+			  ,to_char(OM_AUTO_ORD_CONF.EDITDATE,'yyyy-mm-dd hh24:mi:ss') as EDITDATE
+			  ,USER1.USER_NM 							AS REG_NM	/* 등록자명 */
+			  ,USER2.USER_NM 							AS UPD_NM	/* 수정자명 */			  
+		FROM   OM_AUTO_ORD_CONF
+   LEFT JOIN MS_CUST ON OM_AUTO_ORD_CONF.CONF_CD = MS_CUST.CUSTKEY AND MS_CUST.CUSTTYPE = 'C' /* 고객코드 */
+   LEFT JOIN   FRAMEONE_USER USER1 ON USER1.USER_ID = OM_AUTO_ORD_CONF.ADDWHO  /*등록자명*/
+   LEFT JOIN   FRAMEONE_USER USER2 ON USER2.USER_ID = OM_AUTO_ORD_CONF.EDITWHO  /*수정자명*/   
+		WHERE  OM_AUTO_ORD_CONF.STORERKEY        = 'FW00'
+		AND    OM_AUTO_ORD_CONF.PURCHASE_CD      = #{purchaseCd}
+		AND    OM_AUTO_ORD_CONF.PURCHASE_CONF_CD = #{purchaseConfCd}
+		AND    OM_AUTO_ORD_CONF.DEL_YN           = 'N'
+		ORDER BY OM_AUTO_ORD_CONF.PURCHASE_CD
+		        ,OM_AUTO_ORD_CONF.PURCHASE_CONF_CD
+		        ,OM_AUTO_ORD_CONF.CONF_CD
+	</select>
+	
+	<!-- 자동발주 상품내역 DELETE -->
+    <delete id="deleteMasterInfoSetup">
+    	/* [omAutoOrderSetupService.sqlx][omAutoOrderSetupService.deleteMasterInfoSetup][자동발주 상품내역 DELETE][JeongHyeongCheol][20250724] */
+		UPDATE OM_AUTO_ORD_CONF
+		SET    DEL_YN     = 'N'
+		      ,EDITDATE   = SYSDATE
+		      ,EDITWHO    = #{gUserId}
+		WHERE  STORERKEY   		 = 'FW00'
+		AND    PURCHASE_CD 		 = #{purchaseCd}
+		AND    PURCHASE_CONF_CD  = #{purchaseConfCd}
+		AND    CONF_CD 			 = #{confCd}
+    </delete>
+    
+    <!-- 자동발주 상세내역 확인(고객코드) SELECT -->
+    <select id="validateSetupInfoForCustkey" resultType="OmAutoOrderSetupInfoResDto">
+    	/* [omAutoOrderSetupService.sqlx][omAutoOrderSetupService.validateSetupInfoForCustkey][자동발주 상세내역 확인(고객코드) SELECT][JeongHyeongCheol][20250724] */
+		SELECT (SELECT COUNT(1)
+				FROM   MS_CUST
+				WHERE  MS_CUST.STORERKEY = 'FW00'
+				AND    MS_CUST.CUSTKEY   = #{confCd}
+				AND    MS_CUST.CUSTTYPE  = 'C' ) AS CUSTKEY_CHK
+		FROM   DUAL
+    </select>
+    
+    <!-- 자동발주 상세내역 확인(마감유형) SELECT -->
+    <select id="validateSetupInfoForClosetype" resultType="OmAutoOrderSetupInfoResDto">
+    	/* [omAutoOrderSetupService.sqlx][omAutoOrderSetupService.validateSetupInfoForClosetype][자동발주 상세내역 확인(마감유형) SELECT][JeongHyeongCheol][20250724] */
+		SELECT (SELECT COUNT(1)
+				FROM   CM_CODE
+				WHERE  CM_CODE.STORERKEY = 'FW00'
+				AND    CM_CODE.CODELIST  = 'CUSTORDERCLOSETYPE'
+				AND    CM_CODE.BASECODE  = #{confCd} ) AS CLOSETYPE_CHK
+		FROM   DUAL
+    </select>
+    
+    <!-- 자동발주 상세내역 확인(원거리유형) SELECT -->
+    <select id="validateSetupInfoForDistancetype" resultType="OmAutoOrderSetupInfoResDto">
+    	/* [omAutoOrderSetupService.sqlx][omAutoOrderSetupService.validateSetupInfoForDistancetype][자동발주 상세내역 확인(원거리유형) SELECT][JeongHyeongCheol][20250724] */
+		SELECT (SELECT COUNT(1)
+				FROM   CM_CODE
+				WHERE  CM_CODE.STORERKEY = 'FW00'
+				AND    CM_CODE.CODELIST  = 'DISTANCETYPE'
+				AND    CM_CODE.BASECODE  = #{confCd} ) AS DISTANCETYPE_CHK
+		FROM   DUAL
+    </select>
+    
+    <!-- 자동발주 상품내역 INSERT -->
+    <insert id="saveMasterInfoSetup">
+    	/* [omAutoOrderSetupService.sqlx][omAutoOrderSetupService.saveMasterInfoSetup][자동발주 상품내역 INSERT][JeongHyeongCheol][20250724] */
+	    <![CDATA[
+	    	MERGE INTO OM_AUTO_ORD_CONF USING (SELECT 'FW00'       AS STORERKEY
+	    	                                         ,#{purchaseCd}      AS PURCHASE_CD
+	    	                                         ,#{purchaseConfCd}	 AS PURCHASE_CONF_CD
+	    	                                         ,#{confCd}          AS CONF_CD
+	    	                                   FROM   DUAL) T
+	    	                            ON (    OM_AUTO_ORD_CONF.STORERKEY        = T.STORERKEY
+		    	                            AND OM_AUTO_ORD_CONF.PURCHASE_CD      = T.PURCHASE_CD
+		    	                            AND OM_AUTO_ORD_CONF.PURCHASE_CONF_CD = T.PURCHASE_CONF_CD
+		    	                            AND OM_AUTO_ORD_CONF.CONF_CD          = T.CONF_CD )
+			WHEN MATCHED THEN
+			 	UPDATE SET DEL_YN     = 'N'
+			              ,EDITDATE   = SYSDATE
+			              ,EDITWHO    = #{gUserId}
+			WHEN NOT MATCHED THEN
+				INSERT 
+				    (STORERKEY
+				    ,PURCHASE_CD
+				    ,PURCHASE_CONF_CD
+				    ,CONF_CD
+				    ,DEL_YN
+				    ,ADDDATE
+				    ,EDITDATE
+				    ,ADDWHO
+				    ,EDITWHO)
+				VALUES
+				    ('FW00'
+				    ,#{purchaseCd}
+				    ,#{purchaseConfCd}
+				    ,#{confCd}
+				    ,'N'
+				    ,SYSDATE
+				    ,SYSDATE
+				    ,#{gUserId}
+				    ,#{gUserId})
+		]]>
+    </insert>
+    
+    <!-- 자동발주관리 변경이력조회 -->
+	<select id="getEditHistoryList" resultType="OmAutoOrderSetupHistoryResDto">
+		SELECT /* [omAutoOrderSetupService.sqlx][omAutoOrderSetupService.getDataEditHistlist][자동발주관리 변경이력조회][JeongHyeongCheol][20250724] */
+		       to_char(LOGDATE,'yyyy-mm-dd hh24:mi:ss') as LOGDATE
+		      ,LOGWHO
+		      ,LOGDATA1
+		      ,LOGDATA2
+		      ,LOGDATA3
+			  ,USER1.USER_NM 					AS UPD_NM	/* 수정자명 */		
+		FROM  MG_DATAMODIFYLOG
+   LEFT JOIN  FRAMEONE_USER USER1 ON USER1.USER_ID = MG_DATAMODIFYLOG.LOGWHO  /*수정자명*/
+		WHERE MG_DATAMODIFYLOG.TABLENAME  = 'OM_AUTO_ORD'
+		AND   MG_DATAMODIFYLOG.STORERKEY  = #{storerkey}
+		AND   MG_DATAMODIFYLOG.SEARCHKEY1 = #{purchaseCd}
+		ORDER BY LOGDATE DESC
+	</select>
+	
+	<!-- 저장품자동발주관리 상세설정 마감유형 삭제 -->
+	<update id="saveDeleteCloseType">
+		UPDATE  /* [omAutoOrderSetupService.sqlx][omAutoOrderSetupService.saveDeleteCloseType][저장품자동발주관리 상세설정 마감유형 삭제][LeeJeongCheol][20260317] */
+		LOGISONE.OM_AUTO_ORD_CONF
+		SET DEL_YN = 'Y'
+			, EDITDATE = SYSDATE
+			, EDITWHO = #{gUserId}
+		WHERE STORERKEY = 'FW00'
+			AND CONF_CD = #{confCd}
+			AND PURCHASE_CD = #{purchaseCd}
+			AND PURCHASE_CONF_CD = #{purchaseConfCd}
+	</update>
+    
+</mapper>

@@ -1,0 +1,496 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+ * Copyright 2025. CJ OliveNetworks Co. all rights reserved.
+ *
+ * @author      : KimDongHan (liop0123@cj.net)
+ * @date        : 2025.11.17
+ * @description : 출고 > 출고현황 > 결품추적 SQL
+ * @issues      :
+-->
+
+<mapper namespace="wdItemTraceService">
+
+    <select id="getMasterList" resultType="cjfw.wms.wd.dto.WdItemTraceResDto">
+		SELECT /* [WdItemTraceService.sqlx][WdItemTraceService.getMasterList]모니터링 > 검수 > 검수 공정별 조회][KimDongHan][2025-11-17] */
+		       /*+ INDEX(OM IX_OM_SDY_REGN_REPL_D_01) */
+		       H.DCCODE                                                                                                                                                           AS DCCODE              /* 출고센터 */
+		     , FN_GETDCNAME(H.DCCODE)                                                                                                                                             AS DCNAME              /* 출고센터명*/
+		     , H.DELIVERYDATE                                                                                                                                                     AS DELIVERYDATE        /* 출고일자 */
+		     , D.DOCNO                                                                                                                                                            AS DOCNO               /* 전표번호 */
+		     , D.DOCLINE                                                                                                                                                          AS DOCLINE             /* 전표순번 */
+		     , D.CHANNEL                                                                                                                                                          AS CHANNEL             /* 저장유무 */
+		     , FN_CODEDESCR(D.STORERKEY,'PUTAWAYTYPE', D.CHANNEL)                                                                                                                 AS CHANNEL_NAME        /* 저장유무명*/
+		     , S.STORAGETYPE                                                                                                                                                      AS STORAGETYPE         /* 저장조건 */
+		     , FN_CODEDESCR(D.STORERKEY,'STORAGETYPE', S.STORAGETYPE)                                                                                                             AS STORAGETYPE_NAME    /* 저장조건명*/
+		     , H.FROM_CUSTKEY                                                                                                                                                     AS FROM_CUSTKEY        /* 공급업체 협력사코드 */
+		     , (SELECT DESCRIPTION FROM MS_CUST WHERE CUSTKEY = H.FROM_CUSTKEY AND STORERKEY=H.STORERKEY AND ROWNUM = 1)                                                          AS FROM_CUSTNAME       /* 공급업체 협력사명 */
+		     , H.FROM_CUSTTYPE                                                                                                                                                    AS FROM_CUSTTYPE       /* 공급업체 협력사유형 */
+             , H.TO_CUSTKEY                                                                                                                                                       AS TO_CUSTKEY          /* 고객 관리처코드 */
+		     , (SELECT DESCRIPTION FROM MS_CUST WHERE CUSTKEY = H.TO_CUSTKEY AND STORERKEY=H.STORERKEY AND ROWNUM = 1)                                                            AS TO_CUSTNAME         /* 고객 관리처코드명 */
+			 , H.TO_CUSTTYPE                                                                                                                                                      AS TO_CUSTTYPE         /* 고객 관리처유형 */
+		     , D.SKU                                                                                                                                                              AS SKU                 /* 상품코드 */
+		     , S.DESCRIPTION                                                                                                                                                      AS SKUNAME             /* 상품명칭 */
+		     , S.BASEUOM                                                                                                                                                          AS UOM                 /* 상품단위 */
+		     , NVL(D.ORDERQTY,0)                                                                                                                                                  AS ORDERQTY            /* 주문수량 */
+		     , NVL(D.OPENQTY,0)                                                                                                                                                   AS OPENQTY             /* 오픈수량 */
+		     , DP.DOCNO                                                                                                                                                           AS PONO                /* PO 주문번호 (일배/광역일배만 나옴) */
+		     , DP.DOCLINE                                                                                                                                                         AS POLINE              /* PO 주문 라인 (일배/광역일배만 나옴) */
+		     , NVL(DP.INSPECTQTY,0)                                                                                                                                               AS ILBAE_INSPECT_QTY   /* 입고 검수수량 일배 검수(받는센타) */
+		     , NVL(DP.CONFIRMQTY,0)                                                                                                                                               AS ILBAE_CONFIRM_QTY   /* 입고 입고 확정 일배입고 (받는센타) */
+		     , NVL(OM.MOVE_QTY,0)                                                                                                                                                 AS STO_REQUET_QTY      /* 광역 STO 요청 수량 */
+		     , CASE WHEN D.CHANNEL = '3' THEN NVL(D.ROUTEINSPECTQTY,0) ELSE 0 END                                                                                                 AS STO_DPINSPECT_QTY   /* 광역 검수 입고 STO 검수 처리 여부 필요함  */
+		     , 0                                                                                                                                                                  AS STO_DP_QTY          /* 광역 미정의수량 이거 어떻게 할지 숫자가 나올랑가  이름 미정의  */
+		     , NVL(WP.QTYALLOCATED,0)                                                                                                                                             AS QTYALLOCATED_QTY    /* 분배수량 */
+		     , NVL(WP.QTYPICKED,0)                                                                                                                                                AS QTYPICKED_QTY       /* 피킹 수량 */
+		     , NVL(WP.CONFIRMQTY,0)                                                                                                                                               AS CONFIRMQTY          /* 출고확정수량 */
+		     , NVL(WP.CANCELQTY,0)                                                                                                                                                AS CANCELQTY           /* 결품 수량 */ 
+		     , NVL(WP.INSPECTQTY,0)                                                                                                                                               AS UP_QTY              /* 상차 수량 */
+		     , (SELECT NVL(SUM(INSPECTQTY),0) FROM WD_INSPECT_UNLOAD SA WHERE SA.DCCODE = H.DCCODE AND D.DOCNO =SA.DOCNO AND D.DOCLINE= SA.DOCLINE AND D.DELIVERYDATE =SA.SLIPDT) AS DOWN_QTY            /* 하차수량 */
+		     , USR.USER_NM                                                                                                                                                        AS CANCELWHO_NAME      /* 결품처리자 */
+		  FROM DM_DOCUMENT_H H       /* 출고헤더 */
+		  JOIN DM_DOCUMENT_D D       /* 출고 디테일 */
+		  ON   H.DOCNO        = D.DOCNO
+          AND  H.DELIVERYDATE = D.DELIVERYDATE
+          AND  H.DCCODE       = D.DCCODE 
+		  LEFT JOIN DM_DOCUMENT_D DP      /* 입고 디테일 */
+		  ON   D.POKEY        = DP.DOCNO    /* 입고용 */
+          AND  D.POLINE       = DP.DOCLINE  /* 입고용 */        
+          AND  D.DELIVERYDATE = DP.DELIVERYDATE
+		  LEFT JOIN OM_SDY_REGN_REPL_D OM /* STO 상세 */
+		  ON   D.DOCNO        = OM.SOKEY  
+          AND  D.DOCLINE      = OM.SOLINE
+		  LEFT JOIN WD_INPLAN WP          /* 출고 부분 */
+		  ON   D.DELIVERYDATE = WP.SLIPDT
+          AND  D.DOCLINE      = WP.DOCLINE 
+          AND  D.DOCNO        = WP.DOCNO
+		  JOIN MS_SKU S
+		  ON   D.STORERKEY    = S.STORERKEY
+          AND  D.SKU          = S.SKU
+		  LEFT JOIN FRAMEONE_USER USR
+		  ON   D.CANCELWHO    = USR.USER_ID
+		 WHERE D.DEL_YN       = 'N'
+		   AND D.DOCTYPE      = 'WD'
+           AND H.STORERKEY    = #{gStorerkey}
+		<if test="dccode != null and dccode != ''">   
+           AND H.DCCODE       = #{dccode}
+		</if>  				   
+		<if test="deliverydate != null and deliverydate != ''">   
+           AND H.DELIVERYDATE = #{deliverydate}
+		</if>  				   
+		<if test="channel != null and channel != ''">   
+           AND D.CHANNEL      = #{channel}
+		</if>  				   
+		<!-- START.상품멀티 -->
+		<if test="skuMulti != null and skuMulti != '' ">
+			<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+				<foreach collection="skuMulti" item="item">
+            OR D.SKU IN
+					<foreach collection="item" item="code" open="(" close=")" separator=",">
+						#{code} 	 
+					</foreach>
+				</foreach>
+			</trim>
+		</if>
+		<!-- END.상품멀티 -->		 
+		<if test="storagetype!= null and storagetype!= ''">
+           AND S.STORAGETYPE = #{storagetype}
+		</if>	
+		<!-- START.관리처멀티 -->
+		<if test="toCustkeyMulti != null and toCustkeyMulti != '' ">
+			<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+				<foreach collection="toCustkeyMulti" item="item">
+            OR H.TO_CUSTKEY IN
+					<foreach collection="item" item="code" open="(" close=")" separator=",">
+						#{code} 	 
+					</foreach>
+				</foreach>
+			</trim>
+		</if>
+		<!-- END.관리처멀티 -->			  
+		<!-- START.협력사멀티 -->
+		<if test="fromCustkeyMulti != null and fromCustkeyMulti != '' ">
+			<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+				<foreach collection="fromCustkeyMulti" item="item">
+            OR H.FROM_CUSTKEY IN
+					<foreach collection="item" item="code" open="(" close=")" separator=",">
+						#{code} 	 
+					</foreach>
+				</foreach>
+			</trim>
+		</if>
+		<!-- END.협력사멀티 -->
+		<if test="docno != null and docno != ''">   
+           AND D.DOCNO      LIKE '%'||#{docno}||'%'
+		</if>
+		<if test="shortageYn == 'Y'.toString()">   
+           AND WP.CANCELQTY != 0
+		</if>
+		<if test="shortageYn == 'N'.toString()">   
+           AND WP.CANCELQTY  = 0
+		</if>
+		 ORDER BY D.DOCNO 
+    </select>
+    
+    <select id="getPopList_20260107" resultType="cjfw.wms.wd.dto.WdItemTraceResDto">
+		SELECT /* [WdItemTraceService.sqlx][WdItemTraceService.getPopList][모니터링 > 검수 > 검수 공정별 팝업 조회][KimDongHan][2025-11-17] */
+		       XXX.ROWCNT                                         AS ROWNCNT
+		     , XXX.FROM_CUSTNAME                                  AS FROM_CUSTNAME     /* 협력사명 */
+		     , XXX.TO_CUSTNAME                                    AS TO_CUSTNAME       /* 거래처명 */
+		     , (SELECT FN_DESCR_SKU(#{gStorerkey},SKU) FROM DUAL) AS SKUNAME           /* 상품명칭 */
+		     , XXX.STORERUOM                                      AS STORERUOM         /* 단위 */  
+		     , XXX.STOREROPENQTY                                  AS STOREROPENQTY     /* 입고,전체 : 예정량,예정 */
+		     , XXX.DP_INSPECTQTY                                  AS DP_INSPECTQTY     /* 입고,출고 : 입고량 */
+		     , XXX.WD_INSPECTQTY                                  AS WD_INSPECTQTY     /* 출고 : 출고량 */
+		     , XXX.TOTAL_CNT                                      AS TOTAL_CNT  
+		     , XXX.DELIVERYGROUP                                  AS DELIVERYGROUP  
+		     , XXX.SKU                                            AS SKU  
+		  FROM ( SELECT ROWCNT
+		              , FROM_CUSTNAME
+		              , TO_CUSTNAME
+		              , DELIVERYGROUP
+		              , SKU
+		              , STORERUOM
+		              , STOREROPENQTY
+		              , DP_INSPECTQTY
+		              , WD_INSPECTQTY
+		              , TOTAL_CNT
+		           FROM ( SELECT ROWNUM AS ROWCNT
+		                       , X.*
+		                       , COUNT(1) OVER() AS TOTAL_CNT
+		                    FROM ( SELECT PO.FROM_CUSTNAME
+		                                , H.TO_CUSTNAME
+		                                , T.DELIVERYGROUP
+		                                , A.SKU
+		                                , A.STORERUOM
+		                                , SUM(A.STOREROPENQTY) AS STOREROPENQTY
+		                                , SUM(FN_CONV_UOM(A.STORERKEY,A.SKU,A.UOM,A.STORERUOM,(SELECT SUM(D.DP_INSPECTQTY)
+		                                                                                         FROM WD_INVOICE D
+		                                                                                        WHERE D.DOCNO   = A.DOCNO
+		                                                                                          AND D.DOCLINE = A.DOCLINE
+		                                                                                          AND D.SLIPDT  = A.DELIVERYDATE
+		                                                                                          AND D.DCCODE  = A.DCCODE
+		                                                                                          AND D.DP_INSPECTQTY > 0)))  AS DP_INSPECTQTY
+		                                , SUM(FN_CONV_UOM(A.STORERKEY,A.SKU,A.UOM,A.STORERUOM,(SELECT SUM(D.OPENQTY)
+		                                                                                         FROM WD_INSPECT D
+		                                                                                         WHERE D.DOCNO   = A.DOCNO
+		                                                                                           AND D.DOCLINE = A.DOCLINE
+		                                                                                           AND D.OPENQTY > 0)))       AS WD_INSPECTQTY
+		                            FROM DM_DOCUMENT_D A 
+									JOIN DM_DOCUMENT_H H 
+		                              ON A.DCCODE       = H.DCCODE
+		                             AND A.DOCTYPE      = H.DOCTYPE
+		                             AND A.DELIVERYDATE = H.DELIVERYDATE 
+		                             AND A.DOCNO        = H.DOCNO
+		                            JOIN TM_INPLAN T 
+									  ON T.DCCODE  = A.DCCODE
+		                             AND T.DOCTYPE = A.DOCTYPE
+		                             AND T.SLIPDT  = A.DELIVERYDATE
+		                             AND T.DOCNO   = A.DOCNO
+		                            LEFT JOIN DM_DOCUMENT_H PO 
+									  ON A.POKEY   = PO.DOCNO
+		                             AND A.DCCODE  = PO.DCCODE
+		                             AND 'DP'      = PO.DOCTYPE
+		                            JOIN MS_SKU MS 
+									  ON MS.STORERKEY    = A.STORERKEY
+		                             AND MS.SKU          = A.SKU 
+								<if test="storagetype != null and storagetype != ''">                        
+		                             AND MS.STORAGETYPE  = #{storagetype}     
+								</if>
+		                           WHERE 1=1
+								<if test="deliverydate != null and deliverydate != ''">   
+                                     AND A.DCCODE = #{dccode}
+								</if>  		                           
+								<if test="deliverydate != null and deliverydate != ''">   
+                                     AND A.DELIVERYDATE = #{deliverydate}
+								</if>  			                             
+		                             AND A.STORERKEY        = #{gStorerkey}
+		                             AND A.DEL_YN           = 'N'
+		                             AND A.DOCTYPE          = 'WD'
+		                             AND A.WORKPROCESSCODE IN ('JASO', 'SO')
+		                           GROUP BY A.SKU
+		                                  , A.STORERUOM
+		                                  , PO.FROM_CUSTNAME
+		                                  , H.TO_CUSTNAME
+		                                  , T.DELIVERYGROUP
+		                           ORDER BY DELIVERYGROUP
+		                                  , TO_CUSTNAME
+		                                  , FROM_CUSTNAME
+		                                  , SKU ) X
+				<if test="gubun == 'DP'.toString()">   		                                  
+		          WHERE X.STOREROPENQTY > X.DP_INSPECTQTY 
+		            AND X.STOREROPENQTY > X.WD_INSPECTQTY ) XX
+				</if>		             
+				<if test="gubun == 'WD'.toString()">   		                                  
+		          WHERE X.DP_INSPECTQTY > 0 
+		            AND X.DP_INSPECTQTY > X.WD_INSPECTQTY ) XX
+				</if>		             
+		       ) XXX    
+    </select>
+    
+    <select id="getPopList" resultType="cjfw.wms.wd.dto.WdItemTraceResDto">
+		SELECT /* [WdItemTraceService.sqlx][WdItemTraceService.getPopList][모니터링 > 검수 > 검수 공정별 팝업 조회][KimDongHan][2025-11-17] */
+		       XXX.ROWCNT                                         AS ROWNCNT
+		     , XXX.FROM_CUSTNAME                                  AS FROM_CUSTNAME     /* 협력사명 */
+		     , XXX.TO_CUSTNAME                                    AS TO_CUSTNAME       /* 거래처명 */
+		     , (SELECT FN_DESCR_SKU(#{gStorerkey},SKU) FROM DUAL) AS SKUNAME           /* 상품명칭 */
+		     , XXX.STORERUOM                                      AS STORERUOM         /* 단위 */  
+		     , XXX.STOREROPENQTY                                  AS STOREROPENQTY     /* 입고,전체 : 예정량,예정 */
+		     , XXX.DP_INSPECTQTY                                  AS DP_INSPECTQTY     /* 입고,출고 : 입고량 */
+		     , XXX.WD_INSPECTQTY                                  AS WD_INSPECTQTY     /* 출고 : 출고량 */
+		     , XXX.TOTAL_CNT                                      AS TOTAL_CNT  
+		     , ''                                                 AS DELIVERYGROUP  
+		     , XXX.SKU                                            AS SKU  
+		  FROM ( SELECT ROWCNT
+		              , FROM_CUSTNAME
+		              , TO_CUSTNAME
+		              <!--, DELIVERYGROUP-->
+		              , SKU
+		              , STORERUOM
+		              , STOREROPENQTY
+		              , DP_INSPECTQTY
+		              , WD_INSPECTQTY
+		              , TOTAL_CNT
+		           FROM ( SELECT ROWNUM AS ROWCNT
+		                       , X.*
+		                       , COUNT(1) OVER() AS TOTAL_CNT
+		                    FROM ( SELECT PO.FROM_CUSTNAME
+		                                , H.TO_CUSTNAME
+		                                <!--, T.DELIVERYGROUP-->
+		                                , A.SKU
+		                                , A.STORERUOM
+		                                , SUM(A.STOREROPENQTY) AS STOREROPENQTY
+		                                , SUM(FN_CONV_UOM(A.STORERKEY,A.SKU,A.UOM,A.STORERUOM,(SELECT SUM(D.DP_INSPECTQTY)
+		                                                                                         FROM WD_INVOICE D
+		                                                                                        WHERE D.DOCNO   = A.DOCNO
+		                                                                                          AND D.DOCLINE = A.DOCLINE
+		                                                                                          AND D.SLIPDT  = A.DELIVERYDATE
+		                                                                                          AND D.DCCODE  = A.DCCODE
+		                                                                                          AND D.DP_INSPECTQTY > 0)))  AS DP_INSPECTQTY
+		                                , SUM(FN_CONV_UOM(A.STORERKEY,A.SKU,A.UOM,A.STORERUOM,(SELECT SUM(D.OPENQTY)
+		                                                                                         FROM WD_INSPECT D
+		                                                                                         WHERE D.DOCNO   = A.DOCNO
+		                                                                                           AND D.DOCLINE = A.DOCLINE
+		                                                                                           AND D.OPENQTY > 0)))       AS WD_INSPECTQTY
+		                            FROM DM_DOCUMENT_D A 
+									JOIN DM_DOCUMENT_H H 
+		                              ON A.DCCODE       = H.DCCODE
+		                             AND A.DOCTYPE      = H.DOCTYPE
+		                             AND A.DELIVERYDATE = H.DELIVERYDATE 
+		                             AND A.DOCNO        = H.DOCNO
+		                             <!--
+		                            JOIN TM_INPLAN T 
+									  ON T.DCCODE  = A.DCCODE
+		                             AND T.DOCTYPE = A.DOCTYPE
+		                             AND T.SLIPDT  = A.DELIVERYDATE
+		                             AND T.DOCNO   = A.DOCNO 
+		                             -->
+		                            LEFT JOIN DM_DOCUMENT_H PO 
+									  ON A.POKEY   = PO.DOCNO
+		                             AND A.DCCODE  = PO.DCCODE
+		                             AND 'DP'      = PO.DOCTYPE
+		                            JOIN MS_SKU MS 
+									  ON MS.STORERKEY    = A.STORERKEY
+		                             AND MS.SKU          = A.SKU 
+								<if test="storagetype != null and storagetype != ''">                        
+		                             AND MS.STORAGETYPE  = #{storagetype}     
+								</if>
+		                           WHERE 1=1
+								<if test="dccode != null and dccode != ''">   
+                                     AND A.DCCODE = #{dccode}
+								</if>  		                           
+								<if test="deliverydate != null and deliverydate != ''">   
+                                     AND A.DELIVERYDATE = #{deliverydate}
+								</if>  			                             
+		                             AND A.STORERKEY        = #{gStorerkey}
+		                             AND A.DEL_YN           = 'N'
+		                             AND A.DOCTYPE          = #{gubun}
+		                             <!--AND A.WORKPROCESSCODE IN ('JASO', 'SO')-->
+		                           GROUP BY A.SKU
+		                                  , A.STORERUOM
+		                                  , PO.FROM_CUSTNAME
+		                                  , H.TO_CUSTNAME
+		                                  <!--, T.DELIVERYGROUP-->
+		                           ORDER BY 
+		                                   <!-- DELIVERYGROUP-->
+		                                    TO_CUSTNAME
+		                                  , FROM_CUSTNAME
+		                                  , SKU ) X
+				<if test="gubun == 'DP'.toString()">   		                                  
+		          WHERE X.STOREROPENQTY > X.DP_INSPECTQTY 
+		            AND X.STOREROPENQTY > X.WD_INSPECTQTY ) XX
+				</if>		             
+				<if test="gubun == 'WD'.toString()">   		                                  
+		          WHERE X.DP_INSPECTQTY > 0 
+		            AND X.DP_INSPECTQTY > X.WD_INSPECTQTY ) XX
+				</if>		             
+		       ) XXX    
+    </select>
+    
+	<select id="getPopListDp" resultType="cjfw.wms.wd.dto.WdItemTraceResDto">
+		SELECT /* [WdItemTraceService.sqlx][WdItemTraceService.getPopListDp][모니터링 > 검수 > 검수 공정별 팝업 조회(입고)][KimDongHan][2025-11-17] */
+	           XXX.ROWCNT                                         AS ROWNCNT
+	         , XXX.FROM_CUSTNAME                                  AS FROM_CUSTNAME     /* 협력사명 */
+	         , XXX.TO_CUSTNAME                                    AS TO_CUSTNAME       /* 거래처명 */
+	         , FN_DESCR_SKU(#{gStorerkey},XXX.SKU)                AS SKUNAME           /* 상품명칭 */
+	         , XXX.STORERUOM                                      AS STORERUOM         /* 단위 */  
+	         , XXX.STOREROPENQTY                                  AS STOREROPENQTY     /* 입고,전체 : 예정량,예정 */
+	         , XXX.DP_INSPECTQTY                                  AS DP_INSPECTQTY     /* 입고,출고 : 입고량 */
+	         , XXX.WD_INSPECTQTY                                  AS WD_INSPECTQTY     /* 출고 : 출고량 */
+	         , XXX.TOTAL_CNT                                      AS TOTAL_CNT  
+	         , ''                                                 AS DELIVERYGROUP
+	         , XXX.SKU                                            AS SKU  
+	      FROM ( SELECT ROWCNT
+	                  , FROM_CUSTNAME
+	                  , TO_CUSTNAME
+	                  , SKU
+	                  , STORERUOM
+	                  , STOREROPENQTY
+	                  , DP_INSPECTQTY
+	                  , WD_INSPECTQTY
+	                  , TOTAL_CNT
+	               FROM ( SELECT ROWNUM AS ROWCNT
+	                           , X.*
+	                           , COUNT(1) OVER() AS TOTAL_CNT
+	                        FROM ( SELECT PO.FROM_CUSTNAME
+	                                    , H.TO_CUSTNAME
+	                                    , A.SKU
+	                                    , A.STORERUOM
+	                                    , SUM(A.STOREROPENQTY) AS STOREROPENQTY
+	                                    , SUM(FN_CONV_UOM(A.STORERKEY,A.SKU,A.UOM,A.STORERUOM,(SELECT SUM(D.DP_INSPECTQTY)
+	                                                                                             FROM WD_INVOICE D
+	                                                                                            WHERE D.DOCNO   = A.DOCNO
+	                                                                                              AND D.DOCLINE = A.DOCLINE
+	                                                                                              AND D.SLIPDT  = A.DELIVERYDATE
+	                                                                                              AND D.DCCODE  = A.DCCODE
+	                                                                                              AND D.DP_INSPECTQTY > 0)))  AS DP_INSPECTQTY
+	                                    , SUM(FN_CONV_UOM(A.STORERKEY,A.SKU,A.UOM,A.STORERUOM,(SELECT SUM(D.OPENQTY)
+	                                                                                             FROM WD_INSPECT D
+	                                                                                             WHERE D.DOCNO   = A.DOCNO
+	                                                                                               AND D.DOCLINE = A.DOCLINE
+	                                                                                               AND D.OPENQTY > 0)))       AS WD_INSPECTQTY
+	                                FROM DM_DOCUMENT_D A 
+	                                JOIN DM_DOCUMENT_H H 
+	                                  ON A.DCCODE           = H.DCCODE
+	                                 AND A.DOCTYPE          = H.DOCTYPE
+	                                 AND A.DELIVERYDATE     = H.DELIVERYDATE 
+	                                 AND A.DOCNO            = H.DOCNO
+	                                LEFT JOIN DM_DOCUMENT_H PO 
+	                                  ON A.POKEY            = PO.DOCNO
+	                                 AND A.DCCODE           = PO.DCCODE
+	                                 AND 'DP'               = PO.DOCTYPE
+	                                JOIN MS_SKU MS 
+	                                  ON MS.STORERKEY       = A.STORERKEY
+	                                 AND MS.SKU             = A.SKU 
+	                               WHERE 1=1
+								<if test="dccode != null and dccode != ''">   
+                                     AND A.DCCODE           = #{dccode}
+								</if>  	
+								<if test="deliverydate != null and deliverydate != ''">   
+                                     AND A.DELIVERYDATE     = #{deliverydate}
+								</if>  			                             
+	                                 AND A.STORERKEY        = #{gStorerkey}
+	                                 AND A.DEL_YN           = 'N'
+	                                 AND A.DOCTYPE          = 'DP'
+	                               GROUP BY A.SKU
+	                                      , A.STORERUOM
+	                                      , PO.FROM_CUSTNAME
+	                                      , H.TO_CUSTNAME
+	                               ORDER BY TO_CUSTNAME
+	                                      , FROM_CUSTNAME
+	                                      , SKU ) X
+	               WHERE X.STOREROPENQTY > X.DP_INSPECTQTY 
+	                 AND X.STOREROPENQTY > X.WD_INSPECTQTY
+	                 ) XX
+	           ) XXX	
+	</select>    
+	
+	<select id="getPopListWd" resultType="cjfw.wms.wd.dto.WdItemTraceResDto">
+		SELECT /* [WdItemTraceService.sqlx][WdItemTraceService.getPopListWd][모니터링 > 검수 > 검수 공정별 팝업 조회(출고)][KimDongHan][2025-11-17] */
+			   XXX.ROWCNT                                         AS ROWNCNT
+			 , XXX.FROM_CUSTNAME                                  AS FROM_CUSTNAME     /* 협력사명 */
+			 , XXX.TO_CUSTNAME                                    AS TO_CUSTNAME       /* 거래처명 */
+			 , FN_DESCR_SKU(#{gStorerkey},XXX.SKU)                AS SKUNAME           /* 상품명칭 */
+			 , XXX.STORERUOM                                      AS STORERUOM         /* 단위 */  
+			 , XXX.STOREROPENQTY                                  AS STOREROPENQTY     /* 입고,전체 : 예정량,예정 */
+			 , XXX.DP_INSPECTQTY                                  AS DP_INSPECTQTY     /* 입고,출고 : 입고량 */
+			 , XXX.WD_INSPECTQTY                                  AS WD_INSPECTQTY     /* 출고 : 출고량 */
+			 , XXX.TOTAL_CNT                                      AS TOTAL_CNT  
+			 , XXX.DELIVERYGROUP                                  AS DELIVERYGROUP  
+			 , XXX.SKU                                            AS SKU  
+		  FROM ( SELECT ROWCNT
+					  , FROM_CUSTNAME
+					  , TO_CUSTNAME
+					  , DELIVERYGROUP
+					  , SKU
+					  , STORERUOM
+					  , STOREROPENQTY
+					  , DP_INSPECTQTY
+					  , WD_INSPECTQTY
+					  , TOTAL_CNT
+				   FROM ( SELECT ROWNUM AS ROWCNT
+							   , X.*
+							   , COUNT(1) OVER() AS TOTAL_CNT
+							FROM ( SELECT PO.FROM_CUSTNAME
+										, H.TO_CUSTNAME
+										, T.DELIVERYGROUP
+										, A.SKU
+										, A.STORERUOM
+										, SUM(A.STOREROPENQTY) AS STOREROPENQTY
+										, SUM(FN_CONV_UOM(A.STORERKEY,A.SKU,A.UOM,A.STORERUOM,(SELECT SUM(D.DP_INSPECTQTY)
+																								 FROM WD_INVOICE D
+																								WHERE D.DOCNO   = A.DOCNO
+																								  AND D.DOCLINE = A.DOCLINE
+																								  AND D.SLIPDT  = A.DELIVERYDATE
+																								  AND D.DCCODE  = A.DCCODE
+																								  AND D.DP_INSPECTQTY > 0)))  AS DP_INSPECTQTY
+										, SUM(FN_CONV_UOM(A.STORERKEY,A.SKU,A.UOM,A.STORERUOM,(SELECT SUM(D.OPENQTY)
+																								 FROM WD_INSPECT D
+																								 WHERE D.DOCNO   = A.DOCNO
+																								   AND D.DOCLINE = A.DOCLINE
+																								   AND D.OPENQTY > 0)))       AS WD_INSPECTQTY
+									FROM DM_DOCUMENT_D A 
+									JOIN DM_DOCUMENT_H H 
+									  ON A.DCCODE           = H.DCCODE
+									 AND A.DOCTYPE          = H.DOCTYPE
+									 AND A.DELIVERYDATE     = H.DELIVERYDATE 
+									 AND A.DOCNO            = H.DOCNO
+									JOIN TM_INPLAN T 
+									  ON T.DCCODE           = A.DCCODE
+									 AND T.DOCTYPE          = A.DOCTYPE
+									 AND T.SLIPDT           = A.DELIVERYDATE
+									 AND T.DOCNO            = A.DOCNO
+									LEFT JOIN DM_DOCUMENT_H PO 
+									  ON A.POKEY            = PO.DOCNO
+									 AND A.DCCODE           = PO.DCCODE
+									 AND 'DP'               = PO.DOCTYPE
+									JOIN MS_SKU MS 
+									  ON MS.STORERKEY       = A.STORERKEY
+									 AND MS.SKU             = A.SKU 
+								   WHERE 1=1
+								<if test="dccode != null and dccode != ''">   
+									 AND A.DCCODE           = #{dccode}
+								</if>  	
+								<if test="deliverydate != null and deliverydate != ''">   
+									 AND A.DELIVERYDATE     = #{deliverydate}
+								</if> 
+									 AND A.STORERKEY        = #{gStorerkey}
+									 AND A.DEL_YN           = 'N'
+									 AND A.DOCTYPE          = 'WD'
+									 AND A.WORKPROCESSCODE IN ('JASO', 'SO')
+								   GROUP BY A.SKU
+										  , A.STORERUOM
+										  , PO.FROM_CUSTNAME
+										  , H.TO_CUSTNAME
+										  , T.DELIVERYGROUP
+								   ORDER BY DELIVERYGROUP
+										  , TO_CUSTNAME
+										  , FROM_CUSTNAME
+										  , SKU ) X
+				  WHERE 1=1 
+					AND X.STOREROPENQTY > 0    
+					AND X.STOREROPENQTY > X.WD_INSPECTQTY   
+					 ) XX
+			   ) XXX	
+	</select>	
+</mapper>

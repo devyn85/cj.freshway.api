@@ -1,0 +1,328 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+    "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="msPlantXSLService">
+
+    <select id="getPlantXSLList" resultType="MsPlantXSLListResDto">
+		WITH STOCKAMOUNT AS (
+		     SELECT 
+		         DCCODE, ORGANIZE, SUM(STOCK_AMOUNT)  AS STOCK_AMOUNT
+		     FROM SY_EXDC_STOCK_AMOUNT
+		     WHERE DCCODE = '2170'
+		     GROUP BY DCCODE, ORGANIZE 
+		)
+        
+		SELECT /* [msPlantXSLService.sqlx][msPlantXSLService.getPlantXSLList][저장위치정보 목록 조회][권정윤][20250530] */
+			T.PLANT                                                AS PLANT,
+			T.DCCODE                                               AS DCCODE,
+			T.STORAGELOC                                           AS STORAGELOC,
+			T.STORAGELOCNAME                                       AS STORAGELOCNAME,
+			T.DISTRIC                                              AS DISTRICT,
+			T.AREA                                                 AS AREA,
+			T.SERIALKEY                                            AS SERIALKEY,
+			T.CONTRACTYN                                           AS CONTRACTYN,
+			TO_CHAR(TO_DATE(T.ENDDATE, 'YYYYMMDD'), 'YYYY-MM-DD')  AS CONTRACTENDDATE,
+			TO_DATE(T.ENDDATE, 'YYYYMMDD') - TRUNC(SYSDATE) + 1    AS REMAININGDAYS,
+			STOCKAMOUNT.STOCK_AMOUNT                               AS STOCKAMOUNT,
+			T.ADDWHO                                               AS ADDWHO,
+			TO_CHAR(T.ADDDATE, 'yyyy-mm-dd hh24:mi:ss')            AS ADDDATE,
+			TO_CHAR(T.EDITDATE, 'yyyy-mm-dd hh24:mi:ss')           AS EDITDATE,
+			T.EDITWHO                                              AS EDITWHO,
+			T.CONTRACT_CHG_NTC_YN                                  AS CONTRACTCHGNTCYN,
+			T.CONTRACT_RMK                                         AS CONTRACTRMK,
+			T.USEBYDATE_EMAIL_SEND_YN                              AS USEBYDATEEMAILSENDYN,
+			T.USEBYDATE_FREE_RT                                    AS USEBYDATEFREERT
+	    FROM (
+	        SELECT
+	            MS_PLANTXSL.SERIALKEY,
+	            MS_PLANTXSL.DCCODE,
+	            MS_PLANTXSL.PLANT,
+	            MS_PLANT.DESCRIPTION AS PLANTNAME,
+	            '2170-'||MS_PLANTXSL.STORAGELOC AS STORAGELOC,
+	            MS_PLANTXSL.DESCRIPTION AS STORAGELOCNAME,
+	            COALESCE(MS_PLANTXSL.VATNO, MS_CUST.VATNO) AS VATNO,
+	            MS_PLANTXSL.FAX,
+	            REGEXP_SUBSTR(MS_PLANTXSL.ADDRESS1, '[^ ]+', 1, 1) AS DISTRIC,
+	            REGEXP_SUBSTR(MS_PLANTXSL.ADDRESS1, '[^ ]+', 1, 2) AS AREA,
+	            MS_PLANTXSL.STARTDATE,
+	            MS_PLANTXSL.ENDDATE,
+	            MS_PLANTXSL.CONTRACTYN,
+	            MS_PLANTXSL.CONTRACTDATE,
+	            MS_PLANTXSL.REMARK,
+	            MS_PLANTXSL.ADDWHO,
+	            MS_PLANTXSL.ADDDATE,
+	            MS_PLANTXSL.EDITDATE,
+	            MS_PLANTXSL.EDITWHO,
+	            MS_PLANTXSL.CONTRACT_CHG_NTC_YN,
+	            MS_PLANTXSL.CONTRACT_RMK,
+	            MS_PLANTXSL.USEBYDATE_EMAIL_SEND_YN,
+	            MS_PLANTXSL.USEBYDATE_FREE_RT
+	        FROM MS_PLANTXSL
+	        JOIN MS_PLANT ON MS_PLANTXSL.PLANT = MS_PLANT.PLANT
+	        LEFT JOIN MS_CUST ON MS_CUST.STORERKEY = #{gStorerkey}
+	                         AND MS_CUST.CUSTKEY = MS_PLANTXSL.MEMO
+	                         AND MS_CUST.CUSTTYPE = 'P'
+	        WHERE 1=1
+	        <if test="dccode != null and dccode != ''">
+	            AND MS_PLANTXSL.PLANT = #{dccode}
+	        </if>
+	        <if test="organize != null and organize != ''">
+		    <choose>
+					  <when test='dccode == "2170"'>
+	   			AND CONCAT('2170-', MS_PLANTXSL.STORAGELOC) IN
+	   			         (
+					        SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS VAL
+					        FROM (
+					          SELECT #{organize} AS VAL FROM DUAL
+					        ) A
+					        CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0
+					      )
+					  </when>
+					  <otherwise>
+		  		AND MS_PLANTXSL.STORAGELOC IN
+					      (
+					        SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS VAL
+					        FROM (
+					          SELECT #{organize} AS VAL FROM DUAL
+					        ) A
+					        CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0
+					      )
+					  </otherwise>
+			</choose>
+			</if>
+			<if test="contractyn != null and contractyn != ''">
+				AND MS_PLANTXSL.CONTRACTYN = #{contractyn}
+			</if>
+	    ) T
+	    LEFT JOIN STOCKAMOUNT
+          ON T.STORAGELOC = STOCKAMOUNT.ORGANIZE
+         AND T.PLANT      = STOCKAMOUNT.DCCODE
+	    WHERE 1=1
+	      <if test='qtyyn=="Y"'>AND TT.PLANT IS NOT NULL</if>
+	      <if test='qtyyn=="N"'>AND TT.PLANT IS NULL</if>
+	    ORDER BY T.PLANT, T.STORAGELOC
+	</select>
+
+	<select id="getPlantXSLDtl" resultType="MsPlantXSLDetailResDto">
+	    SELECT /* [msPlantXSLService.sqlx][msPlantXSLService.getMsPlantXSLDetail][저장위치정보 상세 조회][권정윤][20250530] */
+	        MS_PLANTXSL.PLANT         AS PLANT,
+	        MS_PLANTXSL.DCCODE        AS DCCODE,
+	        MS_PLANTXSL.SERIALKEY     AS SERIALKEY,
+	        MS_PLANTXSL.STORAGELOC    AS STORAGELOC,
+	        MS_PLANTXSL.DESCRIPTION   AS DESCRIPTION,
+	        MS_PLANTXSL.OWNER         AS OWNER,
+	        MS_PLANTXSL.SERIALKEY	  AS SERIALKEY,
+	        MS_PLANTXSL.TIMEZONE      AS TIMEZONE,
+	        MS_PLANTXSL.COUNTRY       AS COUNTRY,
+	        MS_PLANTXSL.STATE         AS STATE,
+	        MS_PLANTXSL.DISTRIC       AS DISTRICT,
+	        MS_PLANTXSL.AREA          AS AREA,
+	        MS_PLANTXSL.CITY          AS CITY,
+	        MS_PLANTXSL.ZIPCODE       AS ZIPCODE,
+	        MS_PLANTXSL.ADDRESS1      AS ADDRESS1,
+	        MS_PLANTXSL.ADDRESS2      AS ADDRESS2,
+	        MS_PLANTXSL.PHONE1        AS PHONE1,
+	        MS_PLANTXSL.PHONE2        AS PHONE2,
+	        MS_PLANTXSL.FAX           AS FAX,
+	        MS_PLANTXSL.EMAIL         AS EMAIL,
+	        MS_PLANTXSL.VATNO         AS VATNO,
+	        MS_PLANTXSL.VATOWNER      AS VATOWNER,
+	        MS_PLANTXSL.VATTYPE       AS VATTYPE,
+	        MS_PLANTXSL.VATNAME       AS VATNAME,
+	        MS_PLANTXSL.VATCATEGORY   AS VATCATEGORY,
+	        MS_PLANTXSL.VATADDRESS1   AS VATADDRESS1,
+	        MS_PLANTXSL.VATADDRESS2   AS VATADDRESS2,
+	        MS_PLANTXSL.VATPHONE      AS VATPHONE,
+	        MS_PLANTXSL.VATFAX        AS VATFAX,
+	        MS_PLANTXSL.EMPNAME1      AS EMPNAME1,
+	        MS_PLANTXSL.EMPNAME2      AS EMPNAME2,
+	        MS_PLANTXSL.EMPPHONE1     AS EMPPHONE1,
+	        MS_PLANTXSL.EMPPHONE2     AS EMPPHONE2,
+	        TO_CHAR(TO_DATE(MS_PLANTXSL.STARTDATE, 'YYYYMMDD'), 'YYYY-MM-DD') AS CONTRACTSTARTDATE,
+        	TO_CHAR(TO_DATE(MS_PLANTXSL.ENDDATE, 'YYYYMMDD'), 'YYYY-MM-DD') AS CONTRACTENDDATE,
+	        MS_PLANTXSL.FLOATMASK     AS FLOATMASK,
+	        MS_PLANTXSL.MEMO          AS MEMO,
+	        (	 SELECT MS_CUST.DESCRIPTION
+		         FROM MS_CUST
+		         WHERE MS_CUST.STORERKEY = #{gStorerkey}
+	             AND MS_CUST.CUSTKEY = MS_PLANTXSL.MEMO
+	             AND MS_CUST.CUSTTYPE = 'P'
+             )		 				  AS MEMONAME,
+	        MS_PLANTXSL.IFFILENAME    AS IFFILENAME,
+	        MS_PLANTXSL.STATUS        AS STATUS,
+	        MS_PLANTXSL.DEL_YN        AS DEL_YN,
+	        MS_PLANTXSL.TRAFFICCOP    AS TRAFFICCOP,
+	        MS_PLANTXSL.ARCHIVECOP    AS ARCHIVECOP,
+	        MS_PLANTXSL.ADDDATE       AS ADDDATE,
+	        MS_PLANTXSL.EDITDATE      AS EDITDATE,
+	        MS_PLANTXSL.ADDWHO        AS ADDWHO,
+	        MS_PLANTXSL.EDITWHO       AS EDITWHO,
+	        MS_PLANTXSL.INC_DP_DAY_YN AS INC_DP_DAY_YN,
+	        MS_PLANTXSL.INC_WD_DAY_YN AS INC_WD_DAY_YN,
+	        MS_PLANTXSL.EXT_COST_YN   AS EXT_COST_YN,
+	        MS_PLANTXSL.FAX2          AS FAX2,
+	        MS_PLANTXSL.EMAIL2        AS EMAIL2,
+	        MS_PLANTXSL.COMM_CODE     AS COMMCODE,
+	        MS_PLANTXSL.SAVE_CODE     AS SAVECODE,
+	        MS_PLANTXSL.SITEADDR      AS SITEADDR,
+	        MS_PLANTXSL.SITEID        AS SITEID,
+	        MS_PLANTXSL.SITEPW        AS SITEPW,
+	        MS_PLANTXSL.CONTRACTYN    AS CONTRACTYN,
+	        MS_PLANTXSL.CONTRACTDATE  AS CONTRACTDATE,
+	        MS_PLANTXSL.REMARK        AS REMARK,
+	        MS_PLANTXSL.EMAIL_YN      AS EMAIL_YN,
+	        MS_PLANTXSL.CONTRACT_CHG_NTC_YN     AS CONTRACTCHGNTCYN,
+			MS_PLANTXSL.CONTRACT_RMK            AS CONTRACTRMK,
+			MS_PLANTXSL.USEBYDATE_EMAIL_SEND_YN AS USEBYDATEEMAILSENDYN,
+			MS_PLANTXSL.USEBYDATE_FREE_RT       AS USEBYDATEFREERT,
+		   (SELECT COUNT(S.SERIALKEY)
+	          FROM MS_PLANTXSL_FILE S
+	         WHERE S.DOC_ID   = MS_PLANTXSL.SERIALKEY
+	           AND S.DOC_NAME = 'MS_PLANTXSL')  AS FILE_CNT
+	    FROM MS_PLANTXSL
+	    WHERE MS_PLANTXSL.PLANT      = #{plant}
+	      AND MS_PLANTXSL.STORAGELOC = #{storageloc}
+	</select>
+
+	<select id="getContractDateRangeList" resultType="map">
+	    SELECT /* [msPlantXSLService.sqlx][msPlantXSLService.getContractDateRangeList][계약기간 목록 조회][권정윤][20250610] */
+    		FROMDATE, TODATE
+	    FROM MS_EXDCRATE
+	    WHERE MS_EXDCRATE.DCCODE = #{plant}
+	      AND MS_EXDCRATE.ORGANIZE = #{organize}
+	    GROUP BY FROMDATE, TODATE
+
+	</select>
+
+    <select id="getAtchFileCnt" resultType="MsPlantXSLDetailResDto">
+        SELECT /* [MsPlantXSLService.sqlx][msPlantXSLService.getAtchFileCnt][계약서 count][JiHoPark][2025.12.18] */
+               COUNT(MS_PLANTXSL_FILE.SERIALKEY) AS FILE_CNT
+          FROM MS_PLANTXSL_FILE
+         WHERE DOC_ID   = #{docId}
+	       AND DOC_NAME = 'MS_PLANTXSL'
+    </select>
+
+	<update id="updateMsPlanxsl" parameterType="MsPlantXSLSaveReqDto">
+	    UPDATE MS_PLANTXSL
+	    SET
+	        ZIPCODE                  = #{zipcode},
+	        ADDRESS1                 = #{address1},
+	        ADDRESS2                 = #{address2},
+	        PHONE1                   = #{phone1},
+	        PHONE2                   = #{phone2},
+	        SERIALKEY                = #{serialkey},
+	        FAX                      = #{fax},
+	        EMAIL                    = #{email},
+	        FAX2                     = #{fax2},
+	        EMAIL2                   = #{email2},
+	        DISTRIC                  = #{district},
+	        AREA                     = #{area},
+	        MEMO                     = #{memo},
+	        STARTDATE                = #{contractstartdate},
+	        ENDDATE                  = #{contractenddate},
+	        CONTRACTYN               = #{contractyn},
+	        REMARK                   = #{remark},
+	        SITEADDR                 = #{siteaddr},
+	        SITEID                   = #{siteid},
+	        SITEPW                   = #{sitepw},
+	        SAVE_CODE                = #{savecode},
+			CONTRACT_CHG_NTC_YN      = #{contractchgntcyn},
+			CONTRACT_RMK             = #{contractrmk},
+			USEBYDATE_EMAIL_SEND_YN  = #{usebydateemailsendyn},
+			USEBYDATE_FREE_RT        = #{usebydatefreert}
+	    WHERE
+	        PLANT              = #{dccode}
+	        AND DCCODE         = #{dccode}
+	        AND STORAGELOC     = #{storageloc}
+	</update>
+
+	<insert id="insertMsPlantxslFile" parameterType="MsPlantXSLFileEntity">
+	    INSERT /* [msPlantXSLService.sqlx][msPlantXSLService.insertMsPlantxslFile][권정윤][20250611] */
+	           INTO MS_PLANTXSL_FILE (
+	            SERIALKEY
+		       , DOC_ID
+		       , DOC_TYPE
+		       , DOC_NAME
+		       , FILE_NAME
+		       , FILE_EXTENSION
+		       , FILE_LOCATION
+		       , FILE_SIZE_BYTES
+		       , TRANS_FILE_NAME
+		       , UPLOAD_HASH_ID
+		       , UPLOAD_RES_DOC_ID
+		       , UPLOAD_FILE_NAME
+		       , UPLOAD_WORKPLACE_ID
+		       , UPLOAD_LOCATION
+		       , DOWNLOAD_COUNT
+		       , FILE_CONTENT
+		       , FILE_TYPE
+		       , STATUS
+		       , ADDWHO
+		       , ADDDATE
+		       , EDITWHO
+		       , EDITDATE
+	           )
+	    VALUES (
+	             SEQ_MS_PLANTXSL_FILE.NEXTVAL
+	           , #{serialkey}
+               , #{docType}
+               , 'MS_PLANTXSL'
+               , #{fileName}
+               , #{fileExtension}
+               , #{fileLocation}
+               , #{fileSizeBytes}
+               , #{transFileName}
+               , ''
+               , #{uploadResDocId}
+               , #{uploadFileName}
+               , #{uploadWorkplaceId}
+               , ''
+               , '0'
+               , ''
+               , 'HTTP'
+               , 'Y'
+               , #{gUserNo}
+               , SYSDATE
+               , #{gUserNo}
+               , SYSDATE
+	           )
+	</insert>
+
+	<select id="getMasterFileList" resultType="MsPlantXSLFileEntity">
+	    SELECT /* [msPlantXSLService.sqlx][msPlantXSLService.getMasterFileList][저장위치정보 첨부파일 목록 조회][JiHoPark][2028.09.02] */
+               SERIALKEY              AS SERIALKEY
+             , DOC_ID                 AS DOC_ID
+             , DOC_TYPE               AS DOC_TYPE
+             , DOC_NAME               AS DOC_NAME
+             , FILE_NAME              AS FILE_NM
+             , FILE_EXTENSION         AS ATTCH_FILE_EXT_NM
+             , FILE_LOCATION          AS FILE_LOCATION
+             , FILE_SIZE_BYTES        AS ATTCH_FILE_SZ
+             , TRANS_FILE_NAME        AS ATTCH_FILE_NM
+             , UPLOAD_HASH_ID         AS UPLOAD_HASH_ID
+             , UPLOAD_RES_DOC_ID      AS UPLOAD_RES_DOC_ID
+             , UPLOAD_FILE_NAME       AS UPLOAD_FILE_NAME
+             , UPLOAD_WORKPLACE_ID    AS UPLOAD_WORKPLACE_ID
+             , UPLOAD_LOCATION        AS UPLOAD_LOCATION
+             , DOWNLOAD_COUNT         AS DOWNLOAD_COUNT
+             , FILE_TYPE              AS FILE_TYPE
+             , STATUS                 AS STATUS
+             , ADDWHO                 AS ADDWHO
+             , ADDDATE                AS ADDDATE
+             , EDITWHO                AS EDITWHO
+             , EDITDATE               AS EDITDATE
+          FROM MS_PLANTXSL_FILE
+         WHERE DOC_NAME = 'MS_PLANTXSL'
+           AND DOC_ID   = #{serialkey}
+           AND STATUS   = 'Y'
+         ORDER BY MS_PLANTXSL_FILE.SERIALKEY
+	</select>
+
+	<delete id="deleteMsPlantxslFile" >
+	    DELETE /* [msPlantXSLService.sqlx][msPlantXSLService.saveFileDelete][권정윤][20250611] */
+	    FROM MS_PLANTXSL_FILE
+	    WHERE SERIALKEY = #{serialkey}
+	</delete>
+
+</mapper>

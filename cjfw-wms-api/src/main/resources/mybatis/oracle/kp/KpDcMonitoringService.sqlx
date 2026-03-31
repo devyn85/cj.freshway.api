@@ -1,0 +1,167 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="kpDcMonitoringService">
+
+	<select id="getNewMasterRead" resultType="KpDcMonitoringResDto">
+    	SELECT /* [KpDcMonitoringService.sqlx][getNewMasterRead][신규 마스터 정보 조회][JangGwangSeok][2025.12.02] */
+    		  '신규배송정보' as GUBUN_NM
+		      ,'CRM_CUSTDLVINFO_HIS' as GUBUN
+		      ,'C' as GUBUN_TYPE
+		      ,count(case when CRM_CUSTDLVINFO_HIS.ADDDATE <![CDATA[<]]>  trunc(sysdate) then 1 end) as PRE_CNT
+		      ,count(case when CRM_CUSTDLVINFO_HIS.ADDDATE <![CDATA[>=]]> trunc(sysdate) then 1 end) AS CUR_CNT
+		FROM   CRM_CUSTDLVINFO_HIS JOIN MS_CUST
+		    ON CRM_CUSTDLVINFO_HIS.CUSTKEY = MS_CUST.CUSTKEY
+		    AND CRM_CUSTDLVINFO_HIS.CUSTTYPE = MS_CUST.CUSTTYPE
+		    AND CRM_CUSTDLVINFO_HIS.STORERKEY = MS_CUST.STORERKEY
+		    AND MS_CUST.DEL_YN ='N'
+		WHERE 1 = 1
+			AND    CRM_CUSTDLVINFO_HIS.STORERKEY	=  #{gStorerkey}
+			AND    CRM_CUSTDLVINFO_HIS.SOURCE_SYSTEM IN ('CRM','OFN')
+			AND		CRM_CUSTDLVINFO_HIS.CUSTTYPE = 'C'  
+			AND    CRM_CUSTDLVINFO_HIS.ADDDATE <![CDATA[>=]]> trunc(sysdate-1)
+			AND    MS_CUST.DLV_DCCODE = #{fixdccode}
+		
+		UNION ALL
+		
+		SELECT '신규거래처' as GUBUN_NM
+		      ,'MS_CUST' as GUBUN
+		      ,'C' as GUBUN_TYPE
+		      ,count(case when MS_CUST.ADDDATE <![CDATA[<]]>  trunc(sysdate) then 1 end) as PRE_CNT
+		      ,count(case when MS_CUST.ADDDATE <![CDATA[>=]]> trunc(sysdate) then 1 end) AS CUR_CNT
+		FROM   MS_CUST 
+		WHERE  1=1
+			AND    MS_CUST.STORERKEY	=  #{gStorerkey}
+	    	AND    MS_CUST.DEL_YN    = 'N'
+			AND    MS_CUST.CUSTTYPE  = 'C'
+			AND    MS_CUST.ADDDATE <![CDATA[>=]]> trunc(sysdate-1)
+		
+		UNION ALL
+		
+		SELECT '신규상품' as GUBUN_NM
+		      ,'MS_SKU' as GUBUN
+		      ,'' as GUBUN_TYPE
+		      ,count(case when MS_SKU.ADDDATE <![CDATA[<]]>  trunc(sysdate) then 1 end) as PRE_CNT
+		      ,count(case when MS_SKU.ADDDATE <![CDATA[>=]]> trunc(sysdate) then 1 end) AS CUR_CNT
+		FROM   MS_SKU 
+		WHERE 1=1
+			AND    MS_SKU.STORERKEY	=  #{gStorerkey}
+	    	AND    MS_SKU.DEL_YN    = 'N'
+			AND    MS_SKU.ADDDATE  <![CDATA[>=]]> trunc(sysdate-1)
+		
+		UNION ALL
+		
+		SELECT '신규협력사' as GUBUN_NM
+		      ,'MS_CUST' as GUBUN
+		      ,'P' as GUBUN_TYPE
+		      ,count(case when MS_CUST.ADDDATE <![CDATA[<]]>  trunc(sysdate) then 1 end) as PRE_CNT
+		      ,count(case when MS_CUST.ADDDATE <![CDATA[>=]]> trunc(sysdate) then 1 end) AS CUR_CNT
+		FROM   MS_CUST
+		WHERE 1=1
+			AND    MS_CUST.STORERKEY	=  #{gStorerkey}
+	    	AND    MS_CUST.DEL_YN    = 'N'
+			AND    MS_CUST.CUSTTYPE  = 'P'
+			AND    MS_CUST.ADDDATE <![CDATA[>=]]> trunc(sysdate-1)
+		
+		UNION ALL
+		
+		SELECT '신규수발주' as GUBUN_NM
+		      ,'MS_PURCHASECUST' as GUBUN
+		      ,'' as GUBUN_TYPE
+		      ,count(case when MS_PURCHASECUST.ADDDATE <![CDATA[<]]>  trunc(sysdate) then 1 end) as PRE_CNT
+		      ,count(case when MS_PURCHASECUST.ADDDATE <![CDATA[>=]]> trunc(sysdate) then 1 end) AS CUR_CNT
+		FROM   MS_PURCHASECUST
+		WHERE 1=1
+			AND    MS_PURCHASECUST.STORERKEY	=  #{gStorerkey}
+	    	AND    MS_PURCHASECUST.DEL_YN    = 'N'
+	    	AND    MS_PURCHASECUST.CHANNEL   = '1'
+			AND    MS_PURCHASECUST.ADDDATE <![CDATA[>=]]> trunc(sysdate-1)    
+	</select>
+	
+	<select id="getNewMasterDetailRead" resultType="KpDcMonitoringResDto">
+    	SELECT /* [KpDcMonitoringService.sqlx][getNewMasterDetailRead][신규 마스터 상세 정보 조회][JangGwangSeok][2025.12.02] */
+               T.CODE
+              ,T.NAME
+              ,T.GUBUN
+    	FROM   (
+    		<if test='gubun != null and gubun != "MS_CUST"'>
+    			<if test='gubun != null and gubun == "MS_SKU"'>
+	    	        SELECT MS_SKU.SKU         AS CODE
+	    	              ,MS_SKU.DESCRIPTION AS NAME
+	    	              ,'SKU'               AS GUBUN
+	    	        FROM   MS_SKU
+	    	        WHERE  MS_SKU.STORERKEY = #{gStorerkey}
+		    	        AND    MS_SKU.DEL_YN    = 'N'
+		    	        <if test='preYn != null and preYn != "Y"'>
+		    	        	AND    MS_SKU.ADDDATE >= trunc(sysdate)
+		    	        </if>
+		    	        <if test='preYn != null and preYn == "Y"'>
+			    	        AND    MS_SKU.ADDDATE <![CDATA[<]]>  trunc(sysdate)
+			    	        AND    MS_SKU.ADDDATE <![CDATA[>=]]> trunc(sysdate-1)
+		    	        </if>
+		    	</if>
+		    	<if test='gubun != null and gubun == "CRM_CUSTDLVINFO_HIS"'>
+	    	        SELECT CRM_CUSTDLVINFO_HIS.CUSTKEY     AS CODE
+	    	              ,MS_CUST.DESCRIPTION AS NAME
+	    	              ,'CRM_CUSTDLVINFO_HIS'              AS GUBUN
+	    	        FROM   CRM_CUSTDLVINFO_HIS JOIN MS_CUST
+					    ON CRM_CUSTDLVINFO_HIS.CUSTKEY = MS_CUST.CUSTKEY
+					    AND CRM_CUSTDLVINFO_HIS.CUSTTYPE = MS_CUST.CUSTTYPE
+					    AND CRM_CUSTDLVINFO_HIS.STORERKEY = MS_CUST.STORERKEY
+					    AND MS_CUST.DEL_YN ='N'
+	    	        WHERE  CRM_CUSTDLVINFO_HIS.STORERKEY = #{gStorerkey}
+		    	        AND    CRM_CUSTDLVINFO_HIS.CUSTTYPE  = #{gubunType}
+		    	        AND    CRM_CUSTDLVINFO_HIS.SOURCE_SYSTEM IN ('CRM','OFN')
+		    	        AND    MS_CUST.DLV_DCCODE = #{gDccode} 
+		    	        <if test='preYn != null and preYn != "Y"'>
+		    	        	AND    CRM_CUSTDLVINFO_HIS.ADDDATE >= trunc(sysdate)
+		    	        </if>
+		    	        <if test='preYn != null and preYn == "Y"'>
+			    	        AND    CRM_CUSTDLVINFO_HIS.ADDDATE <![CDATA[<]]>  trunc(sysdate)
+			    	        AND    CRM_CUSTDLVINFO_HIS.ADDDATE <![CDATA[>=]]> trunc(sysdate-1)
+		    	        </if>
+		    	</if>
+		    	<if test='gubun != null and gubun == "MS_PURCHASECUST"'>
+	    	        SELECT MS_PURCHASECUST.DCCODE||'-'||MS_PURCHASECUST.ROUTE||'-'||MS_PURCHASECUST.SKU     AS CODE
+	    	              ,'업체:'||MS_PURCHASECUST.CUSTTYPE
+	    	               ||'-'||MS_PURCHASECUST.CUSTKEY
+	    	               ||', 수발주담당자:'||(SELECT FN_CODEDESCR(MS_PURCHASEMST.STORERKEY,'BUYERKEY',MS_PURCHASEMST.BUYERKEY)
+	    	                                 FROM   MS_PURCHASEMST
+	    	                                 WHERE  MS_PURCHASEMST.STORERKEY = MS_PURCHASECUST.STORERKEY
+	    	                                 AND    MS_PURCHASEMST.DCCODE    = MS_PURCHASECUST.DCCODE
+	    	                                 AND    MS_PURCHASEMST.CUSTTYPE  = MS_PURCHASECUST.CUSTTYPE
+	    	                                 AND    MS_PURCHASEMST.SKU       = MS_PURCHASECUST.SKU ) AS NAME
+	    	              ,'PURCHASECUST'          AS GUBUN
+	    	        FROM   MS_PURCHASECUST
+	    	        WHERE  MS_PURCHASECUST.STORERKEY = #{gStorerkey}
+	    	    	    AND    MS_PURCHASECUST.CHANNEL   = '1'
+		    	        AND    MS_PURCHASECUST.DEL_YN    = 'N'
+		    	        <if test='preYn != null and preYn != "Y"'>
+		    	        	AND    MS_PURCHASECUST.ADDDATE >= trunc(sysdate)
+		    	        </if>
+		    	        <if test='preYn != null and preYn == "Y"'>
+			    	        AND    MS_PURCHASECUST.ADDDATE <![CDATA[<]]>  trunc(sysdate)
+			    	        AND    MS_PURCHASECUST.ADDDATE <![CDATA[>=]]> trunc(sysdate-1)
+		    	        </if>
+		    	</if>
+	    	</if>
+	    	<if test='gubun != null and gubun == "MS_CUST"'>
+    	        SELECT MS_CUST.CUSTKEY     AS CODE
+    	              ,MS_CUST.DESCRIPTION AS NAME
+    	              ,'CUST'              AS GUBUN
+    	        FROM   MS_CUST
+    	        WHERE  MS_CUST.STORERKEY = #{gStorerkey}
+	    	        AND    MS_CUST.DEL_YN    = 'N'
+	    	        AND    MS_CUST.CUSTTYPE  = #{gubunType}
+	    	        <if test='preYn != null and preYn != "Y"'>
+	    	        	AND    MS_CUST.ADDDATE >= trunc(sysdate)
+	    	        </if>
+	    	        <if test='preYn != null and preYn == "Y"'>
+		    	        AND    MS_CUST.ADDDATE <![CDATA[<]]>  trunc(sysdate)
+		    	        AND    MS_CUST.ADDDATE <![CDATA[>=]]> trunc(sysdate-1)
+	    	        </if>
+	    	</if>
+    	) T
+    	ORDER BY CODE
+	</select>
+    
+</mapper>

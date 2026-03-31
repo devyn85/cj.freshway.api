@@ -1,0 +1,748 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="tmLocationMonitorSummary">
+
+    <select id="getTempMonitorByCar" resultType="tmTempMonitorByCarResDto" parameterType="tmTempMonitorByCarReqDto">
+		SELECT /* [TmLocationMonitorSummary.sqlx][getTempMonitorByCar][차량 온도 모니터링 차량별 목록 조회] */
+                  CAR_LIST.DELIVERYDT
+                , CAR_LIST.CARNO
+                , CAR_LIST.PRIORITY
+                , CM_DRIVER.DRIVERNAME
+                , CAR_LIST.CONTRACTTYPE
+                , FN_DESCR_CODE('FW00', 'CONTRACTTYPE', CAR_LIST.CONTRACTTYPE) AS CONTRACTTYPE_NM
+                , DECODE(SUM(CASE WHEN TM_TMPR_RECORD.TEMPERATURE1_STATUS = 'NOML' THEN 1 ELSE 0 END), 0, null, TRUNC(
+                    SUM(CASE WHEN TM_TMPR_RECORD.TEMPERATURE1_STATUS = 'NOML' THEN 1 ELSE 0 END)
+                    / COUNT(1) * 100
+                  , 1)) AS TEMPERATURE1_NOML_RATE
+                , DECODE(SUM(CASE WHEN TM_TMPR_RECORD.TEMPERATURE2_STATUS = 'NOML' THEN 1 ELSE 0 END), 0, null, TRUNC(
+                    SUM(CASE WHEN TM_TMPR_RECORD.TEMPERATURE2_STATUS = 'NOML' THEN 1 ELSE 0 END)
+                    / COUNT(1) * 100
+                  , 1)) AS TEMPERATURE2_NOML_RATE
+                , DECODE(SUM(CASE WHEN TM_TMPR_RECORD.TEMPERATURE1_STATUS = 'OUT' THEN 1 ELSE 0 END), 0, null, TRUNC(
+                    SUM(CASE WHEN TM_TMPR_RECORD.TEMPERATURE1_STATUS = 'OUT' THEN 1 ELSE 0 END)
+                    / COUNT(1) * 100
+                  , 1)) AS TEMPERATURE1_OUT_RATE
+                , DECODE(SUM(CASE WHEN TM_TMPR_RECORD.TEMPERATURE2_STATUS = 'OUT' THEN 1 ELSE 0 END), 0, null, TRUNC(
+                    SUM(CASE WHEN TM_TMPR_RECORD.TEMPERATURE2_STATUS = 'OUT' THEN 1 ELSE 0 END)
+                    / COUNT(1) * 100
+                  , 1)) AS TEMPERATURE2_OUT_RATE
+                , TRUNC(AVG(TM_TMPR_RECORD.TEMPERATURE1), 1) AS TEMPERATURE1_AVG
+                , TRUNC(AVG(TM_TMPR_RECORD.TEMPERATURE2), 1) AS TEMPERATURE2_AVG
+                , DECODE(TO_CHAR(MIN(TM_TMPR_RECORD.TEMPERATURE1), 'FM999G999G999G990D0')
+                         || ' / ' ||
+                         TO_CHAR(MAX(TM_TMPR_RECORD.TEMPERATURE1), 'FM999G999G999G990D0')
+                         , ' / '
+                         , NULL
+                         , TO_CHAR(MIN(TM_TMPR_RECORD.TEMPERATURE1), 'FM999G999G999G990D0')
+                         || ' / ' ||
+                         TO_CHAR(MAX(TM_TMPR_RECORD.TEMPERATURE1), 'FM999G999G999G990D0')) AS TEMPERATURE1_MIN_MAX
+                , DECODE(TO_CHAR(MIN(TM_TMPR_RECORD.TEMPERATURE2), 'FM999G999G999G990D0')
+                         || ' / ' ||
+                         TO_CHAR(MAX(TM_TMPR_RECORD.TEMPERATURE2), 'FM999G999G999G990D0')
+                         , ' / '
+                         , NULL
+                         , TO_CHAR(MIN(TM_TMPR_RECORD.TEMPERATURE2), 'FM999G999G999G990D0')
+                         || ' / ' ||
+                         TO_CHAR(MAX(TM_TMPR_RECORD.TEMPERATURE2), 'FM999G999G999G990D0')) AS TEMPERATURE2_MIN_MAX
+                , DECODE(TO_CHAR(MIN(TM_TMPR_RECORD.RECORD_TIME), 'HH24:MI')
+                         || ' ~ ' ||
+                         TO_CHAR(MAX(TM_TMPR_RECORD.RECORD_TIME), 'HH24:MI')
+                         , ' ~ '
+                         , NULL
+                         , TO_CHAR(MIN(TM_TMPR_RECORD.RECORD_TIME), 'HH24:MI')
+                         || ' ~ ' ||
+                         TO_CHAR(MAX(TM_TMPR_RECORD.RECORD_TIME), 'HH24:MI')) AS TIME_RANGE
+            FROM (
+                SELECT DISTINCT
+                      STORERKEY
+                    , DELIVERYDT
+                    , CARNO
+                    , PRIORITY
+                    , CONTRACTTYPE
+                FROM VW_TM_INPLAN_ALL
+                WHERE DCCODE = #{dccode}
+                  AND DOCTYPE IN ('WD', 'RT')
+                  AND DELIVERYDT = #{deliverydt}
+                  AND SLIPDT BETWEEN TO_CHAR(TRUNC(ADD_MONTHS(TO_DATE(#{deliverydt}, 'YYYYMMDD'), -1), 'MM'), 'YYYYMMDD') AND #{deliverydt}
+                  AND TM_DELIVERYTYPE IN ('1', '2')
+                  AND STATUS = '90'
+                  AND DEL_YN = 'N'
+                <if test="contracttype != null and contracttype != ''">
+                    AND CONTRACTTYPE = #{contracttype}
+                </if>
+                <if test="carnoList != null and carnoList.size() > 0">
+                    AND CARNO IN
+                    <foreach collection="carnoList" item="carno" open="(" separator="," close=")">
+                        #{carno}
+                    </foreach>
+                </if>
+            ) CAR_LIST
+            LEFT JOIN TM_TMPR_RECORD
+                ON  TM_TMPR_RECORD.CARNO      = CAR_LIST.CARNO
+                AND TM_TMPR_RECORD.DELIVERYDT = CAR_LIST.DELIVERYDT
+            LEFT JOIN CM_CAR
+                ON  CM_CAR.CARNO = CAR_LIST.CARNO
+            LEFT JOIN CM_DRIVER
+                ON  CM_DRIVER.DRIVERID = CM_CAR.DRIVER1
+            GROUP BY
+                  CAR_LIST.DELIVERYDT
+                , CAR_LIST.CARNO
+                , CAR_LIST.PRIORITY
+                , CM_DRIVER.DRIVERNAME
+                , CAR_LIST.CONTRACTTYPE
+            ORDER BY
+                  CAR_LIST.CARNO
+                , CAR_LIST.PRIORITY
+    </select>
+
+    <sql id="tempMonitorDescTables">
+        <choose>
+            <when test="base != null and base.equalsIgnoreCase('CAR')">
+                /* TODO:khd 기준 회차의 센터출발이냐 운행시작 ~ 회차의 운행종료 */
+                WITH DE AS (
+                    SELECT i.DCCODE, w.CARNO, c.DRIVERID, w.DELIVERYDT, w.PRIORITY, NVL(MIN(w.DCDEPARTUREDT), MIN(w.CUSTDEPARTUREDT)) AS START_TIME,
+                        NVL(MAX(w.DCARRIVALDT), MAX(w.CUSTARRIVALDT)) AS END_TIME
+                    FROM TM_INPLAN w
+                    JOIN (
+                        SELECT CARNO, NVL(DRIVER1, DRIVER2) AS DRIVERID
+                        FROM CM_CAR
+                    ) c ON c.CARNO = w.CARNO
+                    INNER JOIN CM_DRIVER d ON d.DRIVERID = c.DRIVERID
+                    INNER JOIN (
+                        SELECT DISTINCT DCCODE, CARNO, DELIVERYDT, PRIORITY FROM TM_PLAN_ROUTE
+                        WHERE DEL_YN = 'N'
+                    ) i ON i.CARNO = w.CARNO AND i.DELIVERYDT = w.DELIVERYDT AND i.PRIORITY = w.PRIORITY
+                    WHERE w.DEL_YN = 'N' AND i.DCCODE = #{dccode} AND w.DELIVERYDT BETWEEN #{fromDeliverydt} AND #{toDeliverydt}
+                <if test="priority != null and priority != ''">
+                    AND w.PRIORITY = #{priority}
+                </if>
+                <if test="carnoList != null and carnoList.size() > 0">
+                    AND w.CARNO IN
+                    <foreach collection="carnoList" item="carno" open="(" separator="," close=")">
+                        #{carno}
+                    </foreach>
+                </if>
+                    GROUP BY i.DCCODE, w.CARNO, c.DRIVERID, w.DELIVERYDT, w.PRIORITY
+                ),
+             </when>
+            <otherwise>
+                WITH DE AS (
+                    SELECT i.DCCODE, w.CARNO, c.DRIVERID, w.DELIVERYDT, w.PRIORITY, NVL(MIN(w.DCDEPARTUREDT), MIN(w.CUSTDEPARTUREDT)) AS START_TIME,
+                        NVL(MAX(w.DCARRIVALDT), MAX(w.CUSTARRIVALDT)) AS END_TIME
+                    FROM TM_INPLAN w
+                    JOIN (
+                        SELECT CARNO, NVL(DRIVER1, DRIVER2) AS DRIVERID
+                        FROM CM_CAR
+                    ) c ON c.CARNO = w.CARNO
+                    INNER JOIN CM_DRIVER d ON d.DRIVERID = c.DRIVERID
+                    INNER JOIN (
+                        SELECT DISTINCT DCCODE, CARNO, DELIVERYDT, PRIORITY FROM TM_PLAN_ROUTE
+                        WHERE DEL_YN = 'N'
+                    ) i ON i.CARNO = w.CARNO AND i.DELIVERYDT = w.DELIVERYDT AND i.PRIORITY = w.PRIORITY
+                    WHERE w.DEL_YN = 'N' AND i.DCCODE = #{dccode} AND w.DELIVERYDT BETWEEN #{fromDeliverydt} AND #{toDeliverydt}
+                <if test="priority != null and priority != ''">
+                    AND w.PRIORITY = #{priority}
+                </if>
+                <if test="carnoList != null and carnoList.size() > 0">
+                    AND w.CARNO IN
+                    <foreach collection="carnoList" item="carno" open="(" separator="," close=")">
+                        #{carno}
+                    </foreach>
+                </if>
+                    GROUP BY i.DCCODE, w.CARNO, c.DRIVERID, w.DELIVERYDT, w.PRIORITY
+                ),
+            </otherwise>
+        </choose>
+        <![CDATA[
+        RANGE_DATA AS (
+            SELECT
+                r.CARNO,
+                r.RECORD_TIME,
+                r.TEMPERATURE1,
+                r.TEMPERATURE2,
+                r.TEMPERATURE1_STATUS,
+                r.TEMPERATURE2_STATUS,
+                d.DELIVERYDT,
+                d.PRIORITY,
+                d.END_TIME,
+                d.START_TIME
+            FROM TM_TMPR_RECORD r
+            JOIN DE d ON r.CARNO = d.CARNO AND r.RECORD_TIME >= TO_DATE(d.DELIVERYDT, 'YYYYMMDD') AND r.RECORD_TIME < TO_DATE(d.DELIVERYDT, 'YYYYMMDD') + 1
+            WHERE r.RECORD_TIME BETWEEN d.START_TIME AND d.END_TIME
+        ]]>
+        <if test="priority != null and priority != ''">
+            AND e.PRIORITY = #{priority}
+        </if>
+        ),
+        <![CDATA[
+        INTERVALS AS (
+            SELECT
+                d.CARNO,
+                d.DELIVERYDT,
+                d.START_TIME,
+                d.END_TIME,
+                d.END_TIME - NUMTODSINTERVAL((t.MIN_OFFSET - 1) * ${timeUnit}, 'MINUTE') AS TARGET_TIME,
+                d.PRIORITY
+            FROM DE d
+            CROSS JOIN (
+                SELECT LEVEL AS MIN_OFFSET
+                FROM dual
+                CONNECT BY LEVEL <= 720
+            ) t
+            WHERE d.END_TIME - NUMTODSINTERVAL((t.MIN_OFFSET - 1) * ${timeUnit}, 'MINUTE') > d.START_TIME]]>
+        <if test="priority != null and priority != ''">
+            AND d.PRIORITY = #{priority}
+        </if>
+        ),
+        <![CDATA[
+        TARGET AS (
+            SELECT
+                t.CARNO,
+                '' AS DESCRIPTION,
+                t.TARGET_TIME AS WORKDATE,
+                t.DELIVERYDT,
+                t.PRIORITY,
+                CASE
+                    WHEN t.TEMP1_STATUS_RAW = 'NA' AND ${timeUnit} > 1 THEN (
+                        SELECT MAX(r.TEMPERATURE1)
+                        FROM TM_TMPR_RECORD r
+                        WHERE r.CARNO = t.CARNO
+                          AND r.RECORD_TIME < t.TARGET_TIME
+                          AND r.TEMPERATURE1_STATUS != 'NA'
+                          AND r.RECORD_TIME >= t.TARGET_TIME - NUMTODSINTERVAL(${timeUnit}, 'MINUTE')
+                    )
+                    ELSE t.TEMP1_RAW
+                END AS REFRIG,
+                CASE
+                    WHEN t.TEMP1_STATUS_RAW = 'NA' AND ${timeUnit} > 1 THEN (
+                        SELECT MAX(r.TEMPERATURE1_STATUS)
+                        FROM TM_TMPR_RECORD r
+                        WHERE r.CARNO = t.CARNO
+                          AND r.RECORD_TIME < t.TARGET_TIME
+                          AND r.TEMPERATURE1_STATUS != 'NA'
+                          AND r.RECORD_TIME >= t.TARGET_TIME - NUMTODSINTERVAL(${timeUnit}, 'MINUTE')
+                    )
+                    ELSE t.TEMP1_STATUS_RAW
+                END AS REFRIG_STATUS,
+                CASE
+                    WHEN t.TEMP2_STATUS_RAW = 'NA' AND ${timeUnit} > 1 THEN (
+                        SELECT MAX(r.TEMPERATURE2)
+                        FROM TM_TMPR_RECORD r
+                        WHERE r.CARNO = t.CARNO
+                          AND r.RECORD_TIME < t.TARGET_TIME
+                          AND r.TEMPERATURE2_STATUS != 'NA'
+                          AND r.RECORD_TIME >= t.TARGET_TIME - NUMTODSINTERVAL(${timeUnit}, 'MINUTE')
+                    )
+                    ELSE t.TEMP2_RAW
+                END AS FREEZE,
+                CASE
+                    WHEN t.TEMP2_STATUS_RAW = 'NA' AND ${timeUnit} > 1 THEN (
+                        SELECT MAX(r.TEMPERATURE2_STATUS)
+                        FROM TM_TMPR_RECORD r
+                        WHERE r.CARNO = t.CARNO
+                          AND r.RECORD_TIME < t.TARGET_TIME
+                          AND r.TEMPERATURE2_STATUS != 'NA'
+                          AND r.RECORD_TIME >= t.TARGET_TIME - NUMTODSINTERVAL(${timeUnit}, 'MINUTE')
+                    )
+                    ELSE t.TEMP2_STATUS_RAW
+                END AS FREEZE_STATUS
+            FROM (
+        ]]>
+        <if test="timeUnit > 1">
+        <![CDATA[
+                SELECT
+                    i.CARNO,
+                    i.TARGET_TIME,
+                    i.DELIVERYDT,
+                    i.PRIORITY,
+                    MAX(c.RECORD_TIME) KEEP (DENSE_RANK LAST ORDER BY c.RECORD_TIME) AS LAST_TIME,
+                    MAX(c.TEMPERATURE1) KEEP (DENSE_RANK LAST ORDER BY c.RECORD_TIME) AS TEMP1_RAW,
+                    MAX(c.TEMPERATURE1_STATUS) KEEP (DENSE_RANK LAST ORDER BY c.RECORD_TIME) AS TEMP1_STATUS_RAW,
+                    MAX(c.TEMPERATURE2) KEEP (DENSE_RANK LAST ORDER BY c.RECORD_TIME) AS TEMP2_RAW,
+                    MAX(c.TEMPERATURE2_STATUS) KEEP (DENSE_RANK LAST ORDER BY c.RECORD_TIME) AS TEMP2_STATUS_RAW
+                FROM INTERVALS i
+                LEFT JOIN RANGE_DATA c ON c.CARNO = i.CARNO AND c.DELIVERYDT = i.DELIVERYDT AND c.RECORD_TIME <= i.TARGET_TIME
+                    AND i.PRIORITY = c.PRIORITY
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM TM_WORKLOG w
+                    WHERE w.CARNO = i.CARNO
+                      AND TRUNC(w.WORKDATEDATA1, 'MI') = TRUNC(i.TARGET_TIME, 'MI')
+                )
+                GROUP BY i.CARNO, i.DELIVERYDT, i.PRIORITY, i.TARGET_TIME
+        ]]>
+        </if>
+        <if test="timeUnit == 1">
+        <![CDATA[
+                SELECT
+                    i.CARNO,
+                    i.RECORD_TIME AS TARGET_TIME,
+                    i.DELIVERYDT,
+                    i.PRIORITY,
+                    i.RECORD_TIME AS LAST_TIME,
+                    i.TEMPERATURE1 AS TEMP1_RAW,
+                    i.TEMPERATURE1_STATUS AS TEMP1_STATUS_RAW,
+                    i.TEMPERATURE2 AS TEMP2_RAW,
+                    i.TEMPERATURE2_STATUS AS TEMP2_STATUS_RAW
+                FROM RANGE_DATA i
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM TM_WORKLOG w
+                    WHERE w.CARNO = i.CARNO
+                      AND TRUNC(w.WORKDATEDATA1, 'MI') = TRUNC(i.RECORD_TIME, 'MI')
+                )
+        ]]>
+        </if>
+            ) t
+        )
+    </sql>
+
+    <select id="getTempMonitorDescByCar" resultType="TmTempMonitorDescResDto" parameterType="TmTempMonitorDescReqDto">
+        <include refid="tempMonitorDescTables" />
+        SELECT *
+        FROM (
+            SELECT
+                t.CARNO, t.DESCRIPTION,
+                t.WORKDATE, TO_CHAR(t.WORKDATE, 'HH24:MI') AS WORKTIME, t.REFRIG, t.FREEZE,
+                t.REFRIG_STATUS, t.FREEZE_STATUS,
+                t.DELIVERYDT, t.PRIORITY
+            FROM TARGET t
+            <where>
+                <if test="tempStatus != null and tempStatus != ''">
+                    AND (t.REFRIG_STATUS = #{tempStatus} OR t.FREEZE_STATUS = #{tempStatus})
+                </if>
+            </where>
+
+            UNION ALL
+
+            SELECT DISTINCT w.CARNO, CASE WHEN WORKLOGTYPE = 'DCSTART' THEN dc.DCNAME ELSE c.DESCRIPTION END AS DESCRIPTION,
+                   w.WORKDATEDATA1 AS WORKDATE, TO_CHAR(w.WORKDATEDATA1, 'HH24:MI') AS WORKTIME, r.TEMPERATURE1 AS REFRIG, r.TEMPERATURE2 AS FREEZE,
+                   r.TEMPERATURE1_STATUS AS REFRIG_STATUS, r.TEMPERATURE2_STATUS AS FREEZE_STATUS,
+                   w.DELIVERYDT, i.PRIORITY
+            FROM TM_WORKLOG w
+            INNER JOIN CM_DRIVER d ON d.DRIVERID = w.DRIVERID
+            LEFT OUTER JOIN TM_TMPR_RECORD r ON r.CARNO = w.CARNO AND r.DELIVERYDT = w.DELIVERYDT AND TRUNC(r.RECORD_TIME, 'MI') = TRUNC(w.WORKDATEDATA1, 'MI')
+            INNER JOIN (
+                SELECT DISTINCT DCCODE, CARNO, DELIVERYDT, PRIORITY FROM TM_PLAN_ROUTE
+                WHERE DEL_YN = 'N'
+            ) i ON i.CARNO = w.CARNO AND i.DELIVERYDT = w.DELIVERYDT AND w.PRIORITY = i.PRIORITY
+            INNER JOIN CM_DC dc ON dc.DCCODE = i.DCCODE
+            LEFT OUTER JOIN MS_CUST c ON c.CUSTKEY = w.CUSTKEY
+            WHERE i.DCCODE = #{dccode} AND w.DELIVERYDT BETWEEN #{fromDeliverydt} AND #{toDeliverydt}
+        <choose>
+            <when test="dcIncYn != null and dcIncYn.equalsIgnoreCase('Y')"> AND w.WORKLOGTYPE IN ('DCSTART', 'DELIVERYEND') </when>
+            <otherwise> AND w.WORKLOGTYPE = 'DELIVERYEND' </otherwise>
+        </choose>
+        <if test="priority != null and priority != ''">
+            AND w.PRIORITY = #{priority}
+        </if>
+        <if test="carnoList != null and carnoList.size() > 0">
+            AND w.CARNO IN
+            <foreach collection="carnoList" item="carno" open="(" separator="," close=")">
+                #{carno}
+            </foreach>
+        </if>
+        <if test="tempStatus != null and tempStatus != ''">
+            AND (r.TEMPERATURE1_STATUS = #{tempStatus} OR r.TEMPERATURE2_STATUS = #{tempStatus})
+        </if>
+        <![CDATA[
+        ) t
+        ORDER BY t.CARNO, t.PRIORITY, t.WORKDATE desc
+        ]]>
+    </select>
+
+    <select id="getTempMonitorDescByCust" resultType="TmTempMonitorDescResDto" parameterType="TmTempMonitorDescReqDto">
+        <include refid="tempMonitorDescTables" />
+        SELECT *
+        FROM (
+            SELECT
+                t.CARNO, t.DESCRIPTION,
+                t.WORKDATE, TO_CHAR(t.WORKDATE, 'HH24:MI') AS WORKTIME, t.REFRIG, t.FREEZE,
+                t.REFRIG_STATUS, t.FREEZE_STATUS,
+                t.DELIVERYDT, t.PRIORITY
+            FROM TARGET t
+            <where>
+                <if test="tempStatus != null and tempStatus != ''">
+                    AND (t.REFRIG_STATUS = #{tempStatus} OR t.FREEZE_STATUS = #{tempStatus})
+                </if>
+            </where>
+
+            <if test="dcIncYn != null and dcIncYn.equalsIgnoreCase('Y')">
+            UNION ALL
+
+            SELECT w.CARNO, dc.DCNAME AS DESCRIPTION,
+                   w.WORKDATEDATA1 AS WORKDATE, TO_CHAR(w.WORKDATEDATA1, 'HH24:MI') AS WORKTIME, r.TEMPERATURE1 AS REFRIG, r.TEMPERATURE2 AS FREEZE,
+                   r.TEMPERATURE1_STATUS AS REFRIG_STATUS, r.TEMPERATURE1_STATUS AS FREEZE_STATUS,
+                   w.DELIVERYDT, i.PRIORITY
+            FROM TM_WORKLOG w
+            LEFT OUTER JOIN TM_TMPR_RECORD r ON r.CARNO = w.CARNO AND r.DELIVERYDT = w.DELIVERYDT AND TRUNC(w.WORKDATEDATA1, 'MI') = TRUNC(r.RECORD_TIME, 'MI')
+            INNER JOIN (
+                SELECT DISTINCT DCCODE, CARNO, DELIVERYDT, PRIORITY FROM TM_PLAN_ROUTE
+                WHERE DEL_YN = 'N'
+            ) i ON i.CARNO = w.CARNO AND i.DELIVERYDT = w.DELIVERYDT AND w.PRIORITY = i.PRIORITY
+            INNER JOIN CM_DC dc ON dc.DCCODE = i.DCCODE
+            WHERE i.DCCODE = #{dccode} AND w.DELIVERYDT BETWEEN #{fromDeliverydt} AND #{toDeliverydt}
+              AND w.WORKLOGTYPE = 'DCSTART'
+                <if test="tempStatus != null and tempStatus != ''">
+                    AND (r.TEMPERATURE1_STATUS = #{tempStatus} OR r.TEMPERATURE2_STATUS = #{tempStatus})
+                </if>
+                <if test="priority != null and priority != ''">
+                    AND w.PRIORITY = #{priority}
+                </if>
+            </if>
+
+            UNION ALL
+
+            SELECT DISTINCT w.CARNO, c.DESCRIPTION,
+                   w.WORKDATEDATA1 AS WORKDATE, TO_CHAR(w.WORKDATEDATA1, 'HH24:MI') AS WORKTIME, r.TEMPERATURE1 AS REFRIG, r.TEMPERATURE2 AS FREEZE,
+                   r.TEMPERATURE1_STATUS AS REFRIG_STATUS, r.TEMPERATURE1_STATUS AS FREEZE_STATUS,
+                   w.DELIVERYDT, i.PRIORITY
+            FROM TM_WORKLOG w
+            INNER JOIN CM_DRIVER d ON d.DRIVERID = w.DRIVERID
+            LEFT OUTER JOIN TM_TMPR_RECORD r ON r.CARNO = w.CARNO AND TRUNC(w.WORKDATEDATA1, 'MI') = TRUNC(r.RECORD_TIME, 'MI')
+            INNER JOIN (
+                SELECT DISTINCT DCCODE, CARNO, DELIVERYDT, PRIORITY FROM TM_PLAN_ROUTE
+                WHERE DEL_YN = 'N'
+            ) i ON i.CARNO = w.CARNO AND i.DELIVERYDT = w.DELIVERYDT AND w.PRIORITY = i.PRIORITY
+            INNER JOIN CM_DC dc ON dc.DCCODE = i.DCCODE
+            LEFT OUTER JOIN MS_CUST c ON c.CUSTKEY = w.CUSTKEY
+            WHERE i.DCCODE = #{dccode} AND w.DELIVERYDT BETWEEN #{fromDeliverydt} AND #{toDeliverydt}
+              AND w.WORKLOGTYPE = 'DELIVERYEND'
+        <if test="priority != null and priority != ''">
+            AND w.PRIORITY = #{priority}
+        </if>
+        <if test="custkey != null and custkey != ''">
+            AND c.CUSTKEY = #{custkey}
+        </if>
+        <if test="tempStatus != null and tempStatus != ''">
+            AND (r.TEMPERATURE1_STATUS = #{tempStatus} OR r.TEMPERATURE2_STATUS = #{tempStatus})
+        </if>
+        <![CDATA[
+        ) t
+        ORDER BY t.CARNO, t.PRIORITY, t.WORKDATE desc
+        ]]>
+    </select>
+
+    <select id="getTempMonitorDeparrDesc" resultType="TmTempMonitorDescResDto" parameterType="TmTempMonitorDescReqDto">
+ 		SELECT /* [TmLocationMonitorSummary.sqlx][getTempMonitorDeparrDesc][온도기록상세 목록 조회] */
+               TMPR_LIST.CARNO
+             , TMPR_LIST.CUSTKEY
+             , FN_DESCR_CUST('FW00', TMPR_LIST.CUSTKEY) AS CUSTNAME
+             , TMPR_LIST.RECORD_TIME
+             , TMPR_LIST.TEMPERATURE1 AS REFRIG
+             , TMPR_LIST.TEMPERATURE2 AS FREEZE
+             , TMPR_LIST.TEMPERATURE1_STATUS AS REFRIG_STATUS
+             , FN_CODEDESCR('FW00', 'TEMPERATURE_STATUS', TMPR_LIST.TEMPERATURE1_STATUS) AS REFRIG_STATUS_NM
+             , TMPR_LIST.TEMPERATURE2_STATUS AS FREEZE_STATUS
+             , FN_CODEDESCR('FW00', 'TEMPERATURE_STATUS', TMPR_LIST.TEMPERATURE2_STATUS) AS FREEZE_STATUS_NM
+             , TMPR_LIST.DELIVERYDT
+         FROM (
+ 	        SELECT
+ 	              CAR_CUST_LIST.CARNO
+ 	            , CAR_CUST_LIST.DELIVERYDT
+ 	            , NVL(TM_TMPR_RECORD.RECORD_TIME, CAR_CUST_LIST.ARRIVALDT) AS SORT_DT
+ 	            , CAR_CUST_LIST.ARRIVALDT
+ 	            , TM_TMPR_RECORD.RECORD_TIME
+ 	            , TM_TMPR_RECORD.TEMPERATURE1
+ 	            , TM_TMPR_RECORD.TEMPERATURE2
+ 	            , TM_TMPR_RECORD.TEMPERATURE1_STATUS
+ 	            , TM_TMPR_RECORD.TEMPERATURE2_STATUS
+ 	            , CASE WHEN TM_TMPR_RECORD.RECORD_TIME IS NULL THEN CAR_CUST_LIST.CUSTKEY
+ 		               WHEN CAR_CUST_LIST.ARRIVALDT = TM_TMPR_RECORD.RECORD_TIME THEN CAR_CUST_LIST.CUSTKEY
+ 		               ELSE NULL
+ 		               END AS CUSTKEY
+ 	            -- 마지막 온도 기준으로 제공 필요
+ 	            , MAX(TM_TMPR_RECORD.RECORD_TIME) OVER(
+ 	            	PARTITION BY CAR_CUST_LIST.DELIVERYDT, CAR_CUST_LIST.CARNO
+ 	            ) AS LAST_TIME
+ 	        FROM (
+ 	        	SELECT
+ 	                  CARNO
+ 	                , DELIVERYDT
+ 	                , CUSTTYPE
+ 	                , CUSTKEY
+ 	                , TRUNC(ARRIVALDT, 'MI') AS ARRIVALDT
+ 	                , TRUNC(NVL(LAG(ARRIVALDT) OVER(PARTITION BY DELIVERYDT, CARNO ORDER BY ARRIVALDT), ARRIVALDT - (10/1440)), 'MI') + (1/1440/60) AS RECORD_TIME_START
+ 	                , TRUNC(CASE WHEN LEAD(ARRIVALDT) OVER(PARTITION BY DELIVERYDT, CARNO ORDER BY ARRIVALDT) IS NULL THEN ARRIVALDT + 1
+ 	                             ELSE ARRIVALDT
+ 	                             END, 'MI') AS RECORD_TIME_END
+ 	        	FROM (
+ 	        		SELECT DISTINCT
+ 		                  CARNO
+ 		                , DELIVERYDT
+ 		                , CUSTTYPE
+ 		                , CUSTKEY
+ 		                , CASE WHEN CUSTTYPE = 'D' THEN DCARRIVALDT
+ 		                       ELSE CUSTARRIVALDT
+ 		                       END AS ARRIVALDT
+ 	        		FROM (
+ 			            SELECT
+ 			                  CARNO
+ 			                , DCCODE
+ 			                , DELIVERYDT
+ 			                , TRUTHCUSTKEY
+ 			                , COALESCE(
+ 			                      -- 거래처 도착 보다 빠른 케이스가 확인되어 min으로 변경
+ 			                      MIN(DCDEPARTUREDT) OVER(PARTITION BY DCCODE, DELIVERYDT, CARNO, PRIORITY)
+ 			                    , MAX(DCARRIVALDT) OVER(PARTITION BY DCCODE, DELIVERYDT, CARNO, PRIORITY)
+ 			                    , TO_DATE(DELIVERYDT, 'YYYYMMDD'
+ 			                  ) - (1/24)) AS DCARRIVALDT
+ 			                , NVL(
+ 			                      MAX(CUSTARRIVALDT) OVER(PARTITION BY DCCODE, DELIVERYDT, CARNO, PRIORITY, TRUTHCUSTKEY)
+ 			                    , MAX(DELIVERYPLANDT) OVER(PARTITION BY DCCODE, DELIVERYDT, CARNO, PRIORITY, TRUTHCUSTKEY)
+ 			                  ) AS CUSTARRIVALDT
+ 			            FROM VW_TM_INPLAN_ALL
+                        WHERE DCCODE = #{dccode}
+                          AND DOCTYPE IN ('WD', 'RT')
+                          AND DELIVERYDT BETWEEN #{fromDeliverydt} AND #{toDeliverydt}
+                          AND SLIPDT BETWEEN TO_CHAR(TRUNC(ADD_MONTHS(TO_DATE(#{fromDeliverydt}, 'YYYYMMDD'), -1), 'MM'), 'YYYYMMDD') AND #{toDeliverydt}
+                          AND TM_DELIVERYTYPE IN ('1', '2')
+                          AND DEL_YN = 'N'
+                          AND STATUS = '90'
+                        <if test="'CAR'.equals(base) and carnoList != null and carnoList.size() > 0">
+                            -- 차량번호/기사
+                            AND CARNO IN
+                            <foreach collection="carnoList" item="carno" open="(" separator="," close=")">
+                                #{carno}
+                            </foreach>
+                        </if>
+                        <if test="'CUST'.equals(base) and custkeyList != null and custkeyList.size() > 0">
+                            -- 거래처별 검색
+                            AND TRUTHCUSTKEY IN
+                            <foreach collection="custkeyList" item="custkey" open="(" separator="," close=")">
+                                #{custkey}
+                            </foreach>
+                        </if>
+ 	        		)
+ 	        		UNPIVOT (
+ 	        			CUSTKEY FOR CUSTTYPE IN (
+ 	        				  TRUTHCUSTKEY AS 'C'
+ 	        				, DCCODE AS 'D'
+ 	        			)
+ 	        		)
+ 	        		WHERE 1=1
+                    <if test='"N".equalsIgnoreCase(dcIncYn)'>
+                        -- 센터 포함 보기
+                        AND CUSTTYPE != 'D'
+                    </if>
+                    <if test="'CUST'.equals(base) and custkeyList != null and custkeyList.size() > 0">
+                        -- 거래처별 검색 : 물류센터 - 거래처 구간
+                        AND (
+                               CUSTTYPE = 'D'
+                            OR CUSTKEY IN
+                            <foreach collection="custkeyList" item="custkey" open="(" separator="," close=")">
+                                #{custkey}
+                            </foreach>
+                        )
+                    </if>
+ 	        	)
+ 	        ) CAR_CUST_LIST
+ 	        LEFT JOIN TM_TMPR_RECORD
+ 	            ON  TM_TMPR_RECORD.CARNO       = CAR_CUST_LIST.CARNO
+ 	            AND TM_TMPR_RECORD.DELIVERYDT  = CAR_CUST_LIST.DELIVERYDT
+ 	            AND TM_TMPR_RECORD.RECORD_TIME BETWEEN CAR_CUST_LIST.RECORD_TIME_START AND CAR_CUST_LIST.RECORD_TIME_END
+ 	        LEFT JOIN TM_WORKLOG
+ 	            ON  TM_WORKLOG.DELIVERYDT                 = CAR_CUST_LIST.DELIVERYDT
+ 	            AND TM_WORKLOG.CARNO                      = CAR_CUST_LIST.CARNO
+ 	            AND TRUNC(TM_WORKLOG.WORKDATEDATA1, 'MI') = TRUNC(TM_TMPR_RECORD.RECORD_TIME, 'MI')
+ 	            AND TM_WORKLOG.WORKLOGTYPE                IN ('DCSTART', 'DELIVERYEND')
+ 	        WHERE 1=1
+            <if test="tempStatus != null and tempStatus != ''">
+                -- 온도상태
+                AND ( TM_TMPR_RECORD.TEMPERATURE1_STATUS = #{tempStatus}
+                   OR TM_TMPR_RECORD.TEMPERATURE2_STATUS = #{tempStatus}
+                )
+            </if>
+ 	    ) TMPR_LIST
+         WHERE ( TMPR_LIST.CUSTKEY IS NOT NULL
+              OR MOD(TRUNC((TMPR_LIST.LAST_TIME - TMPR_LIST.RECORD_TIME) * 24 * 60), #{timeUnit}) = 0
+           )
+        <if test='"Y".equalsIgnoreCase(depArrYn)'>
+            -- 출/도착건만 보기
+            AND TMPR_LIST.RECORD_TIME IS NOT NULL
+            AND TMPR_LIST.CUSTKEY     IS NOT NULL
+        </if>
+         ORDER BY
+               TMPR_LIST.CARNO
+             , TMPR_LIST.DELIVERYDT
+             , TMPR_LIST.SORT_DT DESC
+    </select>
+
+    <select id="getTempMonitorDeparrDescStatusCount" resultType="map" parameterType="TmTempMonitorDescReqDto">
+        SELECT /* [TmLocationMonitorSummary.sqlx][getTempMonitorDeparrDescStatusCount][온도기록상세 상태별 건수 조회] */
+              SUM(CASE WHEN T.REFRIG_STATUS = 'NOML' THEN 1 ELSE 0 END) AS REFRIG_NOML_CNT
+            , SUM(CASE WHEN T.REFRIG_STATUS = 'OUT'  THEN 1 ELSE 0 END) AS REFRIG_OUT_CNT
+            , SUM(CASE WHEN T.REFRIG_STATUS = 'NA'   THEN 1 ELSE 0 END) AS REFRIG_NA_CNT
+            , SUM(CASE WHEN T.FREEZE_STATUS = 'NOML' THEN 1 ELSE 0 END) AS FREEZE_NOML_CNT
+            , SUM(CASE WHEN T.FREEZE_STATUS = 'OUT'  THEN 1 ELSE 0 END) AS FREEZE_OUT_CNT
+            , SUM(CASE WHEN T.FREEZE_STATUS = 'NA'   THEN 1 ELSE 0 END) AS FREEZE_NA_CNT
+        FROM (
+            SELECT
+                   TMPR_LIST.CUSTKEY
+                 , TMPR_LIST.RECORD_TIME
+                 , TMPR_LIST.TEMPERATURE1_STATUS AS REFRIG_STATUS
+                 , TMPR_LIST.TEMPERATURE2_STATUS AS FREEZE_STATUS
+             FROM (
+                SELECT
+                      TM_TMPR_RECORD.RECORD_TIME
+                    , TM_TMPR_RECORD.TEMPERATURE1_STATUS
+                    , TM_TMPR_RECORD.TEMPERATURE2_STATUS
+                    , CASE WHEN TM_TMPR_RECORD.RECORD_TIME IS NULL THEN CAR_CUST_LIST.CUSTKEY
+                           WHEN CAR_CUST_LIST.ARRIVALDT = TM_TMPR_RECORD.RECORD_TIME THEN CAR_CUST_LIST.CUSTKEY
+                           ELSE NULL
+                           END AS CUSTKEY
+                    -- 마지막 온도 기준으로 제공 필요
+                    , MAX(TM_TMPR_RECORD.RECORD_TIME) OVER(
+                        PARTITION BY CAR_CUST_LIST.DELIVERYDT, CAR_CUST_LIST.CARNO
+                    ) AS LAST_TIME
+                FROM (
+                    SELECT
+                          CARNO
+                        , DELIVERYDT
+                        , CUSTTYPE
+                        , CUSTKEY
+                        , TRUNC(ARRIVALDT, 'MI') AS ARRIVALDT
+                        , TRUNC(NVL(LAG(ARRIVALDT) OVER(PARTITION BY DELIVERYDT, CARNO ORDER BY ARRIVALDT), ARRIVALDT - (10/1440)), 'MI') + (1/1440/60) AS RECORD_TIME_START
+                        , TRUNC(CASE WHEN LEAD(ARRIVALDT) OVER(PARTITION BY DELIVERYDT, CARNO ORDER BY ARRIVALDT) IS NULL THEN ARRIVALDT + 1
+                                     ELSE ARRIVALDT
+                                     END, 'MI') AS RECORD_TIME_END
+                    FROM (
+                        SELECT DISTINCT
+                              CARNO
+                            , DELIVERYDT
+                            , CUSTTYPE
+                            , CUSTKEY
+                            , CASE WHEN CUSTTYPE = 'D' THEN DCARRIVALDT
+                                   ELSE CUSTARRIVALDT
+                                   END AS ARRIVALDT
+                        FROM (
+                            SELECT
+                                  CARNO
+                                , DCCODE
+                                , DELIVERYDT
+                                , TRUTHCUSTKEY
+                                , COALESCE(
+                                      -- 거래처 도착 보다 빠른 케이스가 확인되어 min으로 변경
+                                      MIN(DCDEPARTUREDT) OVER(PARTITION BY DCCODE, DELIVERYDT, CARNO, PRIORITY)
+                                    , MAX(DCARRIVALDT) OVER(PARTITION BY DCCODE, DELIVERYDT, CARNO, PRIORITY)
+                                    , TO_DATE(DELIVERYDT, 'YYYYMMDD'
+                                  ) - (1/24)) AS DCARRIVALDT
+                                , NVL(
+                                      MAX(CUSTARRIVALDT) OVER(PARTITION BY DCCODE, DELIVERYDT, CARNO, PRIORITY, TRUTHCUSTKEY)
+                                    , MAX(DELIVERYPLANDT) OVER(PARTITION BY DCCODE, DELIVERYDT, CARNO, PRIORITY, TRUTHCUSTKEY)
+                                  ) AS CUSTARRIVALDT
+                            FROM VW_TM_INPLAN_ALL
+                            WHERE DCCODE = #{dccode}
+                              AND DOCTYPE IN ('WD', 'RT')
+                              AND DELIVERYDT BETWEEN #{fromDeliverydt} AND #{toDeliverydt}
+                              AND SLIPDT BETWEEN TO_CHAR(TRUNC(ADD_MONTHS(TO_DATE(#{fromDeliverydt}, 'YYYYMMDD'), -1), 'MM'), 'YYYYMMDD') AND #{toDeliverydt}
+                              AND TM_DELIVERYTYPE IN ('1', '2')
+                              AND DEL_YN = 'N'
+                              AND STATUS = '90'
+                            <if test="'CAR'.equals(base) and carnoList != null and carnoList.size() > 0">
+                                -- 차량번호/기사
+                                AND CARNO IN
+                                <foreach collection="carnoList" item="carno" open="(" separator="," close=")">
+                                    #{carno}
+                                </foreach>
+                            </if>
+                            <if test="'CUST'.equals(base) and custkeyList != null and custkeyList.size() > 0">
+                                -- 거래처별 검색
+                                AND TRUTHCUSTKEY IN
+                                <foreach collection="custkeyList" item="custkey" open="(" separator="," close=")">
+                                    #{custkey}
+                                </foreach>
+                            </if>
+                        )
+                        UNPIVOT (
+                            CUSTKEY FOR CUSTTYPE IN (
+                                  TRUTHCUSTKEY AS 'C'
+                                , DCCODE AS 'D'
+                            )
+                        )
+                        WHERE 1=1
+                        <if test='"N".equalsIgnoreCase(dcIncYn)'>
+                            -- 센터 포함 보기
+                            AND CUSTTYPE != 'D'
+                        </if>
+                        <if test="'CUST'.equals(base) and custkeyList != null and custkeyList.size() > 0">
+                            -- 거래처별 검색 : 물류센터 - 거래처 구간
+                            AND (
+                                   CUSTTYPE = 'D'
+                                OR CUSTKEY IN
+                                <foreach collection="custkeyList" item="custkey" open="(" separator="," close=")">
+                                    #{custkey}
+                                </foreach>
+                            )
+                        </if>
+                    )
+                ) CAR_CUST_LIST
+                LEFT JOIN TM_TMPR_RECORD
+                    ON  TM_TMPR_RECORD.CARNO       = CAR_CUST_LIST.CARNO
+                    AND TM_TMPR_RECORD.DELIVERYDT  = CAR_CUST_LIST.DELIVERYDT
+                    AND TM_TMPR_RECORD.RECORD_TIME BETWEEN CAR_CUST_LIST.RECORD_TIME_START AND CAR_CUST_LIST.RECORD_TIME_END
+                LEFT JOIN TM_WORKLOG
+                    ON  TM_WORKLOG.DELIVERYDT                 = CAR_CUST_LIST.DELIVERYDT
+                    AND TM_WORKLOG.CARNO                      = CAR_CUST_LIST.CARNO
+                    AND TRUNC(TM_WORKLOG.WORKDATEDATA1, 'MI') = TRUNC(TM_TMPR_RECORD.RECORD_TIME, 'MI')
+                    AND TM_WORKLOG.WORKLOGTYPE                IN ('DCSTART', 'DELIVERYEND')
+                WHERE 1=1
+                <if test="tempStatus != null and tempStatus != ''">
+                    -- 온도상태
+                    AND ( TM_TMPR_RECORD.TEMPERATURE1_STATUS = #{tempStatus}
+                       OR TM_TMPR_RECORD.TEMPERATURE2_STATUS = #{tempStatus}
+                    )
+                </if>
+            ) TMPR_LIST
+             WHERE ( TMPR_LIST.CUSTKEY IS NOT NULL
+                  OR MOD(TRUNC((TMPR_LIST.LAST_TIME - TMPR_LIST.RECORD_TIME) * 24 * 60), #{timeUnit}) = 0
+               )
+            <if test='"Y".equalsIgnoreCase(depArrYn)'>
+                -- 출/도착건만 보기
+                AND TMPR_LIST.RECORD_TIME IS NOT NULL
+                AND TMPR_LIST.CUSTKEY     IS NOT NULL
+            </if>
+        ) T
+    </select>
+
+    <select id="getTempGraph" resultType="TmTempGraphResDto" parameterType="TmTempGraphReqDto">
+		SELECT /* [TmLocationMonitorSummary.sqlx][getTempGraph][차량별 온도 차트 목록 조회] */
+               TM_TMPR_RECORD.CARNO
+             , TM_TMPR_RECORD.RECORD_TIME
+             , TO_CHAR(TM_TMPR_RECORD.TEMPERATURE1, 'FM999G999G999G990D0') AS REFRIG
+             , TO_CHAR(TM_TMPR_RECORD.TEMPERATURE2, 'FM999G999G999G990D0') AS FREEZE
+             , TM_TMPR_RECORD.TEMPERATURE1_STATUS AS REFRIG_STATUS
+             , TM_TMPR_RECORD.TEMPERATURE2_STATUS AS FREEZE_STATUS
+             , FN_DESCR_CUST(TM_INPLAN_CAR.STORERKEY, TM_WORKLOG.CUSTKEY) AS CUSTNAME
+             , TO_CHAR(TM_WORKLOG.WORKDATEDATA1, 'HH24:MI') AS ARRIVAL_TIME
+        FROM TM_TMPR_RECORD
+        JOIN (
+            SELECT DISTINCT
+                  STORERKEY
+                , DELIVERYDT
+                , CARNO
+                , PRIORITY
+                , CONTRACTTYPE
+            FROM VW_TM_INPLAN_ALL
+            WHERE DCCODE          = #{dccode}
+              AND DOCTYPE         IN ('WD', 'RT')
+              AND DELIVERYDT      = #{deliverydt}
+              AND SLIPDT          BETWEEN TO_CHAR(TRUNC(ADD_MONTHS(TO_DATE(#{deliverydt}, 'YYYYMMDD'), -1), 'MM'), 'YYYYMMDD') AND #{deliverydt}
+              AND TM_DELIVERYTYPE IN ('1', '2')
+              AND DEL_YN          = 'N'
+              AND STATUS          = '90'
+              /* 차량 선택 */
+              AND CARNO           = #{carno}
+              AND PRIORITY        = #{priority}
+        ) TM_INPLAN_CAR
+            ON  TM_INPLAN_CAR.CARNO       = TM_TMPR_RECORD.CARNO
+            AND TM_INPLAN_CAR.DELIVERYDT  = TM_TMPR_RECORD.DELIVERYDT
+        LEFT JOIN TM_WORKLOG
+            ON  TM_WORKLOG.CARNO         = TM_INPLAN_CAR.CARNO
+            AND TM_WORKLOG.DELIVERYDT    = TM_INPLAN_CAR.DELIVERYDT
+            AND TM_WORKLOG.WORKLOGTYPE   = 'DELIVERYEND'
+            AND TRUNC(TM_WORKLOG.WORKDATEDATA1, 'MI') = TRUNC(TM_TMPR_RECORD.RECORD_TIME, 'MI')
+        ORDER BY TM_TMPR_RECORD.RECORD_TIME
+    </select>
+
+</mapper>

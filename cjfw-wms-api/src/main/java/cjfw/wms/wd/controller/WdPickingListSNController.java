@@ -1,0 +1,58 @@
+package cjfw.wms.wd.controller;
+
+import java.util.List;
+
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import cjfw.core.model.ApiResult;
+import cjfw.core.model.Page;
+import cjfw.wms.wd.dto.WdPickingListSNReqDto;
+import cjfw.wms.wd.dto.WdPickingListSNResDto;
+import cjfw.wms.wd.service.WdPickingListSNService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+
+/**
+ * Copyright 2025. CJ OliveNetworks Co. all rights reserved.
+ * @author : 공두경 (medstorm@cj.net)
+ * @date : 2025.07.03
+ * @description : 이력피킹현황 Controller
+ * @issues :<pre>
+ * -----------------------------------------------------------
+ * DATE       AUTHOR                MAJOR_ISSUE
+ * -----------------------------------------------------------
+ * 2025.07.03 공두경 (medstorm@cj.net) 생성 </pre>
+ */
+@Tag(name = "WdPickingListSN", description = "이력피킹현황")
+@RestController
+@Slf4j
+@RequiredArgsConstructor
+@RequestMapping("api/wd/pickingListSN")
+public class WdPickingListSNController {
+
+	private final WdPickingListSNService wdPickingListSNService;
+
+	/**
+	 * @description : 이력피킹현황 목록 조회
+	 * @issues :<pre>
+	 * -----------------------------------------------------------
+	 * DATE       AUTHOR                MAJOR_ISSUE
+	 * -----------------------------------------------------------
+	 * 2025.07.03 공두경 (medstorm@cj.net) 생성 </pre>
+	 */
+	@Operation(summary = "이력피킹현황 목록 조회", description = "이력피킹현황 목록 조회")
+	@PostMapping(value = "/v1.0/getMasterList")
+	public ApiResult<List<WdPickingListSNResDto>> getDataHeaderlist(@RequestBody WdPickingListSNReqDto wdPickingListSNReqDto, Page page) {
+
+
+		return ApiResult.createResult(wdPickingListSNService.getMasterList(wdPickingListSNReqDto, page));
+	}
+	
+
+
+}

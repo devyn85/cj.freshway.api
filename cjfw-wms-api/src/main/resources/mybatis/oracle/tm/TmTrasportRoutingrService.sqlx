@@ -1,0 +1,410 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="tmTrasportRoutingService">
+    <select id="getToCenterList"  resultType="TmTrasportRoutingResDto">
+        SELECT /* [tmTrasportRoutingService.sqlx][getToCenterList][출발지TC센터설정 목록 조회][YeoSeungCheol][2025.08.18] */
+             TCCODE                                            AS TC_CODE        /* TC센터코드 */
+            ,TCNAME                                            AS TC_NAME        /* TC센터명     */
+            ,LATITUDE                                          AS LATITUDE       /* 위도         */
+            ,LONGITUDE                                         AS LONGITUDE      /* 경도         */
+            ,ADDRESS1                                          AS ADDRESS1       /* 기본주소     */
+            ,ADDRESS2                                          AS ADDRESS2       /* 상세주소     */
+            ,USE_YN                                            AS USEYN          /* 사용여부     */
+            ,TO_CHAR(ADDDATE,'YYYY-MM-DD HH24:MI:SS')          AS ADD_DATE       /* 최초등록시간 */
+            ,ADDWHO                                            AS ADD_WHO        /* 최종등록자     */
+            ,TO_CHAR(EDITDATE,'YYYY-MM-DD HH24:MI:SS')         AS EDIT_DATE      /* 최종변경시간 */
+            ,EDITWHO                                           AS EDIT_WHO       /* 최종변경자     */
+        FROM
+            CM_TC
+        WHERE 1=1
+        AND CM_TC.USE_YN = 'Y'
+        ORDER BY TCCODE
+    </select>
+    
+    <select id="getMasterList"  resultType="TmTrasportRoutingResDto">
+    <![CDATA[
+         SELECT /* [tmTrasportRoutingService.sqlx][getMasterList][수송경로관리 조회 (목록)][ParkYoSep][20251015] */
+                TM_CARRIER_ROUTE.SERIALKEY             AS SERIALKEY           /* 데이터번호 */
+              , TM_CARRIER_ROUTE.SERIALKEY             AS ROUTE_SERIALKEY     /* 노선번호 */
+              , TM_CARRIER_ROUTE.ROUTE_NM              AS ROUTE_NM            /* 노선명 */
+              , TM_CARRIER_ROUTE.FROM_DCCODE           AS FROM_DCCODE         /* 출발센터 */
+              , TM_CARRIER_ROUTE.FROM_ORGANIZE         AS FROM_ORGANIZE       /* 출발창고 */
+              , FROM_ORGANIZE.DESCRIPTION              AS FROM_ORGANIZE_NAME  /* 출발창고명 */
+              , TM_CARRIER_ROUTE.TO_DCCODE             AS TO_DCCODE           /* 도착센터 */
+              , TM_CARRIER_ROUTE.TO_ORGANIZE           AS TO_ORGANIZE         /* 도착창고 */
+              , TO_ORGANIZE.DESCRIPTION                AS TO_ORGANIZE_NAME    /* 도착창고명 */
+              , TM_CARRIER_ROUTE.RMK                   AS RMK                 /* 비고 */
+              , TM_CARRIER_ROUTE.FROMDATE              AS FROMDATE            /* 시작일자 */
+              , TM_CARRIER_ROUTE.TODATE                AS TODATE              /* 종료일자 */
+              , TM_CARRIER_ROUTE.ADDDATE               AS ADDDATE             /* 최초등록시간 */
+              , TM_CARRIER_ROUTE.EDITDATE              AS EDITDATE            /* 최종변경시간 */
+              , TM_CARRIER_ROUTE.ADDWHO                AS ADDWHO              /* 최초등록자 */
+              , TM_CARRIER_ROUTE.EDITWHO               AS EDITWHO             /* 최종변경자 */
+              , USER1.USER_NM                          AS ADDWHONAME          /* 등록자명 */
+              , USER2.USER_NM                          AS EDITWHONAME         /* 수정자명 */
+           FROM TM_CARRIER_ROUTE   
+          /* ── 등록/수정자명 기본 조인 규칙 ───────────────────────────────────── */
+           LEFT JOIN    FRAMEONE_USER USER1
+             ON USER1.USER_ID = TM_CARRIER_ROUTE.ADDWHO                     /* 등록자명 */
+           LEFT JOIN    FRAMEONE_USER USER2
+             ON USER2.USER_ID = TM_CARRIER_ROUTE.EDITWHO                    /* 수정자명 */
+           LEFT JOIN CM_DCXORGANIZE FROM_ORGANIZE
+             ON FROM_ORGANIZE.ORGANIZE = TM_CARRIER_ROUTE.FROM_ORGANIZE
+           LEFT JOIN CM_DCXORGANIZE TO_ORGANIZE
+             ON TO_ORGANIZE.ORGANIZE = TM_CARRIER_ROUTE.TO_ORGANIZE
+          WHERE  1 = 1
+            AND TM_CARRIER_ROUTE.TODATE >= #{fromDate}
+            AND TM_CARRIER_ROUTE.FROMDATE <= #{toDate}      
+            
+        ]]>
+        <if test="fromDcCode != null and fromDcCode != ''">
+            AND TM_CARRIER_ROUTE.FROM_DCCODE = #{fromDcCode}
+          </if>
+          
+          <if test="fromOrganize != null and fromOrganize != ''">
+            AND  TM_CARRIER_ROUTE.FROM_ORGANIZE IN (
+                SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS ORGANIZE
+                FROM (SELECT #{fromOrganize} AS VAL FROM DUAL)
+                CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) > 0
+            )
+        </if>
+          
+           <if test="toDcCode != null and toDcCode != ''">
+            AND TM_CARRIER_ROUTE.TO_DCCODE = #{toDcCode}
+          </if>
+           
+          <if test="toOrganize != null and toOrganize != ''">
+            AND  TM_CARRIER_ROUTE.TO_ORGANIZE IN (
+                SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS ORGANIZE
+                FROM (SELECT #{toOrganize} AS VAL FROM DUAL)
+                CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) > 0
+            )
+        </if>
+         ORDER BY FROM_DCCODE, FROM_ORGANIZE, FROM_DCCODE, TO_ORGANIZE, FROMDATE, TODATE
+    </select>
+    
+    <select id="getDetailList"  resultType="TmTrasportRoutingResDto">
+        SELECT 
+               TM_CARRIER_PRICE.SERIALKEY              AS SERIALKEY           /* 데이터번호 */
+             , TM_CARRIER_PRICE.ROUTE_SERIALKEY        AS ROUTE_SERIALKEY     /* 노선번호 */
+             , TM_CARRIER_PRICE.COURIER                AS COURIER             /* 운송사 */
+             , MS_CARRIER.DESCRIPTION                  AS COURIER_NM          /* 운송사명*/
+             , TM_CARRIER_PRICE.CONTRACTTYPE           AS CONTRACTTYPE        /* 계약유형 */
+             , TM_CARRIER_PRICE.STORAGETYPE            AS STORAGETYPE         /* 저장구분 */
+             , TM_CARRIER_PRICE.ROUTE_YN               AS ROUTE_YN            /* 경유여부 */
+             , TM_CARRIER_PRICE.TON                    AS TON                 /* 톤수 */
+             , TM_CARRIER_PRICE.PRICE                  AS PRICE               /* 단가 */
+             , TM_CARRIER_PRICE.RMK                    AS RMK                 /* 비고 */
+             , TM_CARRIER_PRICE.FROMDATE               AS FROMDATE            /* 시작일자 */
+             , TM_CARRIER_PRICE.TODATE                 AS TODATE              /* 종료일자 */
+             , TM_CARRIER_PRICE.ADDDATE                AS ADDDATE             /* 최초등록시간 */
+             , TM_CARRIER_PRICE.EDITDATE               AS EDITDATE            /* 최종변경시간 */
+             , TM_CARRIER_PRICE.ADDWHO                 AS ADDWHO              /* 최초등록자 */
+             , TM_CARRIER_PRICE.EDITWHO                AS EDITWHO             /* 최종변경자 */
+             , USER1.USER_NM                           AS ADDWHONAME          /* 등록자명 */
+             , USER2.USER_NM                           AS EDITWHONAME         /* 수정자명 */
+          FROM TM_CARRIER_PRICE
+          LEFT JOIN FRAMEONE_USER USER1
+            ON USER1.USER_ID = TM_CARRIER_PRICE.ADDWHO       /* 등록자명 */
+          LEFT JOIN FRAMEONE_USER USER2
+            ON USER2.USER_ID = TM_CARRIER_PRICE.EDITWHO      /* 수정자명 */
+          LEFT JOIN MS_CARRIER
+            ON MS_CARRIER.CARRIERKEY = TM_CARRIER_PRICE.COURIER
+           AND MS_CARRIER.CARRIERTYPE = 'LOCAL'
+         WHERE 1=1
+           AND TM_CARRIER_PRICE.ROUTE_SERIALKEY = #{routeSerialKey} /*노선번호*/
+           AND TM_CARRIER_PRICE.FROMDATE <![CDATA[<=]]> #{toDate}   /*기간*/
+           AND TM_CARRIER_PRICE.TODATE   <![CDATA[>=]]> #{fromDate} /*기간*/
+           ORDER BY COURIER, CONTRACTTYPE, STORAGETYPE, ROUTE_YN, TON, FROMDATE, TODATE
+    </select>
+
+    <insert id="carrierRouteInsert">
+        INSERT /* [tmTrasportRoutingService.xml][carrierRouteInsert][수송경로 노선 정보 입력][ParkYoSep][20251017] */
+        INTO TM_CARRIER_ROUTE (
+                               SERIALKEY            /* 데이터번호 */
+                              , ROUTE_NM            /* 노선명 */
+                              , FROM_DCCODE         /* 출발센터 */
+                              , FROM_ORGANIZE       /* 출발창고 */
+                              , TO_DCCODE           /* 도착센터 */
+                              , TO_ORGANIZE         /* 도착창고 */
+                              , FROMDATE            /* 시작일자 */
+                              , TODATE              /* 종료일자 */
+                              , ADDDATE             /* 최초등록시간 */
+                              , EDITDATE            /* 최종변경시간 */
+                              , ADDWHO              /* 최초등록자 */
+                              , EDITWHO             /* 최종변경자 */
+                           )
+                    SELECT
+                            ( NVL((SELECT MAX(SERIALKEY) FROM TM_CARRIER_ROUTE), 0) + 1) AS SERIALKEY
+                            , #{routeNm}
+                            , #{fromDcCode}
+                            , #{fromOrganize}
+                            , #{toDcCode}
+                            , #{toOrganize}
+                            , #{fromDate}
+                            , #{toDate}
+                            , SYSDATE
+                            , SYSDATE
+                            , #{gUserId}
+                            , #{gUserId}
+                        FROM DUAL
+                       WHERE NOT EXISTS (
+                                         SELECT 1
+                                           FROM TM_CARRIER_ROUTE
+                                          WHERE 1=1
+                                            AND FROM_DCCODE = #{fromDcCode}
+                                            AND TO_DCCODE   = #{toDcCode}
+                                            AND FROMDATE  <![CDATA[ <= ]]> #{toDate}
+                                            AND TODATE    <![CDATA[ >= ]]> #{fromDate}
+                                            AND (#{fromDcCode} != '2170' OR DECODE(FROM_ORGANIZE, #{fromOrganize}, 1, 0) = 1)
+                                            AND (#{toDcCode}   != '2170' OR DECODE(TO_ORGANIZE,   #{toOrganize},   1, 0) = 1)
+                                          )
+    </insert>
+        
+    <update id="carrierRouteUpdate">
+        UPDATE /* [tmTrasportRoutingService.xml][carrierRouteUpdate][수송경로 노선 정보 수정][ParkYoSep][20251017] */
+               TM_CARRIER_ROUTE
+           SET
+               FROMDATE       = #{fromDate},
+               TODATE         = #{toDate},
+               EDITDATE       = SYSDATE,
+               EDITWHO        = #{gUserId}
+         WHERE SERIALKEY = #{serialKey}
+           AND NOT EXISTS (
+                            SELECT 1
+                              FROM TM_CARRIER_ROUTE
+                             WHERE SERIALKEY != #{serialKey}
+                               AND FROM_DCCODE = #{fromDcCode}
+                               AND TO_DCCODE   = #{toDcCode}
+                               AND FROMDATE <![CDATA[ <= ]]> #{toDate}
+                               AND TODATE   <![CDATA[ >= ]]> #{fromDate}
+                               AND (#{fromDcCode} != '2170' OR DECODE(FROM_ORGANIZE, #{fromOrganize}, 1, 0) = 1)
+                               AND (#{toDcCode}   != '2170' OR DECODE(TO_ORGANIZE,   #{toOrganize},   1, 0) = 1)
+                          )
+    </update>
+    
+    <insert id="carrierPriceInsert">
+        INSERT /* [tmTrasportRoutingService.xml][carrierPriceInsert][수송경로 단가 정보 입력][ParkYoSep][20251103] */
+        INTO TM_CARRIER_PRICE (
+                                SERIALKEY           /* 데이터번호 */
+                              , ROUTE_SERIALKEY     /* 노선번호 */
+                              , COURIER             /* 운송사 */
+                              , CONTRACTTYPE        /* 계약유형 */
+                              , STORAGETYPE         /* 저장구분 */
+                              , ROUTE_YN            /* 경유여부 */
+                              , TON                 /* 톤수 */
+                              , PRICE               /* 단가 */
+                              , RMK                 /* 비고 */
+                              , FROMDATE            /* 시작일자 */
+                              , TODATE              /* 종료일자 */
+                              , ADDDATE             /* 최초등록시간 */
+                              , EDITDATE            /* 최종변경시간 */
+                              , ADDWHO              /* 최초등록자 */
+                              , EDITWHO             /* 최종변경자 */
+                           )
+                    SELECT
+                            ( NVL((SELECT MAX(SERIALKEY) FROM TM_CARRIER_PRICE), 0) + 1) AS SERIALKEY
+                            , #{routeSerialKey}
+                            , #{courier}
+                            , #{contractType}
+                            , #{storageType}
+                            , #{routeYn}
+                            , #{ton}
+                            , #{price}
+                            , #{rmk}
+                            , #{fromDate}
+                            , #{toDate}
+                            , SYSDATE
+                            , SYSDATE
+                            , #{gUserId}
+                            , #{gUserId}
+                        FROM DUAL
+                       WHERE NOT EXISTS (
+                                         SELECT 1
+                                           FROM TM_CARRIER_PRICE
+                                          WHERE COURIER         = #{courier}
+                                            AND ROUTE_SERIALKEY = #{routeSerialKey}
+                                            AND ROUTE_YN        = #{routeYn}
+                                            AND CONTRACTTYPE    = #{contractType}
+                                            AND STORAGETYPE     = #{storageType}
+                                            AND TON             = #{ton}
+                                            AND ROUTE_YN        = #{routeYn}
+                                            AND FROMDATE  <![CDATA[ <= ]]> #{toDate}
+                                            AND TODATE    <![CDATA[ >= ]]> #{fromDate}
+                                          )
+    </insert>
+        
+    <update id="carrierPriceUpdate">
+        UPDATE /* [tmTrasportRoutingService.xml][carrierPriceUpdate][수송경로 단가 정보 수정][ParkYoSep][20251103] */
+               TM_CARRIER_PRICE
+           SET
+               COURIER        = #{courier},
+               CONTRACTTYPE   = #{contractType},
+               STORAGETYPE    = #{storageType},
+               ROUTE_YN       = #{routeYn},
+               TON            = #{ton},
+               PRICE          = #{price},
+               RMK            = #{rmk},
+               FROMDATE       = #{fromDate},
+               TODATE         = #{toDate},
+               EDITDATE       = SYSDATE,
+               EDITWHO        = #{gUserId}
+         WHERE SERIALKEY = #{serialKey}
+           AND NOT EXISTS (
+                            SELECT 1
+                              FROM TM_CARRIER_PRICE
+                             WHERE SERIALKEY        != #{serialKey}
+                               AND ROUTE_SERIALKEY  = #{routeSerialKey}
+                               AND COURIER          = #{courier}
+                               AND ROUTE_YN         = #{routeYn}
+                               AND CONTRACTTYPE     = #{contractType}
+                               AND STORAGETYPE      = #{storageType}
+                               AND TON              = #{ton}
+                               AND FROMDATE <![CDATA[ <= ]]> #{toDate}
+                               AND TODATE   <![CDATA[ >= ]]> #{fromDate}
+                          )
+    </update>
+    
+    <select id="getWithTempTable" parameterType="java.util.List" resultType="TmTrasportRoutingResDto">
+	    WITH TEMP AS (    /* [tmTrasportRoutingService.sqlx][getWithTempTable][수송경로관리 엑셀업로드 검증][ParkYoSep][2025.11.03] */
+	        <foreach collection="list" item="item" separator="UNION ALL">
+	            SELECT #{item.courierNm}                   AS COURIER_NM           /* 운송사명 */
+	                 , #{item.routeSerialKey}              AS ROUTE_SERIALKEY      /* 노선번호 */
+	                 , #{item.contractType}                AS CONTRACTTYPE         /* 계약유형 */
+	                 , #{item.storageType}                 AS STORAGETYPE          /* 저장구분 */
+	                 , UPPER(#{item.routeYn})              AS ROUTE_YN             /* 경유여부 */
+	                 , #{item.ton}                         AS TON                  /* 톤수 */
+	                 , #{item.price}                       AS PRICE                /* 단가 */
+	                 , REPLACE(#{item.fromDate}, '-', '')  AS FROMDATE             /* 적용시작일자 */
+	                 , REPLACE(#{item.toDate}, '-', '')    AS TODATE               /* 적용종료일자 */
+	                 , #{item.rowStatus}                   AS ROWSTATUS            /* 행 상태 */
+	                 , #{item.rmk}                         AS RMK                  /* 비고 */
+	            FROM DUAL
+	        </foreach>
+	    )
+	    , NORM AS (
+	        SELECT T.COURIER_NM
+	             , T.ROUTE_SERIALKEY
+	             , T.ROUTE_YN
+	             , T.PRICE
+	             , T.FROMDATE
+	             , T.TODATE
+	             , T.ROWSTATUS
+	             , T.RMK
+	             , MS_CARRIER.CARRIERKEY AS COURIER                      /* 운송사 코드 */
+	             ,  CD1.BASECODE AS TON                                  /* 톤수 */
+	             ,  NVL(CD2.BASECODE,CD3.BASECODE)  AS CONTRACTTYPE      /* 계약유형 */
+	             , CD4.BASECODE AS STORAGETYPE                           /* 저장구분 */
+	        FROM TEMP T
+	        LEFT JOIN  MS_CARRIER                                      /* 운송사 */
+	          ON MS_CARRIER.CARRIERTYPE = 'LOCAL'
+	         AND MS_CARRIER.DESCRIPTION = T.COURIER_NM
+	        LEFT OUTER JOIN CM_CODE_STORER CD1                         /* 톤수 */
+	             ON CD1.STORERKEY  = 'FW00' 
+	            AND CD1.CODELIST   = 'CARCAPACITY'
+	            AND CD1.BASEDESCR  = T.TON
+	        LEFT OUTER JOIN CM_CODE_STORER CD2                         /* 계약유형 */
+	             ON CD2.STORERKEY  = 'FW00' 
+	            AND CD2.CODELIST   = 'CONTRACTTYPE'
+	            AND CD2.BASEDESCR  = T.CONTRACTTYPE
+	       LEFT OUTER JOIN CM_CODE_STORER CD3                          /* 계약유형 */
+	             ON CD3.STORERKEY  = 'FW00' 
+	            AND CD3.CODELIST   = 'CONTRACTTYPE'
+	            AND CD3.BASEDESCR  = T.CONTRACTTYPE
+	       LEFT OUTER JOIN LOGISONESVC.CM_CODE_STORER CD4              /* 저장구분*/
+	             ON CD4.STORERKEY  = 'FW00' 
+	            AND CD4.CODELIST   = 'TM_CARRIER_STORAGE'
+	            AND CD4.BASEDESCR  = T.STORAGETYPE
+	    )
+	    ,VALCHK AS( 
+	      SELECT
+	             N.COURIER_NM
+	           , N.ROUTE_SERIALKEY
+	           , N.CONTRACTTYPE
+	           , N.STORAGETYPE
+	           , N.ROUTE_YN
+	           , N.TON
+	           , N.PRICE
+	           , N.FROMDATE
+	           , N.TODATE
+	           , N.ROWSTATUS
+	           , N.COURIER
+	           , N.RMK
+	           , CASE 
+	                WHEN N.COURIER IS NULL THEN '운송사명을 찾을 수 없습니다.'
+	                WHEN N.CONTRACTTYPE IS NULL THEN '계약유형을 찾을 수 없습니다.'
+	                WHEN N.STORAGETYPE IS NULL THEN '저장구분을 찾을 수 없습니다.'
+	                WHEN N.ROUTE_YN NOT IN ('Y','N') THEN '경유여부는 Y 또는 N 이어야 합니다.'
+	                WHEN N.TON IS NULL THEN '톤수를 찾을 수 없습니다.'
+	                WHEN N.PRICE IS NULL OR N.PRICE <![CDATA[<]]> 0 THEN '단가는 0 이상이어야 합니다.'
+	                WHEN N.FROMDATE IS NULL THEN '시작일자가 누락되었습니다.'
+	                WHEN N.TODATE IS NULL THEN '종료일자가 누락되었습니다.'
+	                WHEN N.FROMDATE <![CDATA[>]]> N.TODATE THEN '시작일자가 종료일자보다 큽니다.'
+	                ELSE NULL
+	             END AS ERRMSG
+	           , CASE WHEN EXISTS (
+	                    SELECT 1
+	                      FROM TM_CARRIER_PRICE A
+	                     WHERE A.COURIER       = N.COURIER  
+	                       AND ROUTE_SERIALKEY = N.ROUTE_SERIALKEY
+	                       AND A.ROUTE_YN      = N.ROUTE_YN
+	                       AND A.CONTRACTTYPE  = N.CONTRACTTYPE
+	                       AND A.STORAGETYPE   = N.STORAGETYPE
+	                       AND A.TON           = N.TON
+	                       AND A.FROMDATE <![CDATA[ <= ]]> N.TODATE
+	                       AND A.TODATE   <![CDATA[ >= ]]> N.FROMDATE
+	                )
+	                THEN 'Y'
+	                ELSE 'N'  END AS ISDUPLICATE
+	       FROM NORM N
+	    )
+	    SELECT 
+	           A.COURIER_NM
+	         , A.ROUTE_SERIALKEY
+	         , A.CONTRACTTYPE
+	         , A.STORAGETYPE
+	         , A.ROUTE_YN
+	         , A.TON
+	         , A.PRICE
+	         , A.FROMDATE
+	         , A.TODATE
+	         , A.ROWSTATUS
+	         , A.COURIER
+	         , A.ERRMSG
+	         , CASE WHEN A.ERRMSG IS NOT NULL THEN 'Y' ELSE 'N' END AS ERRYN
+	         , A.ISDUPLICATE
+	         , A.RMK
+	      FROM VALCHK A
+	</select>
+
+    <update id="carrierPriceUpdate2">
+        UPDATE /* [tmTrasportRoutingService.xml][carrierPriceUpdate][수송경로 단가 정보 수정- 날짜 겹칠시][ParkYoSep][20251203] */
+               TM_CARRIER_PRICE
+           SET
+               TODATE         = #{toDate},
+               EDITDATE       = SYSDATE,
+               EDITWHO        = #{gUserId}
+         WHERE 1=1 
+           AND ROUTE_SERIALKEY  = #{routeSerialKey}
+           AND COURIER          = #{courier}
+           AND ROUTE_YN         = #{routeYn}
+           AND CONTRACTTYPE     = #{contractType}
+           AND STORAGETYPE      = #{storageType}
+           AND TON              = #{ton}
+           AND FROMDATE <![CDATA[ <= ]]> #{toDate}
+           AND TODATE   <![CDATA[ >= ]]> #{fromDate}
+           AND NOT EXISTS (
+                            SELECT 1
+                              FROM TM_CARRIER_PRICE
+                             WHERE SERIALKEY        != #{serialKey}
+                               AND ROUTE_SERIALKEY  = #{routeSerialKey}
+                               AND COURIER          = #{courier}
+                               AND ROUTE_YN         = #{routeYn}
+                               AND CONTRACTTYPE     = #{contractType}
+                               AND STORAGETYPE      = #{storageType}
+                               AND TON              = #{ton}
+                               AND FROMDATE <![CDATA[ <= ]]> #{toDate}
+                               AND TODATE   <![CDATA[ >= ]]> #{fromDate}
+                          )
+    </update>
+</mapper>

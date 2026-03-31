@@ -1,0 +1,307 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="msSkuChainService">
+    
+    <!-- PLT 변환값 마스터 정보 조회 -->
+    <select id="getMasterList" resultType="MsSkuChainResDto">
+        SELECT    A.* /* [msSkuChainService.sqlx][msSkuChainService.getMasterList][PLT 변환값 마스터 정보 조회][JeongHyeongCheol][20250626] */
+          FROM (
+                SELECT 
+                       '0'                                                                      AS CHECKYN  
+                     , MS_SKUCHAIN.SERIALKEY                                                    AS SERIALKEY             /* 데이터번호 */
+                     , MS_SKU.SKU                                                               AS SKU                   /* 상품코드 */
+                     , MS_SKU.DESCRIPTION                                                       AS DESCRIPTION           /* 기본 제품명 없을경우 SKU코드 */
+                     , MS_SKU.STORAGETYPE                                                       AS STORAGETYPE           /* 대분류 혹은 저장 타입 1-저온 2-상온 3-제약 4-사료벌크 5-셋트 .... */
+                     , MS_SKU.STORERKEY                                                         AS STORERKEY             /* 고객사코드 */
+                     , MS_SKU.BASEUOM                                                           AS BASEUOM               /* 단위 */
+                     , MDPL1.DEL_YN                                                             AS DEL_YN                /* 삭제여부 */
+                     , MS_SKU.GROSSWEIGHT                                                       AS GROSSWEIGHT           /* 평균중량 */
+                     , MDPL1.ADDWHO                                                       AS ADDWHO                /* 최초등록자 */
+                     , MDPL1.ADDDATE                                                      AS ADDDATE               /* 최초등록시간 */
+                     , MDPL1.EDITWHO                                                      AS EDITWHO               /* 최종변경자 */
+                     , MDPL1.EDITDATE                                                     AS EDITDATE              /* 최종변경시간 */
+                     , USER1.USER_NM                                                            AS REG_NM                /* 등록자명 */
+                     , USER2.USER_NM                                                            AS UPD_NM                /* 수정자명 */
+                     
+                     , MDPL1.DCCODE                                                             AS DCCODE                /* 센터코드 */
+                     , CASE WHEN MDPL1.DCCODE = '공통' THEN '공통' ELSE CD1.DCNAME END             AS DCNAME                /* 센터명 */
+                     , CASE WHEN MDPL1.DCCODE = '공통' THEN '공통' ELSE MDPL1.PLANT END            AS PLANT                 /* 플랜트(창고) */
+                     , CASE WHEN MDPL1.DCCODE = '공통' THEN '공통' ELSE FN_DESCR_ORGANIZE(MDPL1.DCCODE, MDPL1.PLANT ) END AS PLANTNAME             /* 창고명 */
+                     , CASE WHEN MDPL1.DCCODE = '공통' THEN ''     ELSE MDPL1.CUSTKEY END                                 AS CUSTKEY             /* 협력사코드 */
+                     , CASE WHEN MDPL1.CUSTKEY IS NULL OR MDPL1.DCCODE = '공통' THEN ''
+                            ELSE ( SELECT DISTINCT TO_CHAR(NVL(CUST1.DESCRIPTION,'UNKNOWN'))
+                                     FROM MS_CUST CUST1
+                                    WHERE CUST1.STORERKEY   = MDPL1.STORERKEY
+                                      AND CUST1.CUSTTYPE    = 'P'
+                                      AND CUST1.CUSTKEY     = MDPL1.CUSTKEY )
+                        END                                                                     AS CUSTNAME             /* 협력사명 */
+                     , ( COALESCE(MSS1.SPECDESCR, 'UNKNOWN') 
+                          || CASE WHEN MSS2.SPECDESCR IS NOT NULL THEN '/' || MSS2.SPECDESCR ELSE '' END
+                          || CASE WHEN MSS3.SPECDESCR IS NOT NULL THEN '/' || MSS3.SPECDESCR ELSE '' END)       AS GPC  /* 상품분류 */ 
+                     , MDPL1.BOXPERLAYER                                                        AS BOXPERLAYER          /* 적재단당박스수(방) */
+                     , MDPL1.LAYERPERPLT                                                        AS LAYERPERPLT          /* 팔렛당적재단수(단) */
+                     , MDPL1.BOXPERLAYER * MDPL1.LAYERPERPLT                                    AS BOXPERPLT            /* PLT변환값 */
+                     , NVL(CASE WHEN MS_SKU.BASEUOM = 'KG' AND MS_SKU.LINE01 = 'Y'
+                                    THEN MS_SKU.LINE02 * MDPL1.BOXPERLAYER * MDPL1.LAYERPERPLT
+                                WHEN MS_SKU.BASEUOM = 'KG' AND MS_SKU.LINE01 !='Y'
+                                    THEN MS_SKU.GROSSWEIGHT * MDPL1.BOXPERLAYER * MDPL1.LAYERPERPLT 
+                                WHEN MS_SKU.BASEUOM = 'EA'                                          /* 20260214 BASEUOM = EA 계산식 추가  */
+                                    THEN MDPL1.BOXPERLAYER * MDPL1.LAYERPERPLT * NVL2(MSS4.GROSSWEIGHT, MSS4.GROSSWEIGHT, MS_SKU.GROSSWEIGHT)
+                                ELSE MDPL1.BOXPERLAYER * MDPL1.LAYERPERPLT * MS_SKU.GROSSWEIGHT    /* 상품마스터.박수입수(MS_SKU.QTYPERBOX)를 곱한다. */
+                           END, 0)                                                              AS PLTTRANS             /* PLT변환값(환산) */
+                FROM LOGISONE.MS_DC_PLT_LOAD MDPL1
+                JOIN MS_SKUCHAIN
+                  ON MS_SKUCHAIN.SKU = MDPL1.SKU 
+                 AND MS_SKUCHAIN.STORERKEY = MDPL1.STORERKEY
+                <if test='delYn != null and delYn != ""'>
+                     AND MDPL1.DEL_YN = #{delYn}
+                </if>
+                JOIN MS_SKU 
+                  ON MS_SKU.SKU = MDPL1.SKU 
+                 AND MS_SKU.STORERKEY = MDPL1.STORERKEY
+                <if test='baseuom != null and baseuom != ""'>
+                     AND MS_SKU.BASEUOM = UPPER(#{baseuom})
+                </if>                
+                <if test='storagetypeMulti != null and storagetypeMulti != ""'>
+                    AND MS_SKU.STORAGETYPE IN 
+                     <foreach collection="storagetypeMulti" item="code" open="("  close=")" separator=",">
+                        #{code}
+                    </foreach>
+                </if>
+           LEFT JOIN CM_DC CD1
+                  ON CD1.DCCODE       = MDPL1.DCCODE
+           LEFT JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = MDPL1.ADDWHO          /*등록자명*/
+           LEFT JOIN FRAMEONE_USER USER2 ON USER2.USER_ID = MDPL1.EDITWHO          /*수정자명*/
+           LEFT JOIN MS_SKUSPEC MSS1
+                  ON MSS1.STORERKEY         = 'FW00'
+                 AND MSS1.SPECCATEGORY      = 'SKUGROUP'
+                 AND MSS1.SPECCODE          =  SUBSTR(MS_SKU.SKUGROUP, 1, 2)
+           LEFT JOIN MS_SKUSPEC MSS2
+                  ON MSS2.STORERKEY         = 'FW00'
+                 AND MSS2.SPECCATEGORY      = 'SKUGROUP'
+                 AND MSS2.SPECCODE          = SUBSTR(MS_SKU.SKUGROUP, 1, 4)
+           LEFT JOIN MS_SKUSPEC MSS3
+                  ON MSS3.STORERKEY         = 'FW00'
+                 AND MSS3.SPECCATEGORY      = 'SKUGROUP'
+                 AND MSS3.SPECCODE          = SUBSTR(MS_SKU.SKUGROUP, 1, 6)
+           LEFT JOIN MS_UOM MSS4
+                  ON MSS4.STORERKEY         = MS_SKU.STORERKEY
+                 AND MSS4.SKU               = MS_SKU.SKU
+                 AND MSS4.BASEUOM           = MS_SKU.BASEUOM
+                 AND MSS4.BASEUOM           = 'EA'
+                 AND MSS4.UOM               = 'BOX'
+               WHERE  1=1
+                 AND MDPL1.STORERKEY = 'FW00'                    
+                    <if test='dccodeMulti != null and dccodeMulti != ""'>
+                 AND MDPL1.DCCODE IN 
+                        <foreach collection="dccodeMulti" item="code" open="("  close=")" separator=",">
+                            #{code}
+                        </foreach>
+                    </if>                                        
+                    <if test='plantMulti != null and plantMulti != ""'>
+                        <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                            <foreach collection="plantMulti" item="item">
+                                OR MDPL1.PLANT IN
+                                <foreach collection="item" item="code" open="(" close=")" separator=",">
+                                    #{code}
+                                </foreach>
+                            </foreach>
+                        </trim>
+                    </if>
+                    <!-- 상품 다중선택 -->                    
+                    <if test='skuMulti != null and skuMulti != ""'>
+                        <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                            <foreach collection="skuMulti" item="item">
+                                OR MDPL1.SKU IN
+                                <foreach collection="item" item="code" open="(" close=")" separator=",">
+                                    #{code}
+                                </foreach>
+                            </foreach>
+                        </trim>
+                    </if>
+                    <if test='pltYn == "Y"'>
+                 AND NVL(MDPL1.BOXPERLAYER,0) * NVL(MDPL1.LAYERPERPLT,0) > 0
+                    </if>
+                    <if test='pltYn == "N"'>
+                 AND NVL(MDPL1.BOXPERLAYER,0) * NVL(MDPL1.LAYERPERPLT,0) = 0
+                    </if>
+            ) A
+        ORDER BY A.SKU
+    </select>
+    
+    
+    <select id="getSkuInfo" resultType="MsSkuChainResDto">
+     SELECT MS_SKU.SKU                          AS SKU              /* 상품코드 */
+          , MS_SKU.DESCRIPTION                  AS description
+          , MS_SKU.BASEUOM                      AS BASEUOM          /* 기본 단위 */
+          , MS_SKU.QTYPERBOX                    AS QTY_PER_BOX      /* 박스당 수량 */
+          , CASE WHEN MS_SKU.BASEUOM = 'EA'
+                    THEN NVL2(MSS4.GROSSWEIGHT, MSS4.GROSSWEIGHT, MS_SKU.GROSSWEIGHT)
+                 ELSE MS_SKU.GROSSWEIGHT
+             END                                AS GROSSWEIGHT      /* 20260214 중량 계산식수정 */
+          , MS_SKU.STORAGETYPE                  AS STORAGETYPE      /* 저장타입 */
+          , ( COALESCE(MSS1.SPECDESCR, 'UNKNOWN') 
+                    || CASE WHEN MSS2.SPECDESCR IS NOT NULL THEN '/' || MSS2.SPECDESCR ELSE '' END
+                    || CASE WHEN MSS3.SPECDESCR IS NOT NULL THEN '/' || MSS3.SPECDESCR ELSE '' END)         AS GPC
+          , MS_SKU.LINE01                       AS LINE01 /* 중량환산여부 */
+          , MS_SKU.LINE02                       AS LINE02 /* 중량환산값 */
+       FROM MS_SKU
+  LEFT JOIN MS_SKUSPEC MSS1
+         ON MSS1.STORERKEY      = 'FW00'
+        AND MSS1.SPECCATEGORY   = 'SKUGROUP'
+        AND MSS1.SPECCODE       =  SUBSTR(MS_SKU.SKUGROUP, 1, 2)
+  LEFT JOIN MS_SKUSPEC MSS2
+         ON MSS2.STORERKEY      = 'FW00'
+        AND MSS2.SPECCATEGORY   = 'SKUGROUP'
+        AND MSS2.SPECCODE       =  SUBSTR(MS_SKU.SKUGROUP, 1, 4)
+  LEFT JOIN MS_SKUSPEC MSS3
+         ON MSS3.STORERKEY      = 'FW00'
+        AND MSS3.SPECCATEGORY   = 'SKUGROUP'
+        AND MSS3.SPECCODE       =  SUBSTR(MS_SKU.SKUGROUP, 1, 6)
+  LEFT JOIN MS_UOM MSS4
+         ON MSS4.STORERKEY      = MS_SKU.STORERKEY
+        AND MSS4.SKU            = MS_SKU.SKU
+        AND MSS4.BASEUOM        = MS_SKU.BASEUOM
+        AND MSS4.BASEUOM        = 'EA'
+        AND MSS4.UOM            = 'BOX'
+      WHERE MS_SKU.STORERKEY    = 'FW00'
+        AND MS_SKU.SKU          = #{sku}
+    </select>
+    <!-- 상품코드 유효성 체크 -->
+	<select id="getValidateSaveList" resultType="MsSkuChainExcelResDto">
+		WITH  /* [msSkuChainService.sqlx][msSkuChainService.getValidateSaveList][상품코드 유효성 체크][JeongHyeongCheol][20250805] */
+	  		V AS (
+		        <foreach collection="list" item="item" separator="UNION ALL">
+			        SELECT
+			             TRIM(#{item.sku})								AS SKU
+						,TRIM(#{item.dccode})								AS DCCODE
+						,TRIM(#{item.plant})								AS PLANT
+						,TRIM(#{item.boxperlayer})						AS BOXPERLAYER
+						,TRIM(#{item.layerperplt})						AS LAYERPERPLT
+						,#{item.checkId, jdbcType=VARCHAR}								AS CHECK_ID
+			            ,ROW_NUMBER() OVER(ORDER BY 1) AS RN 
+			        FROM DUAL
+		        </foreach>
+		    )
+		    
+		    SELECT 
+		         V.SKU 							AS SKU
+		        ,V.DCCODE						AS DCCODE
+				,V.PLANT						AS PLANT
+				,V.BOXPERLAYER					AS BOXPERLAYER
+				,V.LAYERPERPLT					AS LAYERPERPLT
+				,V.CHECK_ID					AS CHECK_ID
+		        ,CASE 
+		        	WHEN T1.SKU IS NOT NULL 
+		        	THEN 'U' ELSE 'I' 
+		         END 								AS ROW_STATUS
+		        ,CASE 
+		        	WHEN T2.SKU IS NOT NULL 
+		        	THEN 'Y' ELSE 'N' 
+		         END 								AS SKU_CHECK
+				,CASE 
+					WHEN V.DCCODE = '' OR V.DCCODE = '0000' OR V.DCCODE IS NULL 
+					THEN 'Y'
+		        	WHEN T3.DCCODE IS NOT NULL 
+		        	THEN 'Y' ELSE 'N' 
+		         END 								AS DCCODE_CHK
+				,CASE 
+		        	WHEN T4.DCCODE IS NOT NULL 
+		        	THEN 'Y' ELSE 'N' 
+		         END 								AS PLANT_CHK
+		        
+		    FROM V
+		    
+		    LEFT JOIN LOGISONE.MS_DC_PLT_LOAD T1 
+		    	   ON T1.STORERKEY 		= 'FW00'
+		          AND T1.SKU 			= V.SKU
+		          AND T1.DCCODE 		= V.DCCODE
+		          AND T1.PLANT 			= V.PLANT
+		    
+			LEFT JOIN MS_SKU T2 
+		    	   ON T2.STORERKEY 		= 'FW00'
+		          AND T2.SKU 	= V.SKU			
+		    
+			LEFT JOIN CM_DC T3 
+		    	   ON T3.DEL_YN ='N'
+				  AND (T3.REAL_DC_YN <![CDATA[<>]]> 'N' OR T3.REAL_DC_YN IS NULL)
+				  AND T3.DCCODE 	= V.DCCODE
+
+			LEFT JOIN CM_DCXORGANIZE T4 
+		    	   ON T4.DCCODE 	= V.DCCODE
+		          AND T4.ORGANIZE 	= V.PLANT
+				  
+		    ORDER BY V.RN 
+    </select>
+	
+    <!--  정보 merge -->
+    <update id="saveMasterList">
+    BEGIN
+        MERGE INTO LOGISONE.MS_DC_PLT_LOAD
+            USING DUAL 
+               ON (SKU     = #{sku}
+              AND PLANT    = #{plant}
+              AND DCCODE   = #{dccode})
+        WHEN MATCHED THEN
+            UPDATE SET BOXPERLAYER = #{boxperlayer}
+                     , LAYERPERPLT = #{layerperplt}
+                     , DEL_YN      = NVL(#{delYn}, 'N')
+                     , EDITDATE    = SYSDATE
+                     , EDITWHO     = #{gUserId}
+        WHEN NOT MATCHED THEN
+            INSERT (
+                  DCCODE
+                , PLANT
+                , STORERKEY
+                , SKU
+                , BOXPERLAYER
+                , LAYERPERPLT
+                , DEL_YN
+                , ADDDATE
+                , EDITDATE
+                , ADDWHO
+                , EDITWHO
+            ) VALUES (
+                  #{dccode}
+                , #{plant}
+                , 'FW00'
+                , #{sku}
+                , #{boxperlayer}
+                , #{layerperplt}
+                , NVL(#{delYn}, 'N')
+                , SYSDATE
+                , SYSDATE
+                , #{gUserId}
+                , #{gUserId}
+            );
+
+        /* 2. 두 번째 MERGE문 (MS_SKUCHAIN) */
+        MERGE INTO LOGISONE.MS_SKUCHAIN
+            USING DUAL 
+               ON (SKU       = #{sku}
+              AND STORERKEY  = 'FW00')
+        WHEN NOT MATCHED THEN
+            INSERT (
+                  SERIALKEY
+                , STORERKEY
+                , SKU
+                , BOXPERPLT
+                , DEL_YN
+                , ADDDATE
+                , EDITDATE
+                , ADDWHO
+                , EDITWHO
+            ) VALUES (
+                  SEQ_MS_SKUCHAIN.NEXTVAL
+                , 'FW00'
+                , #{sku}
+                , NULL
+                , 'N'
+                , SYSDATE
+                , SYSDATE
+                , #{gUserId}
+                , #{gUserId}
+            ); 
+    END;
+</update>
+</mapper>

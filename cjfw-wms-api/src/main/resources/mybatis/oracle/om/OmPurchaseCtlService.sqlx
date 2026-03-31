@@ -1,0 +1,1765 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="omPurchaseCtlService">
+
+	<select id="getTab1MasterList" resultType="java.util.Map">
+	    WITH TB_P AS (
+	      SELECT /*+ LEADING(P) FULL(MS) */ 
+	          MAX(P.DCCODE) AS DCCODE,
+	          NVL(COALESCE(P.STORERKEY, ST.STORERKEY), MAX(ST.STORERKEY)) AS STORERKEY,
+	          NVL(COALESCE(P.SKU, ST.SKU), MAX(ST.SKU)) AS SKU,
+	          MAX(MS.DESCRIPTION) AS SKUNAME,
+	          NVL(MAX(CD2.BASEDESCR), MAX(CD2.BASECODE)) AS STORAGETYPENM,
+	          MAX(P.MOQ_SKU) AS MOQ_SKU,
+	          NVL(MAX(SKSPEC.SPECDESCR), MAX('UNKNOWN')) AS SKU_LDESC,
+	          (CASE WHEN MAX(MS.REFERENCE15) = 'Y' THEN '전용' ELSE '범용' END) AS REFERENCE15,
+	          NVL(MAX(MS.NETWEIGHT), 0) AS NETWEIGHT,
+	          MAX(MS.CUSTSKU) AS CUSTSKU,
+	          NVL(MAX(MS.QTYPERBOX), 0) AS QTYPERBOX,
+	          MAX(ST.UOM) AS STOCKUOM,
+	          NVL(MAX(ST.BOXPERPLT), 0) AS BOXPERPLT,
+	          NVL(MAX(ST.QTY_TOTAL), 0) AS QTY_TOTAL,
+	          NVL(MAX(ST.QTY_TOTAL_FW), 0) AS QTY_TOTAL_FW,
+	          MAX(P.ROUTE) AS ROUTE,
+	          MAX(P.BUYERKEY) AS LASTBUYERKEY,
+	          MAX(P.CUSTKEY) AS CUSTKEY,
+	          NVL(MAX(P.MOQ_VENDER), 0) AS MOQ_VENDER,
+	          NVL(MAX(P.LEADTIME), 0) AS LEADTIME,
+	          MAX(P.PURCHASE_IN) AS PURCHASE_IN,
+	          MAX(P.PURCHASE_OUT) AS PURCHASE_OUT,
+	          MAX(ST.STOCKIN) AS STOCKIN,
+	          DECODE(MAX(ST.STOCKOUT), TO_CHAR(SYSDATE, 'YYYYMMDD'), '', MAX(ST.STOCKOUT)) AS STOCKOUT
+	      FROM MS_PURCHASEDC_DAILY P
+	      LEFT OUTER JOIN ( SELECT 
+	                              #{gStorerkey} AS STORERKEY,
+	                              T_STOCKDATE.SKU AS SKU,
+	                              MAX(T_HIS.UOM) AS UOM,
+	                              MAX(T_PLT.PLTCNT) AS BOXPERPLT,
+	                              NVL(SUM(CASE WHEN T_HIS.DCCODE = '1000' AND S.SKUTYPE IN ('20', '30') THEN 0 ELSE T_HIS.QTY END), 0) AS QTY_TOTAL,
+	                              NVL(SUM(CASE WHEN T_HIS.DCCODE IN ('2600', '2620', '2630', '2650', '2660', '2260') THEN T_HIS.QTY ELSE 0 END), 0) AS QTY_TOTAL_FW,
+	                              MIN(STOCKIN) AS STOCKIN,
+	                              MAX(STOCKOUT) AS STOCKOUT
+	                          FROM ( SELECT SKU, MIN(STOCKDATE) AS STOCKIN, MAX(STOCKDATE) AS STOCKOUT
+	                                 FROM ST_STOCK_CHAIN_HIS T
+	                                 WHERE T.STOCKDATE <![CDATA[<=]]> TO_CHAR(SYSDATE, 'YYYYMMDD')
+	                                 GROUP BY SKU
+	                                ) T_STOCKDATE
+	                          LEFT OUTER JOIN MS_SKU S ON S.STORERKEY = #{gStorerkey} AND T_STOCKDATE.SKU = S.SKU
+	                          LEFT OUTER JOIN ST_STOCK_CHAIN_HIS T_HIS ON T_HIS.SKU = T_STOCKDATE.SKU AND T_HIS.STOCKDATE = TO_CHAR(SYSDATE, 'YYYYMMDD') AND T_HIS.QTY <![CDATA[>]]> 0 
+	                          LEFT OUTER JOIN ( SELECT  MDPL1.SKU, MDPL1.BOXPERLAYER * MDPL1.LAYERPERPLT AS PLTCNT
+	                                              FROM MS_DC_PLT_LOAD MDPL1
+	                                             WHERE MDPL1.STORERKEY = #{gStorerkey} 
+	                                              UNION ALL
+	                                            SELECT  SC.SKU, SC.BOXPERPLT AS PLTCNT
+	                                              FROM MS_SKUCHAIN SC
+	                                             WHERE SC.STORERKEY = #{gStorerkey} 
+	                                               AND NOT EXISTS ( SELECT  1 FROM MS_DC_PLT_LOAD M WHERE M.STORERKEY = SC.STORERKEY AND M.SKU = SC.SKU)
+	                                           ) T_PLT
+	                                  ON T_PLT.SKU = T_STOCKDATE.SKU
+	                          GROUP BY T_STOCKDATE.SKU
+	                      ) ST 
+	         ON ST.STORERKEY = P.STORERKEY AND ST.SKU = P.SKU
+	      LEFT OUTER JOIN MS_SKU MS ON MS.STORERKEY = COALESCE(P.STORERKEY, ST.STORERKEY) AND MS.SKU = COALESCE(P.SKU, ST.SKU)
+	      LEFT JOIN MS_SKUSPEC SKSPEC  ON SKSPEC.STORERKEY = 'FW00' AND SKSPEC.SPECCATEGORY = 'SKUGROUP' AND SKSPEC.SPECCODE = SUBSTR(MS.SKUGROUP, 1, 2)
+	      LEFT JOIN CM_CODE CD2 ON CD2.STORERKEY = MS.STORERKEY AND CD2.CODELIST = 'STORAGETYPE' AND CD2.BASECODE = MS.STORAGETYPE
+	     WHERE P.STORERKEY = #{gStorerkey} 
+	       AND P.YYYYMMDD = TO_CHAR(SYSDATE, 'YYYYMMDD')
+	       AND P.STORERKEY = #{gStorerkey} 
+	      GROUP BY COALESCE(P.STORERKEY, ST.STORERKEY), COALESCE(P.SKU, ST.SKU)
+	    ),
+	    MAIN_TB AS (
+	    SELECT T3.* , (CASE WHEN T3.QTY_TOTAL <![CDATA[<>]]> 0 AND T3.STOCKDAY <![CDATA[>]]> 60 AND T3.SHIPQTY1W_TOTAL = 0 THEN 'O' ELSE 'X' END) AS INV_SLOW 
+	    FROM (
+	           SELECT ROUND(CASE WHEN T2.STOCKAVGDAY = 0 THEN 0 ELSE (T2.QTY_TOTAL_FW / T2.STOCKAVGDAY) END) AS STOCKDAY
+	                , T2.* FROM ( 
+	                    SELECT T1.* , (SELECT DESCRIPTION FROM MS_CUST C WHERE C.STORERKEY = T1.STORERKEY AND C.CUSTKEY = T1.CUSTKEY AND C.CUSTTYPE = 'P') AS CUSTNAME
+	                         , ROUND((T1.SHIPQTY1W_TOTAL / DECODE(T1.NETWEIGHT, 0, 1, T1.NETWEIGHT) / BT.BIZDATE_COUNT)) AS STOCKAVGDAY
+	                         , CS.SLAVE_CUSTKEY
+	                         , CASE WHEN CS.SLAVE_CUSTKEY IS NULL THEN '' ELSE (SELECT DISTINCT TO_CHAR(NVL(C1.DESCRIPTION, 'UNKNOWN')) FROM MS_CUST C1 WHERE C1.STORERKEY = CS.STORERKEY AND C1.CUSTTYPE = 'P' AND C1.CUSTKEY = CS.SLAVE_CUSTKEY) END AS SLAVE_CUSTNAME
+	                      FROM ( 
+	                              SELECT /*+ NO_MERGE */  
+	                                    P.DCCODE
+	                                  , P.STORERKEY
+	                                  , P.SKU
+	                                  , P.SKUNAME
+	                                  , P.STORAGETYPENM
+	                                  , P.MOQ_SKU
+	                                  , P.SKU_LDESC
+	                                  , P.REFERENCE15
+	                                  , P.NETWEIGHT
+	                                  , P.CUSTSKU
+	                                  , P.QTYPERBOX
+	                                  , P.STOCKUOM
+	                                  , P.BOXPERPLT
+	                                  , P.QTY_TOTAL
+	                                  , P.QTY_TOTAL_FW
+	                                  , P.ROUTE
+	                                  , NVL(PS.SHIPQTY1W_TOTAL * DECODE(NETWEIGHT, 0, 1, NETWEIGHT), 0) AS SHIPQTY1W_TOTAL
+	                                  , NVL(PS.SHIPQTY2W_TOTAL * DECODE(NETWEIGHT, 0, 1, NETWEIGHT), 0) AS SHIPQTY2W_TOTAL
+	                                  , NVL(PS.SHIPQTY3W_TOTAL * DECODE(NETWEIGHT, 0, 1, NETWEIGHT), 0) AS SHIPQTY3W_TOTAL
+	                                  , P.LASTBUYERKEY
+	                                  , P.CUSTKEY
+	                                  , P.MOQ_VENDER
+	                                  , P.LEADTIME
+	                                  , P.PURCHASE_IN
+	                                  , P.PURCHASE_OUT
+	                                  , P.STOCKIN
+	                                  , P.STOCKOUT
+	                                  , BR.PARENTCUSTKEY
+	                                  , BR.PARENTCUSTNAME
+	                                  , BR.BRANDNAME_FC
+	                                  , NVL(SI.STO_IN_QTY, 0) AS STO_IN_QTY
+	                                  , NVL(SI.STO_OUT_QTY, 0) AS STO_OUT_QTY
+	                                  , NVL(T_TB.TURNOVERDAY, 0) AS TURNOVERDAY
+	                                  , NVL(R_TB.REORDERPOINT, 0) AS REORDERPOINT
+	                                  , NVL(R_TB.STOCKQTY, 0) AS STOCKQTY
+	                                  , NVL(R_TB.STOCKGOAL, 0) AS STOCKGOAL
+	                                  , NVL(R_TB.VENDORCONFIRMQTY, 0) AS VENDORCONFIRMQTY
+	                                  , NVL(R_TB.RECEIVEQTY, 0) AS RECEIVEQTY
+	                               FROM TB_P P
+	                               LEFT OUTER JOIN (SELECT /*+ NO_MERGE FULL(S) */
+	                                                     SCC.SKU
+	                                                   , SCC.STORERKEY
+	                                                   , MAX(CASE WHEN C.PARENTCUSTKEY IS NULL THEN C.CUSTKEY ELSE C.PARENTCUSTKEY END) AS PARENTCUSTKEY 
+	                                                   , MAX(CASE WHEN C.PARENTCUSTKEY IS NULL THEN C.DESCRIPTION ELSE (SELECT A.DESCRIPTION FROM MS_CUST A WHERE A.CUSTKEY = C.PARENTCUSTKEY AND ROWNUM = 1) END) AS PARENTCUSTNAME
+	                                                   , MAX(CB.REFERENCE02) AS BRANDNAME_FC
+	                                                FROM MS_SKUCHAIN_CUST SCC
+	                                                JOIN MS_SKU S ON S.SKU = SCC.SKU AND S.STORERKEY = SCC.STORERKEY
+	                                                JOIN MS_CUST C ON SCC.CUSTKEY = C.CUSTKEY AND C.CUSTTYPE = 'C' AND C.STORERKEY = SCC.STORERKEY
+	                                                LEFT OUTER JOIN MS_CUST_BRAND CB ON CB.CUSTKEY = C.CUSTKEY AND CB.STORERKEY = C.STORERKEY AND CB.CUSTTYPE = C.CUSTTYPE
+	                                               WHERE C.DEL_YN = 'N' 
+	                                                 AND SCC.STORERKEY = #{gStorerkey} 
+	                                                 AND SCC.CUSTNO = (SELECT MIN(TO_NUMBER(CUSTNO)) FROM MS_SKUCHAIN_CUST WHERE SKU = S.SKU)
+	                                               GROUP BY SCC.SKU, SCC.STORERKEY) BR 
+	                                 ON BR.STORERKEY = P.STORERKEY AND BR.SKU = P.SKU
+	                              LEFT OUTER JOIN (SELECT /*+ NO_MERGE */
+	                                                     SKU
+	                                                   , STORERKEY
+	                                                   , MAX(STO_IN_QTY) AS STO_IN_QTY
+	                                                   , MAX(STO_OUT_QTY) AS STO_OUT_QTY
+	                                                FROM (SELECT DDD.SKU
+	                                                           , DDD.STORERKEY 
+	                                                           , SUM(CASE WHEN DDD.DOCTYPE = 'DP' THEN DDD.CONFIRMQTY ELSE 0 END) AS STO_IN_QTY
+	                                                           , SUM(CASE WHEN DDD.DOCTYPE = 'WD' THEN DDD.CONFIRMQTY ELSE 0 END) AS STO_OUT_QTY 
+	                                                        FROM DM_DOCUMENT_D DDD
+	                                                       WHERE DDD.WORKPROCESSCODE = 'STO' 
+	                                                         AND DDD.DELIVERYDATE = TO_CHAR(SYSDATE, 'YYYYMMDD') 
+	                                                         AND DDD.STORERKEY = #{gStorerkey} 
+	                                                       GROUP BY DDD.PLANT, DDD.SKU, DDD.STORERKEY)
+	                                                GROUP BY SKU, STORERKEY ) SI 
+	                                 ON SI.STORERKEY = P.STORERKEY AND SI.SKU = P.SKU
+	                              LEFT OUTER JOIN (SELECT /*+ NO_MERGE */
+	                                                      T_SUB.STORERKEY 
+	                                                    , T_SUB.SKU
+	                                                    , TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD')) AS PREV_END_DATE
+	                                                    , TO_NUMBER(TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')) AS PREV_START_DATE
+	                                                    , ROUND(DECODE(NVL(DECODE(TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD') - TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')), 0, SUM(T_SUB.BASEQTY),
+	                                                                              ROUND(SUM(T_SUB.BASEQTY) / TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD') - TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')))
+	                                                                             ), 0
+	                                                                       ), 0, 0,
+	                                                                       DECODE(DECODE(TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD') - TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')), 0, SUM(T_SUB.ORDERQTY_SO) + SUM(T_SUB.ORDERQTY_PO) + SUM(T_SUB.ORDERQTY_STO) + SUM(T_SUB.ADJUSTQTY_WD) + SUM(T_SUB.ADJUSTQTY_DISUSE),
+	                                                                                    ROUND((SUM(T_SUB.ORDERQTY_SO) + SUM(T_SUB.ORDERQTY_PO) + SUM(T_SUB.ORDERQTY_STO) + SUM(T_SUB.ADJUSTQTY_WD) + SUM(T_SUB.ADJUSTQTY_DISUSE)) / TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD') - TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')))
+	                                                                                    ), 0, 0, NVL(DECODE(TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD') - TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')), 0, SUM(T_SUB.BASEQTY), ROUND(SUM(T_SUB.BASEQTY) / TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD') - TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')))
+	                                                                                                       ), 0
+	                                                                                                ) /
+	                                                                             DECODE(TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD') - TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')), 0, SUM(T_SUB.ORDERQTY_SO) + SUM(T_SUB.ORDERQTY_PO) + SUM(T_SUB.ORDERQTY_STO) + SUM(T_SUB.ADJUSTQTY_WD) + SUM(T_SUB.ADJUSTQTY_DISUSE),
+	                                                                                    ROUND((SUM(T_SUB.ORDERQTY_SO) + SUM(T_SUB.ORDERQTY_PO) + SUM(T_SUB.ORDERQTY_STO) + SUM(T_SUB.ADJUSTQTY_WD) + SUM(T_SUB.ADJUSTQTY_DISUSE)) / TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD') - TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')))
+	                                                                             )
+	                                                                         )
+	                                                                   ), 1
+	                                                             ) AS TURNOVERDAY
+	                                                FROM (SELECT DI.STORERKEY, DI.SKU, SUM(DI.BASEQTY) AS BASEQTY
+	                                                           , SUM(DI.ORDERQTY_SO) AS ORDERQTY_SO, SUM(DI.ORDERQTY_PO) AS ORDERQTY_PO
+	                                                           , SUM(DI.ORDERQTY_STO) AS ORDERQTY_STO, SUM(DI.ADJUSTQTY_WD) AS ADJUSTQTY_WD
+	                                                           , SUM(DI.ADJUSTQTY_DISUSE) AS ADJUSTQTY_DISUSE
+	                                                        FROM ST_DAILYINOUT DI
+	                                                       WHERE DI.STORERKEY = #{gStorerkey} 
+	                                                         AND DI.INOUTDT <![CDATA[>=]]> TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')
+	                                                         AND DI.INOUTDT <![CDATA[<=]]> TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD')
+	                                                       GROUP BY DI.STORERKEY, DI.SKU) T_SUB
+	                                                GROUP BY T_SUB.STORERKEY, T_SUB.SKU
+	                                               HAVING NVL(DECODE(TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD') - TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')), 0, SUM(T_SUB.BASEQTY), ROUND(SUM(T_SUB.BASEQTY) / TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD') - TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')))
+	                                                                 ), 0
+	                                                         ) <![CDATA[>]]> 0
+	                                          ) T_TB 
+	                                 ON T_TB.STORERKEY = P.STORERKEY AND T_TB.SKU = P.SKU
+	                              LEFT OUTER JOIN (SELECT /*+ NO_MERGE NO_PUSH_PRED */
+	                                                      STORERKEY
+	                                                    , SKU
+	                                                    , MAX(REORDERPOINT) AS REORDERPOINT
+	                                                    , MAX(STOCKQTY)     AS STOCKQTY
+	                                                    , MAX(STOCKGOAL)    AS STOCKGOAL
+	                                                    , MAX(VENDORCONFIRMQTY) AS VENDORCONFIRMQTY
+	                                                    , MAX(RECEIVEQTY)       AS RECEIVEQTY
+	                                                 FROM ( SELECT /*+ LEADING(PM PC) FULL(PM) FULL(PS) FULL(PT) */
+	                                                               PC.STORERKEY
+	                                                             , PC.DCCODE
+	                                                             , PC.BUYERKEY
+	                                                             , PC.SKU
+	                                                             , CASE WHEN NVL(PM.EDIT_REORDERPOINT, 0) <![CDATA[>]]> 0 THEN PM.EDIT_REORDERPOINT
+	                                                               ELSE NVL(ROUND((PS.STOCKAVGDAY * NVL(PM.LEADTIME, 1)) + (PS.STDDEVIATION * (NVL(PM.COEFFICIENTSAFETY, 0)) * POWER(NVL(PM.LEADTIME, 1), 1 / 2))), 0)
+	                                                               END AS REORDERPOINT
+	                                                             , NVL((SELECT SUM(OPENQTY) FROM ST_STOCK_PURCHASE SP WHERE SP.STORERKEY = PC.STORERKEY AND SP.DCCODE = PC.DCCODE AND SP.SKU = PC.SKU), 0) AS STOCKQTY
+	                                                             , CASE WHEN NVL(PM.EDIT_STOCKGOAL, 0) <![CDATA[>]]> 0 THEN PM.EDIT_STOCKGOAL
+	                                                                   ELSE NVL(ROUND(PS.STOCKAVGDAY * (NVL(PM.PURINTERVAL, 1) + NVL(PM.LEADTIME, 1)) + ((3 * PS.STDDEVIATION) * POWER((NVL(PM.PURINTERVAL, 1) + NVL(PM.LEADTIME, 1)), 1 / 2))), 0)
+	                                                               END AS STOCKGOAL
+	                                                             , NVL(PT.VENDORCONFIRMQTY, 0) AS VENDORCONFIRMQTY
+	                                                             , NVL(PT.TODAYDPQTY, 0) AS RECEIVEQTY
+	                                                          FROM MS_PURCHASECUST PC
+	                                                          JOIN MS_PURCHASEMST PM ON PM.STORERKEY = PC.STORERKEY AND PM.DCCODE = PC.DCCODE AND PM.CUSTTYPE = PC.CUSTTYPE AND PM.SKU = PC.SKU
+	                                                          LEFT OUTER JOIN MS_PURCHASESTATS PS ON PS.DCCODE = PC.DCCODE AND PS.STORERKEY = PC.STORERKEY AND PS.SKU = PC.SKU AND PS.PLANT = PC.PLANT AND PS.STATSDT = TO_CHAR(SYSDATE, 'YYYYMMDD')
+	                                                          LEFT OUTER JOIN MS_PURCHASETOTAL PT ON PT.DCCODE = PC.DCCODE AND PT.STORERKEY = PC.STORERKEY AND PT.SKU = PC.SKU AND PT.USERID = #{gUserId} 
+	                                                          WHERE 1=1 )
+	                                                  GROUP BY STORERKEY, SKU
+	                                            )  R_TB 
+	                                 ON R_TB.STORERKEY = P.STORERKEY AND R_TB.SKU = P.SKU
+	                              LEFT OUTER JOIN ( SELECT /*+ NO_MERGE NO_PUSH_PRED*/
+	                                                       STORERKEY
+	                                                     , SKU
+	                                                     , NVL(SUM(SHIPQTY1W), 0) AS SHIPQTY1W_TOTAL
+	                                                     , NVL(SUM(SHIPQTY2W), 0) AS SHIPQTY2W_TOTAL
+	                                                     , NVL(SUM(SHIPQTY3W), 0) AS SHIPQTY3W_TOTAL
+	                                                     , NVL(MAX(STOCKAVGDAY), 0) AS STOCKAVGDAY
+	                                                 FROM ( SELECT /*+ FULL(S) */
+	                                                               PS.STORERKEY
+	                                                             , PS.SKU
+	                                                             , MAX(PS.SHIPQTY1W_SO) AS SHIPQTY1W
+	                                                             , MAX(PS.SHIPQTY2W_SO) AS SHIPQTY2W
+	                                                             , MAX(PS.SHIPQTY3W_SO) AS SHIPQTY3W
+	                                                             , MAX(PS.STOCKAVGDAY) AS STOCKAVGDAY
+	                                                          FROM MS_PURCHASESTATS PS
+	                                                          JOIN MS_SKU S 
+	                                                             ON PS.STORERKEY = S.STORERKEY
+	                                                            AND PS.SKU = S.SKU
+	                                                         WHERE PS.STORERKEY = #{gStorerkey} 
+	                                                         GROUP BY PS.DCCODE, PS.STORERKEY, PS.SKU)
+	                                                GROUP BY STORERKEY, SKU ) PS 
+	                                ON PS.STORERKEY = P.STORERKEY AND PS.SKU = P.SKU
+	                              ORDER BY DCCODE, SKU 
+	                            ) T1
+	       CROSS JOIN ( SELECT SUM(CASE WHEN REST_YN = 'N' THEN 1 ELSE 0 END) AS BIZDATE_COUNT 
+	                      FROM CM_CALENDAR 
+	                     WHERE YY || MM || DD BETWEEN TO_CHAR(TRUNC(SYSDATE, 'MM') - 30, 'YYYYMMDD') AND TO_CHAR(SYSDATE - 1, 'YYYYMMDD') 
+	                       AND DCCODE = 'STD' 
+	                       AND CALENDAR_ID = 'STD' ) BT  
+	               LEFT JOIN MS_CUST_SECOND CS ON CS.STORERKEY = T1.STORERKEY AND CS.CUSTKEY = T1.CUSTKEY AND CS.SKU = T1.SKU AND CS.DEL_YN = 'N' 
+	               LEFT JOIN CM_CODE CD1 ON CD1.STORERKEY = T1.STORERKEY AND CD1.CODELIST = 'BUYERKEY' AND CD1.BASECODE = T1.LASTBUYERKEY ) T2 
+	       ) T3 
+	   WHERE 1 = 1 
+	  ), 
+	  BASE_DATA AS ( 
+	      SELECT 
+	          'SKU 현황' AS LEVEL1, 
+	          '담당 협력사' AS LEVEL2, 
+	          A.LASTBUYERKEY AS BUYERKEY, 
+	          COUNT(DISTINCT A.CUSTKEY) AS METRIC_VALUE  
+	      FROM MAIN_TB A 
+	      GROUP BY A.LASTBUYERKEY     
+	      UNION ALL     
+	      SELECT 
+	          'SKU 현황' AS LEVEL1, 
+	          '담당 SKU' AS LEVEL2, 
+	          A.LASTBUYERKEY AS BUYERKEY, 
+	          COUNT(DISTINCT A.SKU) AS METRIC_VALUE  
+	      FROM MAIN_TB A 
+	      GROUP BY A.LASTBUYERKEY 
+	  ), 
+	  PIVOT_READY AS ( 
+	    SELECT 
+	        LEVEL1, 
+	        LEVEL2, 
+	        SUM(METRIC_VALUE) AS TOTAL_ALL,         
+	        SUM(CASE WHEN BUYERKEY = 'BCKKKK' THEN METRIC_VALUE ELSE 0 END) AS KIM_KH, 
+	        SUM(CASE WHEN BUYERKEY = 'JONGGEUNKIM' THEN METRIC_VALUE ELSE 0 END) AS KIM_JG, 
+	        SUM(CASE WHEN BUYERKEY = 'VJDVJD9710' THEN METRIC_VALUE ELSE 0 END) AS KIM_HJ, 
+	        SUM(CASE WHEN BUYERKEY = 'DID0923' THEN METRIC_VALUE ELSE 0 END) AS YANG_JY, 
+	        SUM(CASE WHEN BUYERKEY = 'SARAH0510' THEN METRIC_VALUE ELSE 0 END) AS LEE_SR, 
+	        SUM(CASE WHEN BUYERKEY = 'PARK5700' THEN METRIC_VALUE ELSE 0 END) AS PARK_HB, 
+	        SUM(CASE WHEN BUYERKEY = 'WLSQLS9331' THEN METRIC_VALUE ELSE 0 END) AS PARK_JB, 
+	        SUM(CASE WHEN BUYERKEY = 'CHL973435' THEN METRIC_VALUE ELSE 0 END) AS CHOI_YJ, 
+	        SUM(CASE WHEN BUYERKEY = 'JUEONCHOI' THEN METRIC_VALUE ELSE 0 END) AS CHOI_JO,         
+	        SUM(CASE WHEN BUYERKEY = 'CK' THEN METRIC_VALUE ELSE 0 END) AS CK, 
+	        SUM(CASE WHEN BUYERKEY = 'HSYGENIUS' THEN METRIC_VALUE ELSE 0 END) AS HWANG_SY, 
+	        SUM(CASE WHEN BUYERKEY = 'STD' THEN METRIC_VALUE ELSE 0 END) AS UNASSIGNED
+	    FROM BASE_DATA 
+	    GROUP BY LEVEL1, LEVEL2 
+	  ) 
+	  SELECT 
+	    CASE WHEN P.LEVEL2 IN ('담당 협력사', '담당 SKU') THEN '담당 주체'  
+	         WHEN P.LEVEL2 IN ('평균 PLT', '평균 보유일') THEN 'SKU 현황' 
+	         ELSE P.LEVEL1 
+	    END AS LEVEL1, 
+	    P.LEVEL2, 
+	    P.TOTAL_ALL AS TOTAL, 
+	    P.KIM_KH AS "김광현", 
+	    P.KIM_JG AS "김종근", 
+	    P.KIM_HJ AS "김혜진", 
+	    P.YANG_JY AS "양준영", 
+	    P.LEE_SR AS "이세라", 
+	    P.PARK_HB AS "박한별", 
+	    P.PARK_JB AS "박진빈", 
+	    P.CHOI_YJ AS "최유정", 
+	    P.CHOI_JO AS "최주언", 
+	    P.CK AS "CK", 
+	    P.HWANG_SY AS "황순영", 
+	    P.UNASSIGNED AS "미지정"
+	  FROM PIVOT_READY P 
+	  ORDER BY 
+	    CASE WHEN LEVEL1 = '담당 주체' THEN 1 
+	         WHEN LEVEL1 = 'SKU 현황' THEN 2 
+	         ELSE 9 END, 
+	    P.LEVEL2
+	</select>
+
+	<!-- 탭2 SKU현황 조회 (목록) -->
+	<select id="getTab2MasterList" resultType="java.util.Map">
+		WITH INV_SLOW AS (
+			SELECT
+			    T1.DCCODE,
+			    T1.SKU,
+			    T1.QTY_TOTAL,
+			    T1.STOCKDAY,
+			    T1.SHIPQTY1W_TOTAL
+			FROM
+		    (
+		        SELECT
+		            A.DCCODE,
+		            A.SKU,
+		            NVL(SUM(CASE WHEN T_HIS.DCCODE = '1000' AND MS_SKU.SKUTYPE IN ('20', '30') THEN 0 ELSE T_HIS.QTY END), 0) AS QTY_TOTAL,
+		            CASE
+		               WHEN NVL(A.STOCKAVGDAY, 0) = 0 THEN 0
+		               ELSE
+		                   ROUND((SELECT SUM(OPENQTY)
+				                     FROM ST_STOCK_PURCHASE -- 현재고(1건만 나와서 괜찮음)
+				                    WHERE ST_STOCK_PURCHASE.STORERKEY = A.STORERKEY
+				                      AND ST_STOCK_PURCHASE.DCCODE = A.DCCODE
+				                      AND ST_STOCK_PURCHASE.ORGANIZE = A.ORGANIZE
+				                      AND ST_STOCK_PURCHASE.AREA = A.AREA
+				                      AND ST_STOCK_PURCHASE.SKU = A.SKU) / A.STOCKAVGDAY)
+		           END AS STOCKDAY,         -- 보유일 [현재고/일평균]                     
+		            NVL(SUM(A.SHIPQTY1W * DECODE(MS_SKU.NETWEIGHT, 0, 1, MS_SKU.NETWEIGHT)), 0) AS SHIPQTY1W_TOTAL 
+		        FROM 
+		            MS_PURCHASESTATS A
+		        LEFT OUTER JOIN MS_SKU
+		         ON MS_SKU.STORERKEY = #{gStorerkey} 
+		         AND A.SKU = MS_SKU.SKU
+		        LEFT OUTER JOIN ST_STOCK_CHAIN_HIS T_HIS
+		         ON T_HIS.SKU = A.SKU 
+		         AND A.DCCODE = T_HIS.DCCODE 
+		         AND T_HIS.STOCKDATE = A.STATSDT 
+		         AND T_HIS.QTY  <![CDATA[>]]>  0 
+		        LEFT OUTER JOIN MS_PURCHASECUST
+		         ON MS_PURCHASECUST.STORERKEY = #{gStorerkey} 
+		         AND A.DCCODE = MS_PURCHASECUST.DCCODE 
+		         AND A.SKU = MS_PURCHASECUST.SKU
+		        WHERE 
+		            A.STATSDT = TO_CHAR(SYSDATE, 'YYYYMMDD')
+		            <if test='multiDcCode != null and multiDcCode.length > 0'>
+		                AND A.DCCODE IN 
+		                <foreach collection="multiDcCode" item="item" open="(" separator="," close=")">
+			                #{item}
+			            </foreach> 
+		            </if>
+		            <if test='buyerKey != null and buyerKey != ""'>
+		                AND MS_PURCHASECUST.BUYERKEY = #{buyerKey}
+		            </if>
+		        GROUP BY 
+		            A.DCCODE, 
+		            A.SKU, 
+		            A.STORERKEY,
+		            A.ORGANIZE,
+		            A.AREA,
+		            A.STOCKAVGDAY
+		    ) T1		    
+		),
+		-- 3. 상품당 PLT 수 계산을 위한 CTE 정의
+		SKU_PLT_DATA AS (
+		    SELECT
+		        T_HIS.DCCODE AS DCCODE
+		        ,AVG(T_HIS.BOXPERPLT_QTY) AS ALL_PLT_AVG
+		        ,SUM(CASE WHEN T_HIS.BOXPERPLT_QTY <![CDATA[<=]]> 3 THEN 1 ELSE 0 END) AS COUNT_PLT_LE_3
+		        ,SUM(CASE WHEN T_HIS.BOXPERPLT_QTY <![CDATA[>]]> 3 AND T_HIS.BOXPERPLT_QTY <![CDATA[<=]]> 6 THEN 1 ELSE 0 END) AS COUNT_PLT_LE_6
+		        ,SUM(CASE WHEN T_HIS.BOXPERPLT_QTY <![CDATA[>]]> 6 AND T_HIS.BOXPERPLT_QTY <![CDATA[<=]]> 9 THEN 1 ELSE 0 END) AS COUNT_PLT_LE_9
+		        ,SUM(CASE WHEN T_HIS.BOXPERPLT_QTY <![CDATA[>]]> 9 THEN 1 ELSE 0 END) AS COUNT_PLT_OVER_9
+		    FROM MS_SKU
+		    JOIN ST_STOCK_CHAIN_HIS T_HIS
+		        ON T_HIS.SKU        = MS_SKU.SKU
+		        AND MS_SKU.STORERKEY = #{gStorerkey}
+		    LEFT OUTER JOIN MS_PURCHASECUST
+		        ON T_HIS.SKU = MS_PURCHASECUST.SKU
+		        AND T_HIS.DCCODE = MS_PURCHASECUST.DCCODE
+		    WHERE 1=1
+		        AND T_HIS.STOCKDATE = TO_CHAR(SYSDATE, 'YYYYMMDD')
+		        AND T_HIS.QTY       <![CDATA[>]]> 0
+		        <if test='multiDcCode != null and multiDcCode.length > 0'>
+	                AND T_HIS.DCCODE IN 
+	                <foreach collection="multiDcCode" item="item" open="(" separator="," close=")">
+		                #{item}
+		            </foreach> 
+	            </if>
+	            <if test='buyerKey != null and buyerKey != ""'>
+	                AND MS_PURCHASECUST.BUYERKEY = #{buyerKey}
+	            </if>
+		    GROUP BY T_HIS.DCCODE
+		)
+		-- 메인 쿼리 시작
+		SELECT * FROM 
+		(
+		    -- 1. 담당협력사 (SKU)
+		    SELECT
+		        '1.담당협력사' AS LEVEL1 
+		        , CD1.BASEDESCR AS LEVEL2 
+		        , 'SKU' AS LEVEL3
+		        , COUNT(A.SKU) AS ALL_SKU_COUNT
+		        , COUNT(DISTINCT A.SKU) AS DISTINCT_SKU_COUNT
+		        <if test='multiDcCode != null and multiDcCode.length > 0'>
+	                <foreach collection="multiDcCode" item="item">
+	                	, COUNT(CASE WHEN A.DCCODE = #{item} THEN A.SKU END) AS DC_${item}_SKU_COUNT	                
+		            </foreach> 
+	            </if> 		    
+		    FROM
+		        MS_PURCHASECUST A
+		    JOIN CM_CODE B ON A.STORERKEY = B.STORERKEY AND A.BUYERKEY  = B.BASECODE
+		    JOIN MS_SKU C ON A.SKU = C.SKU AND A.STORERKEY = C.STORERKEY
+		    LEFT JOIN CM_CODE_STORER CD1 ON CD1.STORERKEY = C.STORERKEY AND CD1.CODELIST = 'STORAGETYPE' AND CD1.BASECODE = C.STORAGETYPE
+		    WHERE 1=1
+		        AND A.BUYERKEY != 'STD' 
+		        AND B.CODELIST = 'BUYERKEY'
+		        AND B.STORERKEY = #{gStorerkey}
+		        AND B.DEL_YN = 'N'
+		        <if test='multiDcCode != null and multiDcCode.length > 0'>
+	                AND A.DCCODE IN 
+	                <foreach collection="multiDcCode" item="item" open="(" separator="," close=")">
+		                #{item}
+		            </foreach> 
+	            </if>
+		        <if test='buyerKey != null and buyerKey != ""'>
+	                AND A.BUYERKEY = #{buyerKey}
+	            </if>
+		    GROUP BY CD1.BASEDESCR    
+		    UNION ALL    
+		    -- 1. 담당협력사 (PLT)
+		    SELECT
+		        '1.담당협력사' AS LEVEL1 
+		        , T1.BASEDESCR AS LEVEL2 
+		        , 'PLT' AS LEVEL3
+		        , NVL(SUM(T1.BOXPERPLT_QTY), 0) AS ALL_SKU_COUNT 
+		        , NVL(SUM(T1.UNIQUE_BOXPERPLT_SUM), 0) AS DISTINCT_SKU_COUNT 
+		        <if test='multiDcCode != null and multiDcCode.length > 0'>
+	                <foreach collection="multiDcCode" item="item">
+	                	, COUNT(CASE WHEN T1.DCCODE = #{item} THEN T1.BOXPERPLT_QTY END) AS DC_${item}_SKU_COUNT	                
+		            </foreach> 
+	            </if>
+		    FROM
+		        (
+		            SELECT
+		                A.SKU, 
+		                A.DCCODE,
+		                CD1.BASEDESCR,
+		                D.BOXPERPLT_QTY,
+		                MAX(D.BOXPERPLT_QTY) AS UNIQUE_BOXPERPLT_SUM 
+		            FROM
+		                MS_PURCHASECUST A
+		            JOIN CM_CODE B ON A.STORERKEY = B.STORERKEY AND A.BUYERKEY  = B.BASECODE
+		            JOIN MS_SKU C ON A.SKU = C.SKU AND A.STORERKEY = C.STORERKEY
+		            LEFT OUTER JOIN ST_STOCK_CHAIN_HIS D ON A.SKU = D.SKU AND A.DCCODE = D.DCCODE AND D.STOCKDATE = '20251118'
+		            LEFT JOIN CM_CODE_STORER CD1 ON CD1.STORERKEY = C.STORERKEY AND CD1.CODELIST = 'STORAGETYPE' AND CD1.BASECODE = C.STORAGETYPE
+		            WHERE 
+		                A.BUYERKEY != 'STD' 
+		                AND B.CODELIST = 'BUYERKEY' 
+		                AND B.STORERKEY = #{gStorerkey} 
+		                AND B.DEL_YN = 'N'
+		                <if test='multiDcCode != null and multiDcCode.length > 0'>
+			                AND A.DCCODE IN 
+			                <foreach collection="multiDcCode" item="item" open="(" separator="," close=")">
+				                #{item}
+				            </foreach> 
+			            </if>
+			            <if test='buyerKey != null and buyerKey != ""'>
+			                AND A.BUYERKEY = #{buyerKey}
+			            </if> 
+		            GROUP BY A.SKU, A.DCCODE, CD1.BASEDESCR, D.BOXPERPLT_QTY
+		        ) T1
+		    GROUP BY T1.BASEDESCR
+		    UNION ALL 
+		    -- 2. 전/범용 (SKU)
+		    SELECT
+		    	'2.전/범용' AS LEVEL1 
+		        , (CASE WHEN C.REFERENCE15 = 'Y' THEN '전용' ELSE '범용' END) AS LEVEL2
+		        , 'SKU' AS LEVEL3
+		        , COUNT(A.SKU) AS ALL_SKU_COUNT
+		        , COUNT(DISTINCT A.SKU) AS DISTINCT_SKU_COUNT
+		        <if test='multiDcCode != null and multiDcCode.length > 0'>
+	                <foreach collection="multiDcCode" item="item">
+	                	, COUNT(CASE WHEN A.DCCODE = #{item} THEN A.SKU END) AS DC_${item}_SKU_COUNT	                
+		            </foreach> 
+	            </if>
+		    FROM
+		        MS_PURCHASECUST A
+		    JOIN CM_CODE B ON A.STORERKEY = B.STORERKEY AND A.BUYERKEY  = B.BASECODE
+		    JOIN MS_SKU C ON A.SKU = C.SKU AND A.STORERKEY = C.STORERKEY   
+		    WHERE
+		        A.BUYERKEY != 'STD' 
+		        AND B.CODELIST = 'BUYERKEY' 
+		        AND B.STORERKEY = #{gStorerkey} 
+		        AND B.DEL_YN = 'N'
+		        <if test='buyerKey != null and buyerKey != ""'>
+	                AND A.BUYERKEY = #{buyerKey}
+	            </if>
+		    GROUP BY C.REFERENCE15
+		    UNION ALL
+		    -- 2. 전/범용 (PLT)
+		    SELECT
+		        '2.전/범용' AS LEVEL1 
+		        , (CASE WHEN T1.REFERENCE15 = 'Y' THEN '전용' ELSE '범용' END) AS LEVEL2
+		        , 'PLT' AS LEVEL3
+		        , NVL(SUM(T1.BOXPERPLT_QTY), 0) AS ALL_SKU_COUNT 
+		        , NVL(SUM(T1.UNIQUE_BOXPERPLT_SUM), 0) AS DISTINCT_SKU_COUNT 
+		        <if test='multiDcCode != null and multiDcCode.length > 0'>
+	                <foreach collection="multiDcCode" item="item">
+	                	, COUNT(CASE WHEN T1.DCCODE = #{item} THEN T1.BOXPERPLT_QTY END) AS DC_${item}_SKU_COUNT	                
+		            </foreach> 
+	            </if>    
+		    FROM
+		        (
+		            SELECT
+		                A.SKU, 
+		                A.DCCODE,
+		                C.REFERENCE15,
+		                D.BOXPERPLT_QTY,
+		                MAX(D.BOXPERPLT_QTY) AS UNIQUE_BOXPERPLT_SUM
+		            FROM
+		                MS_PURCHASECUST A
+		            JOIN CM_CODE B ON A.STORERKEY = B.STORERKEY AND A.BUYERKEY  = B.BASECODE
+		            JOIN MS_SKU C ON A.SKU = C.SKU AND A.STORERKEY = C.STORERKEY
+		            LEFT OUTER JOIN ST_STOCK_CHAIN_HIS D ON A.SKU = D.SKU AND A.DCCODE = D.DCCODE AND D.STOCKDATE = '20251118'
+		            WHERE
+		                A.BUYERKEY != 'STD' 
+		                AND B.CODELIST = 'BUYERKEY' 
+		                AND B.STORERKEY = #{gStorerkey} 
+		                AND B.DEL_YN = 'N'
+		                <if test='multiDcCode != null and multiDcCode.length > 0'>
+			                AND A.DCCODE IN 
+			                <foreach collection="multiDcCode" item="item" open="(" separator="," close=")">
+				                #{item}
+				            </foreach> 
+			            </if> 
+			            <if test='buyerKey != null and buyerKey != ""'>
+			                AND A.BUYERKEY = #{buyerKey}
+			            </if> 
+		            GROUP BY A.SKU, A.DCCODE, C.REFERENCE15, D.BOXPERPLT_QTY
+		        ) T1
+		    GROUP BY T1.REFERENCE15
+		    UNION ALL
+		    -- 3. 상품당 PLT 수 (평균PLT, SKU_PLT_DATA CTE 사용)
+		    SELECT
+		    	'3.상품당PLT수' AS LEVEL1 
+		        , T1.LEVEL2 AS LEVEL2 
+		        , 'SKU' AS LEVEL3 
+		        , T1.ALL_PLT_METRIC AS ALL_SKU_COUNT 
+		        , T1.ALL_PLT_METRIC AS DISTINCT_SKU_COUNT 
+		        <if test='multiDcCode != null and multiDcCode.length > 0'>
+	                <foreach collection="multiDcCode" item="item">
+	                	, T1.DC_${item}_PLT_METRIC AS DC_${item}_SKU_COUNT	                
+		            </foreach> 
+	            </if> 
+		    FROM (
+		    	SELECT '평균PLT' AS LEVEL2, ROUND(AVG(T1.ALL_PLT_AVG), 2) AS ALL_PLT_METRIC
+		    	<if test='multiDcCode != null and multiDcCode.length > 0'>
+	                <foreach collection="multiDcCode" item="item">
+	                	, ROUND(MAX(CASE WHEN T1.DCCODE = #{item} THEN T1.ALL_PLT_AVG END), 2) AS DC_${item}_PLT_METRIC	                
+		            </foreach> 
+	            </if> 
+		    	FROM SKU_PLT_DATA T1 GROUP BY 1
+		    	UNION ALL
+		    	SELECT '3PLT이내' AS LEVEL2, MAX(T1.COUNT_PLT_LE_3) AS ALL_PLT_METRIC
+		    	<if test='multiDcCode != null and multiDcCode.length > 0'>
+	                <foreach collection="multiDcCode" item="item">
+	                	, MAX(CASE WHEN T1.DCCODE = #{item} THEN T1.COUNT_PLT_LE_3 END) AS DC_${item}_PLT_METRIC	                
+		            </foreach> 
+	            </if> 
+		    	FROM SKU_PLT_DATA T1 GROUP BY 1
+		    	UNION ALL
+		    	SELECT '6PLT이내' AS LEVEL2, MAX(T1.COUNT_PLT_LE_6) AS ALL_PLT_METRIC
+		    	<if test='multiDcCode != null and multiDcCode.length > 0'>
+	                <foreach collection="multiDcCode" item="item">
+	                	, MAX(CASE WHEN T1.DCCODE = #{item} THEN T1.COUNT_PLT_LE_6 END) AS DC_${item}_PLT_METRIC	                
+		            </foreach> 
+	            </if> 
+		    	FROM SKU_PLT_DATA T1 GROUP BY 1
+		    	UNION ALL
+		    	SELECT '9PLT이내' AS LEVEL2, MAX(T1.COUNT_PLT_LE_9) AS ALL_PLT_METRIC
+		    	<if test='multiDcCode != null and multiDcCode.length > 0'>
+	                <foreach collection="multiDcCode" item="item">
+	                	, MAX(CASE WHEN T1.DCCODE = #{item} THEN T1.COUNT_PLT_LE_9 END) AS DC_${item}_PLT_METRIC	                
+		            </foreach> 
+	            </if>
+		    	FROM SKU_PLT_DATA T1 GROUP BY 1
+		    	UNION ALL
+		    	SELECT '9PLT이상' AS LEVEL2, MAX(T1.COUNT_PLT_OVER_9) AS ALL_PLT_METRIC
+		    	<if test='multiDcCode != null and multiDcCode.length > 0'>
+	                <foreach collection="multiDcCode" item="item">
+	                	, MAX(CASE WHEN T1.DCCODE = #{item} THEN T1.COUNT_PLT_OVER_9 END) AS DC_${item}_PLT_METRIC	                
+		            </foreach> 
+	            </if> 
+		    	FROM SKU_PLT_DATA T1 GROUP BY 1
+		    ) T1
+		    UNION ALL 
+		    -- 4. 무출고상품 
+		    SELECT 
+		    '4.무출고상품' AS LEVEL1 
+		    , T1.LEVEL2 AS LEVEL2
+		    , 'SKU' AS LEVEL3
+		    , SUM(T1.SHIP_COUNT) AS ALL_SKU_COUNT
+		    , SUM(T1.SHIP_COUNT) AS DISTINCT_SKU_COUNT
+		    <if test='multiDcCode != null and multiDcCode.length > 0'>
+                <foreach collection="multiDcCode" item="item">
+                	, MAX(CASE WHEN T1.DCCODE = #{item} THEN T1.SHIP_COUNT END) AS DC_${item}_SKU_COUNT             
+	            </foreach> 
+            </if>
+		    FROM (
+		        SELECT 
+		            MS_PURCHASESTATS.DCCODE
+		            , '1개월' AS LEVEL2
+		            , SUM(CASE WHEN MS_PURCHASESTATS.SHIPQTY1W = 0 THEN 1 ELSE 0 END) AS SHIP_COUNT
+		        FROM MS_PURCHASESTATS 
+		        LEFT OUTER JOIN MS_PURCHASECUST
+		        ON MS_PURCHASESTATS.SKU = MS_PURCHASECUST.SKU
+		        AND MS_PURCHASESTATS.DCCODE = MS_PURCHASECUST.DCCODE
+		        WHERE MS_PURCHASESTATS.STATSDT = '20250314'		        
+		        <if test='multiDcCode != null and multiDcCode.length > 0'>
+		             AND MS_PURCHASESTATS.DCCODE IN 
+	              <foreach collection="multiDcCode" item="item" open="(" separator="," close=")">
+		              #{item}
+		          </foreach> 
+	            </if>
+	            <if test='buyerKey != null and buyerKey != ""'>
+	                AND MS_PURCHASECUST.BUYERKEY = #{buyerKey}
+	            </if>
+		        GROUP BY MS_PURCHASESTATS.DCCODE
+		        UNION ALL
+		        SELECT 
+		            MS_PURCHASESTATS.DCCODE
+		            , '2개월' AS LEVEL2
+		            , SUM(CASE WHEN MS_PURCHASESTATS.SHIPQTY2W = 0 THEN 1 ELSE 0 END) AS SHIP_COUNT
+		        FROM MS_PURCHASESTATS 
+		        LEFT OUTER JOIN MS_PURCHASECUST
+		        ON MS_PURCHASESTATS.SKU = MS_PURCHASECUST.SKU
+		        AND MS_PURCHASESTATS.DCCODE = MS_PURCHASECUST.DCCODE
+		        WHERE MS_PURCHASESTATS.STATSDT = '20250314'		        
+		        <if test='multiDcCode != null and multiDcCode.length > 0'>
+		             AND MS_PURCHASESTATS.DCCODE IN 
+	              <foreach collection="multiDcCode" item="item" open="(" separator="," close=")">
+		              #{item}
+		          </foreach> 
+	            </if>
+	            <if test='buyerKey != null and buyerKey != ""'>
+	                AND MS_PURCHASECUST.BUYERKEY = #{buyerKey}
+	            </if>
+		        GROUP BY MS_PURCHASESTATS.DCCODE
+		        UNION ALL
+		        SELECT 
+		            MS_PURCHASESTATS.DCCODE
+		            , '3개월' AS LEVEL2
+		            , SUM(CASE WHEN MS_PURCHASESTATS.SHIPQTY3W = 0 THEN 1 ELSE 0 END) AS SHIP_COUNT
+		        FROM MS_PURCHASESTATS 
+		        LEFT OUTER JOIN MS_PURCHASECUST
+		        ON MS_PURCHASESTATS.SKU = MS_PURCHASECUST.SKU
+		        AND MS_PURCHASESTATS.DCCODE = MS_PURCHASECUST.DCCODE
+		        WHERE MS_PURCHASESTATS.STATSDT = '20250314'		        
+		        <if test='multiDcCode != null and multiDcCode.length > 0'>
+		             AND MS_PURCHASESTATS.DCCODE IN 
+	              <foreach collection="multiDcCode" item="item" open="(" separator="," close=")">
+		              #{item}
+		          </foreach> 
+	            </if>
+	            <if test='buyerKey != null and buyerKey != ""'>
+	                AND MS_PURCHASECUST.BUYERKEY = #{buyerKey}
+	            </if>
+		        GROUP BY MS_PURCHASESTATS.DCCODE
+		    ) T1
+		    GROUP BY T1.LEVEL2 
+		    UNION ALL
+		    -- 5. 부진재고 (INV_SLOW CTE 사용)
+		    SELECT
+		        '5.부진재고' AS LEVEL1 
+		        , '60일이상' AS LEVEL2 
+		        , 'SKU' AS LEVEL3
+		        , SUM(CASE WHEN QTY_TOTAL <![CDATA[<>]]> 0 AND STOCKDAY <![CDATA[>]]> 60 AND SHIPQTY1W_TOTAL = 0 THEN 1 ELSE 0 END) AS ALL_SKU_COUNT
+		        , SUM(CASE WHEN QTY_TOTAL <![CDATA[<>]]> 0 AND STOCKDAY <![CDATA[>]]> 60 AND SHIPQTY1W_TOTAL = 0 THEN 1 ELSE 0 END) AS DISTINCT_SKU_COUNT
+		        <if test='multiDcCode != null and multiDcCode.length > 0'>
+	                <foreach collection="multiDcCode" item="item">
+	                	, SUM(CASE WHEN DCCODE = #{item} AND QTY_TOTAL <![CDATA[<>]]> 0 AND STOCKDAY <![CDATA[>]]> 60 AND SHIPQTY1W_TOTAL = 0 THEN 1 ELSE 0 END) AS DC_${item}_SKU_COUNT             
+		            </foreach> 
+	            </if> 
+		    FROM INV_SLOW
+		)
+		ORDER BY LEVEL1, LEVEL2 DESC, LEVEL3 DESC
+	</select>
+	
+	<select id="getTab2DetailList" resultType="java.util.Map">
+	-- 1. 전월 영업일(BIZDATE) 계산 (성능 개선을 위해 분리)
+	WITH BIZDATE_TB AS (
+	    SELECT
+	        SUM(CASE WHEN REST_YN = 'N' THEN 1 ELSE 0 END) AS BIZDATE_COUNT
+	    FROM
+	        CM_CALENDAR
+	    WHERE
+	        -- D-30일 ~ D-1일까지의 영업일 계산 (현재 날짜 기준)
+	        YY || MM || DD BETWEEN TO_CHAR(TRUNC(SYSDATE, 'MM') - 30, 'YYYYMMDD') AND TO_CHAR(SYSDATE - 1, 'YYYYMMDD')
+	        AND CM_CALENDAR.DCCODE = 'STD'
+	        AND CM_CALENDAR.CALENDAR_ID = 'STD'
+	),
+	-- 2. PURCHASE_TB (필수 필터 조건 적용)
+	PURCHASE_TB AS (
+	    SELECT
+	        MS_PURCHASEDC_DAILY.*
+	    FROM
+	        MS_PURCHASEDC_DAILY
+	    WHERE
+	        MS_PURCHASEDC_DAILY.YYYYMMDD = TO_CHAR(SYSDATE, 'YYYYMMDD')
+	        AND MS_PURCHASEDC_DAILY.STORERKEY = #{gStorerkey}
+	        <if test='multiDcCode != null and multiDcCode.length > 0'>
+				AND MS_PURCHASEDC_DAILY.DCCODE IN
+		        <foreach collection="multiDcCode" item="item" open="(" separator="," close=")">
+		            #{item}
+		        </foreach>
+			</if>
+			<if test='buyerKey != null and buyerKey.length > 0'>
+				AND MS_PURCHASEDC_DAILY.BUYERKEY = #{buyerKey}
+			</if>
+	),
+	-- 3. PURCHASESTATS_TB
+	PURCHASESTATS_TB AS (
+	    SELECT
+	        STORERKEY,
+	        SKU,
+	        NVL(SUM(SHIPQTY1W), 0) AS SHIPQTY1W_TOTAL,
+	        NVL(SUM(SHIPQTY2W), 0) AS SHIPQTY2W_TOTAL,
+	        NVL(SUM(SHIPQTY3W), 0) AS SHIPQTY3W_TOTAL,
+	        NVL(MAX(STOCKAVGDAY), 0) AS STOCKAVGDAY
+	    FROM (
+	        SELECT
+	            MS_PURCHASESTATS.STORERKEY,
+	            MS_PURCHASESTATS.SKU,
+	            MAX(MS_PURCHASESTATS.SHIPQTY1W_SO) AS SHIPQTY1W,
+	            MAX(MS_PURCHASESTATS.SHIPQTY2W_SO) AS SHIPQTY2W,
+	            MAX(MS_PURCHASESTATS.SHIPQTY3W_SO) AS SHIPQTY3W,
+	            MAX(MS_PURCHASESTATS.STOCKAVGDAY) AS STOCKAVGDAY
+	        FROM
+	            MS_PURCHASESTATS
+	        JOIN MS_SKU
+	            ON MS_PURCHASESTATS.STORERKEY = MS_SKU.STORERKEY
+	            AND MS_PURCHASESTATS.SKU = MS_SKU.SKU
+	        WHERE
+	            MS_PURCHASESTATS.STORERKEY = #{gStorerkey}
+	            <if test='multiDcCode != null and multiDcCode.length > 0'>
+				AND MS_PURCHASESTATS.DCCODE IN
+		        <foreach collection="multiDcCode" item="item" open="(" separator="," close=")">
+		            #{item}
+		        </foreach>
+			</if>
+	        GROUP BY
+	            MS_PURCHASESTATS.DCCODE, MS_PURCHASESTATS.STORERKEY, MS_PURCHASESTATS.SKU
+	    )
+	    GROUP BY STORERKEY, SKU
+	),
+	-- 4. ST_TB (재고 정보)
+	ST_TB AS (
+	    SELECT
+	        #{gStorerkey} AS STORERKEY,
+	        T_STOCKDATE.SKU AS SKU,
+	        MAX(T_HIS.UOM) AS UOM,
+	        MAX(T_PLT.PLTCNT) AS BOXPERPLT,
+	        NVL(SUM(CASE WHEN T_HIS.DCCODE = '1000' AND MS_SKU.SKUTYPE IN ('20', '30') THEN 0 ELSE T_HIS.QTY END), 0) AS QTY_TOTAL,
+	        NVL(SUM(CASE WHEN T_HIS.DCCODE IN ('2600', '2620', '2630', '2650', '2660', '2260') THEN T_HIS.QTY ELSE 0 END), 0) AS QTY_TOTAL_FW,
+	        MIN(STOCKIN) AS STOCKIN,
+	        MAX(STOCKOUT) AS STOCKOUT
+	    FROM (
+	        SELECT SKU, MIN(STOCKDATE) AS STOCKIN, MAX(STOCKDATE) AS STOCKOUT
+	        FROM ST_STOCK_CHAIN_HIS T
+	        WHERE T.STOCKDATE <![CDATA[<=]]> TO_CHAR(SYSDATE, 'YYYYMMDD')
+	        GROUP BY SKU
+	    ) T_STOCKDATE
+	    LEFT OUTER JOIN MS_SKU ON MS_SKU.STORERKEY = #{gStorerkey} AND T_STOCKDATE.SKU = MS_SKU.SKU
+	    LEFT OUTER JOIN ST_STOCK_CHAIN_HIS T_HIS
+	        ON T_HIS.SKU = T_STOCKDATE.SKU 
+	        AND T_HIS.STOCKDATE = TO_CHAR(SYSDATE, 'YYYYMMDD') 
+	        AND T_HIS.QTY > 0 
+	        <if test='multiDcCode != null and multiDcCode.length > 0'>
+        	AND T_HIS.DCCODE IN
+		        <foreach collection="multiDcCode" item="item" open="(" separator="," close=")">
+		            #{item}
+		        </foreach>
+	        </if>
+	    LEFT OUTER JOIN (
+	        SELECT MS_SKU.SKU, MDPL1.BOXPERLAYER * MDPL1.LAYERPERPLT AS PLTCNT
+	        FROM LOGISONE.MS_DC_PLT_LOAD MDPL1
+	        JOIN MS_SKU ON MS_SKU.SKU = MDPL1.SKU AND MS_SKU.STORERKEY = MDPL1.STORERKEY
+	        WHERE MDPL1.STORERKEY = #{gStorerkey}
+	        UNION ALL
+	        SELECT MS_SKUCHAIN.SKU, MS_SKUCHAIN.BOXPERPLT AS PLTCNT
+	        FROM MS_SKUCHAIN
+	        JOIN MS_SKU ON MS_SKU.SKU = MS_SKUCHAIN.SKU AND MS_SKU.STORERKEY = MS_SKUCHAIN.STORERKEY
+	        WHERE MS_SKUCHAIN.STORERKEY = #{gStorerkey}
+	          AND NOT EXISTS (
+	            SELECT 1 FROM LOGISONE.MS_DC_PLT_LOAD M WHERE M.STORERKEY = MS_SKUCHAIN.STORERKEY AND M.SKU = MS_SKUCHAIN.SKU
+	          )
+	    ) T_PLT
+	        ON T_PLT.SKU = T_STOCKDATE.SKU
+	    GROUP BY T_STOCKDATE.SKU
+	),
+	-- 5. BRAND_TB (고객 브랜드 정보)
+	BRAND_TB AS (
+	    SELECT
+	        MS_SKUCHAIN_CUST.SKU,
+	        MS_SKUCHAIN_CUST.STORERKEY,
+	        CASE WHEN MS_CUST.PARENTCUSTKEY IS NULL THEN MS_CUST.CUSTKEY ELSE MS_CUST.PARENTCUSTKEY END AS PARENTCUSTKEY,
+	        CASE WHEN MS_CUST.PARENTCUSTKEY IS NULL THEN MS_CUST.DESCRIPTION ELSE (SELECT A.DESCRIPTION FROM LOGISONE.MS_CUST A WHERE A.CUSTKEY = MS_CUST.PARENTCUSTKEY AND ROWNUM = 1) END AS PARENTCUSTNAME,
+	        MS_CUST_BRAND.REFERENCE02 AS BRANDNAME_FC
+	    FROM LOGISONE.MS_SKUCHAIN_CUST
+	    JOIN LOGISONE.MS_SKU ON MS_SKU.SKU = MS_SKUCHAIN_CUST.SKU AND MS_SKU.STORERKEY = MS_SKUCHAIN_CUST.STORERKEY
+	    JOIN LOGISONE.MS_CUST ON MS_SKUCHAIN_CUST.CUSTKEY = MS_CUST.CUSTKEY AND MS_CUST.CUSTTYPE = 'C' AND MS_CUST.STORERKEY = MS_SKUCHAIN_CUST.STORERKEY
+	    LEFT OUTER JOIN LOGISONE.MS_CUST_BRAND
+	        ON MS_CUST_BRAND.CUSTKEY = MS_CUST.CUSTKEY AND MS_CUST_BRAND.STORERKEY = MS_CUST.STORERKEY AND MS_CUST_BRAND.CUSTTYPE = MS_CUST.CUSTTYPE
+	    WHERE MS_CUST.DEL_YN = 'N'
+	        AND MS_SKUCHAIN_CUST.STORERKEY = #{gStorerkey}
+	        AND MS_SKUCHAIN_CUST.CUSTNO = (SELECT MIN(TO_NUMBER(CUSTNO)) FROM LOGISONE.MS_SKUCHAIN_CUST WHERE SKU = MS_SKU.SKU)
+	    GROUP BY MS_SKUCHAIN_CUST.SKU, MS_SKUCHAIN_CUST.STORERKEY, MS_CUST.CUSTKEY, MS_CUST.PARENTCUSTKEY, MS_CUST.DESCRIPTION, MS_CUST_BRAND.REFERENCE02
+	),
+	-- 6. STO_INOUT_TB (이체 입출고량)
+	STO_INOUT_TB AS (
+	    SELECT
+	        DDD.SKU, DDD.STORERKEY,
+	        SUM(CASE WHEN DDD.DOCTYPE = 'DP' THEN DDD.CONFIRMQTY ELSE 0 END) AS STO_IN_QTY,
+	        SUM(CASE WHEN DDD.DOCTYPE = 'WD' THEN DDD.CONFIRMQTY ELSE 0 END) AS STO_OUT_QTY
+	    FROM DM_DOCUMENT_D DDD
+	    WHERE
+	        DDD.WORKPROCESSCODE = 'STO' 
+	        AND DDD.DELIVERYDATE = TO_CHAR(SYSDATE, 'YYYYMMDD') 
+	        AND DDD.STORERKEY = #{gStorerkey}
+	        <if test='multiDcCode != null and multiDcCode.length > 0'>
+        	AND DDD.DCCODE IN
+		        <foreach collection="multiDcCode" item="item" open="(" separator="," close=")">
+		            #{item}
+		        </foreach>
+	        </if>
+	    GROUP BY DDD.PLANT, DDD.SKU, DDD.STORERKEY
+	),
+	-- 7. TURNOVER_TB (회전일수 계산, 전월 날짜 동적 계산 적용)
+	TURNOVER_TB AS (
+	    SELECT
+	        T_SUB.STORERKEY,
+	        T_SUB.SKU,
+	        -- 전월 시작일 및 마지막 날짜 동적 계산
+	        TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD')) AS PREV_END_DATE,
+	        TO_NUMBER(TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')) AS PREV_START_DATE,
+	        ROUND(
+	            DECODE(
+	                NVL(
+	                    DECODE(TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD') - TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')), 0, SUM(T_SUB.BASEQTY),
+	                           ROUND(SUM(T_SUB.BASEQTY) / TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD') - TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')))
+	                    ), 0
+	                ), 0, 0,
+	                DECODE(
+	                    DECODE(TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD') - TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')), 0, SUM(T_SUB.ORDERQTY_SO) + SUM(T_SUB.ORDERQTY_PO) + SUM(T_SUB.ORDERQTY_STO) + SUM(T_SUB.ADJUSTQTY_WD) + SUM(T_SUB.ADJUSTQTY_DISUSE),
+	                           ROUND((SUM(T_SUB.ORDERQTY_SO) + SUM(T_SUB.ORDERQTY_PO) + SUM(T_SUB.ORDERQTY_STO) + SUM(T_SUB.ADJUSTQTY_WD) + SUM(T_SUB.ADJUSTQTY_DISUSE)) / TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD') - TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')))
+	                    ), 0, 0,
+	                    NVL(
+	                        DECODE(TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD') - TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')), 0, SUM(T_SUB.BASEQTY),
+	                               ROUND(SUM(T_SUB.BASEQTY) / TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD') - TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')))
+	                        ), 0
+	                    ) /
+	                    DECODE(TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD') - TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')), 0, SUM(T_SUB.ORDERQTY_SO) + SUM(T_SUB.ORDERQTY_PO) + SUM(T_SUB.ORDERQTY_STO) + SUM(T_SUB.ADJUSTQTY_WD) + SUM(T_SUB.ADJUSTQTY_DISUSE),
+	                           ROUND((SUM(T_SUB.ORDERQTY_SO) + SUM(T_SUB.ORDERQTY_PO) + SUM(T_SUB.ORDERQTY_STO) + SUM(T_SUB.ADJUSTQTY_WD) + SUM(T_SUB.ADJUSTQTY_DISUSE)) / TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD') - TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')))
+	                    )
+	                )
+	            ), 1
+	        ) AS TURNOVERDAY
+	    FROM (
+	        SELECT
+	            ST_DAILYINOUT.STORERKEY, ST_DAILYINOUT.SKU, SUM(ST_DAILYINOUT.BASEQTY) AS BASEQTY,
+	            SUM(ST_DAILYINOUT.ORDERQTY_SO) AS ORDERQTY_SO, SUM(ST_DAILYINOUT.ORDERQTY_PO) AS ORDERQTY_PO,
+	            SUM(ST_DAILYINOUT.ORDERQTY_STO) AS ORDERQTY_STO, SUM(ST_DAILYINOUT.ADJUSTQTY_WD) AS ADJUSTQTY_WD,
+	            SUM(ST_DAILYINOUT.ADJUSTQTY_DISUSE) AS ADJUSTQTY_DISUSE
+	        FROM ST_DAILYINOUT
+	        WHERE
+	            ST_DAILYINOUT.STORERKEY = #{gStorerkey}
+	            -- 하드코딩된 날짜를 동적 계산으로 변경
+	            AND ST_DAILYINOUT.INOUTDT <![CDATA[>=]]> TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')
+	            AND ST_DAILYINOUT.INOUTDT <![CDATA[<=]]> TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD')
+	            <if test='multiDcCode != null and multiDcCode.length > 0'>
+        		AND ST_DAILYINOUT.DCCODE IN
+		        <foreach collection="multiDcCode" item="item" open="(" separator="," close=")">
+		            #{item}
+		        </foreach>
+	        </if>
+	        GROUP BY ST_DAILYINOUT.STORERKEY, ST_DAILYINOUT.SKU
+	    ) T_SUB
+	    GROUP BY T_SUB.STORERKEY, T_SUB.SKU
+	    HAVING NVL(DECODE(TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD') - TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')), 0, SUM(T_SUB.BASEQTY),
+	                      ROUND(SUM(T_SUB.BASEQTY) / TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD') - TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')))
+	                 ), 0) > 0
+	)
+	-- ********** 2. 메인 쿼리 **********
+	SELECT 
+	T3.*
+	,(CASE WHEN T3.QTY_TOTAL <![CDATA[<>]]> 0 AND T3.STOCKDAY  <![CDATA[>]]>  60 AND T3.SHIPQTY1W_TOTAL = 0 THEN 'O' ELSE 'X' END) AS INV_SLOW
+	FROM (
+	    -- T2를 T3로 래핑하여 최종 STOCKDAY 계산
+	    SELECT
+	        ROUND(CASE WHEN T2.STOCKAVGDAY = 0 THEN 0 ELSE (T2.QTY_TOTAL_FW / T2.STOCKAVGDAY) END) AS STOCKDAY,
+	        T2.*
+	    FROM (
+	        -- T1과 JOIN 결과 및 기타 정보 생성
+	        SELECT
+	            T1.*,
+	            (SELECT DESCRIPTION FROM MS_CUST WHERE MS_CUST.STORERKEY = T1.STORERKEY AND MS_CUST.CUSTKEY = T1.CUSTKEY AND MS_CUST.CUSTTYPE = 'P') AS CUSTNAME,
+	            -- 일평균 (STOCKAVGDAY) 계산: BIZDATE CTE 사용
+	            ROUND((T1.SHIPQTY1W_TOTAL / DECODE(T1.NETWEIGHT, 0, 1, T1.NETWEIGHT) / BIZDATE_TB.BIZDATE_COUNT)) AS STOCKAVGDAY,
+	            MS_CUST_SECOND.SLAVE_CUSTKEY,
+	            CASE WHEN MS_CUST_SECOND.SLAVE_CUSTKEY IS NULL THEN '' ELSE (SELECT DISTINCT TO_CHAR(NVL(CUST1.DESCRIPTION, 'UNKNOWN')) FROM MS_CUST CUST1 WHERE CUST1.STORERKEY = MS_CUST_SECOND.STORERKEY AND CUST1.CUSTTYPE = 'P' AND CUST1.CUSTKEY = MS_CUST_SECOND.SLAVE_CUSTKEY) END AS SLAVE_CUSTNAME
+	        FROM (
+	            -- T1: 모든 CTE를 JOIN하여 기본 집계 필드 생성
+	            SELECT
+	                MAX(P.DCCODE) AS DCCODE,
+	                NVL(COALESCE(P.STORERKEY, ST.STORERKEY), MAX(ST.STORERKEY)) AS STORERKEY,
+	                NVL(COALESCE(P.SKU, ST.SKU), MAX(ST.SKU)) AS SKU,
+	                MAX(MS.DESCRIPTION) AS SKUNAME,
+	                NVL(MAX(CD2.BASEDESCR), MAX(CD2.BASECODE)) AS STORAGETYPENM,
+	                MAX(P.MOQ_SKU) AS MOQ_SKU,
+	                NVL(MAX(CD3.BASEDESCR), MAX(CD3.BASECODE)) AS SKUTYPEDESCR,
+	                NVL(MAX(SKSPEC.SPECDESCR), MAX('UNKNOWN')) AS SKU_LDESC,
+	                (CASE WHEN MAX(MS.REFERENCE15) = 'Y' THEN '전용' ELSE '범용' END) AS REFERENCE15,
+	                NVL(MAX(MS.NETWEIGHT), 0) AS NETWEIGHT,
+	                MAX(MS.CUSTSKU) AS CUSTSKU,
+	                NVL(MAX(MS.QTYPERBOX), 0) AS QTYPERBOX,
+	                MAX(ST.UOM) AS STOCKUOM,
+	                NVL(MAX(ST.BOXPERPLT), 0) AS BOXPERPLT,
+	                NVL(MAX(ST.QTY_TOTAL), 0) AS QTY_TOTAL,
+	                NVL(MAX(ST.QTY_TOTAL_FW), 0) AS QTY_TOTAL_FW,
+	                MAX(P.ROUTE) AS ROUTE,
+	                NVL(MAX(PS.SHIPQTY1W_TOTAL * DECODE(MS.NETWEIGHT, 0, 1, MS.NETWEIGHT)), 0) AS SHIPQTY1W_TOTAL,
+	                NVL(MAX(PS.SHIPQTY2W_TOTAL * DECODE(MS.NETWEIGHT, 0, 1, MS.NETWEIGHT)), 0) AS SHIPQTY2W_TOTAL,
+	                NVL(MAX(PS.SHIPQTY3W_TOTAL * DECODE(MS.NETWEIGHT, 0, 1, MS.NETWEIGHT)), 0) AS SHIPQTY3W_TOTAL,
+	                MAX(P.BUYERKEY) AS LASTBUYERKEY,
+	                MAX(P.CUSTKEY) AS CUSTKEY,
+	                NVL(MAX(P.MOQ_VENDER), 0) AS MOQ_VENDER,
+	                NVL(MAX(P.LEADTIME), 0) AS LEADTIME,
+	                MAX(P.PURCHASE_IN) AS PURCHASE_IN,
+	                MAX(P.PURCHASE_OUT) AS PURCHASE_OUT,
+	                MAX(ST.STOCKIN) AS STOCKIN,
+	                DECODE(MAX(ST.STOCKOUT), '20251120', '', MAX(ST.STOCKOUT)) AS STOCKOUT,
+	                MAX(BR.PARENTCUSTKEY) AS PARENTCUSTKEY,
+	                MAX(BR.PARENTCUSTNAME) AS PARENTCUSTNAME,
+	                MAX(BR.BRANDNAME_FC) AS BRANDNAME_FC,
+	                NVL(MAX(SI.STO_IN_QTY), 0) AS STO_IN_QTY,
+	                NVL(MAX(SI.STO_OUT_QTY), 0) AS STO_OUT_QTY,
+	                NVL(MAX(T_TB.TURNOVERDAY), 0) AS TURNOVERDAY
+	            FROM
+	                PURCHASE_TB P
+	            LEFT OUTER JOIN ST_TB ST ON ST.STORERKEY = P.STORERKEY AND ST.SKU = P.SKU
+	            LEFT OUTER JOIN MS_SKU MS ON MS.STORERKEY = COALESCE(P.STORERKEY, ST.STORERKEY) AND MS.SKU = COALESCE(P.SKU, ST.SKU)
+	            LEFT OUTER JOIN PURCHASESTATS_TB PS ON PS.STORERKEY = COALESCE(P.STORERKEY, ST.STORERKEY) AND PS.SKU = COALESCE(P.SKU, ST.SKU)
+	            LEFT OUTER JOIN BRAND_TB BR ON BR.STORERKEY = COALESCE(P.STORERKEY, ST.STORERKEY) AND BR.SKU = COALESCE(P.SKU, ST.SKU)
+	            LEFT JOIN CM_CODE CD2 ON CD2.STORERKEY IN ('%', 'STD', '', MS.STORERKEY) AND CD2.CODELIST = 'STORAGETYPE' AND CD2.BASECODE = MS.STORAGETYPE
+	            LEFT JOIN CM_CODE CD3 ON CD3.STORERKEY IN ('%', 'STD', '', MS.STORERKEY) AND CD3.CODELIST = 'SKUTYPE' AND CD3.BASECODE = MS.SKUTYPE
+	            LEFT JOIN MS_SKUSPEC SKSPEC ON SKSPEC.STORERKEY IN ('%', 'STD', '', MS.STORERKEY) AND SKSPEC.SPECCATEGORY = 'SKUGROUP' AND SKSPEC.SPECCODE = SUBSTR(MS.SKUGROUP, 1, 2)
+	            LEFT OUTER JOIN STO_INOUT_TB SI ON SI.STORERKEY = COALESCE(P.STORERKEY, ST.STORERKEY) AND SI.SKU = COALESCE(P.SKU, ST.SKU)
+	            LEFT OUTER JOIN TURNOVER_TB T_TB ON T_TB.STORERKEY = COALESCE(P.STORERKEY, ST.STORERKEY) AND T_TB.SKU = COALESCE(P.SKU, ST.SKU)
+	            WHERE
+	                MS.STORERKEY = #{gStorerkey}
+	            GROUP BY COALESCE(P.STORERKEY, ST.STORERKEY), COALESCE(P.SKU, ST.SKU)
+	        ) T1
+	        CROSS JOIN BIZDATE_TB -- BIZDATE CTE를 CROSS JOIN하여 T1의 모든 행에 대해 값을 사용
+	        LEFT OUTER JOIN MS_CUST_SECOND
+	            ON MS_CUST_SECOND.STORERKEY = T1.STORERKEY AND MS_CUST_SECOND.CUSTKEY = T1.CUSTKEY AND MS_CUST_SECOND.SKU = T1.SKU AND MS_CUST_SECOND.DEL_YN = 'N'
+	        LEFT JOIN CM_CODE CD1
+	            ON CD1.STORERKEY = T1.STORERKEY AND CD1.CODELIST = 'BUYERKEY' AND CD1.BASECODE = T1.LASTBUYERKEY
+	    ) T2
+	) T3
+	WHERE 1 = 1
+	</select>
+	
+	<select id="getTab2Detail2List" resultType="java.util.Map">
+	WITH BASE_COUNTS AS (
+	    SELECT
+	        A.DCCODE,
+	        C.STORAGETYPE,
+	        NVL(CD2.BASEDESCR, CD2.BASECODE) AS STORAGETYPENM,
+	        A.BUYERKEY,
+	        -- BUYERKEY별 카운트를 1로 설정
+	        COUNT(A.SKU) AS BUYER_COUNT
+	    FROM
+	        MS_PURCHASECUST A
+	    JOIN CM_CODE B ON A.STORERKEY = B.STORERKEY AND A.BUYERKEY = B.BASECODE
+	    JOIN MS_SKU C ON A.SKU = C.SKU AND A.STORERKEY = C.STORERKEY
+	    LEFT JOIN CM_CODE CD2 ON CD2.STORERKEY = B.STORERKEY AND CD2.CODELIST = 'STORAGETYPE' AND CD2.BASECODE = C.STORAGETYPE
+	    WHERE
+	        A.BUYERKEY != 'STD' 
+	        AND B.CODELIST = 'BUYERKEY'
+	        AND B.STORERKEY = #{gStorerkey}
+	        AND B.DEL_YN = 'N'
+	        <if test='multiDcCode != null and multiDcCode.length > 0'>
+                AND A.DCCODE IN 
+                <foreach collection="multiDcCode" item="item" open="(" separator="," close=")">
+	                #{item}
+	            </foreach> 
+            </if>
+            <if test='buyerKey != null and buyerKey != ""'>
+                AND A.BUYERKEY = #{buyerKey}
+            </if>    
+	    GROUP BY A.DCCODE, C.STORAGETYPE, A.BUYERKEY, CD2.BASEDESCR, CD2.BASECODE
+	),
+	-- ROLLUP을 사용하여 DCCODE별/STORAGETYPENM별 합계를 미리 계산
+	ROLLUP_COUNTS AS (
+	    SELECT
+	        -- GROUPING_ID를 사용하여 합계 행을 구분합니다.
+	        GROUPING_ID(DCCODE, STORAGETYPENM) AS GRP_ID,
+	        -- 합계 행의 이름을 명확하게 설정 (ROLLUP 결과는 NULL로 나옴)
+	        NVL(DCCODE, 'TOTAL') AS DCCODE_GRP,
+	        NVL(STORAGETYPENM, '합계') AS STORAGETYPENM_GRP,
+	        BUYERKEY,
+	        SUM(BUYER_COUNT) AS BUYER_COUNT
+	    FROM BASE_COUNTS
+	    -- DCCODE, STORAGETYPENM, BUYERKEY 조합별로 그룹화하며,
+	    -- (DCCODE, STORAGETYPENM)에 대해 ROLLUP을 적용합니다.
+	    GROUP BY ROLLUP(DCCODE, STORAGETYPENM), BUYERKEY
+	)
+	-- 2. PIVOT 연산자를 사용하여 행을 컬럼으로 변환
+	SELECT 
+	    DCCODE_GRP AS DCCODE, 
+	    STORAGETYPENM_GRP AS STORAGETYPENM,
+	    -- NVL을 사용하여 피벗되지 않은 컬럼은 0으로 처리 
+	    NVL("김광현", 0) AS "김광현", NVL("최유정", 0) AS "최유정", NVL("CK", 0) AS "CK",
+	    NVL("대구수급", 0) AS "대구수급", NVL("양준영", 0) AS "양준영", NVL("DMKT", 0) AS "DMKT",
+	    NVL("FO수급", 0) AS "FO수급", NVL("FS소진", 0) AS "FS소진", NVL("황순영", 0) AS "황순영",
+	    NVL("이천수급", 0) AS "이천수급", NVL("이천2수급", 0) AS "이천2수급", NVL("장성수급", 0) AS "장성수급",
+	    NVL("장성수급2", 0) AS "장성수급2", NVL("김종근", 0) AS "김종근", NVL("최주언", 0) AS "최주언",
+	    NVL("MD", 0) AS "MD", NVL("박한별", 0) AS "박한별", NVL("이세라", 0) AS "이세라",
+	    NVL("미지정", 0) AS "미지정", NVL("수원수급", 0) AS "수원수급", NVL("김혜진", 0) AS "김혜진",
+	    NVL("박진빈", 0) AS "박진빈", NVL("양산수급", 0) AS "양산수급", NVL("양산수급2", 0) AS "양산수급2"
+	FROM ROLLUP_COUNTS
+	PIVOT
+	(
+	    SUM(BUYER_COUNT) -- 집계할 값
+	    FOR BUYERKEY IN (
+	        -- 모든 BUYERKEY를 명시하고 별칭 지정 (이전 목록과 동일)
+	        'BCKKKK' AS "김광현", 'CHL973435' AS "최유정", 'CK' AS "CK", 'DAEGU' AS "대구수급", 'DID0923' AS "양준영",
+	        'DMKT' AS "DMKT", 'FOBUSAN' AS "FO수급", 'FS소진' AS "FS소진", 'HSYGENIUS' AS "황순영", 'ICHEON' AS "이천수급",
+	        'ICHEON2' AS "이천2수급", 'JANGSUNG' AS "장성수급", 'JANGSUNG2' AS "장성수급2", 'JONGGEUNKIM' AS "김종근", 
+	        'JUEONCHOI' AS "최주언", 'MD' AS "MD", 'PARK5700' AS "박한별", 'SARAH0510' AS "이세라", 'STD' AS "미지정", 
+	        'SUWON' AS "수원수급", 'VJDVJD9710' AS "김혜진", 'WLSQLS9331' AS "박진빈", 'YANGSAN' AS "양산수급", 'YANGSAN2' AS "양산수급2"
+	    )
+	)
+	</select>
+	
+	<select id="getTab3MasterList" resultType="java.util.Map">
+	/* PurchaseMapper.selectPurchaseMain */
+    WITH BIZDATE_TB AS (
+        SELECT
+            SUM(CASE WHEN REST_YN = 'N' THEN 1 ELSE 0 END) AS BIZDATE_COUNT
+        FROM
+            CM_CALENDAR
+        WHERE
+            YY || MM || DD BETWEEN TO_CHAR(TRUNC(SYSDATE, 'MM') - 30, 'YYYYMMDD') AND TO_CHAR(SYSDATE - 1, 'YYYYMMDD')
+            AND DCCODE = 'STD'
+            AND CALENDAR_ID = 'STD'
+    ),
+    PURCHASE_TB AS (
+        SELECT
+            *
+        FROM
+            MS_PURCHASEDC_DAILY
+        WHERE
+            YYYYMMDD = TO_CHAR(SYSDATE, 'YYYYMMDD')
+            AND STORERKEY = #{gStorerkey}
+            <if test='multiDcCode != null and multiDcCode.length > 0'>
+		    	AND DCCODE IN 
+                <foreach collection="multiDcCode" item="item" open="(" separator="," close=")">
+	                #{item}
+	            </foreach> 
+            </if>
+            <if test='buyerKey != null and buyerKey != ""'>
+                AND BUYERKEY = #{buyerKey}
+		    </if>
+    ),
+    PURCHASESTATS_TB AS (
+        SELECT
+            STORERKEY,
+            SKU,
+            NVL(SUM(SHIPQTY1W), 0) AS SHIPQTY1W_TOTAL,
+            NVL(SUM(SHIPQTY2W), 0) AS SHIPQTY2W_TOTAL,
+            NVL(SUM(SHIPQTY3W), 0) AS SHIPQTY3W_TOTAL,
+            NVL(MAX(STOCKAVGDAY), 0) AS STOCKAVGDAY
+        FROM (
+            SELECT
+                PS.STORERKEY,
+                PS.SKU,
+                MAX(PS.SHIPQTY1W_SO) AS SHIPQTY1W,
+                MAX(PS.SHIPQTY2W_SO) AS SHIPQTY2W,
+                MAX(PS.SHIPQTY3W_SO) AS SHIPQTY3W,
+                MAX(PS.STOCKAVGDAY) AS STOCKAVGDAY
+            FROM
+                MS_PURCHASESTATS PS
+            JOIN MS_SKU S
+                ON PS.STORERKEY = S.STORERKEY
+                AND PS.SKU = S.SKU
+            WHERE
+                PS.STORERKEY = #{gStorerkey}
+            GROUP BY
+                PS.DCCODE, PS.STORERKEY, PS.SKU
+        )
+        GROUP BY STORERKEY, SKU
+    ),
+    ST_TB AS (
+        SELECT
+            #{gStorerkey} AS STORERKEY,
+            T_STOCKDATE.SKU AS SKU,
+            MAX(T_HIS.UOM) AS UOM,
+            MAX(T_PLT.PLTCNT) AS BOXPERPLT,
+            NVL(SUM(CASE WHEN T_HIS.DCCODE = '1000' AND S.SKUTYPE IN ('20', '30') THEN 0 ELSE T_HIS.QTY END), 0) AS QTY_TOTAL,
+            NVL(SUM(CASE WHEN T_HIS.DCCODE IN ('2600', '2620', '2630', '2650', '2660', '2260') THEN T_HIS.QTY ELSE 0 END), 0) AS QTY_TOTAL_FW,
+            MIN(STOCKIN) AS STOCKIN,
+            MAX(STOCKOUT) AS STOCKOUT
+        FROM (
+            SELECT SKU, MIN(STOCKDATE) AS STOCKIN, MAX(STOCKDATE) AS STOCKOUT
+            FROM ST_STOCK_CHAIN_HIS T
+            WHERE T.STOCKDATE <![CDATA[<=]]> TO_CHAR(SYSDATE, 'YYYYMMDD')
+            GROUP BY SKU
+        ) T_STOCKDATE
+        LEFT OUTER JOIN MS_SKU S ON S.STORERKEY = #{gStorerkey} AND T_STOCKDATE.SKU = S.SKU
+        LEFT OUTER JOIN ST_STOCK_CHAIN_HIS T_HIS
+            ON T_HIS.SKU = T_STOCKDATE.SKU 
+            AND T_HIS.STOCKDATE = TO_CHAR(SYSDATE, 'YYYYMMDD') 
+            AND T_HIS.QTY > 0 
+            <if test='multiDcCode != null and multiDcCode.length > 0'>
+		    	AND T_HIS.DCCODE IN 
+                <foreach collection="multiDcCode" item="item" open="(" separator="," close=")">
+	                #{item}
+	            </foreach> 
+            </if>
+        LEFT OUTER JOIN (
+            SELECT MDPL1.SKU, MDPL1.BOXPERLAYER * MDPL1.LAYERPERPLT AS PLTCNT
+            FROM LOGISONE.MS_DC_PLT_LOAD MDPL1
+            WHERE MDPL1.STORERKEY = #{gStorerkey}
+            UNION ALL
+            SELECT SC.SKU, SC.BOXPERPLT AS PLTCNT
+            FROM MS_SKUCHAIN SC
+            WHERE SC.STORERKEY = #{gStorerkey}
+              AND NOT EXISTS (
+                SELECT 1 FROM LOGISONE.MS_DC_PLT_LOAD M WHERE M.STORERKEY = SC.STORERKEY AND M.SKU = SC.SKU
+              )
+        ) T_PLT
+            ON T_PLT.SKU = T_STOCKDATE.SKU
+        GROUP BY T_STOCKDATE.SKU
+    ),
+    BRAND_TB AS (
+        SELECT
+            SCC.SKU,
+            SCC.STORERKEY,
+            CASE WHEN C.PARENTCUSTKEY IS NULL THEN C.CUSTKEY ELSE C.PARENTCUSTKEY END AS PARENTCUSTKEY,
+            CASE WHEN C.PARENTCUSTKEY IS NULL THEN C.DESCRIPTION ELSE (SELECT A.DESCRIPTION FROM LOGISONE.MS_CUST A WHERE A.CUSTKEY = C.PARENTCUSTKEY AND ROWNUM = 1) END AS PARENTCUSTNAME,
+            CB.REFERENCE02 AS BRANDNAME_FC
+        FROM LOGISONE.MS_SKUCHAIN_CUST SCC
+        JOIN LOGISONE.MS_SKU S ON S.SKU = SCC.SKU AND S.STORERKEY = SCC.STORERKEY
+        JOIN LOGISONE.MS_CUST C ON SCC.CUSTKEY = C.CUSTKEY AND C.CUSTTYPE = 'C' AND C.STORERKEY = SCC.STORERKEY
+        LEFT OUTER JOIN LOGISONE.MS_CUST_BRAND CB
+            ON CB.CUSTKEY = C.CUSTKEY AND CB.STORERKEY = C.STORERKEY AND CB.CUSTTYPE = C.CUSTTYPE
+        WHERE C.DEL_YN = 'N'
+            AND SCC.STORERKEY = #{gStorerkey}
+            AND SCC.CUSTNO = (SELECT MIN(TO_NUMBER(CUSTNO)) FROM LOGISONE.MS_SKUCHAIN_CUST WHERE SKU = S.SKU)
+        GROUP BY SCC.SKU, SCC.STORERKEY, C.CUSTKEY, C.PARENTCUSTKEY, C.DESCRIPTION, CB.REFERENCE02
+    ),
+    STO_INOUT_TB AS (
+        SELECT
+            DDD.SKU, DDD.STORERKEY,
+            SUM(CASE WHEN DDD.DOCTYPE = 'DP' THEN DDD.CONFIRMQTY ELSE 0 END) AS STO_IN_QTY,
+            SUM(CASE WHEN DDD.DOCTYPE = 'WD' THEN DDD.CONFIRMQTY ELSE 0 END) AS STO_OUT_QTY
+        FROM DM_DOCUMENT_D DDD
+        WHERE
+            DDD.WORKPROCESSCODE = 'STO' 
+            AND DDD.DELIVERYDATE = TO_CHAR(SYSDATE, 'YYYYMMDD') 
+            AND DDD.STORERKEY = #{gStorerkey} 
+            <if test='multiDcCode != null and multiDcCode.length > 0'>
+		    	AND DDD.DCCODE IN 
+                <foreach collection="multiDcCode" item="item" open="(" separator="," close=")">
+	                #{item}
+	            </foreach> 
+            </if>
+        GROUP BY DDD.PLANT, DDD.SKU, DDD.STORERKEY
+    ),
+    TURNOVER_TB AS (
+        SELECT
+            T_SUB.STORERKEY,
+            T_SUB.SKU,
+            TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD')) AS PREV_END_DATE,
+            TO_NUMBER(TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')) AS PREV_START_DATE,
+            ROUND(
+                DECODE(
+                    NVL(
+                        DECODE(TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD') - TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')), 0, SUM(T_SUB.BASEQTY),
+                               ROUND(SUM(T_SUB.BASEQTY) / TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD') - TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')))
+                        ), 0
+                    ), 0, 0,
+                    DECODE(
+                        DECODE(TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD') - TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')), 0, SUM(T_SUB.ORDERQTY_SO) + SUM(T_SUB.ORDERQTY_PO) + SUM(T_SUB.ORDERQTY_STO) + SUM(T_SUB.ADJUSTQTY_WD) + SUM(T_SUB.ADJUSTQTY_DISUSE),
+                               ROUND((SUM(T_SUB.ORDERQTY_SO) + SUM(T_SUB.ORDERQTY_PO) + SUM(T_SUB.ORDERQTY_STO) + SUM(T_SUB.ADJUSTQTY_WD) + SUM(T_SUB.ADJUSTQTY_DISUSE)) / TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD') - TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')))
+                        ), 0, 0,
+                        NVL(
+                            DECODE(TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD') - TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')), 0, SUM(T_SUB.BASEQTY),
+                                   ROUND(SUM(T_SUB.BASEQTY) / TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD') - TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')))
+                            ), 0
+                        ) /
+                        DECODE(TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD') - TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')), 0, SUM(T_SUB.ORDERQTY_SO) + SUM(T_SUB.ORDERQTY_PO) + SUM(T_SUB.ORDERQTY_STO) + SUM(T_SUB.ADJUSTQTY_WD) + SUM(T_SUB.ADJUSTQTY_DISUSE),
+                               ROUND((SUM(T_SUB.ORDERQTY_SO) + SUM(T_SUB.ORDERQTY_PO) + SUM(T_SUB.ORDERQTY_STO) + SUM(T_SUB.ADJUSTQTY_WD) + SUM(T_SUB.ADJUSTQTY_DISUSE)) / TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD') - TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')))
+                        )
+                    )
+                ), 1
+            ) AS TURNOVERDAY
+        FROM (
+            SELECT
+                DI.STORERKEY, DI.SKU, SUM(DI.BASEQTY) AS BASEQTY,
+                SUM(DI.ORDERQTY_SO) AS ORDERQTY_SO, SUM(DI.ORDERQTY_PO) AS ORDERQTY_PO,
+                SUM(DI.ORDERQTY_STO) AS ORDERQTY_STO, SUM(DI.ADJUSTQTY_WD) AS ADJUSTQTY_WD,
+                SUM(DI.ADJUSTQTY_DISUSE) AS ADJUSTQTY_DISUSE
+            FROM ST_DAILYINOUT DI
+            WHERE
+                DI.STORERKEY = #{gStorerkey}
+                AND DI.INOUTDT <![CDATA[>=]]> TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')
+                AND DI.INOUTDT <![CDATA[<=]]> TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD')
+                <if test='multiDcCode != null and multiDcCode.length > 0'>
+		    	AND DI.DCCODE IN 
+                <foreach collection="multiDcCode" item="item" open="(" separator="," close=")">
+	                #{item}
+	            </foreach> 
+            </if>
+            GROUP BY DI.STORERKEY, DI.SKU
+        ) T_SUB
+        GROUP BY T_SUB.STORERKEY, T_SUB.SKU
+        HAVING NVL(DECODE(TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD') - TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')), 0, SUM(T_SUB.BASEQTY),
+                          ROUND(SUM(T_SUB.BASEQTY) / TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD') - TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')))
+                     ), 0) > 0
+    ),
+    ROP_TB AS (
+        SELECT
+            PC.STORERKEY
+            ,PC.DCCODE
+            ,PC.BUYERKEY
+            ,PC.SKU
+            ,CASE WHEN NVL(PM.EDIT_REORDERPOINT, 0) > 0 THEN PM.EDIT_REORDERPOINT
+             ELSE NVL(ROUND((PS.STOCKAVGDAY * NVL(PM.LEADTIME, 1)) + (PS.STDDEVIATION * (NVL(PM.COEFFICIENTSAFETY, 0)) * POWER(NVL(PM.LEADTIME, 1), 1 / 2))), 0)
+            END AS REORDERPOINT
+            ,NVL((SELECT SUM(OPENQTY) FROM ST_STOCK_PURCHASE SP WHERE SP.STORERKEY = PC.STORERKEY AND SP.DCCODE = PC.DCCODE AND SP.SKU = PC.SKU), 0) AS STOCKQTY
+            ,CASE WHEN NVL(PM.EDIT_STOCKGOAL, 0) > 0 THEN PM.EDIT_STOCKGOAL
+                 ELSE NVL(ROUND(PS.STOCKAVGDAY * (NVL(PM.PURINTERVAL, 1) + NVL(PM.LEADTIME, 1)) + ((3 * PS.STDDEVIATION) * POWER((NVL(PM.PURINTERVAL, 1) + NVL(PM.LEADTIME, 1)), 1 / 2))), 0)
+            END AS STOCKGOAL
+            , NVL(PT.VENDORCONFIRMQTY, 0) AS VENDORCONFIRMQTY
+            , NVL(PT.TODAYDPQTY, 0) AS RECEIVEQTY
+        FROM MS_PURCHASECUST PC
+        JOIN MS_PURCHASEMST PM ON PM.STORERKEY = PC.STORERKEY AND PM.DCCODE = PC.DCCODE AND PM.CUSTTYPE = PC.CUSTTYPE AND PM.SKU = PC.SKU
+        LEFT OUTER JOIN MS_PURCHASESTATS PS ON PS.DCCODE = PC.DCCODE AND PS.STORERKEY = PC.STORERKEY AND PS.SKU = PC.SKU AND PS.PLANT = PC.PLANT AND PS.STATSDT = TO_CHAR(SYSDATE, 'YYYYMMDD')
+        LEFT OUTER JOIN MS_PURCHASETOTAL PT ON PT.DCCODE = PC.DCCODE AND PT.STORERKEY = PC.STORERKEY AND PT.SKU = PC.SKU AND PT.USERID = #{gUserId} 
+        WHERE 1=1
+          <if test='multiDcCode != null and multiDcCode.length > 0'>
+	    	AND PC.DCCODE IN 
+            <foreach collection="multiDcCode" item="item" open="(" separator="," close=")">
+                #{item}
+            </foreach> 
+          </if>
+    ),
+	INPLAN_TB AS (
+		SELECT				 
+			   DM_DOCUMENT_H.DCCODE                   										AS DCCODE			/*물류센터*/
+		      ,NVL(TRIM((SELECT MIN(DESCRIPTION)
+					       FROM CM_DCXORGANIZE
+					      WHERE CM_DCXORGANIZE.DCCODE    = DM_DOCUMENT_H.DCCODE
+					        AND CM_DCXORGANIZE.ORGANIZE  = DM_DOCUMENT_H.ORGANIZE)),'')		AS ORGANIZEDESC		/*창고*/
+		      ,DM_DOCUMENT_H.DOCNO                    										AS SLIPNO			/*입고전표번호*/
+		      ,NVL(CD1.BASEDESCR,CD1.BASECODE)        										AS ORDERTYPE_NAME	/*구매유형*/
+		      ,CASE WHEN DM_DOCUMENT_H.TPL_TYPE = '020' THEN '통합배송' ELSE '일반주문' END  	AS TPL_TYPE_NM			/*통합배송 주문유형*/
+		      ,DM_DOCUMENT_H.DELIVERYDATE 			  										AS SLIPDT			/*입고일자*/
+		      ,DM_DOCUMENT_H.FROM_CUSTKEY             										AS FROM_CUSTKEY		/*협력사코드*/
+		      ,DM_DOCUMENT_H.FROM_CUSTNAME            										AS FROM_CUSTNAME	/*협력사명*/
+		      ,FN_CODEDESCR(DM_DOCUMENT_H.STORERKEY,'STATUS_DP', (SELECT MIN(DM_DOCUMENT_D.STATUS)
+		                                                            FROM DM_DOCUMENT_D
+		                                                           WHERE DM_DOCUMENT_D.DCCODE  		= DM_DOCUMENT_H.DCCODE
+		                                                             AND DM_DOCUMENT_D.DOCTYPE 		= DM_DOCUMENT_H.DOCTYPE
+		                                                             AND DM_DOCUMENT_D.DOCNO   		= DM_DOCUMENT_H.DOCNO 
+		                                                             AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE)
+		                                                         )                          AS STATUS           /*진행상태*/  				        
+		      ,DM_DOCUMENT_H.STORERKEY                										AS STORERKEY		/**/
+		      ,DM_DOCUMENT_H.DOCTYPE                  										AS DOCTYPE			/**/
+		      ,DM_DOCUMENT_H.ORGANIZE                 										AS ORGANIZE			/**/
+		      ,DM_DOCUMENT_H.ORDERTYPE                										AS ORDERTYPE		/**/
+		      ,DM_DOCUMENT_H.DOCDT                    										AS DOCDT			/**/
+		FROM   DM_DOCUMENT_H 
+		LEFT JOIN CM_CODE_STORER CD1  ON CD1.STORERKEY  = DM_DOCUMENT_H.STORERKEY AND CD1.CODELIST  = 'ORDERTYPE_DP' 	AND CD1.BASECODE   = DM_DOCUMENT_H.ORDERTYPE
+		WHERE  DM_DOCUMENT_H.DELIVERYDATE     =  TO_CHAR(SYSDATE, 'YYYYMMDD')
+		AND    DM_DOCUMENT_H.DOCTYPE         = 'DP'
+		<if test='multiDcCode != null and multiDcCode.length > 0'>
+	    	AND DM_DOCUMENT_H.DCCODE IN 
+	        <foreach collection="multiDcCode" item="item" open="(" separator="," close=")">
+	            #{item}
+	        </foreach> 
+	    </if>
+		AND    DM_DOCUMENT_H.WORKPROCESSCODE = 'PO'
+		AND    EXISTS (SELECT 1
+		               FROM   DM_DOCUMENT_D    
+		               WHERE  DM_DOCUMENT_D.DCCODE  = DM_DOCUMENT_H.DCCODE
+		               AND    DM_DOCUMENT_D.DOCTYPE = DM_DOCUMENT_H.DOCTYPE
+		               AND    DM_DOCUMENT_D.DOCNO   = DM_DOCUMENT_H.DOCNO
+		               AND    DM_DOCUMENT_D.DELIVERYDATE   = DM_DOCUMENT_H.DELIVERYDATE 		
+		               AND    EXISTS (SELECT 1
+		                              FROM MS_SKU 
+		                              WHERE MS_SKU.STORERKEY = DM_DOCUMENT_D.STORERKEY
+		                              AND   MS_SKU.SKU       = DM_DOCUMENT_D.SKU
+		                              AND   MS_SKU.DEL_YN    = 'N')
+		               )
+	),
+    MAIN_TB AS (
+        SELECT 
+            T3.*
+            ,(CASE WHEN T3.QTY_TOTAL <![CDATA[<>]]> 0 AND T3.STOCKDAY > 60 AND T3.SHIPQTY1W_TOTAL = 0 THEN 'O' ELSE 'X' END) AS INV_SLOW
+        FROM (
+            SELECT
+                ROUND(CASE WHEN T2.STOCKAVGDAY = 0 THEN 0 ELSE (T2.QTY_TOTAL_FW / T2.STOCKAVGDAY) END) AS STOCKDAY,
+                T2.*
+            FROM (
+                SELECT
+                    T1.*,
+                    (SELECT DESCRIPTION FROM MS_CUST C WHERE C.STORERKEY = T1.STORERKEY AND C.CUSTKEY = T1.CUSTKEY AND C.CUSTTYPE = 'P') AS CUSTNAME,
+                    ROUND((T1.SHIPQTY1W_TOTAL / DECODE(T1.NETWEIGHT, 0, 1, T1.NETWEIGHT) / BT.BIZDATE_COUNT)) AS STOCKAVGDAY,
+                    CS.SLAVE_CUSTKEY,
+                    CASE WHEN CS.SLAVE_CUSTKEY IS NULL THEN '' ELSE (SELECT DISTINCT TO_CHAR(NVL(C1.DESCRIPTION, 'UNKNOWN')) FROM MS_CUST C1 WHERE C1.STORERKEY = CS.STORERKEY AND C1.CUSTTYPE = 'P' AND C1.CUSTKEY = CS.SLAVE_CUSTKEY) END AS SLAVE_CUSTNAME
+                FROM (
+                    SELECT
+                        MAX(P.DCCODE) AS DCCODE,
+                        NVL(COALESCE(P.STORERKEY, ST.STORERKEY), MAX(ST.STORERKEY)) AS STORERKEY,
+                        NVL(COALESCE(P.SKU, ST.SKU), MAX(ST.SKU)) AS SKU,
+                        MAX(MS.DESCRIPTION) AS SKUNAME,
+                        NVL(MAX(CD2.BASEDESCR), MAX(CD2.BASECODE)) AS STORAGETYPENM,
+                        MAX(P.MOQ_SKU) AS MOQ_SKU,
+                        NVL(MAX(SKSPEC.SPECDESCR), MAX('UNKNOWN')) AS SKU_LDESC,
+                        (CASE WHEN MAX(MS.REFERENCE15) = 'Y' THEN '전용' ELSE '범용' END) AS REFERENCE15,
+                        NVL(MAX(MS.NETWEIGHT), 0) AS NETWEIGHT,
+                        MAX(MS.CUSTSKU) AS CUSTSKU,
+                        NVL(MAX(MS.QTYPERBOX), 0) AS QTYPERBOX,
+                        MAX(ST.UOM) AS STOCKUOM,
+                        NVL(MAX(ST.BOXPERPLT), 0) AS BOXPERPLT,
+                        NVL(MAX(ST.QTY_TOTAL), 0) AS QTY_TOTAL,
+                        NVL(MAX(ST.QTY_TOTAL_FW), 0) AS QTY_TOTAL_FW,
+                        MAX(P.ROUTE) AS ROUTE,
+                        NVL(MAX(PS.SHIPQTY1W_TOTAL * DECODE(MS.NETWEIGHT, 0, 1, MS.NETWEIGHT)), 0) AS SHIPQTY1W_TOTAL,
+                        NVL(MAX(PS.SHIPQTY2W_TOTAL * DECODE(MS.NETWEIGHT, 0, 1, MS.NETWEIGHT)), 0) AS SHIPQTY2W_TOTAL,
+                        NVL(MAX(PS.SHIPQTY3W_TOTAL * DECODE(MS.NETWEIGHT, 0, 1, MS.NETWEIGHT)), 0) AS SHIPQTY3W_TOTAL,
+                        MAX(P.BUYERKEY) AS LASTBUYERKEY,
+                        MAX(P.CUSTKEY) AS CUSTKEY,
+                        NVL(MAX(P.MOQ_VENDER), 0) AS MOQ_VENDER,
+                        NVL(MAX(P.LEADTIME), 0) AS LEADTIME,
+                        MAX(P.PURCHASE_IN) AS PURCHASE_IN,
+                        MAX(P.PURCHASE_OUT) AS PURCHASE_OUT,
+                        MAX(ST.STOCKIN) AS STOCKIN,
+                        DECODE(MAX(ST.STOCKOUT), TO_CHAR(SYSDATE, 'YYYYMMDD'), '', MAX(ST.STOCKOUT)) AS STOCKOUT,
+                        MAX(BR.PARENTCUSTKEY) AS PARENTCUSTKEY,
+                        MAX(BR.PARENTCUSTNAME) AS PARENTCUSTNAME,
+                        MAX(BR.BRANDNAME_FC) AS BRANDNAME_FC,
+                        NVL(MAX(SI.STO_IN_QTY), 0) AS STO_IN_QTY,
+                        NVL(MAX(SI.STO_OUT_QTY), 0) AS STO_OUT_QTY,
+                        NVL(MAX(T_TB.TURNOVERDAY), 0) AS TURNOVERDAY,
+                        NVL(MAX(R_TB.REORDERPOINT), 0) AS REORDERPOINT,
+                        NVL(MAX(R_TB.STOCKQTY), 0) AS STOCKQTY,	                
+                        NVL(MAX(R_TB.STOCKGOAL), 0) AS STOCKGOAL,
+                        NVL(MAX(R_TB.VENDORCONFIRMQTY), 0) AS VENDORCONFIRMQTY,
+                        NVL(MAX(R_TB.RECEIVEQTY), 0) AS RECEIVEQTY
+                    FROM
+                        PURCHASE_TB P
+                    LEFT OUTER JOIN ST_TB ST ON ST.STORERKEY = P.STORERKEY AND ST.SKU = P.SKU
+                    LEFT OUTER JOIN MS_SKU MS ON MS.STORERKEY = COALESCE(P.STORERKEY, ST.STORERKEY) AND MS.SKU = COALESCE(P.SKU, ST.SKU)
+                    LEFT OUTER JOIN PURCHASESTATS_TB PS ON PS.STORERKEY = COALESCE(P.STORERKEY, ST.STORERKEY) AND PS.SKU = COALESCE(P.SKU, ST.SKU)
+                    LEFT OUTER JOIN BRAND_TB BR ON BR.STORERKEY = COALESCE(P.STORERKEY, ST.STORERKEY) AND BR.SKU = COALESCE(P.SKU, ST.SKU)
+                    LEFT JOIN MS_SKUSPEC SKSPEC ON SKSPEC.STORERKEY IN ('%', 'STD', '', MS.STORERKEY) AND SKSPEC.SPECCATEGORY = 'SKUGROUP' AND SKSPEC.SPECCODE = SUBSTR(MS.SKUGROUP, 1, 2)
+                    LEFT OUTER JOIN STO_INOUT_TB SI ON SI.STORERKEY = COALESCE(P.STORERKEY, ST.STORERKEY) AND SI.SKU = COALESCE(P.SKU, ST.SKU)
+                    LEFT OUTER JOIN TURNOVER_TB T_TB ON T_TB.STORERKEY = COALESCE(P.STORERKEY, ST.STORERKEY) AND T_TB.SKU = COALESCE(P.SKU, ST.SKU)
+                    LEFT OUTER JOIN ROP_TB R_TB ON R_TB.STORERKEY = COALESCE(P.STORERKEY, ST.STORERKEY) AND R_TB.SKU = COALESCE(P.SKU, ST.SKU)
+                    LEFT JOIN CM_CODE CD2 ON CD2.STORERKEY IN ('%', 'STD', '', MS.STORERKEY) AND CD2.CODELIST = 'STORAGETYPE' AND CD2.BASECODE = MS.STORAGETYPE
+                    WHERE
+                        MS.STORERKEY = #{gStorerkey}
+                    GROUP BY COALESCE(P.STORERKEY, ST.STORERKEY), COALESCE(P.SKU, ST.SKU)
+                ) T1
+                CROSS JOIN BIZDATE_TB BT 
+                LEFT OUTER JOIN MS_CUST_SECOND CS
+                    ON CS.STORERKEY = T1.STORERKEY AND CS.CUSTKEY = T1.CUSTKEY AND CS.SKU = T1.SKU AND CS.DEL_YN = 'N'
+            ) T2
+        ) T3
+        WHERE 1 = 1
+    )
+    SELECT 
+        '입고 필요 상품' AS LEVEL1
+        , 'SKU수' AS LEVEL2
+        , '보유일 <![CDATA[<]]> 리드타임' AS LEVEL3
+        , SUM(CASE WHEN STOCKDAY <![CDATA[<]]> LEADTIME THEN 1 ELSE 0 END) AS ALL_SKU_COUNT
+        <if test='multiDcCode != null and multiDcCode.length > 0'>
+            <foreach collection="multiDcCode" item="item">
+            	, SUM(CASE WHEN DCCODE = #{item} THEN (CASE WHEN STOCKDAY <![CDATA[<]]> LEADTIME THEN 1 ELSE 0 END) ELSE 0 END) AS DC_${item}_SKU_COUNT	                
+            </foreach> 
+        </if>
+    FROM MAIN_TB
+    UNION ALL
+    SELECT 
+        '입고 필요 상품' AS LEVEL1
+        , 'SKU수' AS LEVEL2
+        , '현재고 <![CDATA[<]]> 재발주점' AS LEVEL3
+        , SUM(CASE WHEN STOCKQTY <![CDATA[<]]> REORDERPOINT THEN 1 ELSE 0 END) AS ALL_SKU_COUNT 
+        <if test='multiDcCode != null and multiDcCode.length > 0'>
+            <foreach collection="multiDcCode" item="item">
+            	, SUM(CASE WHEN DCCODE = #{item} THEN (CASE WHEN STOCKDAY <![CDATA[<]]> REORDERPOINT THEN 1 ELSE 0 END) ELSE 0 END) AS DC_${item}_SKU_COUNT	                
+            </foreach> 
+        </if>
+    FROM MAIN_TB
+    UNION ALL
+    SELECT 
+        '입고 필요 상품' AS LEVEL1
+        , 'SKU수' AS LEVEL2
+        , '현재고 <![CDATA[<]]> 목표재고량' AS LEVEL3
+        , SUM(CASE WHEN STOCKQTY <![CDATA[<]]> STOCKGOAL THEN 1 ELSE 0 END) AS ALL_SKU_COUNT 
+        <if test='multiDcCode != null and multiDcCode.length > 0'>
+            <foreach collection="multiDcCode" item="item">
+            	, SUM(CASE WHEN DCCODE = #{item} THEN (CASE WHEN STOCKDAY <![CDATA[<]]> STOCKGOAL THEN 1 ELSE 0 END) ELSE 0 END) AS DC_${item}_SKU_COUNT	                
+            </foreach> 
+        </if>
+    FROM MAIN_TB
+    UNION ALL
+    SELECT 
+        '당일 입고 예정' AS LEVEL1
+        , 'SKU수' AS LEVEL2
+        , '당일 입고 예정 PO' AS LEVEL3
+        , SUM(RECEIVEQTY) AS ALL_SKU_COUNT 
+        <if test='multiDcCode != null and multiDcCode.length > 0'>
+            <foreach collection="multiDcCode" item="item">
+            	, SUM(CASE WHEN DCCODE = #{item} THEN RECEIVEQTY ELSE 0 END) AS DC_${item}_SKU_COUNT	                
+            </foreach> 
+        </if>
+    FROM MAIN_TB
+    UNION ALL
+    SELECT 
+        '당일 입고 예정' AS LEVEL1
+        , 'SKU수' AS LEVEL2
+        , '납품예정 미등록' AS LEVEL3
+        , SUM(CASE WHEN VENDORCONFIRMQTY = 0 THEN 1 ELSE 0 END) AS ALL_SKU_COUNT 
+        <if test='multiDcCode != null and multiDcCode.length > 0'>
+            <foreach collection="multiDcCode" item="item">
+            	, SUM(CASE WHEN DCCODE = #{item} THEN (CASE WHEN VENDORCONFIRMQTY = 0 THEN 1 ELSE 0 END) ELSE 0 END) AS DC_${item}_SKU_COUNT	                
+            </foreach> 
+        </if>
+    FROM MAIN_TB
+    UNION ALL
+    SELECT 
+        '당일 입고 예정' AS LEVEL1
+        , 'SKU수' AS LEVEL2
+        , '당일미입고' AS LEVEL3
+        , NVL(SUM(CASE WHEN STATUS = '부분확정' OR STATUS = '입고예정' THEN 1 ELSE 0 END), 0) AS ALL_SKU_COUNT
+        <if test='multiDcCode != null and multiDcCode.length > 0'>
+            <foreach collection="multiDcCode" item="item">
+            	, SUM(CASE WHEN DCCODE = #{item} THEN (CASE WHEN STATUS = '부분확정' OR STATUS = '입고예정' THEN 1 ELSE 0 END) ELSE 0 END) AS DC_${item}_SKU_COUNT	                
+            </foreach> 
+        </if>
+    FROM INPLAN_TB
+	</select>
+	
+	<!-- 탭3 점검필요SKU 조회 (목록) -->
+	<select id="getTab3DetailList" resultType="java.util.Map">
+    /* PurchaseMapper.selectPurchaseMain */
+    WITH BIZDATE_TB AS (
+        SELECT
+            SUM(CASE WHEN REST_YN = 'N' THEN 1 ELSE 0 END) AS BIZDATE_COUNT
+        FROM
+            CM_CALENDAR
+        WHERE
+            YY || MM || DD BETWEEN TO_CHAR(TRUNC(SYSDATE, 'MM') - 30, 'YYYYMMDD') AND TO_CHAR(SYSDATE - 1, 'YYYYMMDD')
+            AND DCCODE = 'STD'
+            AND CALENDAR_ID = 'STD'
+    ),
+    PURCHASE_TB AS (
+        SELECT
+            *
+        FROM
+            MS_PURCHASEDC_DAILY
+        WHERE
+            YYYYMMDD = TO_CHAR(SYSDATE, 'YYYYMMDD')
+            AND STORERKEY = #{gStorerkey}
+            <if test='multiDcCode != null and multiDcCode.length > 0'>
+		    	AND DCCODE IN 
+                <foreach collection="multiDcCode" item="item" open="(" separator="," close=")">
+	                #{item}
+	            </foreach> 
+            </if>
+            <if test='buyerKey != null and buyerKey != ""'>
+                AND BUYERKEY = #{buyerKey}
+		    </if>
+    ),
+    PURCHASESTATS_TB AS (
+        SELECT
+            STORERKEY,
+            SKU,
+            NVL(SUM(SHIPQTY1W), 0) AS SHIPQTY1W_TOTAL,
+            NVL(SUM(SHIPQTY2W), 0) AS SHIPQTY2W_TOTAL,
+            NVL(SUM(SHIPQTY3W), 0) AS SHIPQTY3W_TOTAL,
+            NVL(MAX(STOCKAVGDAY), 0) AS STOCKAVGDAY
+        FROM (
+            SELECT
+                PS.STORERKEY,
+                PS.SKU,
+                MAX(PS.SHIPQTY1W_SO) AS SHIPQTY1W,
+                MAX(PS.SHIPQTY2W_SO) AS SHIPQTY2W,
+                MAX(PS.SHIPQTY3W_SO) AS SHIPQTY3W,
+                MAX(PS.STOCKAVGDAY) AS STOCKAVGDAY
+            FROM
+                MS_PURCHASESTATS PS
+            JOIN MS_SKU S
+                ON PS.STORERKEY = S.STORERKEY
+                AND PS.SKU = S.SKU
+            WHERE
+                PS.STORERKEY = #{gStorerkey}
+            GROUP BY
+                PS.DCCODE, PS.STORERKEY, PS.SKU
+        )
+        GROUP BY STORERKEY, SKU
+    ),
+    ST_TB AS (
+        SELECT
+            #{gStorerkey} AS STORERKEY,
+            T_STOCKDATE.SKU AS SKU,
+            MAX(T_HIS.UOM) AS UOM,
+            MAX(T_PLT.PLTCNT) AS BOXPERPLT,
+            NVL(SUM(CASE WHEN T_HIS.DCCODE = '1000' AND S.SKUTYPE IN ('20', '30') THEN 0 ELSE T_HIS.QTY END), 0) AS QTY_TOTAL,
+            NVL(SUM(CASE WHEN T_HIS.DCCODE IN ('2600', '2620', '2630', '2650', '2660', '2260') THEN T_HIS.QTY ELSE 0 END), 0) AS QTY_TOTAL_FW,
+            MIN(STOCKIN) AS STOCKIN,
+            MAX(STOCKOUT) AS STOCKOUT
+        FROM (
+            SELECT SKU, MIN(STOCKDATE) AS STOCKIN, MAX(STOCKDATE) AS STOCKOUT
+            FROM ST_STOCK_CHAIN_HIS T
+            WHERE T.STOCKDATE <![CDATA[<=]]> TO_CHAR(SYSDATE, 'YYYYMMDD')
+            GROUP BY SKU
+        ) T_STOCKDATE
+        LEFT OUTER JOIN MS_SKU S ON S.STORERKEY = #{gStorerkey} AND T_STOCKDATE.SKU = S.SKU
+        LEFT OUTER JOIN ST_STOCK_CHAIN_HIS T_HIS
+            ON T_HIS.SKU = T_STOCKDATE.SKU 
+            AND T_HIS.STOCKDATE = TO_CHAR(SYSDATE, 'YYYYMMDD') 
+            AND T_HIS.QTY > 0 
+            <if test='multiDcCode != null and multiDcCode.length > 0'>
+		    	AND T_HIS.DCCODE IN 
+                <foreach collection="multiDcCode" item="item" open="(" separator="," close=")">
+	                #{item}
+	            </foreach> 
+            </if>
+        LEFT OUTER JOIN (
+            SELECT MDPL1.SKU, MDPL1.BOXPERLAYER * MDPL1.LAYERPERPLT AS PLTCNT
+            FROM LOGISONE.MS_DC_PLT_LOAD MDPL1
+            WHERE MDPL1.STORERKEY = #{gStorerkey}
+            UNION ALL
+            SELECT SC.SKU, SC.BOXPERPLT AS PLTCNT
+            FROM MS_SKUCHAIN SC
+            WHERE SC.STORERKEY = #{gStorerkey}
+              AND NOT EXISTS (
+                SELECT 1 FROM LOGISONE.MS_DC_PLT_LOAD M WHERE M.STORERKEY = SC.STORERKEY AND M.SKU = SC.SKU
+              )
+        ) T_PLT
+            ON T_PLT.SKU = T_STOCKDATE.SKU
+        GROUP BY T_STOCKDATE.SKU
+    ),
+    BRAND_TB AS (
+        SELECT
+            SCC.SKU,
+            SCC.STORERKEY,
+            CASE WHEN C.PARENTCUSTKEY IS NULL THEN C.CUSTKEY ELSE C.PARENTCUSTKEY END AS PARENTCUSTKEY,
+            CASE WHEN C.PARENTCUSTKEY IS NULL THEN C.DESCRIPTION ELSE (SELECT A.DESCRIPTION FROM LOGISONE.MS_CUST A WHERE A.CUSTKEY = C.PARENTCUSTKEY AND ROWNUM = 1) END AS PARENTCUSTNAME,
+            CB.REFERENCE02 AS BRANDNAME_FC
+        FROM LOGISONE.MS_SKUCHAIN_CUST SCC
+        JOIN LOGISONE.MS_SKU S ON S.SKU = SCC.SKU AND S.STORERKEY = SCC.STORERKEY
+        JOIN LOGISONE.MS_CUST C ON SCC.CUSTKEY = C.CUSTKEY AND C.CUSTTYPE = 'C' AND C.STORERKEY = SCC.STORERKEY
+        LEFT OUTER JOIN LOGISONE.MS_CUST_BRAND CB
+            ON CB.CUSTKEY = C.CUSTKEY AND CB.STORERKEY = C.STORERKEY AND CB.CUSTTYPE = C.CUSTTYPE
+        WHERE C.DEL_YN = 'N'
+            AND SCC.STORERKEY = #{gStorerkey}
+            AND SCC.CUSTNO = (SELECT MIN(TO_NUMBER(CUSTNO)) FROM LOGISONE.MS_SKUCHAIN_CUST WHERE SKU = S.SKU)
+        GROUP BY SCC.SKU, SCC.STORERKEY, C.CUSTKEY, C.PARENTCUSTKEY, C.DESCRIPTION, CB.REFERENCE02
+    ),
+    STO_INOUT_TB AS (
+        SELECT
+            DDD.SKU, DDD.STORERKEY,
+            SUM(CASE WHEN DDD.DOCTYPE = 'DP' THEN DDD.CONFIRMQTY ELSE 0 END) AS STO_IN_QTY,
+            SUM(CASE WHEN DDD.DOCTYPE = 'WD' THEN DDD.CONFIRMQTY ELSE 0 END) AS STO_OUT_QTY
+        FROM DM_DOCUMENT_D DDD
+        WHERE
+            DDD.WORKPROCESSCODE = 'STO' 
+            AND DDD.DELIVERYDATE = TO_CHAR(SYSDATE, 'YYYYMMDD') 
+            AND DDD.STORERKEY = #{gStorerkey} 
+            <if test='multiDcCode != null and multiDcCode.length > 0'>
+		    	AND DDD.DCCODE IN 
+                <foreach collection="multiDcCode" item="item" open="(" separator="," close=")">
+	                #{item}
+	            </foreach> 
+            </if>
+        GROUP BY DDD.PLANT, DDD.SKU, DDD.STORERKEY
+    ),
+    TURNOVER_TB AS (
+        SELECT
+            T_SUB.STORERKEY,
+            T_SUB.SKU,
+            TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD')) AS PREV_END_DATE,
+            TO_NUMBER(TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')) AS PREV_START_DATE,
+            ROUND(
+                DECODE(
+                    NVL(
+                        DECODE(TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD') - TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')), 0, SUM(T_SUB.BASEQTY),
+                               ROUND(SUM(T_SUB.BASEQTY) / TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD') - TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')))
+                        ), 0
+                    ), 0, 0,
+                    DECODE(
+                        DECODE(TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD') - TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')), 0, SUM(T_SUB.ORDERQTY_SO) + SUM(T_SUB.ORDERQTY_PO) + SUM(T_SUB.ORDERQTY_STO) + SUM(T_SUB.ADJUSTQTY_WD) + SUM(T_SUB.ADJUSTQTY_DISUSE),
+                               ROUND((SUM(T_SUB.ORDERQTY_SO) + SUM(T_SUB.ORDERQTY_PO) + SUM(T_SUB.ORDERQTY_STO) + SUM(T_SUB.ADJUSTQTY_WD) + SUM(T_SUB.ADJUSTQTY_DISUSE)) / TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD') - TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')))
+                        ), 0, 0,
+                        NVL(
+                            DECODE(TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD') - TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')), 0, SUM(T_SUB.BASEQTY),
+                                   ROUND(SUM(T_SUB.BASEQTY) / TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD') - TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')))
+                            ), 0
+                        ) /
+                        DECODE(TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD') - TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')), 0, SUM(T_SUB.ORDERQTY_SO) + SUM(T_SUB.ORDERQTY_PO) + SUM(T_SUB.ORDERQTY_STO) + SUM(T_SUB.ADJUSTQTY_WD) + SUM(T_SUB.ADJUSTQTY_DISUSE),
+                               ROUND((SUM(T_SUB.ORDERQTY_SO) + SUM(T_SUB.ORDERQTY_PO) + SUM(T_SUB.ORDERQTY_STO) + SUM(T_SUB.ADJUSTQTY_WD) + SUM(T_SUB.ADJUSTQTY_DISUSE)) / TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD') - TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')))
+                        )
+                    )
+                ), 1
+            ) AS TURNOVERDAY
+        FROM (
+            SELECT
+                DI.STORERKEY, DI.SKU, SUM(DI.BASEQTY) AS BASEQTY,
+                SUM(DI.ORDERQTY_SO) AS ORDERQTY_SO, SUM(DI.ORDERQTY_PO) AS ORDERQTY_PO,
+                SUM(DI.ORDERQTY_STO) AS ORDERQTY_STO, SUM(DI.ADJUSTQTY_WD) AS ADJUSTQTY_WD,
+                SUM(DI.ADJUSTQTY_DISUSE) AS ADJUSTQTY_DISUSE
+            FROM ST_DAILYINOUT DI
+            WHERE
+                DI.STORERKEY = #{gStorerkey}
+                AND DI.INOUTDT <![CDATA[>=]]> TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')
+                AND DI.INOUTDT <![CDATA[<=]]> TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD')
+                <if test='multiDcCode != null and multiDcCode.length > 0'>
+		    	AND DI.DCCODE IN 
+                <foreach collection="multiDcCode" item="item" open="(" separator="," close=")">
+	                #{item}
+	            </foreach> 
+            </if>
+            GROUP BY DI.STORERKEY, DI.SKU
+        ) T_SUB
+        GROUP BY T_SUB.STORERKEY, T_SUB.SKU
+        HAVING NVL(DECODE(TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD') - TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')), 0, SUM(T_SUB.BASEQTY),
+                          ROUND(SUM(T_SUB.BASEQTY) / TO_NUMBER(TO_CHAR(TRUNC(SYSDATE, 'MM') - 1, 'YYYYMMDD') - TO_CHAR(ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1), 'YYYYMMDD')))
+                     ), 0) > 0
+    ),
+    ROP_TB AS (
+        SELECT
+            PC.STORERKEY
+            ,PC.DCCODE
+            ,PC.BUYERKEY
+            ,PC.SKU
+            ,CASE WHEN NVL(PM.EDIT_REORDERPOINT, 0) > 0 THEN PM.EDIT_REORDERPOINT
+             ELSE NVL(ROUND((PS.STOCKAVGDAY * NVL(PM.LEADTIME, 1)) + (PS.STDDEVIATION * (NVL(PM.COEFFICIENTSAFETY, 0)) * POWER(NVL(PM.LEADTIME, 1), 1 / 2))), 0)
+            END AS REORDERPOINT
+            ,NVL((SELECT SUM(OPENQTY) FROM ST_STOCK_PURCHASE SP WHERE SP.STORERKEY = PC.STORERKEY AND SP.DCCODE = PC.DCCODE AND SP.SKU = PC.SKU), 0) AS STOCKQTY
+            ,CASE WHEN NVL(PM.EDIT_STOCKGOAL, 0) > 0 THEN PM.EDIT_STOCKGOAL
+                 ELSE NVL(ROUND(PS.STOCKAVGDAY * (NVL(PM.PURINTERVAL, 1) + NVL(PM.LEADTIME, 1)) + ((3 * PS.STDDEVIATION) * POWER((NVL(PM.PURINTERVAL, 1) + NVL(PM.LEADTIME, 1)), 1 / 2))), 0)
+            END AS STOCKGOAL
+            , NVL(PT.VENDORCONFIRMQTY, 0) AS VENDORCONFIRMQTY
+            , NVL(PT.TODAYDPQTY, 0) AS RECEIVEQTY
+        FROM MS_PURCHASECUST PC
+        JOIN MS_PURCHASEMST PM ON PM.STORERKEY = PC.STORERKEY AND PM.DCCODE = PC.DCCODE AND PM.CUSTTYPE = PC.CUSTTYPE AND PM.SKU = PC.SKU
+        LEFT OUTER JOIN MS_PURCHASESTATS PS ON PS.DCCODE = PC.DCCODE AND PS.STORERKEY = PC.STORERKEY AND PS.SKU = PC.SKU AND PS.PLANT = PC.PLANT AND PS.STATSDT = TO_CHAR(SYSDATE, 'YYYYMMDD')
+        LEFT OUTER JOIN MS_PURCHASETOTAL PT ON PT.DCCODE = PC.DCCODE AND PT.STORERKEY = PC.STORERKEY AND PT.SKU = PC.SKU AND PT.USERID = #{gUserId} 
+        WHERE 1=1
+          <if test='multiDcCode != null and multiDcCode.length > 0'>
+	    	AND PC.DCCODE IN 
+            <foreach collection="multiDcCode" item="item" open="(" separator="," close=")">
+                #{item}
+            </foreach> 
+          </if>
+    ),
+    MAIN_TB AS (
+        SELECT 
+            T3.*
+            ,(CASE WHEN T3.QTY_TOTAL <![CDATA[<>]]> 0 AND T3.STOCKDAY > 60 AND T3.SHIPQTY1W_TOTAL = 0 THEN 'O' ELSE 'X' END) AS INV_SLOW
+        FROM (
+            SELECT
+                ROUND(CASE WHEN T2.STOCKAVGDAY = 0 THEN 0 ELSE (T2.QTY_TOTAL_FW / T2.STOCKAVGDAY) END) AS STOCKDAY,
+                T2.*
+            FROM (
+                SELECT
+                    T1.*,
+                    (SELECT DESCRIPTION FROM MS_CUST C WHERE C.STORERKEY = T1.STORERKEY AND C.CUSTKEY = T1.CUSTKEY AND C.CUSTTYPE = 'P') AS CUSTNAME,
+                    ROUND((T1.SHIPQTY1W_TOTAL / DECODE(T1.NETWEIGHT, 0, 1, T1.NETWEIGHT) / BT.BIZDATE_COUNT)) AS STOCKAVGDAY,
+                    CS.SLAVE_CUSTKEY,
+                    CASE WHEN CS.SLAVE_CUSTKEY IS NULL THEN '' ELSE (SELECT DISTINCT TO_CHAR(NVL(C1.DESCRIPTION, 'UNKNOWN')) FROM MS_CUST C1 WHERE C1.STORERKEY = CS.STORERKEY AND C1.CUSTTYPE = 'P' AND C1.CUSTKEY = CS.SLAVE_CUSTKEY) END AS SLAVE_CUSTNAME
+                FROM (
+                    SELECT
+                        MAX(P.DCCODE) AS DCCODE,
+                        NVL(COALESCE(P.STORERKEY, ST.STORERKEY), MAX(ST.STORERKEY)) AS STORERKEY,
+                        NVL(COALESCE(P.SKU, ST.SKU), MAX(ST.SKU)) AS SKU,
+                        MAX(MS.DESCRIPTION) AS SKUNAME,
+                        NVL(MAX(CD2.BASEDESCR), MAX(CD2.BASECODE)) AS STORAGETYPENM,
+                        MAX(P.MOQ_SKU) AS MOQ_SKU,
+                        NVL(MAX(SKSPEC.SPECDESCR), MAX('UNKNOWN')) AS SKU_LDESC,
+                        (CASE WHEN MAX(MS.REFERENCE15) = 'Y' THEN '전용' ELSE '범용' END) AS REFERENCE15,
+                        NVL(MAX(MS.NETWEIGHT), 0) AS NETWEIGHT,
+                        MAX(MS.CUSTSKU) AS CUSTSKU,
+                        NVL(MAX(MS.QTYPERBOX), 0) AS QTYPERBOX,
+                        MAX(ST.UOM) AS STOCKUOM,
+                        NVL(MAX(ST.BOXPERPLT), 0) AS BOXPERPLT,
+                        NVL(MAX(ST.QTY_TOTAL), 0) AS QTY_TOTAL,
+                        NVL(MAX(ST.QTY_TOTAL_FW), 0) AS QTY_TOTAL_FW,
+                        MAX(P.ROUTE) AS ROUTE,
+                        NVL(MAX(PS.SHIPQTY1W_TOTAL * DECODE(MS.NETWEIGHT, 0, 1, MS.NETWEIGHT)), 0) AS SHIPQTY1W_TOTAL,
+                        NVL(MAX(PS.SHIPQTY2W_TOTAL * DECODE(MS.NETWEIGHT, 0, 1, MS.NETWEIGHT)), 0) AS SHIPQTY2W_TOTAL,
+                        NVL(MAX(PS.SHIPQTY3W_TOTAL * DECODE(MS.NETWEIGHT, 0, 1, MS.NETWEIGHT)), 0) AS SHIPQTY3W_TOTAL,
+                        MAX(P.BUYERKEY) AS LASTBUYERKEY,
+                        MAX(P.CUSTKEY) AS CUSTKEY,
+                        NVL(MAX(P.MOQ_VENDER), 0) AS MOQ_VENDER,
+                        NVL(MAX(P.LEADTIME), 0) AS LEADTIME,
+                        MAX(P.PURCHASE_IN) AS PURCHASE_IN,
+                        MAX(P.PURCHASE_OUT) AS PURCHASE_OUT,
+                        MAX(ST.STOCKIN) AS STOCKIN,
+                        DECODE(MAX(ST.STOCKOUT), TO_CHAR(SYSDATE, 'YYYYMMDD'), '', MAX(ST.STOCKOUT)) AS STOCKOUT,
+                        MAX(BR.PARENTCUSTKEY) AS PARENTCUSTKEY,
+                        MAX(BR.PARENTCUSTNAME) AS PARENTCUSTNAME,
+                        MAX(BR.BRANDNAME_FC) AS BRANDNAME_FC,
+                        NVL(MAX(SI.STO_IN_QTY), 0) AS STO_IN_QTY,
+                        NVL(MAX(SI.STO_OUT_QTY), 0) AS STO_OUT_QTY,
+                        NVL(MAX(T_TB.TURNOVERDAY), 0) AS TURNOVERDAY,
+                        NVL(MAX(R_TB.REORDERPOINT), 0) AS REORDERPOINT,
+                        NVL(MAX(R_TB.STOCKQTY), 0) AS STOCKQTY,	                
+                        NVL(MAX(R_TB.STOCKGOAL), 0) AS STOCKGOAL,
+                        NVL(MAX(R_TB.VENDORCONFIRMQTY), 0) AS VENDORCONFIRMQTY,
+                        NVL(MAX(R_TB.RECEIVEQTY), 0) AS RECEIVEQTY
+                    FROM
+                        PURCHASE_TB P
+                    LEFT OUTER JOIN ST_TB ST ON ST.STORERKEY = P.STORERKEY AND ST.SKU = P.SKU
+                    LEFT OUTER JOIN MS_SKU MS ON MS.STORERKEY = COALESCE(P.STORERKEY, ST.STORERKEY) AND MS.SKU = COALESCE(P.SKU, ST.SKU)
+                    LEFT OUTER JOIN PURCHASESTATS_TB PS ON PS.STORERKEY = COALESCE(P.STORERKEY, ST.STORERKEY) AND PS.SKU = COALESCE(P.SKU, ST.SKU)
+                    LEFT OUTER JOIN BRAND_TB BR ON BR.STORERKEY = COALESCE(P.STORERKEY, ST.STORERKEY) AND BR.SKU = COALESCE(P.SKU, ST.SKU)
+                    LEFT JOIN MS_SKUSPEC SKSPEC ON SKSPEC.STORERKEY IN ('%', 'STD', '', MS.STORERKEY) AND SKSPEC.SPECCATEGORY = 'SKUGROUP' AND SKSPEC.SPECCODE = SUBSTR(MS.SKUGROUP, 1, 2)
+                    LEFT OUTER JOIN STO_INOUT_TB SI ON SI.STORERKEY = COALESCE(P.STORERKEY, ST.STORERKEY) AND SI.SKU = COALESCE(P.SKU, ST.SKU)
+                    LEFT OUTER JOIN TURNOVER_TB T_TB ON T_TB.STORERKEY = COALESCE(P.STORERKEY, ST.STORERKEY) AND T_TB.SKU = COALESCE(P.SKU, ST.SKU)
+                    LEFT OUTER JOIN ROP_TB R_TB ON R_TB.STORERKEY = COALESCE(P.STORERKEY, ST.STORERKEY) AND R_TB.SKU = COALESCE(P.SKU, ST.SKU)
+                    LEFT JOIN CM_CODE CD2 ON CD2.STORERKEY IN ('%', 'STD', '', MS.STORERKEY) AND CD2.CODELIST = 'STORAGETYPE' AND CD2.BASECODE = MS.STORAGETYPE
+                    WHERE
+                        MS.STORERKEY = #{gStorerkey}
+                    GROUP BY COALESCE(P.STORERKEY, ST.STORERKEY), COALESCE(P.SKU, ST.SKU)
+                ) T1
+                CROSS JOIN BIZDATE_TB BT 
+                LEFT OUTER JOIN MS_CUST_SECOND CS
+                    ON CS.STORERKEY = T1.STORERKEY AND CS.CUSTKEY = T1.CUSTKEY AND CS.SKU = T1.SKU AND CS.DEL_YN = 'N'
+            ) T2
+        ) T3
+        WHERE 1 = 1
+    )
+    SELECT * FROM MAIN_TB
+</select>
+    
+</mapper>

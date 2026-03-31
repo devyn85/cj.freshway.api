@@ -1,0 +1,329 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="msDeliveryDistrictRepPopService">
+
+    <update id="updateDlvDistrictGroupPop">
+     	UPDATE  /* [msCenterDlvDistrictService.sqlx][msCenterDlvDistrictService.updateDlvDistrictGroupPop][센터 배송 권역 그룹 POP 목록 업데이트] */
+     		MS_DLV_DISTRICTGROUP_POP
+    	SET  TODATE = #{toDate}
+    	    ,DEL_YN = #{delYn}
+    	WHERE SERIALKEY = #{serialkey}
+    </update>
+    
+   <delete id="deleteDlvDistrictGroupPop">
+	 	MERGE INTO MS_DLV_DISTRICTGROUP_POP /* [msCenterDlvDistrictService.sqlx][msCenterDlvDistrictService.deleteDlvDistrictGroup][센터 배송 권역 그룹 POP 목록 삭제 (미래데이터)] */ 
+		USING (SELECT 1 FROM DUAL)
+		ON (MS_DLV_DISTRICTGROUP_POP.SERIALKEY = #{serialkey})
+		WHEN MATCHED THEN
+	    UPDATE 
+    	SET  MS_DLV_DISTRICTGROUP_POP.TODATE   = #{toDate}
+    		,MS_DLV_DISTRICTGROUP_POP.DEL_YN   = 'Y'
+	    DELETE 
+	  	WHERE MS_DLV_DISTRICTGROUP_POP.FROMDATE > SYSDATE
+   </delete>
+    
+   <select id="getMasterList" parameterType="MsDistrictGroupPopReqDto" resultType="MsDistrictGroupPopResDto">
+    	SELECT /* [센터 권역 그룹 Pop 목록 조회] */
+			  POP.SERIALKEY
+			, POP.DCCODE
+ 			, POP.POPNAME
+			, POP.POPNO
+			, POP.FROMDATE
+			, POP.TODATE
+			, POP.DEL_YN
+			, POP.BASE_YN
+			, POP.DESCRIPTION
+    		, POP.REF_SERIALKEY
+		FROM MS_DISTRICTGROUP_POP POP
+		WHERE POP.DCCODE = #{dccode}
+		AND ( #{effectiveDate} BETWEEN POP.FROMDATE AND POP.TODATE OR POP.FROMDATE > #{effectiveDate} )
+		<if test='delYn != null and delYn !=""'> AND POP.DEL_YN = #{delYn}	</if>
+		<choose>
+			<when test='searchKeyword != null and searchKeyword !=""'>
+				AND (UPPER(POP.POPNAME) LIKE '%' || UPPER(#{searchKeyword}) || '%' OR UPPER(POP.POPNO) LIKE '%' || UPPER(#{searchKeyword}) || '%')
+			</when>
+			<otherwise>
+				<if test='popNo != null and popNo !=""'> AND POP.POPNO = #{popNo}	</if>
+				<if test='popName != null and popName !=""'> AND POP.POPNAME = #{popName} </if>
+			</otherwise>
+		</choose>
+		<if test="multiSelect != null and multiSelect != '' and multiSelect.indexOf(',') > -1">
+			AND POP.POPNO IN
+			<foreach item="item" index="index" collection="multiSelect.split(',')" open="(" separator="," close=")">
+				#{item}
+			</foreach>
+		</if>
+    	ORDER BY POP.SERIALKEY
+   </select>
+
+    <select id="getPopValidationInsert" parameterType="MsDistrictGroupPopReqDto" resultType="MsDistrictGroupPopResDto">
+    	SELECT  /* [msCenterDlvDistrictService.sqlx][msCenterDlvDistrictService.getPopValidationInsert][센터 권역 그룹 Pop 제약조건 INSERT 검사] */
+			 MS_DISTRICTGROUP_POP.DCCODE           AS DCCODE
+ 			,MS_DISTRICTGROUP_POP.POPNAME          AS POP_NAME
+			,MS_DISTRICTGROUP_POP.POPNO            AS POP_NO
+			,MS_DISTRICTGROUP_POP.FROMDATE         AS FROMDATE
+			,MS_DISTRICTGROUP_POP.TODATE           AS TODATE
+			,MS_DISTRICTGROUP_POP.BASE_YN          AS BASE_YN
+			,MS_DISTRICTGROUP_POP.DESCRIPTION      AS DESCRIPTION
+		FROM MS_DISTRICTGROUP_POP
+		WHERE MS_DISTRICTGROUP_POP.DCCODE = #{dccode}
+		AND   MS_DISTRICTGROUP_POP.FROMDATE <![CDATA[<=]]> #{toDate}
+		AND   MS_DISTRICTGROUP_POP.TODATE   <![CDATA[>=]]> #{fromDate}
+		AND   MS_DISTRICTGROUP_POP.DEL_YN = 'N'
+    </select>
+
+    <select id="getPopConflictList" parameterType="MsDistrictValidationReqDto" resultType="MsDistrictGroupPopResDto">
+		/* [msCenterDlvDistrictService.sqlx][msCenterDlvDistrictService.getPopValidationInsertList][센터 권역 그룹 Pop 제약조건 INSERT 검사] */
+        WITH BASE AS (
+            SELECT SERIALKEY, BASE_YN, DCCODE, POPNAME, POPNO, FROMDATE, TODATE
+            FROM MS_DISTRICTGROUP_POP
+            WHERE DCCODE = #{dccode}
+			<if test="serialkeySet != null and serialkeySet.size > 0">
+				AND SERIALKEY NOT IN
+				<foreach collection="serialkeySet" item="key" open="(" separator="," close=")">
+					#{key}
+				</foreach>
+			</if>
+        	<foreach collection="list" item="dto">
+            UNION ALL
+            SELECT
+                 NULL AS SERIALKEY, #{dto.baseYn}, #{dto.dccode}, #{dto.popName}, #{dto.popNo}, #{dto.fromDate}, #{dto.toDate}
+            FROM DUAL
+            </foreach>
+		),
+		NUMBERED AS (
+		    SELECT
+		        SERIALKEY, DCCODE, BASE_YN, POPNAME, POPNO, FROMDATE, TODATE
+	           ,ROW_NUMBER() OVER (ORDER BY DCCODE, POPNO, FROMDATE, TODATE) AS RN
+		    FROM BASE
+		)
+        <![CDATA[
+    	SELECT
+			 b1.DCCODE           AS DCCODE
+ 			,b1.POPNAME          AS POP_NAME
+			,b1.POPNO            AS POP_NO
+			,b1.FROMDATE         AS FROMDATE
+			,b1.TODATE           AS TODATE
+			,b1.BASE_YN          AS BASE_YN
+    		,'POPNO'             AS DUP_TYPE
+		FROM NUMBERED b1
+		JOIN NUMBERED b2 ON b1.DCCODE = b2.DCCODE AND b1.POPNO = b2.POPNO
+		WHERE b1.FROMDATE <= b2.TODATE AND b1.TODATE >= b2.FROMDATE AND b2.RN < b1.RN
+
+        UNION ALL
+
+    	SELECT
+			 b1.DCCODE           AS DCCODE
+ 			,b1.POPNAME          AS POP_NAME
+			,b1.POPNO            AS POP_NO
+			,b1.FROMDATE         AS FROMDATE
+			,b1.TODATE           AS TODATE
+			,b1.BASE_YN          AS BASE_YN
+    		,'BASE_YN'           AS DUP_TYPE
+		FROM NUMBERED b1
+		JOIN NUMBERED b2 ON b1.DCCODE = b2.DCCODE
+		WHERE b1.FROMDATE <= b2.TODATE AND b1.TODATE >= b2.FROMDATE AND b2.RN < b1.RN
+        AND b1.BASE_YN = 'Y' AND b2.BASE_YN = 'Y'
+        ]]>
+    </select>
+
+    <select id="getPopValidationUpdate" parameterType="MsDistrictGroupPopReqDto" resultType="MsDistrictGroupPopResDto">
+        SELECT /* [msCenterDlvDistrictService.sqlx][msCenterDlvDistrictService.getPopValidationUpdate][센터 권역 그룹 Pop 제약조건 UPDATE 검사] */
+        	 MS_DISTRICTGROUP_POP.SERIALKEY          AS  SERIALKEY
+            ,MS_DISTRICTGROUP_POP.POPNO              AS  POPNO
+            ,MS_DLV_DISTRICTGROUP_POP.FROMDATE       AS  FROMDATE
+        FROM MS_DISTRICTGROUP_POP
+        LEFT OUTER JOIN MS_DLV_DISTRICTGROUP_POP
+        ON MS_DISTRICTGROUP_POP.DCCODE      = MS_DLV_DISTRICTGROUP_POP.DCCODE
+        AND MS_DISTRICTGROUP_POP.POPNO      = MS_DLV_DISTRICTGROUP_POP.POPNO
+        AND MS_DISTRICTGROUP_POP.FROMDATE  <![CDATA[<=]]> MS_DLV_DISTRICTGROUP_POP.TODATE
+        AND MS_DISTRICTGROUP_POP.TODATE    <![CDATA[>=]]> MS_DLV_DISTRICTGROUP_POP.FROMDATE
+        AND MS_DLV_DISTRICTGROUP_POP.DEL_YN = 'N'
+        WHERE MS_DISTRICTGROUP_POP.DCCODE     = #{dccode}
+        AND MS_DISTRICTGROUP_POP.FROMDATE  <![CDATA[<=]]> #{toDate}
+        AND MS_DISTRICTGROUP_POP.TODATE    <![CDATA[>=]]> #{fromDate}
+        AND MS_DISTRICTGROUP_POP.DEL_YN     = 'N'
+	</select>
+
+	<select id="getDlvDistrictgroupPopListByKeyset" parameterType="MsDistrictGroupPopReqDto" resultType="MsDistrictGroupPopResDto">
+        <![CDATA[
+        SELECT /* [msCenterDlvDistrictService.sqlx][msCenterDlvDistrictService.getPopValidationUpdateList][센터 권역 그룹 Pop 제약조건 UPDATE 검사] */
+        	 p.SERIALKEY
+            ,p.DCCODE
+            ,p.POPNO
+            ,p.FROMDATE
+        FROM MS_DISTRICTGROUP_POP p
+        JOIN MS_DLV_DISTRICTGROUP_POP dp ON p.DCCODE = dp.DCCODE AND p.POPNO = dp.POPNO
+            AND p.FROMDATE  <= dp.TODATE AND p.TODATE >= dp.FROMDATE
+            AND dp.DEL_YN = 'N'
+        ]]>
+        <where>
+            <if test="serialkeySet != null and serialkeySet.size > 0">
+                AND p.SERIALKEY IN
+                <foreach collection="serialkeySet" item="key" open="(" separator="," close=")">
+                    #{key}
+                </foreach>
+            </if>
+        </where>
+	</select>
+
+    <insert id="saveMasterList" parameterType="MsDistrictGroupPopReqDto">
+    	INSERT /* [msCenterDlvDistrictService.sqlx][msCenterDlvDistrictService.savePopList][센터 권역 그룹 Pop 목록 저장] */
+    		INTO MS_DISTRICTGROUP_POP
+    		(
+    			 DCCODE
+    			,POPNO
+    			,POPNAME
+    			,DESCRIPTION
+    			,BASE_YN
+    			,FROMDATE
+    			,TODATE
+				,ADDWHO
+				,EDITWHO
+				,REF_SERIALKEY
+			)
+			VALUES
+			(
+				 #{dccode}
+				,#{popNo}
+				,#{popName}
+				,#{description}
+				,#{baseYn}
+				,#{fromDate}
+				,#{toDate}
+				,NVL(#{gUserId}, 'SYSTEM')
+				,NVL(#{gUserId}, 'SYSTEM')
+				,#{refSerialkey}
+			)
+    </insert>
+
+    <select id="getSerialkeysFromDistrictgroupPop" parameterType="int" resultType="string">
+        <![CDATA[
+        SELECT LOGISONESVC.SEQ_MS_DISTRICTGROUP_POP_01.NEXTVAL FROM DUAL
+        CONNECT BY LEVEL <= #{count}
+        ]]>
+    </select>
+
+    <insert id="saveDistrictgroupPop" parameterType="MsDistrictGroupPopReqDto">
+    	INSERT /* [msCenterDlvDistrictService.sqlx][msCenterDlvDistrictService.savePopList][센터 권역 그룹 Pop 목록 저장] */
+    		INTO MS_DISTRICTGROUP_POP (
+                SERIALKEY
+    			,DCCODE
+    			,POPNO
+    			,POPNAME
+    			,DESCRIPTION
+    			,BASE_YN
+    			,FROMDATE
+    			,TODATE
+				,ADDWHO
+				,EDITWHO
+				,REF_SERIALKEY
+			)
+			VALUES
+			(
+				 #{serialkey}
+				,#{dccode}
+				,#{popNo}
+				,#{popName}
+				,#{description}
+				,#{baseYn}
+				,#{fromDate}
+				,#{toDate}
+				,NVL(#{gUserId}, 'SYSTEM')
+				,NVL(#{gUserId}, 'SYSTEM')
+				,NVL(#{refSerialkey}, 0)
+			)
+    </insert>
+
+    <update id="updateDistrictGroupPop">
+    	UPDATE /* [msCenterDlvDistrictService.sqlx][msCenterDlvDistrictService.updateDistrictGroupPop][센터 권역 그룹 Pop 목록 갱신] */
+    		MS_DISTRICTGROUP_POP
+    	SET  TODATE      = #{toDate}
+    	    ,DEL_YN      = #{delYn}
+    	    ,DESCRIPTION = #{description}
+    	    ,ADDWHO = NVL(#{gUserId}, 'SYSTEM')
+    	    ,EDITWHO = NVL(#{gUserId}, 'SYSTEM')
+    	WHERE SERIALKEY  = #{serialkey}
+    </update>
+    
+    <delete id="deleteDistrictGroupPop">
+	 	MERGE INTO MS_DISTRICTGROUP_POP /* [msCenterDlvDistrictService.sqlx][msCenterDlvDistrictService.deleteDistrictGroupPop][센터 권역 그룹 Pop 목록 삭제] */ 
+		USING (SELECT 1 FROM DUAL)
+		ON (MS_DISTRICTGROUP_POP.SERIALKEY = #{serialkey})
+		WHEN MATCHED THEN
+    	UPDATE 
+	    	SET  MS_DISTRICTGROUP_POP.TODATE  = #{toDate}
+			,MS_DISTRICTGROUP_POP.DEL_YN      = 'Y'
+    	DELETE 
+  			WHERE MS_DISTRICTGROUP_POP.FROMDATE > TRUNC(SYSDATE)
+    </delete>
+
+    <delete id="expireDistrictGroupPopByKey">
+		/* [msCenterDlvDistrictService.sqlx][msCenterDlvDistrictService.expireDistrictGroupPop][센터 권역 그룹 Pop 만료] */
+    	UPDATE MS_DISTRICTGROUP_POP
+	    	SET  MS_DISTRICTGROUP_POP.TODATE  = #{toDate}
+			,MS_DISTRICTGROUP_POP.DEL_YN      = 'Y'
+  		WHERE SERIALKEY = #{serialkey}
+    </delete>
+
+	<delete id="deleteDistrictGroupPopBySerialKeySet">
+		<![CDATA[
+		/* [msCenterDlvDistrictService.sqlx][msCenterDlvDistrictService.expireDistrictGroupPop][미래데이터삭제] */
+		DELETE FROM MS_DISTRICTGROUP_POP
+		WHERE FROMDATE >= TO_CHAR(SYSDATE+3, 'YYYYMMDD') AND DEL_YN = 'Y'
+		AND SERIALKEY IN
+		]]>
+		<foreach collection="serialkeySet" item="key" open="(" separator="," close=")">
+			#{key}
+		</foreach>
+	</delete>
+
+	<select id="countAssignedDlvHjdong">
+		SELECT p.*
+		FROM MS_DISTRICTGROUP_POP p
+		LEFT JOIN MS_DLV_DISTRICTGROUP_POP dp ON dp.POPNO = p.POPNO AND dp.DCCODE = p.DCCODE
+		LEFT JOIN MS_DISTRICTGROUP_POP bp ON bp.DCCODE = p.DCCODE AND bp.BASE_YN = 'Y' AND bp.DEL_YN = 'N'
+		LEFT JOIN MS_DLV_DISTRICTGROUP dg ON dg.DCCODE = dp.DCCODE AND dg.DLVGROUP_ID = dp.DLVGROUP_ID
+		LEFT JOIN MS_DLV_DISTRICT d ON d.DCCODE = dg.DCCODE AND d.DLVGROUP_ID = dg.DLVGROUP_ID
+		LEFT JOIN MS_DLV_DISTRICT_HJDONG dh ON dh.DCCODE = d.DCCODE AND dh.DLVDISTRICT_ID = d.DLVDISTRICT_ID
+		WHERE p.SERIALKEY = #{serialkey}
+
+		UNION ALL
+
+		SELECT p.*
+		FROM MS_DISTRICTGROUP_POP p
+		LEFT JOIN MS_DC_DISTRICT_HJDONG h ON h.DCCODE = p.DCCODE
+		LEFT JOIN MS_DLV_DISTRICT_HJDONG dh ON dh.HJDONG_CD = h.HJDONG_CD AND h.DCCODE   = dh.DCCODE
+		LEFT JOIN MS_HJDONG_POLYGON hp ON hp.HJDONG_CD = h.HJDONG_CD
+		WHERE p.SERIALKEY = #{serialkey}
+		AND dh.HJDONG_CD IS NULL AND p.BASE_YN = 'Y'
+	</select>
+
+	<select id="countBaseRepPopByDccode" parameterType="MsDistrictValidationReqDto" resultType="int">
+		SELECT COUNT(*) AS CNT
+		FROM MS_DISTRICTGROUP_POP POP
+		WHERE POP.DCCODE = #{dccode} AND BASE_YN = 'Y'
+		AND (TO_CHAR(SYSDATE+3, 'YYYYMMDD') BETWEEN POP.FROMDATE AND POP.TODATE)
+	</select>
+
+	<select id="existsRepPop" parameterType="MsDistrictGroupPopReqDto" resultType="string">
+		SELECT /* [MsDeliveryDistrictRepPopService.sqlx][existsRepPop][센터 대표POP 존재 여부 확인] */
+			POPNO
+		FROM MS_DISTRICTGROUP_POP
+		WHERE DCCODE = #{dccode}
+		  AND BASE_YN = 'Y'
+		FETCH FIRST 1 ROWS ONLY
+	</select>
+
+	<!-- 대표POP TODATE 단축 시 하위 권역그룹POP 영향도 검증 -->
+	<select id="countPopChildBeyondTodate" parameterType="MsDistrictGroupPopReqDto" resultType="int">
+		/* [MsDeliveryDistrictRepPopService.sqlx][countPopChildBeyondTodate] */
+		SELECT COUNT(*)
+		FROM MS_DLV_DISTRICTGROUP_POP
+		WHERE DCCODE = #{dccode}
+		  AND POPNO  = #{popNo}
+		  AND DEL_YN = 'N'
+		  AND TODATE > #{toDate}
+	</select>
+
+</mapper>

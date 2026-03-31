@@ -1,0 +1,171 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="cmSearch90Service">
+    <!-- 기사 목록 조회 -->
+    <select id="getDriverList" resultType="cjfw.wms.cm.dto.CmDriverPopupResDto">
+        SELECT
+             CM_DRIVER.DRIVERID 		AS CODE
+            ,CM_DRIVER.DRIVERNAME   	AS NAME
+			,DAMO.DEC(CM_DRIVER.PHONE1) AS PHONE1
+            ,DAMO.DEC(CM_DRIVER.PHONE2) AS PHONE2            
+        FROM CM_DRIVER
+        WHERE 1 = 1
+        <if test="driverid != null and driverid != ''"> 
+            AND CM_DRIVER.DRIVERID = #{driverid}             
+        </if>           
+		<!-- 멀티선택: 999 청크 OR-IN -->
+		<if test="codeGroups != null and codeGroups.size() &gt; 0">
+			<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+				<foreach collection="codeGroups" item="grp">
+					OR CM_DRIVER.DRIVERID IN
+					<foreach collection="grp" item="code" open="(" close=")" separator=",">
+						#{code}
+		      		</foreach>
+		    	</foreach>
+		  	</trim>
+		</if>
+        <choose>
+        <when test='multiSelect != null and multiSelect != ""'>
+	        AND CM_DRIVER.DRIVERID IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+			                     FROM (SELECT #{multiSelect} AS VAL FROM DUAL) A
+			                  CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+        </when>		
+        
+        <otherwise>
+	        <choose>
+		        <when test="isEnter == 'Y'.toString()"> <!-- 엔터검색.input/돋보기 =검색(성능) -->
+			          AND (CM_DRIVER.DRIVERID = #{name}  OR CM_DRIVER.DRIVERNAME = #{name}) /*엔터검색*/
+		        </when>
+	        <otherwise>
+		        <if test='name != null and name != ""'>
+			        <choose>
+			        	<when test="fixedSearchYn == '' and fixedSearchYn == null"> <!-- FIX검색.%1개일 때(3/4) -->
+					     AND (CM_DRIVER.DRIVERID   LIKE '%'||#{name}||'%' 
+                           OR CM_DRIVER.DRIVERNAME LIKE '%'||#{name}||'%')
+				        </when>
+			        
+				        <when test="fixedSearchYn == 'Y'.toString()"> <!-- FIX검색.%1개일 때(3/4) -->
+					          AND (CM_DRIVER.DRIVERID LIKE #{name} OR CM_DRIVER.DRIVERNAME LIKE #{name} )
+				        </when>
+			        <otherwise><!-- 2.단일검색,5.%다중검색  -->
+				        AND (CM_DRIVER.DRIVERID LIKE '%'||#{name}||'%' OR CM_DRIVER.DRIVERNAME LIKE '%'||#{name}||'%' )
+			        </otherwise>
+			        </choose>		            
+		                
+	                <!-- START.검색요건 -->
+                       <if test= 'name != null and name.indexOf(" ") gt 0 '>
+                           OR REGEXP_LIKE (UPPER(CM_DRIVER.DRIVERNAME), REGEXP_REPLACE (UPPER(#{keywordRegexp}), '[ ]+', '|'))
+                       </if>
+                    <!-- END.검색요건 -->     
+		        </if>
+	        </otherwise>
+	        </choose>
+
+        </otherwise>
+        </choose>
+        
+        <!-- START.검색요건 -->
+        <choose>
+            <when test='name != null and name.indexOf(" ") gt 0 '>
+                ORDER BY
+                        REGEXP_COUNT(UPPER(CM_DRIVER.DRIVERNAME), REGEXP_REPLACE (UPPER(#{keywordRegexp}), '[ ]+', '|')) DESC, /*매치 검색 count*/
+                        UTL_MATCH.JARO_WINKLER_SIMILARITY(CM_DRIVER.DRIVERNAME, #{name}) DESC 
+                            
+            </when>
+            <otherwise>
+               /*ASIS처럼 정열 없음*/
+            </otherwise>
+        </choose>     
+        <!-- END.검색요건 -->   
+    </select>
+
+    <!-- 차량POP 목록 조회 -->
+    <select id="getCarPopList" resultType="CmCarPopPopupResDto">
+        SELECT
+            CM_CAR.CARNO 				AS code
+            ,CM_DRIVER.DRIVERNAME 		AS driverName
+            ,CM_CAR.CONTRACTTYPE 		AS contractType
+            ,MS_DISTRICT.DISTRICTCODE 	AS name
+            ,CM_CAR.CUSTKEY				AS custKey
+            ,COURIER.CARRIERKEY        AS COURIER
+            ,COURIER.DESCRIPTION       AS COURIERNAME
+            ,CARAGENT.CARRIERKEY       AS CARAGENTKEY
+            ,CARAGENT.DESCRIPTION      AS CARAGENTNAME
+        FROM CM_CAR
+        LEFT OUTER JOIN CM_DRIVER
+            ON CM_DRIVER.DRIVERID 	= NVL(CM_CAR.DRIVER1, CM_CAR.DRIVER2)
+        LEFT OUTER JOIN MS_DISTRICT
+            ON 	CM_CAR.CARID 		= MS_DISTRICT.CARNO
+        LEFT JOIN MS_CARRIER COURIER
+            ON  COURIER.STORERKEY   = 'FW00'
+            AND COURIER.CARRIERKEY  = CM_CAR.COURIER
+            AND COURIER.CARRIERTYPE = 'LOCAL'
+        LEFT JOIN MS_CARRIER CARAGENT
+            ON  CARAGENT.STORERKEY   = 'FW00'
+            AND CARAGENT.CARRIERKEY  = CM_CAR.CARAGENTKEY
+            AND CARAGENT.CARRIERTYPE = 'SUBC'
+        WHERE 1 = 1
+          	AND CM_CAR.DEL_YN 		= 'N'
+          	
+        <if test="multiSelect != null and multiSelect != ''">
+            AND CM_CAR.CARNO IN (
+                SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS VAL
+                FROM (SELECT #{multiSelect} AS VAL FROM DUAL) A
+                CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0
+            )
+        </if>
+        
+		<if test="contractType != null and contractType != ''">  
+			AND    CM_CAR.CONTRACTTYPE = #{contractType}
+		</if>
+		
+		<if test="code != null and code != ''">
+		    AND CM_CAR.CARNO = #{code} 
+		</if>
+        
+        <if test="name != null and name != ''">
+            AND (
+                	CM_CAR.CARNO 				LIKE '%' || #{name} || '%'
+                OR 	MS_DISTRICT.DISTRICTCODE 	LIKE '%' || #{name} || '%'
+            )
+        </if>
+    </select>
+
+    <!-- SKU 그룹 목록2 조회 -->
+    <select id="getNewSkuGroup2List" resultType="CmSkuGroupListPopupResDto">
+        SELECT
+			MS_SKUSPEC.SPECCODE 	AS CODE
+			,MS_SKUSPEC.SPECDESCR 	AS NAME
+        FROM MS_SKUSPEC
+        WHERE MS_SKUSPEC.STORERKEY		= #{gStorerkey}
+          AND MS_SKUSPEC.SPECCATEGORY 	= 'SKUGROUP'
+          AND MS_SKUSPEC.SPECCLASS 		= #{specClass}
+          
+        <!-- 멀티선택: 999 청크 OR-IN -->
+		<if test="codeGroups != null and codeGroups.size() &gt; 0">
+			<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+				<foreach collection="codeGroups" item="grp">
+					OR MS_SKUSPEC.SPECCODE IN
+					<foreach collection="grp" item="code" open="(" close=")" separator=",">
+						#{code}
+		      		</foreach>
+		    	</foreach>
+		  	</trim>
+		</if>
+          
+        <if test="searchVal != null and searchVal != ''">
+            AND (
+                	MS_SKUSPEC.SPECCODE 	LIKE #{searchVal} || '%'
+                OR 	MS_SKUSPEC.SPECDESCR 	LIKE #{searchVal} || '%'
+            )
+        </if>
+        
+        <if test="name != null and name != ''">
+            AND MS_SKUSPEC.SPECDESCR LIKE #{name} || '%'
+        </if>
+        
+        ORDER BY MS_SKUSPEC.SPECCODE
+    </select>
+
+</mapper>

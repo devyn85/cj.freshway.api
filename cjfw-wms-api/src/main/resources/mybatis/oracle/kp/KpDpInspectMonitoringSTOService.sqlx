@@ -1,0 +1,577 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="kpDpInspectMonitoringSTOService">
+
+
+	<select id="getMasterList" resultType="KpDpInspectMonitoringSTOResDto">
+        SELECT  /* [KpDpInspectMonitoringSTOService.sqlx][getTab1MasterList][광역출고검수현황 목록 조회][공두경][2025.11.29] */		       
+		       SLIPDT			/*출고일자*/
+		      ,FROM_DC          /*공급물류센터*/
+		      ,FROM_DCNAME      /*공급물류센터명*/
+		      ,TO_DC            /*공급받는물류센터*/
+		      ,TO_DCNAME        /*공급받는물류센터명*/
+		      ,NVL(CD1.BASEDESCR,CD1.BASECODE) AS CHANNELNAME	/*저장유무*/		      
+		      ,LOADPLANCNT      /*상차예정건수*/
+		      ,LOADCMPCNT       /*상차완료건수*/
+		      ,LOADRATE         /*상차진행률*/
+		      ,SHORTAGECNT      /*결품건수*/
+		      ,SHORTAGERATE     /*결품율*/
+		      ,FORCECMPCNT      /*강제완료건수*/
+		      ,FORCECMPRATE     /*강제완료률*/
+		      ,FORCECMPYN       /*강제완료여부*/
+		      ,CHANNEL          /**/
+		FROM   (
+				SELECT /* 광역일배 */
+				       STORERKEY                                                                         AS STORERKEY
+				      ,FROM_DC                                                                           AS FROM_DC
+				      ,FROM_DCNAME                                                                       AS FROM_DCNAME
+				      ,SLIPDT                                                                            AS SLIPDT
+				      ,TO_DC                                                                             AS TO_DC
+				      ,TO_DCNAME                                                                         AS TO_DCNAME
+				      ,LOADPLANCNT                                                                       AS LOADPLANCNT
+				      ,LOADCMPCNT                                                                        AS LOADCMPCNT
+				      ,DECODE(LOADPLANCNT, 0, 0, ROUND(LOADCMPCNT/LOADPLANCNT * 100, 2))                 AS LOADRATE
+				      ,LOADPLANCNT - LOADCMPCNT                                                          AS SHORTAGECNT
+				      ,DECODE(LOADPLANCNT, 0, 0, ROUND((LOADPLANCNT - LOADCMPCNT)/LOADPLANCNT * 100, 2)) AS SHORTAGERATE
+				      ,0                                                                                 AS FORCECMPCNT
+				      ,0                                                                                 AS FORCECMPRATE
+				      ,CASE WHEN LOADPLANCNT = LOADCMPCNT THEN 'Y' ELSE 'N' END                          AS FORCECMPYN 
+				      ,CHANNEL                                                                           AS CHANNEL 
+				FROM (
+					        SELECT WD_INPLAN.STORERKEY                                 AS STORERKEY
+					              ,DM_DOCUMENT_D.ROUTE                                 AS FROM_DC
+					              ,MIN(FROM_DC.DCNAME)                                 AS FROM_DCNAME
+					              ,WD_INPLAN.SLIPDT                                    AS SLIPDT
+					              ,WD_INPLAN.DCCODE                                    AS TO_DC
+					              ,MIN(TO_DC.DCNAME)                                   AS TO_DCNAME
+					              ,COUNT(1)                                            AS LOADPLANCNT
+					              ,SUM(DECODE(WD_INVOICE_TRACKING.INVOICENO,NULL,0,1)) AS LOADCMPCNT
+					              ,MIN(DM_DOCUMENT_D.CHANNEL)                          AS CHANNEL       
+					        FROM   WD_INPLAN           
+					        JOIN   DM_DOCUMENT_H           
+					        ON     DM_DOCUMENT_H.DCCODE            = WD_INPLAN.DCCODE           
+					        AND    DM_DOCUMENT_H.STORERKEY         = WD_INPLAN.STORERKEY           
+					        AND    DM_DOCUMENT_H.ORGANIZE          = WD_INPLAN.ORGANIZE           
+					        AND    DM_DOCUMENT_H.DOCTYPE           = WD_INPLAN.DOCTYPE           
+					        AND    DM_DOCUMENT_H.DOCDT             = WD_INPLAN.DOCDT           
+					        AND    DM_DOCUMENT_H.DOCNO             = WD_INPLAN.DOCNO           
+					        AND    DM_DOCUMENT_H.DELIVERYDATE      = WD_INPLAN.SLIPDT
+					        AND    DM_DOCUMENT_H.DEL_YN            = 'N'   
+					        <if test="toCustkeyMulti != null and toCustkeyMulti != '' ">
+						    	<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+						    		<foreach collection="toCustkeyMulti" item="item">
+						    			OR DM_DOCUMENT_H.TO_CUSTKEY IN
+						    			<foreach collection="item" item="code" open="(" close=")" separator=",">
+						    				#{code} 	 
+						          		</foreach>
+						        	</foreach>
+						      	</trim>			                                    
+				            </if>
+				            <if test="gMultiCourier != null and gMultiCourier != ''">	AND DM_DOCUMENT_H.COURIER 	= 	 #{gMultiCourier}		</if>
+					        JOIN   DM_DOCUMENT_D           
+					        ON     DM_DOCUMENT_D.DCCODE            = WD_INPLAN.DCCODE           
+					        AND    DM_DOCUMENT_D.STORERKEY         = WD_INPLAN.STORERKEY           
+					        AND    DM_DOCUMENT_D.ORGANIZE          = WD_INPLAN.ORGANIZE           
+					        AND    DM_DOCUMENT_D.AREA              = WD_INPLAN.AREA           
+					        AND    DM_DOCUMENT_D.DOCTYPE           = WD_INPLAN.DOCTYPE           
+					        AND    DM_DOCUMENT_D.DOCDT             = WD_INPLAN.DOCDT           
+					        AND    DM_DOCUMENT_D.DOCNO             = WD_INPLAN.DOCNO           
+					        AND    DM_DOCUMENT_D.DOCLINE           = WD_INPLAN.DOCLINE       
+					        AND    DM_DOCUMENT_D.DELIVERYDATE      = WD_INPLAN.SLIPDT
+					        AND    DM_DOCUMENT_D.DEL_YN            = 'N'           
+					        AND    DM_DOCUMENT_D.CHANNEL           = '3'          
+					        <if test="fromDccode != null and fromDccode != ''">  AND    DM_DOCUMENT_D.ROUTE    = #{fromDccode}     </if>
+					        <if test="toDccode != null and toDccode != ''">      AND    DM_DOCUMENT_D.DCCODE   = #{toDccode}       </if>
+					        <if test="status != null and status != ''">          AND    DM_DOCUMENT_D.STATUS   = #{status}          </if> 
+					        JOIN   DM_DOCUMENT_D DM_DOCUMENT_D_PO           
+					        ON     DM_DOCUMENT_D_PO.DCCODE         = DM_DOCUMENT_D.DCCODE           
+					        AND    DM_DOCUMENT_D_PO.STORERKEY      = DM_DOCUMENT_D.STORERKEY           
+					        AND    DM_DOCUMENT_D_PO.ORGANIZE       = DM_DOCUMENT_D.ORGANIZE           
+					        AND    DM_DOCUMENT_D_PO.AREA           = DM_DOCUMENT_D.AREA           
+					        AND    DM_DOCUMENT_D_PO.DOCTYPE        = 'DP'           
+					        AND    DM_DOCUMENT_D_PO.DOCNO          = DM_DOCUMENT_D.POKEY           
+					        AND    DM_DOCUMENT_D_PO.DOCLINE        = DM_DOCUMENT_D.POLINE           
+					        AND    DM_DOCUMENT_D_PO.DEL_YN         = 'N'           
+					        AND    DM_DOCUMENT_D_PO.SKU            = DM_DOCUMENT_D.SKU
+                            AND    DM_DOCUMENT_D_PO.DELIVERYDATE   = DM_DOCUMENT_D.DELIVERYDATE
+					        JOIN   DM_DOCUMENT_H DM_DOCUMENT_H_PO           
+					        ON     DM_DOCUMENT_H_PO.DCCODE         = DM_DOCUMENT_D_PO.DCCODE           
+					        AND    DM_DOCUMENT_H_PO.STORERKEY      = DM_DOCUMENT_D_PO.STORERKEY           
+					        AND    DM_DOCUMENT_H_PO.ORGANIZE       = DM_DOCUMENT_D_PO.ORGANIZE           
+					        AND    DM_DOCUMENT_H_PO.DOCTYPE        = DM_DOCUMENT_D_PO.DOCTYPE           
+					        AND    DM_DOCUMENT_H_PO.DOCDT          = DM_DOCUMENT_D_PO.DOCDT
+					        AND    DM_DOCUMENT_H_PO.DOCNO          = DM_DOCUMENT_D_PO.DOCNO           
+					        AND    DM_DOCUMENT_H_PO.DEL_YN         = 'N'
+					        AND    DM_DOCUMENT_H_PO.DELIVERYDATE   = DM_DOCUMENT_D_PO.DELIVERYDATE					        
+					        <if test="vendorMulti != null and vendorMulti != '' ">
+						    	<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+						    		<foreach collection="vendorMulti" item="item">
+						    			OR DM_DOCUMENT_H_PO.FROM_CUSTKEY IN
+						    			<foreach collection="item" item="code" open="(" close=")" separator=",">
+						    				#{code} 	 
+						          		</foreach>
+						        	</foreach>
+						      	</trim>			                                    
+				            </if>         
+					        JOIN   CM_DC FROM_DC           
+					        ON     FROM_DC.DCCODE                  = DM_DOCUMENT_D.ROUTE           
+					        AND    FROM_DC.DEL_YN                  = 'N'                                                 
+					        JOIN   CM_DC TO_DC           
+					        ON     TO_DC.DCCODE                    = DM_DOCUMENT_H.DCCODE           
+					        AND    TO_DC.DEL_YN                    = 'N'                                               
+					        JOIN   MS_SKU           
+					        ON     MS_SKU.STORERKEY                = WD_INPLAN.STORERKEY           
+					        AND    MS_SKU.SKU                      = WD_INPLAN.SKU           
+					        AND    MS_SKU.DEL_YN                   = 'N'   
+					        <!-- START.상품.다중OR검색 -->
+					        <if test="sku != null and sku != '' ">
+								<if test="skuMulti != null and skuMulti.size() > 0">
+									<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+										<foreach collection="skuMulti" item="item">
+											OR MS_SKU.SKU IN
+											<foreach collection="item" item="code" open="(" close=")" separator=",">
+												#{code} 	 
+								      		</foreach>
+								    	</foreach>
+								  	</trim>			                                    
+						    	</if>
+					        </if>                                                     
+					        LEFT JOIN WD_INVOICE
+					        ON     WD_INVOICE.DCCODE                         = WD_INPLAN.DCCODE
+					        AND    WD_INVOICE.STORERKEY                      = WD_INPLAN.STORERKEY
+					        AND    WD_INVOICE.ORGANIZE                       = WD_INPLAN.ORGANIZE
+					        AND    WD_INVOICE.AREA                           = WD_INPLAN.AREA
+					        AND    WD_INVOICE.DOCTYPE                        = WD_INPLAN.DOCTYPE
+					        AND    WD_INVOICE.DOCDT                          = WD_INPLAN.DOCDT  
+					        AND    WD_INVOICE.DOCNO                          = WD_INPLAN.DOCNO  
+					        AND    WD_INVOICE.DOCLINE                        = WD_INPLAN.DOCLINE
+					        AND    WD_INVOICE.SLIPDT                         = WD_INPLAN.SLIPDT  
+					        AND    WD_INVOICE.SLIPNO                         = WD_INPLAN.SLIPNO  
+					        AND    WD_INVOICE.SLIPLINE                       = WD_INPLAN.SLIPLINE
+					        LEFT JOIN WD_INVOICE_TRACKING
+					        ON     WD_INVOICE_TRACKING.INVOICENO             = WD_INVOICE.INVOICENO
+					        AND    WD_INVOICE_TRACKING.EVENTSTATUS           = '30'
+					        WHERE  1=1              
+				    		<if test="fromSlipdt != null and fromSlipdt != ''">   AND    WD_INPLAN.SLIPDT    <![CDATA[>=]]> #{fromSlipdt}        </if>
+				    		<if test="toSlipdt != null and toSlipdt != ''">       AND    WD_INPLAN.SLIPDT    <![CDATA[<=]]> #{toSlipdt}          </if>
+					        AND    WD_INPLAN.DEL_YN                = 'N'           
+					        GROUP BY WD_INPLAN.STORERKEY
+					                ,WD_INPLAN.DCCODE
+					                ,WD_INPLAN.SLIPDT
+					                ,DM_DOCUMENT_D.ROUTE
+					)
+				UNION ALL
+                SELECT /* 광역저장 */
+                       STORERKEY                                                                         AS STORERKEY
+                      ,FROM_DC                                                                           AS FROM_DC
+                      ,FROM_DCNAME                                                                       AS FROM_DCNAME
+                      ,SLIPDT                                                                            AS SLIPDT
+                      ,TO_DC                                                                             AS TO_DC
+                      ,TO_DCNAME                                                                         AS TO_DCNAME
+                      ,LOADPLANCNT                                                                       AS LOADPLANCNT
+                      ,LOADCMPCNT                                                                        AS LOADCMPCNT
+                      ,DECODE(LOADPLANCNT, 0, 0, ROUND(LOADCMPCNT/LOADPLANCNT * 100, 2))                 AS LOADRATE
+                      ,LOADPLANCNT - LOADCMPCNT                                                          AS SHORTAGECNT
+                      ,DECODE(LOADPLANCNT, 0, 0, ROUND((LOADPLANCNT - LOADCMPCNT)/LOADPLANCNT * 100, 2)) AS SHORTAGERATE
+                      ,0                                                                                 AS FORCECMPCNT
+                      ,0                                                                                 AS FORCECMPRATE
+                      ,CASE WHEN LOADPLANCNT = LOADCMPCNT THEN 'Y' ELSE 'N' END                          AS FORCECMPYN 
+                      ,CHANNEL                                                                           AS CHANNEL
+                FROM   (
+                        SELECT WD_INPLAN.STORERKEY                                      AS STORERKEY
+                              ,DM_DOCUMENT_H.FROM_CUSTKEY                               AS FROM_DC
+                              ,DM_DOCUMENT_H.FROM_CUSTNAME                              AS FROM_DCNAME
+                              ,WD_INPLAN.SLIPDT                                         AS SLIPDT
+                              ,DM_DOCUMENT_H.TO_CUSTKEY                                 AS TO_DC
+                              ,DM_DOCUMENT_H.TO_CUSTNAME                                AS TO_DCNAME
+                              ,COUNT(1)                                                 AS LOADPLANCNT
+                              ,SUM(CASE WHEN WD_INPLAN.QTYPICKED = WD_INPLAN.INSPECTQTY                    
+                                         AND WD_INPLAN.INSPECTQTY > 0 THEN 1 
+                                        ELSE 0 END)                                     AS LOADCMPCNT 
+                              ,DM_DOCUMENT_D.CHANNEL                                    AS CHANNEL               
+                        FROM   WD_INPLAN
+                        JOIN   DM_DOCUMENT_H                     
+                        ON     DM_DOCUMENT_H.DCCODE            = WD_INPLAN.DCCODE
+                        AND    DM_DOCUMENT_H.STORERKEY         = WD_INPLAN.STORERKEY
+                        AND    DM_DOCUMENT_H.ORGANIZE          = WD_INPLAN.ORGANIZE
+                        AND    DM_DOCUMENT_H.DOCTYPE           = 'WD'
+                        AND    DM_DOCUMENT_H.DOCDT             = WD_INPLAN.DOCDT
+                        AND    DM_DOCUMENT_H.DOCNO             = WD_INPLAN.DOCNO
+                        AND    DM_DOCUMENT_H.DELIVERYDATE      = WD_INPLAN.SLIPDT
+                        AND    DM_DOCUMENT_H.DEL_YN            = 'N'   
+                        <if test="fromDccode != null and fromDccode != ''">  AND    DM_DOCUMENT_H.FROM_CUSTKEY  = #{fromDccode}     </if>
+                        <if test="toDccode != null and toDccode != ''">      AND    DM_DOCUMENT_H.TO_CUSTKEY    = #{toDccode}       </if>
+                        <if test="toCustkeyMulti != null and toCustkeyMulti != '' ">
+                            <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                                <foreach collection="toCustkeyMulti" item="item">
+                                    OR DM_DOCUMENT_H.TO_CUSTKEY IN
+                                    <foreach collection="item" item="code" open="(" close=")" separator=",">
+                                        #{code}      
+                                    </foreach>
+                                </foreach>
+                            </trim>                                             
+                        </if>
+                        <if test="gMultiCourier != null and gMultiCourier != ''">   AND DM_DOCUMENT_H.COURIER   =    #{gMultiCourier}       </if>
+                        JOIN   CM_DC
+                        ON     CM_DC.DCCODE                    = DM_DOCUMENT_H.TO_CUSTKEY
+                        JOIN   DM_DOCUMENT_D
+                        ON     DM_DOCUMENT_D.DCCODE            = WD_INPLAN.DCCODE
+                        AND    DM_DOCUMENT_D.STORERKEY         = WD_INPLAN.STORERKEY
+                        AND    DM_DOCUMENT_D.ORGANIZE          = WD_INPLAN.ORGANIZE
+                        AND    DM_DOCUMENT_D.AREA              = WD_INPLAN.AREA
+                        AND    DM_DOCUMENT_D.DOCTYPE           = 'WD'
+                        AND    DM_DOCUMENT_D.DOCDT             = WD_INPLAN.DOCDT
+                        AND    DM_DOCUMENT_D.DOCNO             = WD_INPLAN.DOCNO
+                        AND    DM_DOCUMENT_D.DOCLINE           = WD_INPLAN.DOCLINE
+                        AND    DM_DOCUMENT_D.DELIVERYDATE      = WD_INPLAN.SLIPDT
+                        AND    DM_DOCUMENT_D.DEL_YN            = 'N'
+                        AND    DM_DOCUMENT_D.CHANNEL           = '1'
+                        <if test="status != null and status != ''">          AND    DM_DOCUMENT_D.STATUS   = #{status}          </if>
+                        JOIN   MS_SKU
+                        ON     MS_SKU.STORERKEY                = WD_INPLAN.STORERKEY
+                        AND    MS_SKU.SKU                      = WD_INPLAN.SKU
+                        AND    MS_SKU.DEL_YN                   = 'N'
+                        <!-- START.상품.다중OR검색 -->
+                        <if test="sku != null and sku != '' ">
+                            <if test="skuMulti != null and skuMulti.size() > 0">
+                                <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                                    <foreach collection="skuMulti" item="item">
+                                        OR MS_SKU.SKU IN
+                                        <foreach collection="item" item="code" open="(" close=")" separator=",">
+                                            #{code}      
+                                        </foreach>
+                                    </foreach>
+                                </trim>                                             
+                            </if>
+                        </if>    
+                        WHERE  1=1
+                        <if test="fromSlipdt != null and fromSlipdt != ''">   AND    WD_INPLAN.SLIPDT    <![CDATA[>=]]> #{fromSlipdt}        </if>
+                        <if test="toSlipdt != null and toSlipdt != ''">       AND    WD_INPLAN.SLIPDT    <![CDATA[<=]]> #{toSlipdt}          </if>  
+                        AND    WD_INPLAN.DEL_YN                = 'N'
+                        GROUP BY WD_INPLAN.STORERKEY
+                                ,DM_DOCUMENT_H.FROM_CUSTKEY  
+                                ,DM_DOCUMENT_H.FROM_CUSTNAME 
+                                ,WD_INPLAN.SLIPDT            
+                                ,DM_DOCUMENT_H.TO_CUSTKEY    
+                                ,DM_DOCUMENT_H.TO_CUSTNAME
+                                ,DM_DOCUMENT_D.CHANNEL
+                       )   	
+		)  A  
+		LEFT JOIN CM_CODE_STORER CD1 ON (CD1.STORERKEY = A.STORERKEY	AND CD1.CODELIST = 'PUTAWAYTYPE' 	AND CD1.BASECODE  = A.CHANNEL)
+		ORDER BY CHANNEL
+		        ,SLIPDT
+		        ,FROM_DC
+		        ,TO_DC    
+    </select>
+
+	<select id="getDetailList" resultType="KpDpInspectMonitoringSTOResDetailDto">		 
+        <if test="channel == '1'.toString()">	        
+                SELECT  /* [KpDpInspectMonitoringSTOService.sqlx][getDetailList][광역출고검수현황 상세 조회][공두경][2025.11.29] */
+				       CARNO                                     AS CARNO			/*차량번호*/
+				      ,DELIVERYGROUP                             AS DELIVERYGROUP   /*POP번호*/
+				      ,SKU                                       AS SKU             /*상품코드*/
+				      ,MIN(SKUNAME)                              AS SKUNAME         /*상품명칭*/
+				      ,''										 AS ASSORTPICKCUST  /*분류피킹업체*/
+				      ,MIN(CHANNEL)                              AS CHANNEL         /*저장유무*/
+				      ,SUM(ORDERQTY)                             AS ORDERQTY        /*주문수량*/
+				      ,SUM(INSPECTQTY)                           AS SCANQTY         /*스캔완료수량*/
+				      ,SUM(ORDERQTY) -SUM(INSPECTQTY)            AS SHORTAGEQTY     /*현결품수량*/
+				      ,UOM                                       AS UOM             /*주문단위*/
+				      ,MIN(FROM_CUSTNAME)                        AS FROM_CUSTNAME   /*협력사명*/
+				      ,MIN(TO_CUSTNAME)                          AS TO_CUSTNAME     /*판매처명*/
+				      ,STATUS                                    AS STATUS          /*검수진행상태*/
+				      ,FROM_DC                                   AS FROM_DC         /**/
+				      ,MIN(FROM_DCNAME)                          AS FROM_DCNAME     /**/
+				      ,SLIPDT                                    AS SLIPDT          /**/
+				      ,TO_DC                                     AS TO_DC           /**/
+				      ,MIN(TO_DCNAME)                            AS TO_DCNAME       /**/
+				      ,TO_CUSTKEY                                AS TO_CUSTKEY      /**/
+				  FROM   (
+							SELECT 	 DM_DOCUMENT_H.FROM_CUSTKEY                          AS FROM_DC
+									,MIN(DM_DOCUMENT_H.FROM_CUSTNAME)                    AS FROM_DCNAME
+									,WD_INPLAN.SLIPDT                                    AS SLIPDT
+									,WD_INPLAN.DCCODE                                    AS TO_DC
+									,MIN(DM_DOCUMENT_H.TO_CUSTKEY)                       AS TO_DCNAME
+									,''                                                  AS TO_CUSTKEY
+									,''                                                  AS TO_CUSTNAME
+									,WD_INPLAN.SKU                                       AS SKU
+									,MIN(MS_SKU.DESCRIPTION)                             AS SKUNAME
+									,MIN(WD_INPLAN.ORDERQTY)                             AS ORDERQTY
+									,SUM(NVL(WD_INPLAN.INSPECTQTY,0))                    AS INSPECTQTY
+									,MIN(TM_INPLAN.CARNO)                                AS CARNO
+									,MIN(TM_INPLAN.DELIVERYGROUP)                        AS DELIVERYGROUP
+									,MIN(WD_INPLAN.UOM)                                  AS UOM
+									,MIN(NVL(CD1.BASEDESCR,CD1.BASECODE)) 				 AS STATUS
+									,''                                                  AS FROM_CUSTNAME
+									,MIN(NVL(CD2.BASEDESCR,CD2.BASECODE)) 				 AS CHANNEL									
+									,WD_INPLAN.SLIPNO                                    AS SLIPNO
+									,WD_INPLAN.SLIPLINE                                  AS SLIPLINE      
+							FROM   WD_INPLAN
+							JOIN   DM_DOCUMENT_H                     
+							ON     DM_DOCUMENT_H.DCCODE            = WD_INPLAN.DCCODE
+							AND    DM_DOCUMENT_H.STORERKEY         = WD_INPLAN.STORERKEY
+							AND    DM_DOCUMENT_H.ORGANIZE          = WD_INPLAN.ORGANIZE
+							AND    DM_DOCUMENT_H.DOCTYPE           = 'WD'
+							AND    DM_DOCUMENT_H.DOCDT             = WD_INPLAN.DOCDT
+							AND    DM_DOCUMENT_H.DOCNO             = WD_INPLAN.DOCNO
+							AND    DM_DOCUMENT_H.DEL_YN            = 'N'   
+							AND    DM_DOCUMENT_H.DELIVERYDATE      = WD_INPLAN.SLIPDT 
+							JOIN   CM_DC
+							ON     CM_DC.DCCODE                    = DM_DOCUMENT_H.TO_CUSTKEY
+							JOIN   DM_DOCUMENT_D
+							ON     DM_DOCUMENT_D.DCCODE            = WD_INPLAN.DCCODE
+							AND    DM_DOCUMENT_D.STORERKEY         = WD_INPLAN.STORERKEY
+							AND    DM_DOCUMENT_D.ORGANIZE          = WD_INPLAN.ORGANIZE
+							AND    DM_DOCUMENT_D.AREA              = WD_INPLAN.AREA
+							AND    DM_DOCUMENT_D.DOCTYPE           = 'WD'
+							AND    DM_DOCUMENT_D.DOCDT             = WD_INPLAN.DOCDT
+							AND    DM_DOCUMENT_D.DOCNO             = WD_INPLAN.DOCNO
+							AND    DM_DOCUMENT_D.DOCLINE           = WD_INPLAN.DOCLINE
+							AND    DM_DOCUMENT_D.DELIVERYDATE      = WD_INPLAN.SLIPDT 
+							AND    DM_DOCUMENT_D.DEL_YN            = 'N'
+							AND    DM_DOCUMENT_D.CHANNEL           = '1'
+							<if test="status != null and status != ''">          AND    DM_DOCUMENT_D.STATUS   = #{status}          </if> 
+							JOIN   MS_SKU
+							ON     MS_SKU.STORERKEY                = WD_INPLAN.STORERKEY
+							AND    MS_SKU.SKU                      = WD_INPLAN.SKU
+							AND    MS_SKU.DEL_YN                   = 'N'
+							<!-- START.상품.다중OR검색 -->
+					        <if test="sku != null and sku != '' ">
+								<if test="skuMulti != null and skuMulti.size() > 0">
+									<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+										<foreach collection="skuMulti" item="item">
+											OR MS_SKU.SKU IN
+											<foreach collection="item" item="code" open="(" close=")" separator=",">
+												#{code} 	 
+								      		</foreach>
+								    	</foreach>
+								  	</trim>			                                    
+						    	</if>
+					        </if>
+				            LEFT JOIN TM_INPLAN
+				            ON     TM_INPLAN.DCCODE                          = WD_INPLAN.DCCODE
+				            AND    TM_INPLAN.DOCTYPE                         = WD_INPLAN.DOCTYPE
+				            AND    TM_INPLAN.SLIPDT                          = WD_INPLAN.SLIPDT
+				            AND    TM_INPLAN.SLIPNO                          = WD_INPLAN.SLIPNO
+				            LEFT JOIN CM_CODE_STORER CD1 ON (CD1.STORERKEY = DM_DOCUMENT_D.STORERKEY	AND CD1.CODELIST = 'STATUS_WD' 	AND CD1.BASECODE  = DM_DOCUMENT_D.STATUS)
+							LEFT JOIN CM_CODE_STORER CD2 ON (CD2.STORERKEY = DM_DOCUMENT_D.STORERKEY	AND CD2.CODELIST = 'PUTAWAYTYPE' 	AND CD2.BASECODE  = DM_DOCUMENT_D.CHANNEL)
+				            WHERE  1=1
+				            AND    DM_DOCUMENT_H.FROM_CUSTKEY      = #{fromDc}
+				            AND    DM_DOCUMENT_H.TO_CUSTKEY        = #{toDc}
+				            AND    WD_INPLAN.SLIPDT                = #{slipdt}
+				            AND    WD_INPLAN.DEL_YN                = 'N'
+				            GROUP BY WD_INPLAN.DCCODE
+				                    ,WD_INPLAN.SLIPDT
+				                    ,DM_DOCUMENT_H.FROM_CUSTKEY
+				                    ,DM_DOCUMENT_H.TO_CUSTKEY
+				                    ,WD_INPLAN.SKU
+				                    ,WD_INPLAN.SLIPNO
+				                    ,WD_INPLAN.SLIPLINE
+				         ) 
+				GROUP BY FROM_DC
+				        ,SLIPDT
+				        ,TO_DC
+				        ,TO_CUSTKEY
+				        ,SKU   
+				        ,CARNO
+				        ,DELIVERYGROUP
+				        ,UOM  
+				        ,STATUS
+				        ,SLIPNO
+				        ,SLIPLINE 
+				ORDER BY FROM_DC
+				         ,SLIPDT
+				         ,TO_DC
+				         ,CARNO
+				         ,DELIVERYGROUP
+				         ,TO_CUSTKEY
+				         ,SKU  
+            </if>
+            
+            <if test="channel == '3'.toString()">	     
+            	SELECT  /* [KpDpInspectMonitoringSTOService.sqlx][getDetailList][광역출고검수현황 상세 조회][공두경][2025.11.29] */
+            		   CARNO                                     AS CARNO			/*차량번호*/
+				      ,DELIVERYGROUP                             AS DELIVERYGROUP   /*POP번호*/
+				      ,SKU                                       AS SKU             /*상품코드*/
+				      ,MIN(SKUNAME)                              AS SKUNAME         /*상품명칭*/
+				      ,''										 AS ASSORTPICKCUST  /*분류피킹업체*/
+				      ,MIN(CHANNEL)                              AS CHANNEL         /*저장유무*/
+				      ,SUM(ORDERQTY)                             AS ORDERQTY        /*주문수량*/
+				      ,SUM(CONFIRMQTY)                           AS SCANQTY         /*스캔완료수량*/
+				      ,SUM(ORDERQTY) -SUM(CONFIRMQTY)            AS SHORTAGEQTY     /*현결품수량*/
+				      ,UOM                                       AS UOM             /*주문단위*/
+				      ,MIN(FROM_CUSTNAME)                        AS FROM_CUSTNAME   /*협력사명*/
+				      ,MIN(TO_CUSTNAME)                          AS TO_CUSTNAME     /*판매처명*/
+				      ,STATUS                                    AS STATUS          /*검수진행상태*/
+				      ,FROM_DC                                   AS FROM_DC         /**/
+				      ,MIN(FROM_DCNAME)                          AS FROM_DCNAME     /**/
+				      ,SLIPDT                                    AS SLIPDT          /**/
+				      ,TO_DC                                     AS TO_DC           /**/
+				      ,MIN(TO_DCNAME)                            AS TO_DCNAME       /**/
+				      ,TO_CUSTKEY                                AS TO_CUSTKEY      /**/
+				FROM  (
+				        SELECT DM_DOCUMENT_D.ROUTE                                 AS FROM_DC
+				              ,MIN(FROM_DC.DCNAME)                                 AS FROM_DCNAME
+				              ,WD_INPLAN.SLIPDT                                    AS SLIPDT
+				              ,WD_INPLAN.DCCODE                                    AS TO_DC
+				              ,MIN(TO_DC.DCNAME)                                   AS TO_DCNAME
+				              ,DM_DOCUMENT_H.TO_CUSTKEY                            AS TO_CUSTKEY
+				              ,MIN(DM_DOCUMENT_H.TO_CUSTNAME)                      AS TO_CUSTNAME
+				              ,WD_INPLAN.SKU                                       AS SKU
+				              ,MIN(MS_SKU.DESCRIPTION)                             AS SKUNAME
+				              ,MIN(WD_INPLAN.ORDERQTY)                             AS ORDERQTY
+				              ,SUM(NVL(WD_INVOICE_TRACKING.CONFIRMQTY,0))          AS CONFIRMQTY
+				              ,MIN(TM_INPLAN.CARNO)                                AS CARNO
+				              ,MIN(TM_INPLAN.DELIVERYGROUP)                        AS DELIVERYGROUP
+				              ,MIN(WD_INPLAN.UOM)                                  AS UOM
+				              ,MIN(NVL(CD1.BASEDESCR,CD1.BASECODE)) 			   AS STATUS
+		                      ,MIN(DM_DOCUMENT_H_PO.FROM_CUSTNAME)                 AS FROM_CUSTNAME
+		                      ,MIN(NVL(CD2.BASEDESCR,CD2.BASECODE)) 			   AS CHANNEL
+		                      ,WD_INPLAN.SLIPNO                                    AS SLIPNO
+				              ,WD_INPLAN.SLIPLINE                                  AS SLIPLINE
+				        FROM   WD_INPLAN           
+				        JOIN   DM_DOCUMENT_H           
+				        ON     DM_DOCUMENT_H.DCCODE            = WD_INPLAN.DCCODE           
+				        AND    DM_DOCUMENT_H.STORERKEY         = WD_INPLAN.STORERKEY           
+				        AND    DM_DOCUMENT_H.ORGANIZE          = WD_INPLAN.ORGANIZE           
+				        AND    DM_DOCUMENT_H.DOCTYPE           = WD_INPLAN.DOCTYPE           
+				        AND    DM_DOCUMENT_H.DOCDT             = WD_INPLAN.DOCDT           
+				        AND    DM_DOCUMENT_H.DOCNO             = WD_INPLAN.DOCNO           
+				        AND    DM_DOCUMENT_H.DEL_YN            = 'N'    
+				        AND    DM_DOCUMENT_H.DELIVERYDATE      = WD_INPLAN.SLIPDT 
+				        <if test="toCustkeyMulti != null and toCustkeyMulti != '' ">
+					    	<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+					    		<foreach collection="toCustkeyMulti" item="item">
+					    			OR DM_DOCUMENT_H.TO_CUSTKEY IN
+					    			<foreach collection="item" item="code" open="(" close=")" separator=",">
+					    				#{code} 	 
+					          		</foreach>
+					        	</foreach>
+					      	</trim>			                                    
+			            </if>                                                                      
+				        JOIN   DM_DOCUMENT_D           
+				        ON     DM_DOCUMENT_D.DCCODE            = WD_INPLAN.DCCODE           
+				        AND    DM_DOCUMENT_D.STORERKEY         = WD_INPLAN.STORERKEY           
+				        AND    DM_DOCUMENT_D.ORGANIZE          = WD_INPLAN.ORGANIZE           
+				        AND    DM_DOCUMENT_D.AREA              = WD_INPLAN.AREA           
+				        AND    DM_DOCUMENT_D.DOCTYPE           = WD_INPLAN.DOCTYPE           
+				        AND    DM_DOCUMENT_D.DOCDT             = WD_INPLAN.DOCDT           
+				        AND    DM_DOCUMENT_D.DOCNO             = WD_INPLAN.DOCNO           
+				        AND    DM_DOCUMENT_D.DOCLINE           = WD_INPLAN.DOCLINE
+				        AND    DM_DOCUMENT_D.DELIVERYDATE      = WD_INPLAN.SLIPDT 
+				        AND    DM_DOCUMENT_D.DEL_YN            = 'N'           
+				        AND    DM_DOCUMENT_D.CHANNEL           = '3'    				        
+				        AND    DM_DOCUMENT_D.ROUTE             = #{fromDc}  				        
+				        <if test="status != null and status != ''">          AND    DM_DOCUMENT_D.STATUS   = #{status}          </if>                                                                  
+				        JOIN   DM_DOCUMENT_D DM_DOCUMENT_D_PO           
+				        ON     DM_DOCUMENT_D_PO.DCCODE         = DM_DOCUMENT_D.DCCODE           
+				        AND    DM_DOCUMENT_D_PO.STORERKEY      = DM_DOCUMENT_D.STORERKEY           
+				        AND    DM_DOCUMENT_D_PO.ORGANIZE       = DM_DOCUMENT_D.ORGANIZE           
+				        AND    DM_DOCUMENT_D_PO.AREA           = DM_DOCUMENT_D.AREA           
+				        AND    DM_DOCUMENT_D_PO.DOCTYPE        = 'DP'           
+				        AND    DM_DOCUMENT_D_PO.DOCNO          = DM_DOCUMENT_D.POKEY           
+				        AND    DM_DOCUMENT_D_PO.DOCLINE        = DM_DOCUMENT_D.POLINE           
+				        AND    DM_DOCUMENT_D_PO.DEL_YN         = 'N'
+				        AND    DM_DOCUMENT_D_PO.SKU            = DM_DOCUMENT_D.SKU   
+				        AND    DM_DOCUMENT_D_PO.DELIVERYDATE   = DM_DOCUMENT_D.DELIVERYDATE
+				        JOIN   DM_DOCUMENT_H DM_DOCUMENT_H_PO           
+				        ON     DM_DOCUMENT_H_PO.DCCODE         = DM_DOCUMENT_D_PO.DCCODE           
+				        AND    DM_DOCUMENT_H_PO.STORERKEY      = DM_DOCUMENT_D_PO.STORERKEY           
+				        AND    DM_DOCUMENT_H_PO.ORGANIZE       = DM_DOCUMENT_D_PO.ORGANIZE           
+				        AND    DM_DOCUMENT_H_PO.DOCTYPE        = DM_DOCUMENT_D_PO.DOCTYPE           
+				        AND    DM_DOCUMENT_H_PO.DOCDT          = DM_DOCUMENT_D_PO.DOCDT
+				        AND    DM_DOCUMENT_H_PO.DOCNO          = DM_DOCUMENT_D_PO.DOCNO           
+				        AND    DM_DOCUMENT_H_PO.DEL_YN         = 'N'
+				        AND    DM_DOCUMENT_H_PO.DELIVERYDATE   = DM_DOCUMENT_D_PO.DELIVERYDATE
+				        <if test="vendorMulti != null and vendorMulti != '' ">
+					    	<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+					    		<foreach collection="vendorMulti" item="item">
+					    			OR DM_DOCUMENT_H_PO.FROM_CUSTKEY IN
+					    			<foreach collection="item" item="code" open="(" close=")" separator=",">
+					    				#{code} 	 
+					          		</foreach>
+					        	</foreach>
+					      	</trim>			                                    
+			            </if>                     
+				        JOIN   CM_DC FROM_DC           
+				        ON     FROM_DC.DCCODE                  = DM_DOCUMENT_D.ROUTE           
+				        AND    FROM_DC.DEL_YN                  = 'N'                                      
+				        JOIN   CM_DC TO_DC           
+				        ON     TO_DC.DCCODE                    = DM_DOCUMENT_H.DCCODE           
+				        AND    TO_DC.DEL_YN                    = 'N'                                      
+				        JOIN   MS_SKU           
+				        ON     MS_SKU.STORERKEY                = WD_INPLAN.STORERKEY           
+				        AND    MS_SKU.SKU                      = WD_INPLAN.SKU           
+				        AND    MS_SKU.DEL_YN                   = 'N' 
+				        <!-- START.상품.다중OR검색 -->
+				        <if test="sku != null and sku != '' ">
+							<if test="skuMulti != null and skuMulti.size() > 0">
+								<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+									<foreach collection="skuMulti" item="item">
+										OR MS_SKU.SKU IN
+										<foreach collection="item" item="code" open="(" close=")" separator=",">
+											#{code} 	 
+							      		</foreach>
+							    	</foreach>
+							  	</trim>			                                    
+					    	</if>
+				        </if>                                                        
+				        LEFT JOIN WD_INVOICE
+				        ON     WD_INVOICE.DCCODE                         = WD_INPLAN.DCCODE
+				        AND    WD_INVOICE.STORERKEY                      = WD_INPLAN.STORERKEY
+				        AND    WD_INVOICE.ORGANIZE                       = WD_INPLAN.ORGANIZE
+				        AND    WD_INVOICE.AREA                           = WD_INPLAN.AREA
+				        AND    WD_INVOICE.DOCTYPE                        = WD_INPLAN.DOCTYPE
+				        AND    WD_INVOICE.DOCDT                          = WD_INPLAN.DOCDT  
+				        AND    WD_INVOICE.DOCNO                          = WD_INPLAN.DOCNO  
+				        AND    WD_INVOICE.DOCLINE                        = WD_INPLAN.DOCLINE
+				        AND    WD_INVOICE.SLIPDT                         = WD_INPLAN.SLIPDT  
+				        AND    WD_INVOICE.SLIPNO                         = WD_INPLAN.SLIPNO  
+				        AND    WD_INVOICE.SLIPLINE                       = WD_INPLAN.SLIPLINE
+				        LEFT JOIN WD_INVOICE_TRACKING
+				        ON     WD_INVOICE_TRACKING.INVOICENO             = WD_INVOICE.INVOICENO
+				        AND    WD_INVOICE_TRACKING.EVENTSTATUS           = '30'
+				        LEFT JOIN TM_INPLAN
+				        ON     TM_INPLAN.DCCODE                          = WD_INPLAN.DCCODE
+				        AND    TM_INPLAN.DOCTYPE                         = WD_INPLAN.DOCTYPE
+				        AND    TM_INPLAN.SLIPDT                          = WD_INPLAN.SLIPDT
+				        AND    TM_INPLAN.SLIPNO                          = WD_INPLAN.SLIPNO
+				        LEFT JOIN CM_CODE_STORER CD1 ON (CD1.STORERKEY = DM_DOCUMENT_D.STORERKEY	AND CD1.CODELIST = 'STATUS_WD' 	AND CD1.BASECODE  = DM_DOCUMENT_D.STATUS)
+						LEFT JOIN CM_CODE_STORER CD2 ON (CD2.STORERKEY = DM_DOCUMENT_D.STORERKEY	AND CD2.CODELIST = 'PUTAWAYTYPE' 	AND CD2.BASECODE  = DM_DOCUMENT_D.CHANNEL)
+				        WHERE  1=1              
+				        AND    WD_INPLAN.DCCODE         = #{toDc}
+				        AND    WD_INPLAN.SLIPDT         = #{slipdt}                    
+				        AND    WD_INPLAN.DEL_YN         = 'N'           
+				        GROUP BY WD_INPLAN.DCCODE
+				                ,WD_INPLAN.SLIPDT
+				                ,DM_DOCUMENT_D.ROUTE
+				                ,DM_DOCUMENT_H.TO_CUSTKEY
+				                ,WD_INPLAN.SKU
+				                ,WD_INPLAN.SLIPNO
+				                ,WD_INPLAN.SLIPLINE
+				      )
+				GROUP BY FROM_DC
+				        ,SLIPDT
+				        ,TO_DC
+				        ,TO_CUSTKEY
+				        ,SKU   
+				        ,CARNO
+				        ,DELIVERYGROUP
+				        ,UOM  
+				        ,STATUS
+				        ,SLIPNO
+				        ,SLIPLINE
+				ORDER BY FROM_DC
+				         ,SLIPDT
+				         ,TO_DC
+				         ,CARNO
+				         ,DELIVERYGROUP
+				         ,TO_CUSTKEY
+				         ,SKU
+            
+            </if>
+        
+		       
+    </select>
+    
+</mapper>

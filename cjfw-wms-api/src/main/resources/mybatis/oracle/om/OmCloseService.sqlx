@@ -1,0 +1,237 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="omCloseService">
+
+
+	<select id="getMasterList" resultType="OmCloseResDto">		
+		SELECT DM_DOCUMENT_H.DCCODE AS DCCODE
+              ,DM_DOCUMENT_H.STORERKEY AS STORERKEY
+              ,DM_DOCUMENT_H.DELIVERYDATE AS DELIVERYDT
+              ,DM_DOCUMENT_H.DOCTYPE AS DOCTYPE
+              ,FN_CODEDESCR(DM_DOCUMENT_H.STORERKEY,
+                            'DOCTYPE',
+                            DM_DOCUMENT_H.DOCTYPE) AS DOCNAME
+              ,DM_DOCUMENT_H.WORKPROCESSCODE AS WORKPROCESSCODE
+              ,FN_CODEDESCR(DM_DOCUMENT_H.STORERKEY,
+                            'WORKPROCESSCODE',
+                            DM_DOCUMENT_H.WORKPROCESSCODE) AS WORKPROCESSNAME
+              ,COUNT(DM_DOCUMENT_D.SERIALKEY) ORDERCNT
+              ,SUM(DECODE(DM_DOCUMENT_D.DEL_YN, 'N', 0, 1)) DELCNT
+              ,ROUND(SUM(FN_CONV_UOM(DM_DOCUMENT_D.STORERKEY,
+                                     DM_DOCUMENT_D.SKU,
+                                     DM_DOCUMENT_D.STORERUOM,
+                                     'KG',
+                                     DM_DOCUMENT_D.STOREROPENQTY)),
+                     2) AS WEIGHT
+              ,CASE
+                   WHEN COUNT(DM_DOCUMENT_D.SERIALKEY) -
+                        SUM(DECODE(DM_DOCUMENT_D.OMS_FLAG,
+                                   'Y',
+                                   1,
+                                   0)) = 0 THEN
+                    '마감완료'
+                   ELSE
+                    '진행중'
+               END AS CLOSEYN
+          FROM DM_DOCUMENT_H
+          JOIN DM_DOCUMENT_D
+            ON DM_DOCUMENT_D.DCCODE = DM_DOCUMENT_H.DCCODE
+           AND DM_DOCUMENT_D.STORERKEY =
+               DM_DOCUMENT_H.STORERKEY
+           AND DM_DOCUMENT_D.DOCTYPE =
+               DM_DOCUMENT_H.DOCTYPE
+           AND DM_DOCUMENT_D.DOCNO = DM_DOCUMENT_H.DOCNO
+           AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+         WHERE 1 = 1
+         <if test='multiDcCode != null and multiDcCode.length > 0'>
+		   AND DM_DOCUMENT_H.DCCODE IN
+	        <foreach collection="multiDcCode" item="dccodeItem" open="(" separator="," close=")">
+	            #{dccodeItem}
+	        </foreach>
+		 </if>
+           AND DM_DOCUMENT_H.DELIVERYDATE = #{slipDt}
+           AND DM_DOCUMENT_H.STORERKEY = #{gStorerkey}
+           AND DM_DOCUMENT_H.DOCTYPE = 'WD'
+         GROUP BY DM_DOCUMENT_H.DCCODE
+                 ,DM_DOCUMENT_H.STORERKEY
+                 ,DM_DOCUMENT_H.DELIVERYDATE
+                 ,DM_DOCUMENT_H.DOCTYPE
+                 ,DM_DOCUMENT_H.WORKPROCESSCODE
+         ORDER BY DM_DOCUMENT_H.DCCODE
+                 ,DM_DOCUMENT_H.DELIVERYDATE
+                 ,DM_DOCUMENT_H.DOCTYPE
+                 ,DM_DOCUMENT_H.WORKPROCESSCODE	
+	</select>
+	
+	<select id="getDetailList" resultType="OmCloseResDto">
+		SELECT DM_DOCUMENT_H.DCCODE AS DCCODE
+	          ,DM_DOCUMENT_H.STORERKEY AS STORERKEY
+	          ,DM_DOCUMENT_H.DOCTYPE AS DOCTYPE
+	          ,DM_DOCUMENT_D.PLANT AS PLANT
+	          ,DM_DOCUMENT_H.WORKPROCESSCODE AS WORKPROCESSCODE
+	          ,DM_DOCUMENT_H.DELIVERYDATE AS SLIPDT
+	          ,CM_CODE.BASECODE AS CLOSEKEY
+	          ,MAX(CM_CODE.BASEDESCR) CLOSENAME
+	          ,NVL(TO_CHAR(MAX(DM_CLOSE.ADDDATE),
+	                       'YYYY-MM-DD HH24:MI:SS'),
+	               '') CLOSEDATE
+	          ,COUNT(DM_DOCUMENT_D.SERIALKEY) ORDERCNT
+	          ,COUNT(DM_DOCUMENT_D.SERIALKEY) -
+	           SUM(DECODE(DM_DOCUMENT_D.OMS_FLAG,
+	                      'Y',
+	                      1,
+	                      0)) OPENCNT
+	          ,SUM(DECODE(DM_DOCUMENT_D.DEL_YN, 'N', 0, 1)) DELCNT
+	          ,SUM(DM_DOCUMENT_D.ORDERQTY +
+	               DM_DOCUMENT_D.ORDERADJUSTQTY) ORDERQTY
+	          ,ROUND(SUM(FN_CONV_UOM(DM_DOCUMENT_D.STORERKEY,
+	                                 DM_DOCUMENT_D.SKU,
+	                                 DM_DOCUMENT_D.STORERUOM,
+	                                 'KG',
+	                                 DM_DOCUMENT_D.STOREROPENQTY)),
+	                 2) AS WEIGHT
+	          ,SUM(DM_DOCUMENT_D.CONFIRMQTY) CONFIRMQTY
+	      FROM DM_DOCUMENT_H
+	      JOIN DM_DOCUMENT_D
+	        ON DM_DOCUMENT_D.DCCODE = DM_DOCUMENT_H.DCCODE
+	       AND DM_DOCUMENT_D.STORERKEY =
+	           DM_DOCUMENT_H.STORERKEY
+	       AND DM_DOCUMENT_D.DOCTYPE =
+	           DM_DOCUMENT_H.DOCTYPE
+	       AND DM_DOCUMENT_D.DOCNO = DM_DOCUMENT_H.DOCNO
+	      LEFT OUTER JOIN MS_CUST
+	        ON MS_CUST.STORERKEY = DM_DOCUMENT_H.STORERKEY
+	       AND MS_CUST.CUSTTYPE = DM_DOCUMENT_H.TO_CUSTTYPE
+	       AND MS_CUST.CUSTKEY = DM_DOCUMENT_H.TO_CUSTKEY
+	      LEFT OUTER JOIN CM_CODE
+	        ON CM_CODE.STORERKEY = DM_DOCUMENT_H.STORERKEY
+	       AND CM_CODE.CODELIST = 'CUSTORDERCLOSETYPE'
+	       AND CM_CODE.BASECODE = MS_CUST.CUSTSTRATEGY4
+	      LEFT OUTER JOIN DM_CLOSE
+	        ON DM_CLOSE.STORERKEY = DM_DOCUMENT_H.STORERKEY
+	       AND DM_CLOSE.SLIPDT = DM_DOCUMENT_H.DELIVERYDATE
+	       AND DM_CLOSE.CLOSEKEY = MS_CUST.CUSTSTRATEGY4
+	     WHERE 1 = 1
+		   AND DM_DOCUMENT_H.DCCODE = #{dcCode}
+           AND DM_DOCUMENT_H.DELIVERYDATE = #{deliveryDt}
+           AND DM_DOCUMENT_H.STORERKEY = #{gStorerkey}           
+	       AND DM_DOCUMENT_H.DOCTYPE = #{docType}
+	       AND DM_DOCUMENT_H.WORKPROCESSCODE = #{workProcessCode}
+	     GROUP BY DM_DOCUMENT_H.DCCODE
+	             ,DM_DOCUMENT_D.PLANT
+	             ,DM_DOCUMENT_H.STORERKEY
+	             ,DM_DOCUMENT_H.DOCTYPE
+	             ,DM_DOCUMENT_H.WORKPROCESSCODE
+	             ,DM_DOCUMENT_H.DELIVERYDATE
+	             ,CM_CODE.BASECODE
+	     ORDER BY DM_DOCUMENT_H.DCCODE
+	             ,DM_DOCUMENT_D.PLANT
+	             ,CM_CODE.BASECODE
+	</select>
+	
+	<select id="getDetail2List" resultType="OmCloseResDto">
+		SELECT DM_DOCUMENT_H.DOCNO AS DOCNO
+              ,DM_DOCUMENT_H.DELIVERYDATE AS DELIVERYDT
+              ,FN_CODEDESCR(DM_DOCUMENT_H.STORERKEY,
+                            'DOCTYPE',
+                            DM_DOCUMENT_H.DOCTYPE) AS DOCNAME
+              ,FN_CODEDESCR(DM_DOCUMENT_H.STORERKEY,
+                            'ORDERTYPE' || '_' ||
+                            DM_DOCUMENT_D.DOCTYPE,
+                            DM_DOCUMENT_H.ORDERTYPE) AS ORDERTYPE
+              ,FN_CODEDESCR(DM_DOCUMENT_H.STORERKEY,
+                            DECODE(DM_DOCUMENT_H.WORKPROCESSCODE,
+                                   'PO',
+                                   'POTYPE',
+                                   'SO',
+                                   'SOTYPE',
+                                   'WORKPROCESSCODE'),
+                            DECODE(DM_DOCUMENT_H.WORKPROCESSCODE,
+                                   'PO',
+                                   DM_DOCUMENT_D.POTYPE,
+                                   'SO',
+                                   DM_DOCUMENT_D.SOTYPE,
+                                   DM_DOCUMENT_H.WORKPROCESSCODE)) AS SOPOTYPE
+              ,FN_CODEDESCR(DM_DOCUMENT_H.STORERKEY,
+                            'WORKPROCESSCODE',
+                            DM_DOCUMENT_H.WORKPROCESSCODE) AS WORKPROCESSNAME
+              ,DECODE(DM_DOCUMENT_H.DOCTYPE,
+                      'DP',
+                      DM_DOCUMENT_H.FROM_CUSTKEY,
+                      'RT',
+                      DM_DOCUMENT_H.FROM_CUSTKEY,
+                      'WD',
+                      DM_DOCUMENT_H.TO_CUSTKEY,
+                      DM_DOCUMENT_H.TO_CUSTKEY) AS CUSTKEY
+              ,DECODE(DM_DOCUMENT_H.DOCTYPE,
+                      'DP',
+                      DM_DOCUMENT_H.FROM_CUSTNAME,
+                      'RT',
+                      DM_DOCUMENT_H.FROM_CUSTNAME,
+                      'WD',
+                      DM_DOCUMENT_H.TO_CUSTNAME,
+                      DM_DOCUMENT_H.TO_CUSTNAME) AS CUSTNAME
+              ,DM_DOCUMENT_D.SKU AS SKU
+              ,MS_SKU.DESCRIPTION AS SKUNAME
+              ,'[' || MS_SKU.COUNTRYOFORIGIN || ']' ||
+               (SELECT BASEDESCR
+                  FROM CM_CODE
+                 WHERE CM_CODE.STORERKEY =
+                       MS_SKU.STORERKEY
+                   AND CM_CODE.CODELIST = 'COUNTRY'
+                   AND CM_CODE.BASECODE =
+                       MS_SKU.COUNTRYOFORIGIN
+                   AND CM_CODE.DEL_YN = 'N') AS COUNTRYOFORIGIN
+              ,DECODE(DM_DOCUMENT_D.OMS_FLAG,
+                      'Y',
+                      '마감완료',
+                      '마감중') AS CLOSEYN
+              ,DM_DOCUMENT_D.UOM AS UOM
+              ,DM_DOCUMENT_D.ORDERQTY +
+               DM_DOCUMENT_D.ORDERADJUSTQTY AS ORDERQTY
+              ,ROUND(FN_CONV_UOM(DM_DOCUMENT_D.STORERKEY,
+                                 DM_DOCUMENT_D.SKU,
+                                 DM_DOCUMENT_D.STORERUOM,
+                                 'KG',
+                                 DM_DOCUMENT_D.STOREROPENQTY),
+                     2) AS WEIGHT
+          FROM DM_DOCUMENT_H
+          JOIN DM_DOCUMENT_D
+            ON DM_DOCUMENT_D.DCCODE =
+               DM_DOCUMENT_H.DCCODE
+           AND DM_DOCUMENT_D.STORERKEY =
+               DM_DOCUMENT_H.STORERKEY
+           AND DM_DOCUMENT_D.DOCTYPE =
+               DM_DOCUMENT_H.DOCTYPE
+           AND DM_DOCUMENT_D.DOCNO =
+               DM_DOCUMENT_H.DOCNO
+           AND DM_DOCUMENT_D.PLANT = #{plant}
+          JOIN MS_SKU
+            ON MS_SKU.STORERKEY =
+               DM_DOCUMENT_D.STORERKEY
+           AND MS_SKU.SKU = DM_DOCUMENT_D.SKU
+          JOIN MS_CUST
+            ON MS_CUST.STORERKEY =
+               DM_DOCUMENT_H.STORERKEY
+           AND MS_CUST.CUSTTYPE =
+               DM_DOCUMENT_H.TO_CUSTTYPE
+           AND MS_CUST.CUSTKEY =
+               DM_DOCUMENT_H.TO_CUSTKEY
+           <choose>
+             <when test='closeKey != null and closeKey.length > 0'>
+               AND MS_CUST.CUSTSTRATEGY4 = #{closeKey}
+             </when>
+             <otherwise>
+               AND MS_CUST.CUSTSTRATEGY4 IS NULL
+             </otherwise>
+           </choose>
+         WHERE 1 = 1
+           AND DM_DOCUMENT_H.DCCODE = #{dcCode}
+           AND DM_DOCUMENT_H.DELIVERYDATE = #{slipDt}
+           AND DM_DOCUMENT_H.STORERKEY = #{gStorerkey}           
+	       AND DM_DOCUMENT_H.DOCTYPE = #{docType}
+	       AND DM_DOCUMENT_H.WORKPROCESSCODE = #{workProcessCode}
+         ORDER BY DM_DOCUMENT_H.DCCODE
+                 ,DM_DOCUMENT_H.DOCNO
+	</select>
+</mapper>

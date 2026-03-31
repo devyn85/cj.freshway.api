@@ -1,0 +1,275 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="tmTransportControlService">
+
+    <select id="getTransportRoutingList" resultType="TmTransportControlResDto">
+        SELECT /* [TmTransportControlService.sqlx][tmTransportControlService.getTransportRoutingList][노선 목록 조회][JiHoPark][20251106] */
+               TM_CARRIER_ROUTE.SERIALKEY                                                                                        AS SERIALKEY       /* 데이터번호/노선번호 */
+             , TM_CARRIER_ROUTE.ROUTE_NM                                                                                         AS ROUTE_NM        /* 노선명 */
+             , TM_CARRIER_ROUTE.FROM_DCCODE                                                                                      AS FROM_DCCODE     /* 출발센터 */
+             , FN_DESCR_DC(TM_CARRIER_ROUTE.FROM_DCCODE)                                                                         AS FROM_DCCODENAME /* 출발센터명 */
+             , TM_CARRIER_ROUTE.TO_DCCODE                                                                                        AS TO_DCCODE       /* 도착센터 */
+             , DECODE(FN_DESCR_DC(TM_CARRIER_ROUTE.TO_DCCODE), 'UNKNOWN', CM_TC.TCNAME, FN_DESCR_DC(TM_CARRIER_ROUTE.TO_DCCODE)) AS TO_DCCODENAME   /* 도착센터명 */
+             , TM_CARRIER_ROUTE.FROMDATE                                                                                         AS FROMDATE        /* 시작일자 */
+             , TM_CARRIER_ROUTE.TODATE                                                                                           AS TODATE          /* 종료일자 */
+          FROM TM_CARRIER_ROUTE
+          LEFT OUTER JOIN CM_TC ON TM_CARRIER_ROUTE.TO_DCCODE = CM_TC.TCCODE
+                               AND CM_TC.USE_YN = 'Y'
+         WHERE 1 = 1
+           AND TM_CARRIER_ROUTE.FROMDATE <![CDATA[<=]]> #{deliverydt}
+           AND TM_CARRIER_ROUTE.TODATE <![CDATA[>=]]> #{deliverydt}
+       <if test="fromDcCode != null and fromDcCode != ''">
+           AND TM_CARRIER_ROUTE.FROM_DCCODE = #{fromDcCode}
+       </if>
+         ORDER BY FROM_DCCODE
+    </select>
+
+    <select id="getMasterList" resultType="TmTransportControlResDto">
+        SELECT /* [TmTransportControlService.sqlx][tmTransportControlService.getMasterList][수송배차조정 - 수송배차조정 목록 조회][JiHoPark][2025.11.05] */
+               RSLT.SERIALKEY                                                                            AS SERIALKEY         /*데이터번호*/
+             , RSLT.DELIVERYDT                                                                           AS DELIVERYDT        /*일자*/
+             , RSLT.CARNO                                                                                AS CARNO             /*차량번호*/
+             , RSLT.COURIER                                                                              AS COURIER           /*운송사*/
+             , MS_CARRIER.DESCRIPTION                                                                    AS COURIERNAME       /*운송사명*/
+             , RSLT.SLAVE_COURIER                                                                        AS SLAVE_COURIER     /*2차운송사*/
+             , MS_CARAGENTKEY.DESCRIPTION                                                                AS SLAVE_COURIERNAME /*2차운송사명*/
+             , RSLT.CARCAPACITY                                                                          AS CARCAPACITY       /*톤급*/
+             , RSLT.STORAGETYPE                                                                          AS STORAGETYPE       /*저장조건*/
+             , RSLT.CARRIER_ROUTE_ID                                                                     AS CARRIER_ROUTE_ID  /*노선*/
+             , RSLT.ROUTE_NM                                                                             AS ROUTE_NM          /*노선명*/
+             , RSLT.DCCODE                                                                               AS DCCODE            /*출발센터*/
+             , FN_DESCR_DC(RSLT.DCCODE)                                                                  AS FROM_DCCODENAME   /*출발센터명*/
+             , RSLT.TO_DCCODE                                                                            AS TO_DCCODE         /*도착센터*/
+             , DECODE(FN_DESCR_DC(RSLT.TO_DCCODE), 'UNKNOWN', CM_TC.TCNAME, FN_DESCR_DC(RSLT.TO_DCCODE)) AS TO_DCCODENAME     /*도착센터명*/
+             , RSLT.STATUS                                                                               AS STATUS            /*상태코드*/
+             , FN_CODEDESCR(RSLT.STORERKEY, 'TM_TRANSPORT_STATUS', RSLT.STATUS)                          AS STATUSNAME        /*상태명*/
+             , RSLT.ROUTE_YN                                                                             AS ROUTE_YN          /*경유여부*/
+             , RSLT.CARRIER_CNT                                                                          AS CARRIER_CNT       /*운행횟수*/
+             , CASE WHEN RSLT.CARRIER_CNT IS NOT NULL AND TM_CARRIER_PRICE.PRICE IS NOT NULL
+                    THEN RSLT.CARRIER_CNT * TM_CARRIER_PRICE.PRICE
+                    ELSE NULL
+                END                                                                                      AS TOT_PRICE        /*비용*/
+             , RSLT.RMK                                                                                  AS RMK              /*비고*/
+             , RSLT.CONTRACTTYPE                                                                         AS CONTRACTTYPE     /*계약유형 ( 지입, 임시용차 등)*/
+          FROM ( SELECT TM_CARRIER_INPLAN.SERIALKEY          AS SERIALKEY        /*데이터번호*/
+                      , #{gStorerkey}                        AS STORERKEY        /*STORERKEY*/
+                      , TM_CARRIER_INPLAN.DELIVERYDT         AS DELIVERYDT       /*일자*/
+                      , TM_CARRIER_INPLAN.CARNO              AS CARNO            /*차량번호*/
+                      , TM_CARRIER_INPLAN.COURIER            AS COURIER          /*운송사*/
+                      , TM_CARRIER_INPLAN.SLAVE_COURIER      AS SLAVE_COURIER    /*2차운송사*/
+                      , CM_CAR.CARCAPACITY                   AS CARCAPACITY      /*톤급*/
+                      , TM_CARRIER_INPLAN.STORAGETYPE        AS STORAGETYPE      /*저장조건*/
+                      , TM_CARRIER_INPLAN.CARRIER_ROUTE_ID   AS CARRIER_ROUTE_ID /*노선*/
+                      , TM_CARRIER_ROUTE.ROUTE_NM            AS ROUTE_NM         /*노선명*/
+                      , TM_CARRIER_INPLAN.DCCODE             AS DCCODE           /*출발센터*/
+                      , TM_CARRIER_ROUTE.TO_DCCODE           AS TO_DCCODE        /*도착센터*/
+                      , TM_CARRIER_INPLAN.STATUS             AS STATUS           /*상태코드*/
+                      , NVL(TM_CARRIER_INPLAN.ROUTE_YN, 'N') AS ROUTE_YN         /*경유여부*/
+                      , TM_CARRIER_INPLAN.CARRIER_CNT        AS CARRIER_CNT      /*운행횟수*/
+                      , TM_CARRIER_INPLAN.RMK                AS RMK              /*비고*/
+                      , CM_CAR.CONTRACTTYPE                  AS CONTRACTTYPE     /*계약유형 ( 지입, 임시용차 등)*/
+                   FROM TM_CARRIER_INPLAN
+                  INNER JOIN CM_USER_AUTHORITY_DCXSTORER ON 1=1
+                                                        AND CM_USER_AUTHORITY_DCXSTORER.DCCODE    = TM_CARRIER_INPLAN.DCCODE
+                                                        AND CM_USER_AUTHORITY_DCXSTORER.USERID    = #{gUserId}
+                                                    <if test="fromDcCode != null and fromDcCode != ''">
+                                                        AND CM_USER_AUTHORITY_DCXSTORER.DCCODE    = #{fromDcCode}
+                                                    </if>
+                                                    <if test="gStorerkey != null and gStorerkey != ''">
+                                                        AND CM_USER_AUTHORITY_DCXSTORER.STORERKEY = #{gStorerkey}
+                                                    </if>
+                   LEFT OUTER JOIN CM_CAR ON TM_CARRIER_INPLAN.CARNO = CM_CAR.CARNO
+                   LEFT OUTER JOIN TM_CARRIER_ROUTE ON TM_CARRIER_INPLAN.CARRIER_ROUTE_ID = TM_CARRIER_ROUTE.SERIALKEY
+                  WHERE 1 = 1
+                <if test="fromDcCode != null and fromDcCode != ''">
+                    AND TM_CARRIER_INPLAN.DCCODE    = #{fromDcCode}
+                </if>
+                <if test="toDcCode != null and toDcCode != ''">
+                    AND TM_CARRIER_ROUTE.TO_DCCODE  = #{toDcCode}
+                </if>
+                <if test="fromDeliverydt != null and fromDeliverydt != ''">
+                    AND TM_CARRIER_INPLAN.DELIVERYDT <![CDATA[>=]]> #{fromDeliverydt}
+                </if>
+                <if test="toDeliverydt != null and toDeliverydt != ''">
+                    AND TM_CARRIER_INPLAN.DELIVERYDT <![CDATA[<=]]> #{toDeliverydt}
+                </if>
+                <if test="carno != null and carno != ''">
+                    AND TM_CARRIER_INPLAN.CARNO IN (SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS VAL
+                                                      FROM (SELECT #{carno} AS VAL FROM DUAL) A
+                                                    CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+                </if>
+                <if test="courier != null and courier != ''">
+                    AND TM_CARRIER_INPLAN.COURIER IN (SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS VAL
+                                                        FROM (SELECT #{courier} AS VAL FROM DUAL) A
+                                                      CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+                </if>
+                <if test="contracttype != null and contracttype != ''">
+                    AND CM_CAR.CONTRACTTYPE = #{contracttype}
+                </if>
+                <if test="storagetype != null and storagetype != ''">
+                    AND TM_CARRIER_INPLAN.STORAGETYPE = #{storagetype}
+                </if>
+                <if test="carcapacity != null and carcapacity != ''">
+                    AND CM_CAR.CARCAPACITY = #{carcapacity}
+                </if>
+                <if test="routeYn != null and routeYn != ''">
+                    AND NVL(TM_CARRIER_INPLAN.ROUTE_YN, 'N') = #{routeYn}
+                </if>
+             ) RSLT
+          LEFT OUTER JOIN CM_TC ON RSLT.TO_DCCODE = CM_TC.TCCODE
+                               AND CM_TC.USE_YN = 'Y'
+          LEFT OUTER JOIN MS_CARRIER ON RSLT.STORERKEY         = MS_CARRIER.STORERKEY
+                                    AND RSLT.COURIER           = MS_CARRIER.CARRIERKEY
+                                    AND MS_CARRIER.CARRIERTYPE = 'LOCAL'
+          LEFT OUTER JOIN MS_CARRIER MS_CARAGENTKEY ON RSLT.STORERKEY = MS_CARAGENTKEY.STORERKEY
+                                    AND RSLT.SLAVE_COURIER            = MS_CARAGENTKEY.CARRIERKEY
+                                    AND MS_CARAGENTKEY.CARRIERTYPE    = 'SUBC'
+          LEFT OUTER JOIN TM_CARRIER_PRICE ON RSLT.CARRIER_ROUTE_ID = TM_CARRIER_PRICE.ROUTE_SERIALKEY
+                                          AND RSLT.COURIER          = TM_CARRIER_PRICE.COURIER
+                                          AND RSLT.ROUTE_YN         = NVL(TM_CARRIER_PRICE.ROUTE_YN, 'N')
+                                          AND RSLT.CONTRACTTYPE     = TM_CARRIER_PRICE.CONTRACTTYPE
+                                          AND RSLT.STORAGETYPE      = TM_CARRIER_PRICE.STORAGETYPE
+                                          AND RSLT.CARCAPACITY      = TM_CARRIER_PRICE.TON
+                                          AND RSLT.DELIVERYDT BETWEEN TM_CARRIER_PRICE.FROMDATE AND TM_CARRIER_PRICE.TODATE
+         ORDER BY RSLT.DELIVERYDT
+    </select>
+
+    <select id="getMasterList2" resultType="TmTransportControlResDto">
+        SELECT /* [TmTransportControlService.sqlx][tmTransportControlService.getMasterList2][수송배차조정 - 수송배차조정 상세 목록 조회][JiHoPark][2025.11.05] */
+               TM_CARRIER_PLT.SERIALKEY                                             AS SERIALKEY         /*데이터번호*/
+             , TM_CARRIER_PLT.PLT_ID                                                AS PLT_ID            /*PLT_ID*/
+             , TM_CARRIER_PLT.SKU                                                   AS SKU               /*상품코드*/
+             , MS_SKU.DESCRIPTION                                                   AS SKUNAME           /*상품명*/
+             , MS_SKU.BASEUOM                                                       AS UOM               /*단위*/
+             , TM_CARRIER_PLT.QTY                                                   AS QTY               /*수량*/
+             , TM_CARRIER_PLT.CARRIER_SERIALKEY                                     AS CARRIER_SERIALKEY /*수송 SERIALKEY*/
+             , TM_CARRIER_PLT.DEL_YN                                                AS DEL_YN            /*삭제여부*/
+             , TM_CARRIER_PLT.ADDDATE                                               AS ADDDATE           /*최초등록시간*/
+             , TM_CARRIER_PLT.EDITDATE                                              AS EDITDATE          /*최종변경시간*/
+             , TM_CARRIER_PLT.ADDWHO                                                AS ADDWHO            /*최초등록자*/
+             , TM_CARRIER_PLT.EDITWHO                                               AS EDITWHO           /*최종변경자*/
+             , FN_CODEDESCR(#{gStorerkey}, 'PUTAWAYTYPE', DM_DOCUMENT_D.CHANNEL)    AS CHANNELNAME       /*저장유무*/
+             , FN_CODEDESCR(#{gStorerkey}, 'STORAGETYPE', MS_SKU.STORAGETYPE)       AS STORAGETYPE       /*저장조건*/
+             , ROUND(MS_SKU.GROSSWEIGHT, 2)                                         AS GROSSWEIGHT       /*상품중량 - 총중량 */
+             , ROUND((MS_SKU.GROSSWEIGHT * NVL(TM_CARRIER_PLT.QTY ,0)), 2)          AS INSPECWEIGHT      /* 상차중량 - 상품중량 * 상품수량*/
+             , ROUND((MS_SKU.CUBE * NVL(TM_CARRIER_PLT.QTY ,0)), 2)                 AS INSPECCUBE        /* 상차체적 */
+             , USER1.USER_NM                                                        AS ADDWHONM          /*최초등록자*/
+             , USER2.USER_NM                                                        AS EDITWHONM         /*최종변경자*/
+          FROM TM_CARRIER_PLT
+         INNER JOIN TM_CARRIER_INPLAN
+            ON TM_CARRIER_INPLAN.DCCODE           = TM_CARRIER_PLT.DCCODE
+           AND TM_CARRIER_INPLAN.DELIVERYDT       = TM_CARRIER_PLT.DELIVERYDATE
+           AND TM_CARRIER_INPLAN.CARNO            = TM_CARRIER_PLT.CARNO
+           AND TM_CARRIER_INPLAN.CARRIER_ROUTE_ID = TM_CARRIER_PLT.CARRIER_SERIALKEY
+          LEFT OUTER JOIN MS_SKU
+            ON TM_CARRIER_PLT.SKU           = MS_SKU.SKU
+           AND MS_SKU.STORERKEY             = #{gStorerkey}
+          LEFT OUTER JOIN DM_DOCUMENT_D
+            ON DM_DOCUMENT_D.DOCNO          = TM_CARRIER_PLT.SLIPNO
+           AND DM_DOCUMENT_D.DOCLINE        = TM_CARRIER_PLT.SLIPLINE
+           AND DM_DOCUMENT_D.DOCTYPE        = 'WD'
+         LEFT OUTER JOIN FRAMEONE_USER USER1
+            ON USER1.USER_ID = TM_CARRIER_PLT.ADDWHO
+          LEFT OUTER JOIN FRAMEONE_USER USER2
+            ON USER2.USER_ID = TM_CARRIER_PLT.EDITWHO
+         WHERE 1=1
+           AND TM_CARRIER_PLT.DEL_YN        = 'N'
+           AND TM_CARRIER_PLT.STATUS        = '90'
+           AND TM_CARRIER_PLT.DCCODE        = #{dccode}
+           AND TM_CARRIER_PLT.CARNO         = #{carno}
+           AND TM_CARRIER_PLT.DELIVERYDATE  = #{deliverydt}
+           AND TM_CARRIER_INPLAN.CARRIER_ROUTE_ID = #{carrierRouteId}
+         ORDER BY TM_CARRIER_PLT.PLT_ID
+                , TM_CARRIER_PLT.SKU
+    </select>
+
+    <select id="getCarInfo" resultType="TmTransportControlResDto">
+        SELECT /* [TmTransportControlService.sqlx][tmTransportControlService.getCarInfo][수송배차조정 - 차량정보 조회][JiHoPark][2025.11.11] */
+               CM_CAR.CARNO               AS CARNO
+             , CM_CAR.CARCAPACITY         AS CARCAPACITY
+             , CM_CAR.CONTRACTTYPE        AS CONTRACTTYPE
+             , DECODE(MS_CARRIER.DEL_YN, 'N', CM_CAR.COURIER, '')                 AS COURIER
+             , DECODE(MS_CARRIER.DEL_YN, 'N', MS_CARRIER.DESCRIPTION, '')         AS COURIERNAME       /*운송사명*/
+             , DECODE(MS_CARAGENTKEY.DEL_YN, 'N', CM_CAR.CARAGENTKEY, '')         AS SLAVE_COURIER
+             , DECODE(MS_CARAGENTKEY.DEL_YN, 'N', MS_CARAGENTKEY.DESCRIPTION, '') AS SLAVE_COURIERNAME /*2차운송사명*/
+          FROM CM_CAR
+          LEFT OUTER JOIN MS_CARRIER ON CM_CAR.COURIER         = MS_CARRIER.CARRIERKEY
+                                    AND MS_CARRIER.CARRIERTYPE = 'LOCAL'
+                                    AND MS_CARRIER.STORERKEY   = #{gStorerkey}
+          LEFT OUTER JOIN MS_CARRIER MS_CARAGENTKEY ON CM_CAR.CARAGENTKEY = MS_CARAGENTKEY.CARRIERKEY
+                                    AND MS_CARAGENTKEY.CARRIERTYPE        = 'SUBC'
+                                    AND MS_CARAGENTKEY.STORERKEY          = #{gStorerkey}
+         WHERE CARNO = #{carno}
+    </select>
+
+    <select id="getTotPrice" resultType="TmTransportControlResDto">
+        SELECT /* [TmTransportControlService.sqlx][tmTransportControlService.getTotPrice][수송배차조정 - 비용 정보 조회][JiHoPark][2025.11.11] */
+          CASE WHEN #{carrierCnt} IS NOT NULL AND TM_CARRIER_PRICE.PRICE IS NOT NULL
+               THEN #{carrierCnt} * TM_CARRIER_PRICE.PRICE
+               ELSE NULL
+           END AS TOT_PRICE        /*비용*/
+          FROM TM_CARRIER_ROUTE
+         INNER JOIN TM_CARRIER_PRICE ON TM_CARRIER_ROUTE.SERIALKEY = TM_CARRIER_PRICE.ROUTE_SERIALKEY
+         WHERE TM_CARRIER_ROUTE.SERIALKEY    = #{carrierRouteId}
+           AND TM_CARRIER_PRICE.COURIER      = #{courier}
+           AND TM_CARRIER_PRICE.ROUTE_YN     = #{routeYn}
+           AND TM_CARRIER_PRICE.CONTRACTTYPE = #{contracttype}
+           AND TM_CARRIER_PRICE.STORAGETYPE  = #{storagetype}
+           AND TM_CARRIER_PRICE.TON          = #{carcapacity}
+           AND #{deliverydt} BETWEEN TM_CARRIER_PRICE.FROMDATE AND TM_CARRIER_PRICE.TODATE
+    </select>
+
+    <insert id="insertMasterList">
+        INSERT /* [TmTransportControlService.sqlx][tmTransportControlService.insertMasterList][수송배차조정 insert][JiHoPark][2025.11.11] */
+          INTO TM_CARRIER_INPLAN
+             ( DELIVERYDT
+             , DCCODE
+             , CARNO
+             , COURIER
+             , SLAVE_COURIER
+             , STORAGETYPE
+             , CARRIER_ROUTE_ID
+             , ROUTE_YN
+             , CARRIER_CNT
+             , STATUS
+             , RMK
+             , ADDDATE
+             , EDITDATE
+             , ADDWHO
+             , EDITWHO )
+        VALUES
+             ( #{deliverydt}
+             , #{dccode}
+             , #{carno}
+             , #{courier}
+             , #{slaveCourier}
+             , #{storagetype}
+             , #{carrierRouteId}
+             , #{routeYn}
+             , #{carrierCnt}
+             , #{status}
+             , #{rmk}
+             , SYSDATE
+             , SYSDATE
+             , #{gUserId}
+             , #{gUserId} )
+    </insert>
+
+    <update id="updateMasterList">
+        UPDATE /* [TmTransportControlService.sqlx][tmTransportControlService.updateMasterList][수송배차조정 update][JiHoPark][2028.11.11] */
+               TM_CARRIER_INPLAN
+           SET CARNO            = #{carno}
+             , COURIER          = #{courier}
+             , SLAVE_COURIER    = #{slaveCourier}
+             , CARRIER_ROUTE_ID = #{carrierRouteId}
+             , DCCODE           = #{dccode}
+             , STORAGETYPE      = #{storagetype}
+             , ROUTE_YN         = #{routeYn}
+             , CARRIER_CNT      = #{carrierCnt}
+             , RMK              = #{rmk}
+             , EDITDATE         = SYSDATE
+             , EDITWHO          = #{gUserId}
+         WHERE SERIALKEY = #{serialkey}
+    </update>
+
+</mapper>

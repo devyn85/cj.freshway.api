@@ -1,0 +1,1331 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="wdLoadService">
+
+    <select id="getMasterList" resultType="WdLoadResDto">
+        WITH T_RESULT AS ( /* [WdLoadService.sqlx][wdLoadService.getMasterList][출차지시처리 - 출차지시처리 목록 조회][JiHoPark][2025.11.12] */
+                           SELECT TM_INPLAN.STORERKEY                                                                        AS STORERKEY
+                                , TM_INPLAN.DCCODE                                                                           AS DCCODE
+                                , TM_INPLAN.DOCTYPE                                                                          AS DOCTYPE
+                                , TM_INPLAN.DELIVERYDT                                                                       AS DELIVERYDT
+                                , TM_INPLAN.SLIPDT                                                                           AS SLIPDT
+                                , TM_INPLAN.CARNO                                                                            AS CARNO
+                                , MAX(CM_DRIVER.DRIVERNAME)                                                                  AS DRIVERNAME
+                                , TO_CHAR(MAX(TM_INPLAN.DCDEPARTUREDT), 'MM/DD HH24:MI')                                     AS DCDEPARTUREDT
+                                , TM_INPLAN.PRIORITY                                                                         AS PRIORITY
+                                , TM_INPLAN.DELIVERYGROUP                                                                    AS DELIVERYGROUP
+                                , MIN(TM_INPLAN.LOADSTATUS)                                                                  AS LOADSTATUS
+                                , MAX(TM_INPLAN.COURIER)                                                                     AS COURIER
+                                , SUM(WD_INPLAN.ORDERQTY) + SUM(DECODE(DM_DOCUMENT_D.ORDERTYPE,'ZUB',0,WD_INPLAN.CANCELQTY)) AS LOADPLANQTY
+                                , SUM(WD_INPLAN.INSPECTQTY)                                                                  AS LOADCMPQTY
+                                , SUM(WD_INPLAN.ORDERQTY)                                                                    AS ORDERQTY
+                                , SUM(WD_INPLAN.INSPECTQTY)                                                                  AS INSPECTQTY
+                                , SUM(DECODE(DM_DOCUMENT_D.ORDERTYPE,'ZUB',0,WD_INPLAN.CANCELQTY))                           AS CANCELQTY
+                                , SUM(T_WD_INSPECT.INSPECTQTY)                                                               AS FORCECMPQTY
+                                , SUM(WD_INPLAN.CONFIRMQTY)                                                                  AS CONFIRMQTY
+
+                             FROM (
+                                   SELECT 
+                                      TM_INPLAN.STORERKEY
+                                    , TM_INPLAN.DCCODE
+                                    , TM_INPLAN.DOCTYPE
+                                    , TM_INPLAN.DELIVERYDT
+                                    , TM_INPLAN.CARNO
+                                    , TM_INPLAN.PRIORITY
+                                    , TM_INPLAN.DELIVERYGROUP
+                                    , TM_INPLAN.COURIER
+                                    , TM_INPLAN.SLIPDT
+                                    , TM_INPLAN.SLIPNO
+                                    , TM_INPLAN.DCDEPARTUREDT
+                                    , TM_INPLAN.LOADSTATUS
+                                   FROM TM_INPLAN
+                                   WHERE TM_INPLAN.DEL_YN     = 'N'
+                                     AND TM_INPLAN.STATUS     = '90'
+                                     AND TM_INPLAN.TM_DELIVERYTYPE   IN ('1','2')
+                                     AND TM_INPLAN.SPLIT_DELIVERY_YN = 'N'
+                                 <if test="fromSlipdt != null and fromSlipdt != ''">
+                                     AND TM_INPLAN.DELIVERYDT <![CDATA[>=]]> #{fromSlipdt}
+                                 </if>
+                                 <if test="toSlipdt != null and toSlipdt != ''">
+                                     AND TM_INPLAN.DELIVERYDT <![CDATA[<=]]> #{toSlipdt}
+                                 </if>    
+                                 <if test="carno != null and carno != ''">
+                                     AND TM_INPLAN.CARNO IN (SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS VAL
+                                                                FROM (SELECT #{carno} AS VAL FROM DUAL) A
+                                                                CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+                                 </if>
+                                 <if test="dccode != null and dccode != ''">
+                                     AND TM_INPLAN.DCCODE = #{dccode}
+                                 </if>
+                                 <if test="deliverygroup != null and deliverygroup != ''">
+                                     AND TM_INPLAN.DELIVERYGROUP LIKE '%'|| #{deliverygroup} ||'%'
+                                 </if>
+                                   
+                                   UNION ALL
+                                   
+                                   SELECT 
+                                      TM_INPLAN_SPLIT.STORERKEY
+                                    , TM_INPLAN_SPLIT.DCCODE
+                                    , TM_INPLAN_SPLIT.DOCTYPE
+                                    , TM_INPLAN_SPLIT.DELIVERYDT
+                                    , TM_INPLAN_SPLIT.CARNO
+                                    , TM_INPLAN_SPLIT.PRIORITY
+                                    , TM_INPLAN_SPLIT.DELIVERYGROUP
+                                    , TM_INPLAN_SPLIT.COURIER
+                                    , TM_INPLAN_SPLIT.SLIPDT
+                                    , TM_INPLAN_SPLIT.SLIPNO
+                                    , TM_INPLAN_SPLIT.DCDEPARTUREDT
+                                    , TM_INPLAN_SPLIT.LOADSTATUS
+                                   FROM TM_INPLAN_SPLIT
+                                   WHERE TM_INPLAN_SPLIT.DEL_YN     = 'N'
+                                     AND TM_INPLAN_SPLIT.STATUS     = '90'
+                                     AND TM_INPLAN_SPLIT.TM_DELIVERYTYPE  IN ('1','2')
+                                 <if test="fromSlipdt != null and fromSlipdt != ''">
+                                     AND TM_INPLAN_SPLIT.DELIVERYDT <![CDATA[>=]]> #{fromSlipdt}
+                                 </if>
+                                 <if test="toSlipdt != null and toSlipdt != ''">
+                                     AND TM_INPLAN_SPLIT.DELIVERYDT <![CDATA[<=]]> #{toSlipdt}
+                                 </if>    
+                                 <if test="carno != null and carno != ''">
+                                     AND TM_INPLAN_SPLIT.CARNO IN (SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS VAL
+                                                                    FROM (SELECT #{carno} AS VAL FROM DUAL) A
+                                                                    CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+                                 </if>
+                                 <if test="dccode != null and dccode != ''">
+                                     AND TM_INPLAN_SPLIT.DCCODE = #{dccode}
+                                 </if>
+                                 <if test="deliverygroup != null and deliverygroup != ''">
+                                     AND TM_INPLAN_SPLIT.DELIVERYGROUP LIKE '%'|| #{deliverygroup} ||'%'
+                                 </if>
+                                  )  TM_INPLAN 
+                             
+                             JOIN WD_INPLAN ON WD_INPLAN.DCCODE    = TM_INPLAN.DCCODE
+                                           AND WD_INPLAN.STORERKEY = TM_INPLAN.STORERKEY
+                                           AND WD_INPLAN.DOCTYPE   = TM_INPLAN.DOCTYPE
+                                           AND WD_INPLAN.SLIPDT    = TM_INPLAN.SLIPDT
+                                           AND WD_INPLAN.SLIPNO    = TM_INPLAN.SLIPNO
+                                           AND WD_INPLAN.DEL_YN    = 'N'
+                                       <if test="fromDocdt != null and fromDocdt != ''">
+                                           AND WD_INPLAN.DOCDT <![CDATA[>=]]> #{fromDocdt}
+                                       </if>
+                                       <if test="toDocdt != null and toDocdt != ''">
+                                           AND WD_INPLAN.DOCDT	<![CDATA[<=]]> #{toDocdt}
+                                       </if>
+                                       <if test="fromSlipdt != null and fromSlipdt != ''">
+                                           AND WD_INPLAN.SLIPDT <![CDATA[>=]]> #{fromSlipdt}
+                                       </if>
+                                       <if test="toSlipdt != null and toSlipdt != ''">
+                                           AND WD_INPLAN.SLIPDT <![CDATA[<=]]>  #{toSlipdt}
+                                       </if>
+                                       <if test="organize != null and organize != ''">
+                                           AND WD_INPLAN.ORGANIZE = #{organize}
+                                       </if>
+                                       <!-- 고객 다중선택 -->
+                                       <if test="toCustkey != null and toCustkey != ''">
+                                           AND WD_INPLAN.CUSTKEY IN (SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS VAL
+                                                                      FROM (SELECT #{toCustkey} AS VAL FROM DUAL) A
+                                                                   CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+                                       </if>
+                                       <!-- 상품 다중선택 -->
+                                       <if test="sku != null and sku != ''">
+                                           AND WD_INPLAN.SKU IN (SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS VAL
+                                                                   FROM (SELECT #{sku} AS VAL FROM DUAL) A
+                                                                CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+                                       </if>
+                             JOIN CM_USER_AUTHORITY ON 1=1
+                                               <if test="dccode != null and dccode != ''">
+                                                   AND CM_USER_AUTHORITY.DCCODE    = #{dccode}
+                                               </if>
+                                               <if test="gStorerkey != null and gStorerkey != ''">
+                                                   AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey}
+                                               </if>
+                                               <if test="organize != null and organize != ''">
+                                                   AND CM_USER_AUTHORITY.ORGANIZE  = #{organize}
+                                               </if>
+                                                   AND CM_USER_AUTHORITY.USERID    = #{gUserId}
+                                                   AND CM_USER_AUTHORITY.DCCODE    = WD_INPLAN.DCCODE
+                                                   AND CM_USER_AUTHORITY.STORERKEY = WD_INPLAN.STORERKEY
+                                                   AND CM_USER_AUTHORITY.ORGANIZE  = WD_INPLAN.ORGANIZE
+                                                   AND CM_USER_AUTHORITY.AREA      = WD_INPLAN.AREA
+                             LEFT OUTER JOIN ( SELECT WD_INSPECT.DCCODE
+                                                    , WD_INSPECT.STORERKEY
+                                                    , WD_INSPECT.DOCTYPE
+                                                    , WD_INSPECT.SLIPDT
+                                                    , WD_INSPECT.SLIPNO
+                                                    , WD_INSPECT.SLIPLINE
+                                                    , SUM(INSPECTQTY) INSPECTQTY
+                                                    , MAX(WD_INSPECT.INVOICETYPE) INVOICETYPE
+                                                 FROM WD_INSPECT
+                                                WHERE WD_INSPECT.INVOICETYPE = 'FORCEINSPECT'
+                                                GROUP BY WD_INSPECT.DCCODE
+                                                       , WD_INSPECT.STORERKEY
+                                                       , WD_INSPECT.DOCTYPE
+                                                       , WD_INSPECT.SLIPDT
+                                                       , WD_INSPECT.SLIPNO
+                                                       , WD_INSPECT.SLIPLINE ) T_WD_INSPECT ON T_WD_INSPECT.DCCODE    = WD_INPLAN.DCCODE
+                                                                                           AND T_WD_INSPECT.STORERKEY = WD_INPLAN.STORERKEY
+                                                                                           AND T_WD_INSPECT.DOCTYPE   = WD_INPLAN.DOCTYPE
+                                                                                           AND T_WD_INSPECT.SLIPDT    = WD_INPLAN.SLIPDT
+                                                                                           AND T_WD_INSPECT.SLIPNO    = WD_INPLAN.SLIPNO
+                                                                                           AND T_WD_INSPECT.SLIPLINE  = WD_INPLAN.SLIPLINE
+                             JOIN DM_DOCUMENT_D ON DM_DOCUMENT_D.DCCODE       = WD_INPLAN.DCCODE
+                                               AND DM_DOCUMENT_D.STORERKEY    = WD_INPLAN.STORERKEY
+                                               AND DM_DOCUMENT_D.DOCTYPE      = WD_INPLAN.DOCTYPE
+                                               AND DM_DOCUMENT_D.DOCNO        = WD_INPLAN.DOCNO
+                                               AND DM_DOCUMENT_D.DOCLINE      = WD_INPLAN.DOCLINE
+                                               AND DM_DOCUMENT_D.DELIVERYDATE = WD_INPLAN.SLIPDT /* 3) ■ 2026.01.26 파티션 키컬럼 조건절 추가 */
+                                               <!-- AND    DM_DOCUMENT_D.STATUS         <![CDATA[>=]]>  '45'       피킹중단계이후부터 표시 2015.01.27 MODIFY SLLEE  -->
+                                               AND DM_DOCUMENT_D.DEL_YN = 'N'
+                                           <if test="channel != null and channel != ''">
+                                               AND DM_DOCUMENT_D.CHANNEL = #{channel}
+                                           </if>
+                                           <if test="status != null and status != ''">
+                                               AND CASE WHEN WD_INPLAN.INSPECTQTY = 0
+                                                        THEN '50'
+                                                        WHEN WD_INPLAN.INSPECTQTY <![CDATA[>]]> 0 AND WD_INPLAN.ORDERQTY - WD_INPLAN.CANCELQTY - WD_INPLAN.INSPECTQTY <![CDATA[>]]> 0
+                                                        THEN '55'
+                                                        WHEN WD_INPLAN.ORDERQTY - WD_INPLAN.CANCELQTY <![CDATA[<=]]> WD_INPLAN.INSPECTQTY AND T_WD_INSPECT.INVOICETYPE = 'FORCEINSPECT'
+                                                        THEN '80'
+                                                        WHEN WD_INPLAN.ORDERQTY - WD_INPLAN.CANCELQTY <![CDATA[<=]]> WD_INPLAN.INSPECTQTY
+                                                        THEN '60'
+                                                    END = #{status}
+                                           </if>
+                             JOIN DM_DOCUMENT_H ON DM_DOCUMENT_H.DCCODE    = DM_DOCUMENT_D.DCCODE
+                                               AND DM_DOCUMENT_H.STORERKEY = DM_DOCUMENT_D.STORERKEY
+                                               AND DM_DOCUMENT_H.DOCDT     = DM_DOCUMENT_D.DOCDT
+                                               AND DM_DOCUMENT_H.DOCNO     = DM_DOCUMENT_D.DOCNO
+                                               AND DM_DOCUMENT_H.DOCTYPE   = DM_DOCUMENT_D.DOCTYPE
+                                               <!--AND    DM_DOCUMENT_H.STATUS          <![CDATA[>=]]>  '45'        피킹중단계이후부터 표시 2015.01.27 MODIFY SLLEE  -->
+                                               AND DM_DOCUMENT_H.DEL_YN = 'N'
+                                           <if test="docno != null and docno != ''">
+                                               AND DM_DOCUMENT_H.DOCNO = #{docno}
+                                           </if>
+                                           <!-- 배송그룹 공통조회 조건 -->
+                                           <if test="gMultiCourier != null and gMultiCourier != ''">
+                                               AND DM_DOCUMENT_H.COURIER = #{gMultiCourier}
+                                           </if>
+                                           <if test="ordertype != null and ordertype != ''">
+                                               AND DM_DOCUMENT_H.ORDERTYPE = #{ordertype}
+                                           </if>
+                             LEFT OUTER JOIN CM_CAR ON CM_CAR.CARNO  = TM_INPLAN.CARNO
+                                                   AND CM_CAR.DEL_YN = 'N'
+                             LEFT OUTER JOIN CM_DRIVER ON CM_DRIVER.DRIVERID = CM_CAR.DRIVER1
+                                                      AND CM_DRIVER.DEL_YN   = 'N'
+                             JOIN MS_SKU ON MS_SKU.STORERKEY = WD_INPLAN.STORERKEY
+                                        AND MS_SKU.SKU       = WD_INPLAN.SKU
+                                        AND MS_SKU.DEL_YN    = 'N'
+                                    <!-- 협력사 다중선택 -->
+                                    <if test="vendor != null and vendor != ''">
+                                        AND MS_SKU.VENDOR IN (SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS VAL
+                                                                FROM (SELECT #{vendor} AS VAL FROM DUAL) A
+                                                              CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+                                    </if>
+                            WHERE 1 = 1
+                          <!-- AND WD_INPLAN.STATUS          <![CDATA[>=]]>  '45'        피킹중단계이후부터 표시 2015.01.27 MODIFY SLLEE  -->
+                          
+                            GROUP BY TM_INPLAN.STORERKEY
+                                   , TM_INPLAN.DCCODE
+                                   , TM_INPLAN.DOCTYPE
+                                   , TM_INPLAN.DELIVERYDT
+                                   , TM_INPLAN.SLIPDT
+                                   , TM_INPLAN.CARNO
+                                   , TM_INPLAN.PRIORITY
+                                   , TM_INPLAN.DELIVERYGROUP
+                        )
+        SELECT STORERKEY                                                                         AS STORERKEY
+             , DCCODE                                                                            AS DCCODE
+             , DOCTYPE                                                                           AS DOCTYPE
+             , DELIVERYDT                                                                        AS DELIVERYDT
+             , SLIPDT                                                                            AS SLIPDT
+             , CARNO                                                                             AS CARNO
+             , DRIVERNAME                                                                        AS DRIVERNAME
+             , DCDEPARTUREDT                                                                     AS DCDEPARTUREDT
+             , PRIORITY                                                                          AS PRIORITY
+             , DELIVERYGROUP                                                                     AS DELIVERYGROUP
+             , LOADSTATUS                                                                        AS LOADSTATUS
+             , FN_CODEDESCR(STORERKEY, 'COURIER', COURIER)                                       AS COURIER
+             , LOADPLANQTY                                                                       AS LOADPLANQTY
+             , LOADCMPQTY                                                                        AS LOADCMPQTY
+             , CASE WHEN (LOADPLANQTY) <![CDATA[>]]> 0
+                    THEN TRUNC((CASE WHEN NVL(LOADCMPQTY,0) / (LOADPLANQTY) <![CDATA[>]]> 1
+                                     THEN 1
+                                     ELSE NVL(LOADCMPQTY,0) / (LOADPLANQTY)
+                                 END) * 100, 2)
+                    ELSE 0
+                END                                                                              AS LOADRATE     <!--  정상권님 요청으로 다시 수정(2015-09-30 AKH) 결품량 반영x -->
+             , CANCELQTY                                                                         AS SHORTAGEQTY
+             , CASE WHEN CANCELQTY + ORDERQTY <![CDATA[>]]> 0
+                    THEN TRUNC( CANCELQTY / (ORDERQTY + CANCELQTY) * 100, 2)
+                    ELSE 0
+                END                                                                              AS SHORTAGERATE
+             , FORCECMPQTY                                                                       AS FORCECMPQTY
+             , CASE WHEN INSPECTQTY <![CDATA[>]]> 0
+                    THEN TRUNC( NVL(FORCECMPQTY,0) / INSPECTQTY * 100, 2)
+                    ELSE 0
+                END                                                                              AS FORCECMPRATE
+             , ORDERQTY + CANCELQTY                                                              AS ORDERQTY
+             , ORDERQTY - CONFIRMQTY                                                             AS UNCONFIRMQTY
+             , CONFIRMQTY                                                                        AS CONFIRMQTY
+             , CASE WHEN (ORDERQTY + CANCELQTY) <![CDATA[>]]> 0
+                    THEN TRUNC( NVL(CONFIRMQTY + CANCELQTY,0) / (ORDERQTY + CANCELQTY) * 100, 2)
+                    ELSE 0
+                END                                                                              AS CONFIRMRATE
+             , CASE WHEN ORDERQTY = INSPECTQTY
+                    THEN 'Y'
+                    ELSE 'N'
+                END                                                                              AS FORCECMPYN
+             , 'STD'                                                                             AS SLIPNO
+             , 'STD'                                                                             AS SLIPTYPE
+             , 'STD'                                                                             AS CUSTKEY
+             , 'STD'                                                                             AS CUSTTYPE
+          FROM T_RESULT
+         WHERE 1=1
+       <if test="inspectedyn == 'Y'.toString()">
+           AND T_RESULT.ORDERQTY = T_RESULT.INSPECTQTY
+       </if>
+       <if test="inspectedyn == 'N'.toString()">
+           AND T_RESULT.ORDERQTY <![CDATA[>]]> T_RESULT.INSPECTQTY
+       </if>
+          ORDER BY STORERKEY
+                 , DCCODE
+                 , DOCTYPE
+                 , DELIVERYDT
+                 , SLIPDT
+                 , CARNO
+                 , PRIORITY
+                 , DELIVERYGROUP
+    </select>
+
+    <select id="getMasterList2" resultType="WdLoadResDto">
+        SELECT /* [WdLoadService.sqlx][wdLoadService.getMasterList2][출차지시처리 - 출차지시처리 상세 목록 조회][JiHoPark][2025.11.12] */
+               TM_INPLAN.CUSTKEY                                                         AS TO_CUSTKEY        /* 거래처코드*/
+             , CASE WHEN TM_INPLAN.B2C_YN = 'Y'
+                    THEN DM_DOCUMENT_H.TO_CUSTNAME
+                    ELSE MS_CUST.DESCRIPTION
+                END                                                                      AS TO_CUSTNAME       /* 거래처 명*/
+             , TM_INPLAN.TRUTHCUSTKEY                                                    AS TRUTHCUSTKEY      /* 실착지코드 */
+             , FN_DESCR_CUST(TM_INPLAN.STORERKEY, TM_INPLAN.TRUTHCUSTKEY)                AS TRUTHCUSTNAME     /* 실작지명 */
+             , FN_CODEDESCR(MS_CUST.STORERKEY, 'SALEGROUP', MS_CUST.SALEGROUP)           AS SALEGROUP
+             , FN_CODEDESCR(MS_CUST.STORERKEY, 'SALEDEPARTMENT', MS_CUST.SALEDEPARTMENT) AS SALEDEPARTMENT
+             , FN_CODEDESCR(MS_CUST.STORERKEY, 'SALEORGANIZE', MS_CUST.OTHER04)          AS SALEORGANIZE
+             , WD_INPLAN.SKU                                                             AS SKU
+             , MS_SKU.DESCRIPTION                                                        AS SKUNAME
+             , FN_CODEDESCR(WD_INPLAN.STORERKEY, 'PUTAWAYTYPE', DM_DOCUMENT_D.CHANNEL)   AS CHANNEL
+             , FN_CODEDESCR(WD_INPLAN.STORERKEY, 'STORAGETYPE', MS_SKU.STORAGETYPE)      AS STORAGETYPE
+             , WD_INPLAN.UOM                                                             AS UOM
+             , WD_INPLAN.ORDERQTY                                                        AS ORDERQTY
+             , WD_INPLAN.INSPECTQTY                                                      AS INSPECTQTY
+             , WD_INPLAN.QTYPICKED                                                       AS WORKQTY
+             , FN_CODEDESCR(WD_INPLAN.STORERKEY, 'INSPECTSTATUS_WD', CASE WHEN WD_INPLAN.INSPECTQTY = 0
+                                                                          THEN '50'
+                                                                          WHEN WD_INPLAN.INSPECTQTY <![CDATA[>]]> 0 AND WD_INPLAN.ORDERQTY - WD_INPLAN.CANCELQTY - WD_INPLAN.INSPECTQTY <![CDATA[>]]> 0
+                                                                          THEN '55'
+                                                                          WHEN WD_INPLAN.ORDERQTY - WD_INPLAN.CANCELQTY <![CDATA[<=]]> WD_INPLAN.INSPECTQTY AND WD_INSPECT.INVOICETYPE = 'FORCEINSPECT'
+                                                                          THEN '80'
+                                                                          WHEN WD_INPLAN.ORDERQTY - WD_INPLAN.CANCELQTY <![CDATA[<=]]> WD_INPLAN.INSPECTQTY
+                                                                          THEN '60'
+                                                                       END)              AS STATUS
+             , DM_DOCUMENT_D.PLANT                                                       AS PLANT
+             , '['||DM_DOCUMENT_D.PLANT||']'||FN_DESCR_PLANT(DM_DOCUMENT_D.PLANT)        AS PLANT_DESCR
+          FROM WD_INPLAN
+          JOIN CM_USER_AUTHORITY ON 1=1
+                            <if test="dccode != null and dccode != ''">
+                                AND CM_USER_AUTHORITY.DCCODE    = #{dccode}
+                            </if>
+                            <if test="gStorerkey != null and gStorerkey != ''">
+                                AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey}
+                            </if>
+                            <if test="organize != null and organize != ''">
+                                AND CM_USER_AUTHORITY.ORGANIZE  = #{organize}
+                            </if>
+                                AND CM_USER_AUTHORITY.USERID    = #{gUserId}
+                                AND CM_USER_AUTHORITY.DCCODE    = WD_INPLAN.DCCODE
+                                AND CM_USER_AUTHORITY.STORERKEY = WD_INPLAN.STORERKEY
+                                AND CM_USER_AUTHORITY.ORGANIZE  = WD_INPLAN.ORGANIZE
+                                AND CM_USER_AUTHORITY.AREA      = WD_INPLAN.AREA
+          JOIN DM_DOCUMENT_D ON DM_DOCUMENT_D.DCCODE    = WD_INPLAN.DCCODE
+                            AND DM_DOCUMENT_D.STORERKEY = WD_INPLAN.STORERKEY
+                            AND DM_DOCUMENT_D.DOCDT     = WD_INPLAN.DOCDT
+                            AND DM_DOCUMENT_D.DOCNO     = WD_INPLAN.DOCNO
+                            AND DM_DOCUMENT_D.DOCLINE   = WD_INPLAN.DOCLINE
+                            AND DM_DOCUMENT_D.DOCTYPE   = WD_INPLAN.DOCTYPE
+                        <if test="channel != null and channel != ''">
+                            AND DM_DOCUMENT_D.CHANNEL = #{channel}
+                        </if>
+                            AND DM_DOCUMENT_D.DEL_YN = 'N'
+          JOIN DM_DOCUMENT_H ON DM_DOCUMENT_H.DCCODE    = DM_DOCUMENT_D.DCCODE
+                            AND DM_DOCUMENT_H.STORERKEY = DM_DOCUMENT_D.STORERKEY
+                            AND DM_DOCUMENT_H.DOCDT     = DM_DOCUMENT_D.DOCDT
+                            AND DM_DOCUMENT_H.DOCNO     = DM_DOCUMENT_D.DOCNO
+                            AND DM_DOCUMENT_H.DOCTYPE   = DM_DOCUMENT_D.DOCTYPE
+                            <!--AND    DM_DOCUMENT_H.STATUS          <![CDATA[>=]]>  '45'        피킹중단계이후부터 표시 2015.01.27 MODIFY SLLEE  -->
+                            AND DM_DOCUMENT_H.DEL_YN = 'N'
+          LEFT OUTER JOIN (SELECT WD_INSPECT.DCCODE
+                                , WD_INSPECT.STORERKEY
+                                , WD_INSPECT.DOCDT
+                                , WD_INSPECT.DOCNO
+                                , WD_INSPECT.SLIPDT
+                                , WD_INSPECT.SLIPNO
+                                , WD_INSPECT.SLIPLINE
+                                , MAX(INVOICETYPE) AS INVOICETYPE
+                             FROM WD_INSPECT
+                            WHERE WD_INSPECT.STORERKEY = #{storerkey}
+                              AND WD_INSPECT.DCCODE    = #{dccode}
+                              AND WD_INSPECT.SLIPDT    = #{slipdt}
+                            GROUP BY WD_INSPECT.DCCODE
+                                   , WD_INSPECT.STORERKEY
+                                   , WD_INSPECT.DOCDT
+                                   , WD_INSPECT.DOCNO
+                                   , WD_INSPECT.SLIPDT
+                                   , WD_INSPECT.SLIPNO
+                                   , WD_INSPECT.SLIPLINE) WD_INSPECT ON WD_INSPECT.DCCODE      = WD_INPLAN.DCCODE
+                                                                    AND WD_INSPECT.STORERKEY   = WD_INPLAN.STORERKEY
+                                                                    AND WD_INSPECT.DOCDT       = WD_INPLAN.DOCDT
+                                                                    AND WD_INSPECT.DOCNO       = WD_INPLAN.DOCNO
+                                                                    AND WD_INSPECT.SLIPDT      = WD_INPLAN.SLIPDT
+                                                                    AND WD_INSPECT.SLIPNO      = WD_INPLAN.SLIPNO
+                                                                    AND WD_INSPECT.SLIPLINE    = WD_INPLAN.SLIPLINE
+                                                                    AND WD_INSPECT.INVOICETYPE = 'FORCEINSPECT'
+          JOIN MS_SKU ON MS_SKU.STORERKEY = DM_DOCUMENT_D.STORERKEY
+                     AND MS_SKU.SKU       = DM_DOCUMENT_D.SKU
+                     AND MS_SKU.DEL_YN    = 'N'
+          
+          JOIN (
+              SELECT 
+                   TM_INPLAN.STORERKEY
+                 , TM_INPLAN.DCCODE
+                 , TM_INPLAN.DOCTYPE
+                 , TM_INPLAN.DELIVERYDT
+                 , TM_INPLAN.CARNO
+                 , TM_INPLAN.PRIORITY
+                 , TM_INPLAN.DELIVERYGROUP
+                 , TM_INPLAN.COURIER
+                 , TM_INPLAN.SLIPDT
+                 , TM_INPLAN.SLIPNO
+                 , TM_INPLAN.DCDEPARTUREDT
+                 , TM_INPLAN.LOADSTATUS
+                 , TM_INPLAN.CUSTTYPE
+                 , TM_INPLAN.CUSTKEY
+                 , TM_INPLAN.TRUTHCUSTKEY
+                 , TM_INPLAN.B2C_YN
+                FROM TM_INPLAN
+                WHERE TM_INPLAN.DEL_YN            = 'N'
+                  AND TM_INPLAN.STATUS            = '90'
+                  AND TM_INPLAN.TM_DELIVERYTYPE   IN ('1','2')
+                  AND TM_INPLAN.SPLIT_DELIVERY_YN = 'N'
+                  AND TM_INPLAN.DELIVERYDT        = #{deliverydt}  
+                  AND TM_INPLAN.CARNO             = #{carno}
+                  AND TM_INPLAN.DCCODE            = #{dccode}
+                  AND TM_INPLAN.DELIVERYGROUP     = #{deliverygroup}
+                  AND TM_INPLAN.PRIORITY          = #{priority}
+
+                UNION ALL
+                
+                SELECT 
+                   TM_INPLAN_SPLIT.STORERKEY
+                 , TM_INPLAN_SPLIT.DCCODE
+                 , TM_INPLAN_SPLIT.DOCTYPE
+                 , TM_INPLAN_SPLIT.DELIVERYDT
+                 , TM_INPLAN_SPLIT.CARNO
+                 , TM_INPLAN_SPLIT.PRIORITY
+                 , TM_INPLAN_SPLIT.DELIVERYGROUP
+                 , TM_INPLAN_SPLIT.COURIER
+                 , TM_INPLAN_SPLIT.SLIPDT
+                 , TM_INPLAN_SPLIT.SLIPNO
+                 , TM_INPLAN_SPLIT.DCDEPARTUREDT
+                 , TM_INPLAN_SPLIT.LOADSTATUS
+                 , TM_INPLAN_SPLIT.CUSTTYPE
+                 , TM_INPLAN_SPLIT.CUSTKEY
+                 , TM_INPLAN_SPLIT.TRUTHCUSTKEY
+                 , TM_INPLAN_SPLIT.B2C_YN
+                FROM TM_INPLAN_SPLIT
+                WHERE TM_INPLAN_SPLIT.DEL_YN        = 'N'
+                  AND TM_INPLAN_SPLIT.STATUS        = '90'
+                  AND TM_INPLAN_SPLIT.TM_DELIVERYTYPE  IN ('1','2')
+                  AND TM_INPLAN_SPLIT.DELIVERYDT    = #{deliverydt}  
+                  AND TM_INPLAN_SPLIT.CARNO         = #{carno}
+                  AND TM_INPLAN_SPLIT.DCCODE        = #{dccode}
+                  AND TM_INPLAN_SPLIT.DELIVERYGROUP = #{deliverygroup}
+                  AND TM_INPLAN_SPLIT.PRIORITY      = #{priority}
+             ) TM_INPLAN ON TM_INPLAN.DCCODE        = WD_INPLAN.DCCODE
+                        AND TM_INPLAN.STORERKEY     = WD_INPLAN.STORERKEY
+                        AND TM_INPLAN.DOCTYPE       = WD_INPLAN.DOCTYPE
+                        AND TM_INPLAN.SLIPDT        = WD_INPLAN.SLIPDT
+                        AND TM_INPLAN.SLIPNO        = WD_INPLAN.SLIPNO
+
+          JOIN MS_CUST ON MS_CUST.STORERKEY = TM_INPLAN.STORERKEY
+                      AND MS_CUST.CUSTKEY   = TM_INPLAN.CUSTKEY
+                      AND MS_CUST.CUSTTYPE  = TM_INPLAN.CUSTTYPE
+                      AND MS_CUST.DEL_YN    = 'N'
+                      
+         WHERE WD_INPLAN.DOCTYPE   = 'WD'
+           AND WD_INPLAN.DEL_YN    = 'N'
+           AND WD_INPLAN.STORERKEY = #{storerkey}
+           AND WD_INPLAN.DCCODE    = #{dccode}
+           AND WD_INPLAN.DOCTYPE   = #{doctype}
+       <!-- 창고 다중선택 -->
+       <if test="organize != null and organize != ''">
+           AND WD_INPLAN.ORGANIZE IN (SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS VAL
+                                       FROM (SELECT #{organize} AS VAL FROM DUAL) A
+                                    CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+       </if>
+       <!-- 상품 다중선택 -->
+       <if test="sku != null and sku != ''">
+           AND WD_INPLAN.SKU IN (SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS VAL
+                                   FROM (SELECT #{sku} AS VAL FROM DUAL) A
+                                CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+       </if>
+       <!-- 고객 다중선택 -->
+       <if test="toCustkey != null and toCustkey != ''">
+           AND WD_INPLAN.CUSTKEY IN (SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS VAL
+                                       FROM (SELECT #{toCustkey} AS VAL FROM DUAL) A
+                                    CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+       </if>
+       <if test="status != null and status != ''">
+           AND CASE WHEN WD_INPLAN.INSPECTQTY = 0
+                    THEN '50'
+                    WHEN WD_INPLAN.INSPECTQTY <![CDATA[>]]> 0 AND WD_INPLAN.ORDERQTY - WD_INPLAN.CANCELQTY - WD_INPLAN.INSPECTQTY <![CDATA[>]]> 0
+                    THEN '55'
+                    WHEN WD_INPLAN.ORDERQTY - WD_INPLAN.CANCELQTY <![CDATA[<=]]> WD_INPLAN.INSPECTQTY AND WD_INSPECT.INVOICETYPE = 'FORCEINSPECT'
+                    THEN '80'
+                    WHEN WD_INPLAN.ORDERQTY - WD_INPLAN.CANCELQTY <![CDATA[<=]]> WD_INPLAN.INSPECTQTY
+                    THEN '60'
+                END = #{status}
+       </if>
+         ORDER BY WD_INPLAN.STORERKEY
+                , TM_INPLAN.CUSTKEY
+                , MS_CUST.DESCRIPTION
+                , DM_DOCUMENT_H.TO_CUSTNAME
+                , WD_INPLAN.SKU
+                , MS_SKU.DESCRIPTION
+                , DM_DOCUMENT_D.CHANNEL
+                , MS_SKU.STORAGETYPE
+                , WD_INPLAN.UOM
+    </select>
+
+    <select id="getPrintHeaderList" resultType="WdLoadReportDto">
+        SELECT /* [WdLoadService.sqlx][wdLoadService.getPrintHeaderList][출차지시처리 - 상차지시서 출력용 헤더][JiHoPark][2025.11.13] */
+               TM_INPLAN.DCCODE                                                                    AS DCCODE
+             , TM_INPLAN.CARNO                                                                     AS CARNO
+             , TM_INPLAN.DELIVERYDT                                                                AS DELIVERYDT
+             , TRIM(TM_INPLAN.DCCODE)||'_'||TRIM(TM_INPLAN.CARNO)||'_'||TRIM(TM_INPLAN.DELIVERYDT) AS KEY
+             , '차량번호'                                                                             AS GUBUN
+          FROM (
+               SELECT 
+                  TM_INPLAN.STORERKEY
+                , TM_INPLAN.DCCODE
+                , TM_INPLAN.DOCTYPE
+                , TM_INPLAN.DELIVERYDT
+                , TM_INPLAN.CARNO
+                , TM_INPLAN.PRIORITY
+                , TM_INPLAN.DELIVERYGROUP
+                , TM_INPLAN.COURIER
+                , TM_INPLAN.SLIPDT
+                , TM_INPLAN.SLIPNO
+                , TM_INPLAN.DCDEPARTUREDT
+                , TM_INPLAN.LOADSTATUS
+               FROM TM_INPLAN
+               WHERE TM_INPLAN.DEL_YN     = 'N'
+                 AND TM_INPLAN.STATUS     = '90'
+                 AND TM_INPLAN.TM_DELIVERYTYPE   IN ('1','2')
+                 AND TM_INPLAN.SPLIT_DELIVERY_YN = 'N'
+             <if test="dccode != null and dccode != ''">
+                 AND TM_INPLAN.DCCODE = #{dccode}
+             </if>
+             <if test="deliverygroup != null and deliverygroup != ''">
+                 AND TM_INPLAN.DELIVERYGROUP = #{deliverygroup} 
+             </if>  
+             <if test="deliverydt != null and deliverydt != ''">
+                 AND TM_INPLAN.DELIVERYDT = #{deliverydt}
+             </if>
+             <if test="fromSlipdt != null and fromSlipdt != ''">
+                  AND TM_INPLAN.DELIVERYDT <![CDATA[>=]]> #{fromSlipdt}
+             </if>
+             <if test="toSlipdt != null and toSlipdt != ''">
+                  AND TM_INPLAN.DELIVERYDT <![CDATA[<=]]> #{toSlipdt}
+             </if>
+               UNION ALL
+               
+               SELECT 
+                  TM_INPLAN_SPLIT.STORERKEY
+                , TM_INPLAN_SPLIT.DCCODE
+                , TM_INPLAN_SPLIT.DOCTYPE
+                , TM_INPLAN_SPLIT.DELIVERYDT
+                , TM_INPLAN_SPLIT.CARNO
+                , TM_INPLAN_SPLIT.PRIORITY
+                , TM_INPLAN_SPLIT.DELIVERYGROUP
+                , TM_INPLAN_SPLIT.COURIER
+                , TM_INPLAN_SPLIT.SLIPDT
+                , TM_INPLAN_SPLIT.SLIPNO
+                , TM_INPLAN_SPLIT.DCDEPARTUREDT
+                , TM_INPLAN_SPLIT.LOADSTATUS
+               FROM TM_INPLAN_SPLIT
+               WHERE TM_INPLAN_SPLIT.DEL_YN     = 'N'
+                 AND TM_INPLAN_SPLIT.STATUS     = '90'
+                 AND TM_INPLAN_SPLIT.TM_DELIVERYTYPE  IN ('1','2')
+             <if test="dccode != null and dccode != ''">
+                 AND TM_INPLAN_SPLIT.DCCODE = #{dccode}
+             </if>
+             <if test="deliverygroup != null and deliverygroup != ''">
+                 AND TM_INPLAN_SPLIT.DELIVERYGROUP = #{deliverygroup} 
+             </if>    
+             <if test="deliverydt != null and deliverydt != ''">
+                 AND TM_INPLAN_SPLIT.DELIVERYDT = #{deliverydt}
+             </if>
+             <if test="fromSlipdt != null and fromSlipdt != ''">
+                  AND TM_INPLAN_SPLIT.DELIVERYDT <![CDATA[>=]]> #{fromSlipdt}
+             </if>
+             <if test="toSlipdt != null and toSlipdt != ''">
+                  AND TM_INPLAN_SPLIT.DELIVERYDT <![CDATA[<=]]> #{toSlipdt}
+             </if>
+              )  TM_INPLAN 
+          
+          JOIN SY_PROCESSTEMP_TM ON SY_PROCESSTEMP_TM.DELIVERYDT     = TM_INPLAN.DELIVERYDT
+                                AND SY_PROCESSTEMP_TM.DELIVERYGROUP  = TM_INPLAN.DELIVERYGROUP
+                                AND SY_PROCESSTEMP_TM.PRIORITY       = TM_INPLAN.PRIORITY
+                                AND SY_PROCESSTEMP_TM.CARNO          = TM_INPLAN.CARNO
+                                AND SY_PROCESSTEMP_TM.PROCESSTYPE    = #{processtype}
+                                AND SY_PROCESSTEMP_TM.PROCESSCREATOR = #{gUserId}
+                                AND SY_PROCESSTEMP_TM.SPID           = #{gSpid}
+          JOIN WD_INPLAN ON WD_INPLAN.DCCODE    = TM_INPLAN.DCCODE
+                        AND WD_INPLAN.DOCTYPE   = TM_INPLAN.DOCTYPE
+                        AND WD_INPLAN.STORERKEY = TM_INPLAN.STORERKEY
+                        AND WD_INPLAN.SLIPDT    = TM_INPLAN.SLIPDT
+                        AND WD_INPLAN.SLIPNO    = TM_INPLAN.SLIPNO
+                     <!-- 고객 다중선택 -->
+                     <if test="toCustkey != null and toCustkey != ''">
+                        AND WD_INPLAN.CUSTKEY IN (SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS VAL
+                                                    FROM (SELECT #{toCustkey} AS VAL FROM DUAL) A
+                                                 CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+                    </if>
+                       JOIN CM_USER_AUTHORITY ON 1=1
+                                         <if test="dccode != null and dccode != ''">
+                                             AND CM_USER_AUTHORITY.DCCODE    = #{dccode}
+                                         </if>
+                                         <if test="gStorerkey != null and gStorerkey != ''">
+                                             AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey}
+                                         </if>
+                                         <if test="organize != null and organize != ''">
+                                             AND CM_USER_AUTHORITY.ORGANIZE  = #{organize}
+                                         </if>
+                                             AND CM_USER_AUTHORITY.USERID    = #{gUserId}
+                                             AND CM_USER_AUTHORITY.DCCODE    = WD_INPLAN.DCCODE
+                                             AND CM_USER_AUTHORITY.STORERKEY = WD_INPLAN.STORERKEY
+                                             AND CM_USER_AUTHORITY.ORGANIZE  = WD_INPLAN.ORGANIZE
+                                             AND CM_USER_AUTHORITY.AREA      = WD_INPLAN.AREA
+                       JOIN DM_DOCUMENT_D ON DM_DOCUMENT_D.DCCODE    = WD_INPLAN.DCCODE
+                                         AND DM_DOCUMENT_D.STORERKEY = WD_INPLAN.STORERKEY
+                                         AND DM_DOCUMENT_D.DOCTYPE   = WD_INPLAN.DOCTYPE
+                                         AND DM_DOCUMENT_D.DOCDT     = WD_INPLAN.DOCDT
+                                         AND DM_DOCUMENT_D.DOCNO     = WD_INPLAN.DOCNO
+                                         AND DM_DOCUMENT_D.DOCLINE   = WD_INPLAN.DOCLINE
+                                         AND DM_DOCUMENT_D.DEL_YN    = 'N'
+                                     <if test="channel != null and channel != ''">
+                                         AND DM_DOCUMENT_D.CHANNEL   = #{channel}
+                                     </if>
+         WHERE 1 = 1
+         GROUP BY TM_INPLAN.DCCODE
+                , TM_INPLAN.DELIVERYDT
+                , TM_INPLAN.CARNO
+         ORDER BY TM_INPLAN.DCCODE
+                , TM_INPLAN.DELIVERYDT
+                , TM_INPLAN.CARNO
+    </select>
+
+    <select id="getPrintHeaderList2" resultType="WdLoadReportDto">
+        SELECT /* [WdLoadService.sqlx][wdLoadService.getPrintHeaderList2][출차지시처리 - 상차지시서 출력용 헤더2][JiHoPark][2026.01.14] */
+               TM_INPLAN.DCCODE                                                                      AS DCCODE
+             , TM_INPLAN.DELIVERYDT                                                                  AS DELIVERYDT
+             , TM_INPLAN.CUSTKEY                                                                     AS TO_CUSTKEY
+             , TRIM(TM_INPLAN.DCCODE)||'_'||TRIM(TM_INPLAN.CUSTKEY)||'_'||TRIM(TM_INPLAN.DELIVERYDT) AS KEY
+             , '납품처'                                                                                AS GUBUN
+          FROM (
+               SELECT 
+                  TM_INPLAN.STORERKEY
+                , TM_INPLAN.DCCODE
+                , TM_INPLAN.DOCTYPE
+                , TM_INPLAN.DELIVERYDT
+                , TM_INPLAN.CARNO
+                , TM_INPLAN.PRIORITY
+                , TM_INPLAN.DELIVERYGROUP
+                , TM_INPLAN.COURIER
+                , TM_INPLAN.SLIPDT
+                , TM_INPLAN.SLIPNO
+                , TM_INPLAN.DCDEPARTUREDT
+                , TM_INPLAN.LOADSTATUS
+               FROM TM_INPLAN
+               WHERE TM_INPLAN.DEL_YN     = 'N'
+                 AND TM_INPLAN.STATUS     = '90'
+                 AND TM_INPLAN.TM_DELIVERYTYPE   IN ('1','2')
+                 AND TM_INPLAN.SPLIT_DELIVERY_YN = 'N'
+             <if test="dccode != null and dccode != ''">
+                 AND TM_INPLAN.DCCODE = #{dccode}
+             </if>
+             <if test="deliverygroup != null and deliverygroup != ''">
+                 AND TM_INPLAN.DELIVERYGROUP = #{deliverygroup} 
+             </if>  
+             <if test="deliverydt != null and deliverydt != ''">
+                 AND TM_INPLAN.DELIVERYDT = #{deliverydt}
+             </if>
+             <if test="fromSlipdt != null and fromSlipdt != ''">
+                 AND TM_INPLAN.DELIVERYDT <![CDATA[>=]]> #{fromSlipdt}
+             </if>
+             <if test="toSlipdt != null and toSlipdt != ''">
+                 AND TM_INPLAN.DELIVERYDT <![CDATA[<=]]> #{toSlipdt}
+             </if>
+               UNION ALL
+               
+               SELECT 
+                  TM_INPLAN_SPLIT.STORERKEY
+                , TM_INPLAN_SPLIT.DCCODE
+                , TM_INPLAN_SPLIT.DOCTYPE
+                , TM_INPLAN_SPLIT.DELIVERYDT
+                , TM_INPLAN_SPLIT.CARNO
+                , TM_INPLAN_SPLIT.PRIORITY
+                , TM_INPLAN_SPLIT.DELIVERYGROUP
+                , TM_INPLAN_SPLIT.COURIER
+                , TM_INPLAN_SPLIT.SLIPDT
+                , TM_INPLAN_SPLIT.SLIPNO
+                , TM_INPLAN_SPLIT.DCDEPARTUREDT
+                , TM_INPLAN_SPLIT.LOADSTATUS
+               FROM TM_INPLAN_SPLIT
+               WHERE TM_INPLAN_SPLIT.DEL_YN     = 'N'
+                 AND TM_INPLAN_SPLIT.STATUS     = '90'
+                 AND TM_INPLAN_SPLIT.TM_DELIVERYTYPE  IN ('1','2')
+             <if test="dccode != null and dccode != ''">
+                 AND TM_INPLAN_SPLIT.DCCODE = #{dccode}
+             </if>
+             <if test="deliverygroup != null and deliverygroup != ''">
+                 AND TM_INPLAN_SPLIT.DELIVERYGROUP = #{deliverygroup} 
+             </if>    
+             <if test="deliverydt != null and deliverydt != ''">
+                 AND TM_INPLAN_SPLIT.DELIVERYDT = #{deliverydt}
+             </if>
+             <if test="fromSlipdt != null and fromSlipdt != ''">
+                 AND TM_INPLAN_SPLIT.DELIVERYDT <![CDATA[>=]]> #{fromSlipdt}
+             </if>
+             <if test="toSlipdt != null and toSlipdt != ''">
+                 AND TM_INPLAN_SPLIT.DELIVERYDT <![CDATA[<=]]> #{toSlipdt}
+             </if>
+              )  TM_INPLAN 
+          JOIN SY_PROCESSTEMP_TM ON SY_PROCESSTEMP_TM.DELIVERYDT     = TM_INPLAN.DELIVERYDT
+                                AND SY_PROCESSTEMP_TM.DELIVERYGROUP  = TM_INPLAN.DELIVERYGROUP
+                                AND SY_PROCESSTEMP_TM.PRIORITY       = TM_INPLAN.PRIORITY
+                                AND SY_PROCESSTEMP_TM.CARNO          = TM_INPLAN.CARNO
+                                AND SY_PROCESSTEMP_TM.PROCESSTYPE    = #{processtype}
+                                AND SY_PROCESSTEMP_TM.PROCESSCREATOR = #{gUserId}
+                                AND SY_PROCESSTEMP_TM.SPID           = #{gSpid}
+          JOIN WD_INPLAN ON WD_INPLAN.DCCODE    = TM_INPLAN.DCCODE
+                        AND WD_INPLAN.DOCTYPE   = TM_INPLAN.DOCTYPE
+                        AND WD_INPLAN.STORERKEY = TM_INPLAN.STORERKEY
+                        AND WD_INPLAN.SLIPDT    = TM_INPLAN.SLIPDT
+                        AND WD_INPLAN.SLIPNO    = TM_INPLAN.SLIPNO
+                    <!-- 고객 다중선택 -->
+                    <if test="toCustkey != null and toCustkey != ''">
+                        AND WD_INPLAN.CUSTKEY IN (SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS VAL
+                                                    FROM (SELECT #{toCustkey} AS VAL FROM DUAL) A
+                                                 CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+                    </if>
+          JOIN CM_USER_AUTHORITY ON 1=1
+                            <if test="dccode != null and dccode != ''">
+                                AND CM_USER_AUTHORITY.DCCODE = #{dccode}
+                            </if>
+                            <if test="gStorerkey != null and gStorerkey != ''">
+                                AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey}
+                            </if>
+                            <if test="organize != null and organize != ''">
+                                AND CM_USER_AUTHORITY.ORGANIZE = #{organize}
+                            </if>
+                                AND CM_USER_AUTHORITY.USERID    = #{gUserId}
+                                AND CM_USER_AUTHORITY.DCCODE    = WD_INPLAN.DCCODE
+                                AND CM_USER_AUTHORITY.STORERKEY = WD_INPLAN.STORERKEY
+                                AND CM_USER_AUTHORITY.ORGANIZE  = WD_INPLAN.ORGANIZE
+                                AND CM_USER_AUTHORITY.AREA      = WD_INPLAN.AREA
+          JOIN DM_DOCUMENT_D ON DM_DOCUMENT_D.DCCODE    = WD_INPLAN.DCCODE
+                            AND DM_DOCUMENT_D.STORERKEY = WD_INPLAN.STORERKEY
+                            AND DM_DOCUMENT_D.DOCTYPE   = WD_INPLAN.DOCTYPE
+                            AND DM_DOCUMENT_D.DOCDT     = WD_INPLAN.DOCDT
+                            AND DM_DOCUMENT_D.DOCNO     = WD_INPLAN.DOCNO
+                            AND DM_DOCUMENT_D.DOCLINE   = WD_INPLAN.DOCLINE
+                            AND DM_DOCUMENT_D.DEL_YN    = 'N'
+                        <if test="channel != null and channel != ''">
+                            AND DM_DOCUMENT_D.CHANNEL   = #{channel}
+                        </if>
+         WHERE 1 = 1
+         GROUP BY TM_INPLAN.DCCODE
+                , TM_INPLAN.DELIVERYDT
+                , TM_INPLAN.CUSTKEY
+         ORDER BY TM_INPLAN.DCCODE
+                , TM_INPLAN.DELIVERYDT
+                , TM_INPLAN.CUSTKEY
+    </select>
+
+    <select id="getPrintMemoList" resultType="WdLoadReportDto">
+        SELECT /* [WdLoadService.sqlx][wdLoadService.getPrintMemoList][출차지시처리 - 출상차지시서 출력용 메모사항][JiHoPark][2025.11.13] */
+               LIST.*
+        FROM (   SELECT TM_INPLAN.DCCODE ||' '||CM_DC.DESCRIPTION                                           AS DCNAME
+                      , TM_INPLAN.CARNO  ||' ( '||TM_INPLAN.DELIVERYGROUP||' ) '                            AS CARNAME
+                      , FN_FORMAT_MASK(TM_INPLAN.DELIVERYDT, '####-##-##')                                  AS DELIVERYDT
+                      , DM_DOCUMENT_H.TO_CUSTNAME||' ('||T_MNGPLC.DESCRIPTION||')'                          AS CUSTNAME
+                      , '('||#{channelnm}||')'                                                              AS CHANNELNM
+                      , CASE WHEN MAX(DM_DOCUMENT_H.B2C_YN ) = 'Y'
+                             THEN MAX(DM_DOCUMENT_H.MEMO1)
+                             ELSE MAX(MS_CUSTDLVINFO.MEMO)
+                         END                                                                                AS MEMO
+                      , NULL                                                                                AS TMMEMO
+                      , TM_INPLAN.DELIVERYGROUP                                                             AS DELIVERYGROUP
+                      , TRIM(TM_INPLAN.DCCODE)||'_'||TRIM(TM_INPLAN.CARNO)||'_'||TRIM(TM_INPLAN.DELIVERYDT) AS KEY
+                   FROM (
+                        SELECT 
+                             TM_INPLAN.STORERKEY
+                            , TM_INPLAN.DCCODE
+                            , TM_INPLAN.DOCTYPE
+                            , TM_INPLAN.DELIVERYDT
+                            , TM_INPLAN.CARNO
+                            , TM_INPLAN.PRIORITY
+                            , TM_INPLAN.DELIVERYGROUP
+                            , TM_INPLAN.COURIER
+                            , TM_INPLAN.SLIPDT
+                            , TM_INPLAN.SLIPNO
+                            , TM_INPLAN.DCDEPARTUREDT
+                            , TM_INPLAN.LOADSTATUS
+                            , TM_INPLAN.TMMEMO
+                        FROM TM_INPLAN
+                        WHERE TM_INPLAN.DEL_YN     = 'N'
+                            AND TM_INPLAN.STATUS     = '90'
+                            AND TM_INPLAN.TM_DELIVERYTYPE   IN ('1','2')
+                            AND TM_INPLAN.SPLIT_DELIVERY_YN = 'N'
+                            AND TM_INPLAN.TMMEMO IS NOT NULL
+                        <if test="dccode != null and dccode != ''">
+                            AND TM_INPLAN.DCCODE = #{dccode}
+                        </if>
+                        <if test="deliverygroup != null and deliverygroup != ''">
+                            AND TM_INPLAN.DELIVERYGROUP = #{deliverygroup} 
+                        </if>  
+                        <if test="deliverydt != null and deliverydt != ''">
+                            AND TM_INPLAN.DELIVERYDT = #{deliverydt}
+                        </if>
+                        <if test="fromSlipdt != null and fromSlipdt != ''">
+                            AND TM_INPLAN.DELIVERYDT <![CDATA[>=]]> #{fromSlipdt}
+                        </if>
+                        <if test="toSlipdt != null and toSlipdt != ''">
+                            AND TM_INPLAN.DELIVERYDT <![CDATA[<=]]> #{toSlipdt}
+                        </if>
+                        UNION ALL
+               
+                        SELECT 
+                             TM_INPLAN_SPLIT.STORERKEY
+                            , TM_INPLAN_SPLIT.DCCODE
+                            , TM_INPLAN_SPLIT.DOCTYPE
+                            , TM_INPLAN_SPLIT.DELIVERYDT
+                            , TM_INPLAN_SPLIT.CARNO
+                            , TM_INPLAN_SPLIT.PRIORITY
+                            , TM_INPLAN_SPLIT.DELIVERYGROUP
+                            , TM_INPLAN_SPLIT.COURIER
+                            , TM_INPLAN_SPLIT.SLIPDT
+                            , TM_INPLAN_SPLIT.SLIPNO
+                            , TM_INPLAN_SPLIT.DCDEPARTUREDT
+                            , TM_INPLAN_SPLIT.LOADSTATUS
+                            , TM_INPLAN_SPLIT.TMMEMO
+                        FROM TM_INPLAN_SPLIT
+                        WHERE TM_INPLAN_SPLIT.DEL_YN     = 'N'
+                            AND TM_INPLAN_SPLIT.STATUS     = '90'
+                            AND TM_INPLAN_SPLIT.TM_DELIVERYTYPE  IN ('1','2')
+                            AND TM_INPLAN_SPLIT.TMMEMO IS NOT NULL
+                        <if test="dccode != null and dccode != ''">
+                            AND TM_INPLAN_SPLIT.DCCODE = #{dccode}
+                        </if>
+                        <if test="deliverygroup != null and deliverygroup != ''">
+                            AND TM_INPLAN_SPLIT.DELIVERYGROUP = #{deliverygroup} 
+                        </if>    
+                        <if test="deliverydt != null and deliverydt != ''">
+                            AND TM_INPLAN_SPLIT.DELIVERYDT = #{deliverydt}
+                        </if>
+                        <if test="fromSlipdt != null and fromSlipdt != ''">
+                            AND TM_INPLAN_SPLIT.DELIVERYDT <![CDATA[>=]]> #{fromSlipdt}
+                        </if>
+                        <if test="toSlipdt != null and toSlipdt != ''">
+                            AND TM_INPLAN_SPLIT.DELIVERYDT <![CDATA[<=]]> #{toSlipdt}
+                        </if>
+                        )  TM_INPLAN
+                   JOIN SY_PROCESSTEMP_TM ON SY_PROCESSTEMP_TM.DELIVERYDT     = TM_INPLAN.DELIVERYDT
+                                         AND SY_PROCESSTEMP_TM.DELIVERYGROUP  = TM_INPLAN.DELIVERYGROUP
+                                         AND SY_PROCESSTEMP_TM.PRIORITY       = TM_INPLAN.PRIORITY
+                                         AND SY_PROCESSTEMP_TM.CARNO          = TM_INPLAN.CARNO
+                                         AND SY_PROCESSTEMP_TM.PROCESSTYPE    = #{processtype}
+                                         AND SY_PROCESSTEMP_TM.PROCESSCREATOR = #{gUserId}
+                                         AND SY_PROCESSTEMP_TM.SPID           = #{gSpid}
+                   JOIN WD_INPLAN ON WD_INPLAN.DCCODE    = TM_INPLAN.DCCODE
+                                 AND WD_INPLAN.DOCTYPE   = TM_INPLAN.DOCTYPE
+                                 AND WD_INPLAN.STORERKEY = TM_INPLAN.STORERKEY
+                                 AND WD_INPLAN.SLIPDT    = TM_INPLAN.SLIPDT
+                                 AND WD_INPLAN.SLIPNO    = TM_INPLAN.SLIPNO
+                            <!-- 고객 다중선택 -->
+                            <if test="toCustkey != null and toCustkey != ''">
+                                AND WD_INPLAN.CUSTKEY IN (SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS VAL
+                                                            FROM (SELECT #{toCustkey} AS VAL FROM DUAL) A
+                                                         CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+                            </if>
+                   JOIN CM_USER_AUTHORITY ON 1=1
+                                     <if test="dccode != null and dccode != ''">
+                                         AND CM_USER_AUTHORITY.DCCODE    = #{dccode}
+                                     </if>
+                                     <if test="gStorerkey != null and gStorerkey != ''">
+                                         AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey}
+                                     </if>
+                                     <if test="organize != null and organize != ''">
+                                         AND CM_USER_AUTHORITY.ORGANIZE  = #{organize}
+                                     </if>
+                                         AND CM_USER_AUTHORITY.USERID    = #{gUserId}
+                                         AND CM_USER_AUTHORITY.DCCODE    = WD_INPLAN.DCCODE
+                                         AND CM_USER_AUTHORITY.STORERKEY = WD_INPLAN.STORERKEY
+                                         AND CM_USER_AUTHORITY.ORGANIZE  = WD_INPLAN.ORGANIZE
+                                         AND CM_USER_AUTHORITY.AREA      = WD_INPLAN.AREA
+                   JOIN MS_SKU ON MS_SKU.STORERKEY = WD_INPLAN.STORERKEY
+                              AND MS_SKU.SKU       = WD_INPLAN.SKU
+                   JOIN DM_DOCUMENT_D ON DM_DOCUMENT_D.DCCODE    = WD_INPLAN.DCCODE
+                                     AND DM_DOCUMENT_D.STORERKEY = WD_INPLAN.STORERKEY
+                                     AND DM_DOCUMENT_D.DOCTYPE   = WD_INPLAN.DOCTYPE
+                                     AND DM_DOCUMENT_D.DOCDT     = WD_INPLAN.DOCDT
+                                     AND DM_DOCUMENT_D.DOCNO     = WD_INPLAN.DOCNO
+                                     AND DM_DOCUMENT_D.DOCLINE   = WD_INPLAN.DOCLINE
+                                     AND DM_DOCUMENT_D.DEL_YN    = 'N'
+                                 <if test="channel != null and channel != ''">
+                                     AND DM_DOCUMENT_D.CHANNEL   = #{channel}
+                                 </if>
+                   JOIN DM_DOCUMENT_H ON DM_DOCUMENT_H.DCCODE    = DM_DOCUMENT_D.DCCODE
+                                     AND DM_DOCUMENT_H.STORERKEY = DM_DOCUMENT_D.STORERKEY
+                                     AND DM_DOCUMENT_H.DOCTYPE   = DM_DOCUMENT_D.DOCTYPE
+                                     AND DM_DOCUMENT_H.DOCDT     = DM_DOCUMENT_D.DOCDT
+                                     AND DM_DOCUMENT_H.DOCNO     = DM_DOCUMENT_D.DOCNO
+                                     AND DM_DOCUMENT_H.DEL_YN    = 'N'
+                   JOIN CM_DC ON CM_DC.DCCODE = TM_INPLAN.DCCODE
+                   LEFT OUTER JOIN  MS_CUST T_MNGPLC ON DM_DOCUMENT_H.STORERKEY = T_MNGPLC.STORERKEY
+                                                    AND 'C'                     = T_MNGPLC.CUSTTYPE
+                                                    AND DM_DOCUMENT_H.MNGPLC_ID = T_MNGPLC.CUSTKEY
+                   LEFT OUTER JOIN  MS_CUSTDLVINFO ON DM_DOCUMENT_H.STORERKEY = MS_CUSTDLVINFO.STORERKEY
+                                                  AND 'C'                     = MS_CUSTDLVINFO.CUSTTYPE
+                                                  AND DM_DOCUMENT_H.MNGPLC_ID = MS_CUSTDLVINFO.CUSTKEY
+                                                  AND MS_CUSTDLVINFO.MEMO IS NOT NULL
+                  WHERE 1 = 1
+                    AND MS_CUSTDLVINFO.MEMO IS NOT NULL
+
+                  GROUP BY TM_INPLAN.DCCODE
+                         , CM_DC.DESCRIPTION
+                         , TM_INPLAN.DELIVERYDT
+                         , TM_INPLAN.CARNO
+                         , TM_INPLAN.DELIVERYGROUP
+                         , DM_DOCUMENT_H.TO_CUSTNAME
+                         , T_MNGPLC.DESCRIPTION
+                 
+                 UNION ALL
+                 
+                 SELECT TM_INPLAN.DCCODE ||' '||CM_DC.DESCRIPTION                                           AS DCNAME
+                      , TM_INPLAN.CARNO  ||' ( '||TM_INPLAN.DELIVERYGROUP||' ) '                            AS CARNAME
+                      , FN_FORMAT_MASK(TM_INPLAN.DELIVERYDT, '####-##-##')                          AS DELIVERYDT
+                      , DM_DOCUMENT_H.TO_CUSTNAME||' ('||T_MNGPLC.DESCRIPTION||')'                          AS CUSTNAME
+                      , '('||#{channelnm}||')'                                                              AS CHANNELNM
+                      , NULL                                                                                AS MEMO
+                      , TM_INPLAN.TMMEMO                                                                    AS TMMEMO
+                      , TM_INPLAN.DELIVERYGROUP
+                      , TRIM(TM_INPLAN.DCCODE)||'_'||TRIM(TM_INPLAN.CARNO)||'_'||TRIM(TM_INPLAN.DELIVERYDT) AS KEY
+                   FROM (
+                        SELECT 
+                              TM_INPLAN.STORERKEY
+                            , TM_INPLAN.DCCODE
+                            , TM_INPLAN.DOCTYPE
+                            , TM_INPLAN.DELIVERYDT
+                            , TM_INPLAN.CARNO
+                            , TM_INPLAN.PRIORITY
+                            , TM_INPLAN.DELIVERYGROUP
+                            , TM_INPLAN.COURIER
+                            , TM_INPLAN.SLIPDT
+                            , TM_INPLAN.SLIPNO
+                            , TM_INPLAN.DCDEPARTUREDT
+                            , TM_INPLAN.LOADSTATUS
+                            , TM_INPLAN.TMMEMO
+                        FROM TM_INPLAN
+                        WHERE   TM_INPLAN.DEL_YN     = 'N'
+                            AND TM_INPLAN.STATUS     = '90'
+                            AND TM_INPLAN.TM_DELIVERYTYPE   IN ('1','2')
+                            AND TM_INPLAN.SPLIT_DELIVERY_YN = 'N'
+                            AND TM_INPLAN.TMMEMO IS NOT NULL
+                        <if test="dccode != null and dccode != ''">
+                            AND TM_INPLAN.DCCODE = #{dccode}
+                        </if>
+                        <if test="deliverygroup != null and deliverygroup != ''">
+                            AND TM_INPLAN.DELIVERYGROUP = #{deliverygroup} 
+                        </if>  
+                        <if test="deliverydt != null and deliverydt != ''">
+                            AND TM_INPLAN.DELIVERYDT = #{deliverydt}
+                        </if>
+                        <if test="fromSlipdt != null and fromSlipdt != ''">
+                            AND TM_INPLAN.DELIVERYDT <![CDATA[>=]]> #{fromSlipdt}
+                        </if>
+                        <if test="toSlipdt != null and toSlipdt != ''">
+                            AND TM_INPLAN.DELIVERYDT <![CDATA[<=]]> #{toSlipdt}
+                        </if>
+                        UNION ALL
+               
+                        SELECT 
+                              TM_INPLAN_SPLIT.STORERKEY
+                            , TM_INPLAN_SPLIT.DCCODE
+                            , TM_INPLAN_SPLIT.DOCTYPE
+                            , TM_INPLAN_SPLIT.DELIVERYDT
+                            , TM_INPLAN_SPLIT.CARNO
+                            , TM_INPLAN_SPLIT.PRIORITY
+                            , TM_INPLAN_SPLIT.DELIVERYGROUP
+                            , TM_INPLAN_SPLIT.COURIER
+                            , TM_INPLAN_SPLIT.SLIPDT
+                            , TM_INPLAN_SPLIT.SLIPNO
+                            , TM_INPLAN_SPLIT.DCDEPARTUREDT
+                            , TM_INPLAN_SPLIT.LOADSTATUS
+                            , TM_INPLAN_SPLIT.TMMEMO
+                        FROM TM_INPLAN_SPLIT
+                        WHERE   TM_INPLAN_SPLIT.DEL_YN     = 'N'
+                            AND TM_INPLAN_SPLIT.STATUS     = '90'
+                            AND TM_INPLAN_SPLIT.TM_DELIVERYTYPE  IN ('1','2')
+                            AND TM_INPLAN_SPLIT.TMMEMO IS NOT NULL
+                        <if test="dccode != null and dccode != ''">
+                            AND TM_INPLAN_SPLIT.DCCODE = #{dccode}
+                        </if>
+                        <if test="deliverygroup != null and deliverygroup != ''">
+                            AND TM_INPLAN_SPLIT.DELIVERYGROUP = #{deliverygroup} 
+                        </if>    
+                        <if test="deliverydt != null and deliverydt != ''">
+                            AND TM_INPLAN_SPLIT.DELIVERYDT = #{deliverydt}
+                        </if>
+                        <if test="fromSlipdt != null and fromSlipdt != ''">
+                            AND TM_INPLAN_SPLIT.DELIVERYDT <![CDATA[>=]]> #{fromSlipdt}
+                        </if>
+                        <if test="toSlipdt != null and toSlipdt != ''">
+                            AND TM_INPLAN_SPLIT.DELIVERYDT <![CDATA[<=]]> #{toSlipdt}
+                        </if>
+                        )  TM_INPLAN
+                   JOIN SY_PROCESSTEMP_TM ON SY_PROCESSTEMP_TM.DELIVERYDT     = TM_INPLAN.DELIVERYDT
+                                         AND SY_PROCESSTEMP_TM.DELIVERYGROUP  = TM_INPLAN.DELIVERYGROUP
+                                         AND SY_PROCESSTEMP_TM.PRIORITY       = TM_INPLAN.PRIORITY
+                                         AND SY_PROCESSTEMP_TM.CARNO          = TM_INPLAN.CARNO
+                                         AND SY_PROCESSTEMP_TM.PROCESSTYPE    = #{processtype}
+                                         AND SY_PROCESSTEMP_TM.PROCESSCREATOR = #{gUserId}
+                                         AND SY_PROCESSTEMP_TM.SPID           = #{gSpid}
+                   JOIN WD_INPLAN ON WD_INPLAN.DCCODE    = TM_INPLAN.DCCODE
+                                 AND WD_INPLAN.DOCTYPE   = TM_INPLAN.DOCTYPE
+                                 AND WD_INPLAN.STORERKEY = TM_INPLAN.STORERKEY
+                                 AND WD_INPLAN.SLIPDT    = TM_INPLAN.SLIPDT
+                                 AND WD_INPLAN.SLIPNO    = TM_INPLAN.SLIPNO
+                             <!-- 고객 다중선택 -->
+                             <if test="toCustkey != null and toCustkey != ''">
+                                 AND WD_INPLAN.CUSTKEY IN (SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS VAL
+                                                             FROM (SELECT #{toCustkey} AS VAL FROM DUAL) A
+                                                          CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+                             </if>
+                   JOIN CM_USER_AUTHORITY ON 1=1
+                                     <if test="dccode != null and dccode != ''">
+                                         AND CM_USER_AUTHORITY.DCCODE    = #{dccode}
+                                     </if>
+                                     <if test="gStorerkey != null and gStorerkey != ''">
+                                         AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey}
+                                     </if>
+                                     <if test="organize != null and organize != ''">
+                                         AND CM_USER_AUTHORITY.ORGANIZE  = #{organize}
+                                     </if>
+                                         AND CM_USER_AUTHORITY.USERID    = #{gUserId}
+                                         AND CM_USER_AUTHORITY.DCCODE    = WD_INPLAN.DCCODE
+                                         AND CM_USER_AUTHORITY.STORERKEY = WD_INPLAN.STORERKEY
+                                         AND CM_USER_AUTHORITY.ORGANIZE  = WD_INPLAN.ORGANIZE
+                                         AND CM_USER_AUTHORITY.AREA      = WD_INPLAN.AREA
+                   JOIN MS_SKU ON MS_SKU.STORERKEY = WD_INPLAN.STORERKEY
+                              AND MS_SKU.SKU       = WD_INPLAN.SKU
+                   JOIN DM_DOCUMENT_D ON DM_DOCUMENT_D.DCCODE    = WD_INPLAN.DCCODE
+                                     AND DM_DOCUMENT_D.STORERKEY = WD_INPLAN.STORERKEY
+                                     AND DM_DOCUMENT_D.DOCTYPE   = WD_INPLAN.DOCTYPE
+                                     AND DM_DOCUMENT_D.DOCDT     = WD_INPLAN.DOCDT
+                                     AND DM_DOCUMENT_D.DOCNO     = WD_INPLAN.DOCNO
+                                     AND DM_DOCUMENT_D.DOCLINE   = WD_INPLAN.DOCLINE
+                                     AND DM_DOCUMENT_D.DEL_YN    = 'N'
+                                 <if test="channel != null and channel != ''">
+                                     AND DM_DOCUMENT_D.CHANNEL   = #{channel}
+                                 </if>
+                   JOIN DM_DOCUMENT_H ON DM_DOCUMENT_H.DCCODE    = DM_DOCUMENT_D.DCCODE
+                                     AND DM_DOCUMENT_H.STORERKEY = DM_DOCUMENT_D.STORERKEY
+                                     AND DM_DOCUMENT_H.DOCTYPE   = DM_DOCUMENT_D.DOCTYPE
+                                     AND DM_DOCUMENT_H.DOCDT     = DM_DOCUMENT_D.DOCDT
+                                     AND DM_DOCUMENT_H.DOCNO     = DM_DOCUMENT_D.DOCNO
+                                     AND DM_DOCUMENT_H.DEL_YN    = 'N'
+                   JOIN CM_DC ON CM_DC.DCCODE = TM_INPLAN.DCCODE
+                   LEFT OUTER JOIN MS_CUST T_MNGPLC ON DM_DOCUMENT_H.STORERKEY = T_MNGPLC.STORERKEY
+                                                   AND 'C'                     = T_MNGPLC.CUSTTYPE
+                                                   AND DM_DOCUMENT_H.MNGPLC_ID = T_MNGPLC.CUSTKEY
+                  WHERE 1 = 1
+                    AND TM_INPLAN.TMMEMO IS NOT NULL
+
+                  GROUP BY TM_INPLAN.DCCODE
+                      , CM_DC.DESCRIPTION
+                      , TM_INPLAN.DELIVERYDT
+                      , TM_INPLAN.CARNO
+                      , TM_INPLAN.DELIVERYGROUP
+                      , DM_DOCUMENT_H.TO_CUSTNAME
+                      , T_MNGPLC.DESCRIPTION
+                      , TM_INPLAN.TMMEMO ) LIST
+         
+         ORDER BY LIST.DCNAME
+                , LIST.DELIVERYDT
+                , LIST.CARNAME
+                , LIST.DELIVERYGROUP
+                , LIST.CUSTNAME
+                , LIST.MEMO
+    </select>
+
+    <select id="getPrintList" resultType="WdLoadReportDto">
+        SELECT /* [WdLoadService.sqlx][wdLoadService.getPrintList][출차지시처리 - 상차지시서 출력][JiHoPark][2025.11.13] */
+              TM_INPLAN.DCCODE ||' ( '||CM_DC.DCNAME||' ) '                                                                                               AS DCNAME
+            , TM_INPLAN.CARNO  ||' ( '||TM_INPLAN.DELIVERYGROUP||' ) '                                                                                    AS CARNAME
+            , TM_INPLAN.CARNO  ||' / '||(SELECT CM_DRIVER.DRIVERNAME
+                                           FROM CM_CAR
+                                           LEFT OUTER JOIN CM_DRIVER ON CM_DRIVER.DRIVERID = NVL(CM_CAR.DRIVER1, CM_CAR.DRIVER2)
+                                          WHERE CM_CAR.CARNO = TM_INPLAN.CARNO
+                                            AND CM_DRIVER.DEL_YN = 'N')                                                                                   AS DRIVERNAME
+            , FN_FORMAT_MASK(TM_INPLAN.DELIVERYDT, '####-##-##')                                                                                          AS DELIVERYDT
+            , DM_DOCUMENT_H.TO_CUSTKEY                                                                                                                    AS TO_CUSTKEY
+            , DM_DOCUMENT_H.TO_CUSTNAME||' ('||T_MNGPLC.DESCRIPTION||')'                                                                                  AS CUSTNAME
+            , NVL(DM_DOCUMENT_H_PO.FROM_CUSTNAME,' ')                                                                                                     AS VENDOR
+            , MS_SKU.SKU                                                                                                                                  AS SKU
+            , CASE WHEN NVL(DM_DOCUMENT_D.PROCPOSS_YN,'Y') = 'R'
+                   THEN '●●'|| MS_SKU.DESCRIPTION
+                   ELSE MS_SKU.DESCRIPTION
+               END                                                                                                                                        AS SKUNAME
+            , WD_INPLAN.ORDERQTY * DM_DOCUMENT_D.BUNMO / DM_DOCUMENT_D.BUNJA                                                                              AS QTY
+            , DM_DOCUMENT_D.STORERUOM                                                                                                                     AS STORERUOM
+            , FN_CODEDESCR(MS_SKU.STORERKEY, 'STORAGETYPE', MS_SKU.STORAGETYPE)                                                                           AS STORAGETYPE
+            , FN_CONV_UOM (TM_INPLAN.STORERKEY, MS_SKU.SKU, DM_DOCUMENT_D.STORERUOM,'KG', WD_INPLAN.ORDERQTY * DM_DOCUMENT_D.BUNMO / DM_DOCUMENT_D.BUNJA) AS CONV_KG
+            , FN_CODEDESCR(MS_SKU.STORERKEY, 'PUTAWAYTYPE', DM_DOCUMENT_D.CHANNEL)                                                                        AS CHANNEL
+            ,'('||#{channelnm}||')'                                                                                                                       AS CHANNELNM
+<if test="searchgubun != null and searchgubun != ''">
+    <if test="searchgubun == '0'.toString()">
+        <if test="searchtype != null and searchtype != ''">
+            <if test="searchtype == '1'.toString()">
+            , TRIM(TM_INPLAN.DCCODE)||'_'||TRIM(DM_DOCUMENT_H.TO_CUSTKEY)||'_'||TRIM(TM_INPLAN.DELIVERYDT)                                                AS KEY
+            </if>
+            <if test="searchtype == '0'.toString()">
+            , TRIM(TM_INPLAN.DCCODE)||'_'||TRIM(TM_INPLAN.CARNO)||'_'||TRIM(TM_INPLAN.DELIVERYDT)                                                         AS KEY
+            </if>
+        </if>
+    </if>
+    <if test="searchgubun == '1'.toString()">
+            , TRIM(TM_INPLAN.DCCODE)||'_'||TRIM(TM_INPLAN.CARNO)||'_'||TRIM(TM_INPLAN.DELIVERYDT)                                                         AS KEY
+    </if>
+</if>
+<if test="searchgubun != null or searchgubun == ''">
+            , TRIM(TM_INPLAN.DCCODE)||'_'||TRIM(TM_INPLAN.CARNO)||'_'||TRIM(TM_INPLAN.DELIVERYDT)                                                         AS KEY
+</if>
+         FROM (
+                SELECT 
+                     TM_INPLAN.STORERKEY
+                    , TM_INPLAN.DCCODE
+                    , TM_INPLAN.DOCTYPE
+                    , TM_INPLAN.DELIVERYDT
+                    , TM_INPLAN.CARNO
+                    , TM_INPLAN.PRIORITY
+                    , TM_INPLAN.DELIVERYGROUP
+                    , TM_INPLAN.COURIER
+                    , TM_INPLAN.SLIPDT
+                    , TM_INPLAN.SLIPNO
+                    , TM_INPLAN.DCDEPARTUREDT
+                    , TM_INPLAN.LOADSTATUS
+                    , TM_INPLAN.TMMEMO
+                FROM TM_INPLAN
+                WHERE   TM_INPLAN.DEL_YN     = 'N'
+                    AND TM_INPLAN.STATUS     = '90'
+                    AND TM_INPLAN.TM_DELIVERYTYPE   IN ('1','2')
+                    AND TM_INPLAN.SPLIT_DELIVERY_YN = 'N'
+                <if test="dccode != null and dccode != ''">
+                    AND TM_INPLAN.DCCODE = #{dccode}
+                </if>
+                <if test="deliverygroup != null and deliverygroup != ''">
+                    AND TM_INPLAN.DELIVERYGROUP = #{deliverygroup} 
+                </if>  
+                <if test="deliverydt != null and deliverydt != ''">
+                    AND TM_INPLAN.DELIVERYDT = #{deliverydt}
+                </if>
+                <if test="fromSlipdt != null and fromSlipdt != ''">
+                    AND TM_INPLAN.DELIVERYDT <![CDATA[>=]]> #{fromSlipdt}
+                </if>
+                <if test="toSlipdt != null and toSlipdt != ''">
+                    AND TM_INPLAN.DELIVERYDT <![CDATA[<=]]> #{toSlipdt}
+                </if>
+                UNION ALL
+               
+                SELECT 
+                     TM_INPLAN_SPLIT.STORERKEY
+                    , TM_INPLAN_SPLIT.DCCODE
+                    , TM_INPLAN_SPLIT.DOCTYPE
+                    , TM_INPLAN_SPLIT.DELIVERYDT
+                    , TM_INPLAN_SPLIT.CARNO
+                    , TM_INPLAN_SPLIT.PRIORITY
+                    , TM_INPLAN_SPLIT.DELIVERYGROUP
+                    , TM_INPLAN_SPLIT.COURIER
+                    , TM_INPLAN_SPLIT.SLIPDT
+                    , TM_INPLAN_SPLIT.SLIPNO
+                    , TM_INPLAN_SPLIT.DCDEPARTUREDT
+                    , TM_INPLAN_SPLIT.LOADSTATUS
+                    , TM_INPLAN_SPLIT.TMMEMO
+                FROM TM_INPLAN_SPLIT
+                WHERE   TM_INPLAN_SPLIT.DEL_YN     = 'N'
+                    AND TM_INPLAN_SPLIT.STATUS     = '90'
+                    AND TM_INPLAN_SPLIT.TM_DELIVERYTYPE  IN ('1','2')
+                <if test="dccode != null and dccode != ''">
+                    AND TM_INPLAN_SPLIT.DCCODE = #{dccode}
+                </if>
+                <if test="deliverygroup != null and deliverygroup != ''">
+                    AND TM_INPLAN_SPLIT.DELIVERYGROUP = #{deliverygroup} 
+                </if>    
+                <if test="deliverydt != null and deliverydt != ''">
+                    AND TM_INPLAN_SPLIT.DELIVERYDT = #{deliverydt}
+                 </if>
+                 <if test="fromSlipdt != null and fromSlipdt != ''">
+                    AND TM_INPLAN_SPLIT.DELIVERYDT <![CDATA[>=]]> #{fromSlipdt}
+                </if>
+                <if test="toSlipdt != null and toSlipdt != ''">
+                    AND TM_INPLAN_SPLIT.DELIVERYDT <![CDATA[<=]]> #{toSlipdt}
+                </if>
+                )  TM_INPLAN
+         JOIN SY_PROCESSTEMP_TM ON SY_PROCESSTEMP_TM.DELIVERYDT     = TM_INPLAN.DELIVERYDT
+                               AND SY_PROCESSTEMP_TM.DELIVERYGROUP  = TM_INPLAN.DELIVERYGROUP
+                               AND SY_PROCESSTEMP_TM.PRIORITY       = TM_INPLAN.PRIORITY
+                               AND SY_PROCESSTEMP_TM.CARNO          = TM_INPLAN.CARNO
+                               AND SY_PROCESSTEMP_TM.PROCESSTYPE    = #{processtype}
+                               AND SY_PROCESSTEMP_TM.PROCESSCREATOR = #{gUserId}
+                               AND SY_PROCESSTEMP_TM.SPID           = #{gSpid}
+         JOIN WD_INPLAN ON WD_INPLAN.DCCODE    = TM_INPLAN.DCCODE
+                       AND WD_INPLAN.DOCTYPE   = TM_INPLAN.DOCTYPE
+                       AND WD_INPLAN.STORERKEY = TM_INPLAN.STORERKEY
+                       AND WD_INPLAN.SLIPDT    = TM_INPLAN.SLIPDT
+                       AND WD_INPLAN.SLIPNO    = TM_INPLAN.SLIPNO
+                   <!-- 고객 다중선택 -->
+                   <if test="toCustkey != null and toCustkey != ''">
+                       AND WD_INPLAN.CUSTKEY IN (SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS VAL
+                                                   FROM (SELECT #{toCustkey} AS VAL FROM DUAL) A
+                                                CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+                   </if>
+         JOIN CM_USER_AUTHORITY ON 1=1
+                           <if test="dccode != null and dccode != ''">
+                               AND CM_USER_AUTHORITY.DCCODE    = #{dccode}
+                           </if>
+                           <if test="gStorerkey != null and gStorerkey != ''">
+                               AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey}
+                           </if>
+                           <if test="organize != null and organize != ''">
+                               AND CM_USER_AUTHORITY.ORGANIZE  = #{organize}
+                           </if>
+                               AND CM_USER_AUTHORITY.USERID    = #{gUserId}
+                               AND CM_USER_AUTHORITY.DCCODE    = WD_INPLAN.DCCODE
+                               AND CM_USER_AUTHORITY.STORERKEY = WD_INPLAN.STORERKEY
+                               AND CM_USER_AUTHORITY.ORGANIZE  = WD_INPLAN.ORGANIZE
+                               AND CM_USER_AUTHORITY.AREA      = WD_INPLAN.AREA
+         JOIN MS_SKU ON MS_SKU.STORERKEY = WD_INPLAN.STORERKEY
+                    AND MS_SKU.SKU       = WD_INPLAN.SKU
+         <!-- 		LEFT OUTER JOIN MS_CUSTXSKU -->
+         <!-- 		ON     WD_INPLAN.DCCODE         = MS_CUSTXSKU.DCCODE -->
+         <!-- 		AND    WD_INPLAN.STORERKEY      = MS_CUSTXSKU.STORERKEY -->
+         <!-- 		AND    WD_INPLAN.SKU            = MS_CUSTXSKU.SKU -->
+         <!-- 		LEFT OUTER JOIN  MS_CUST T_VENDOR -->
+         <!-- 		ON     MS_CUSTXSKU.STORERKEY    = T_VENDOR.STORERKEY -->
+         <!-- 		AND    MS_CUSTXSKU.CUSTTYPE     = T_VENDOR.CUSTTYPE -->
+         <!-- 		AND    MS_CUSTXSKU.CUSTKEY      = T_VENDOR.CUSTKEY -->
+         JOIN DM_DOCUMENT_D ON DM_DOCUMENT_D.DCCODE    = WD_INPLAN.DCCODE
+                           AND DM_DOCUMENT_D.STORERKEY = WD_INPLAN.STORERKEY
+                           AND DM_DOCUMENT_D.DOCTYPE   = WD_INPLAN.DOCTYPE
+                           AND DM_DOCUMENT_D.DOCDT     = WD_INPLAN.DOCDT
+                           AND DM_DOCUMENT_D.DOCNO     = WD_INPLAN.DOCNO
+                           AND DM_DOCUMENT_D.DOCLINE   = WD_INPLAN.DOCLINE
+                           AND DM_DOCUMENT_D.DEL_YN    = 'N'
+                       <if test="channel != null and channel != ''">
+                           AND DM_DOCUMENT_D.CHANNEL   = #{channel}
+                       </if>
+         JOIN DM_DOCUMENT_H ON DM_DOCUMENT_H.DCCODE    = DM_DOCUMENT_D.DCCODE
+                           AND DM_DOCUMENT_H.STORERKEY = DM_DOCUMENT_D.STORERKEY
+                           AND DM_DOCUMENT_H.DOCTYPE   = DM_DOCUMENT_D.DOCTYPE
+                           AND DM_DOCUMENT_H.DOCDT     = DM_DOCUMENT_D.DOCDT
+                           AND DM_DOCUMENT_H.DOCNO     = DM_DOCUMENT_D.DOCNO
+                           AND DM_DOCUMENT_H.DEL_YN = 'N'
+         JOIN CM_DC ON CM_DC.DCCODE = TM_INPLAN.DCCODE
+         LEFT OUTER JOIN MS_CUST T_MNGPLC ON DM_DOCUMENT_H.STORERKEY = T_MNGPLC.STORERKEY
+                                         AND 'C'                     = T_MNGPLC.CUSTTYPE
+                                         AND DM_DOCUMENT_H.MNGPLC_ID = T_MNGPLC.CUSTKEY
+         LEFT OUTER JOIN DM_DOCUMENT_H DM_DOCUMENT_H_PO ON DM_DOCUMENT_H_PO.DCCODE    = DM_DOCUMENT_D.DCCODE
+                                                       AND DM_DOCUMENT_H_PO.STORERKEY = DM_DOCUMENT_D.STORERKEY
+                                                       AND DM_DOCUMENT_H_PO.DOCTYPE   = 'DP'
+                                                       AND DM_DOCUMENT_H_PO.DOCNO     = DM_DOCUMENT_D.POKEY
+        WHERE 1 = 1
+      <if test="deliverygroup != null and deliverygroup != ''">
+          AND TM_INPLAN.DELIVERYGROUP = #{deliverygroup}
+      </if>
+        ORDER BY TM_INPLAN.DCCODE
+               , TM_INPLAN.DELIVERYDT
+               , TM_INPLAN.CARNO
+               , TM_INPLAN.DELIVERYGROUP
+               , DM_DOCUMENT_H.TO_CUSTNAME||' ('||T_MNGPLC.DESCRIPTION||')'
+               , MS_SKU.STORAGETYPE
+               , DECODE(DM_DOCUMENT_H_PO.FROM_CUSTNAME, NULL, 2, 1)
+               , NVL(DM_DOCUMENT_H_PO.FROM_CUSTNAME, ' ')
+               , MS_SKU.DESCRIPTION
+    </select>
+
+    <insert id="insertSyProcessTempTm">
+        INSERT /* [WdLoadService.sqlx][wdLoadService.insertSyProcessTempTm][임시저장 정보 TM 등록][JiHoPark][2025.11.13] */
+          INTO SY_PROCESSTEMP_TM
+             ( PROCESSTYPE
+             , PROCESSCREATOR
+             , SPID
+             , PROCESSFLAG
+             , DELIVERYDT
+             , DELIVERYGROUP
+             , CARNO
+             , PRIORITY
+             , SLIPDT
+             , SLIPNO
+             , SLIPTYPE
+             , STORERKEY
+             , CUSTTYPE
+             , CUSTKEY
+             , STATUS
+             , DEL_YN
+             , ADDDATE
+             , EDITDATE
+             , ADDWHO
+             , EDITWHO )
+           <foreach collection="list" item="item" separator="UNION ALL">
+               SELECT #{item.processtype}           AS PROCESSTYPE
+                    , #{item.processcreator}        AS PROCESSCREATOR
+                    , #{item.spid}                  AS SPID
+                    , NVL(#{item.processflag}, 'N') AS PROCESSFLAG
+                    , #{item.deliverydt}            AS DELIVERYDT
+                    , #{item.deliverygroup}         AS DELIVERYGROUP
+                    , #{item.carno}                 AS CARNO
+                    , #{item.priority}              AS PRIORITY
+                    , #{item.slipdt}                AS SLIPDT
+                    , #{item.slipno}                AS SLIPNO
+                    , #{item.sliptype}              AS SLIPTYPE
+                    , #{item.storerkey}             AS STORERKEY
+                    , #{item.custtype}              AS CUSTTYPE
+                    , #{item.custkey}               AS CUSTKEY
+                    , NVL(#{item.status}, '00')     AS STATUS
+                    , NVL(#{item.delYn}, 'N')       AS DEL_YN
+                    , SYSDATE                       AS ADDDATE
+                    , SYSDATE                       AS EDITDATE
+                    , #{item.addwho}                AS ADDWHO
+                    , #{item.editwho}               AS EDITWHO
+                 FROM DUAL
+           </foreach>
+    </insert>
+
+    <delete id="deleteSyProcessTempTm">
+        DELETE /* [WdLoadService.sqlx][wdLoadService.deleteSyProcessTempTm][임시저장 정보 TM 삭제][JiHoPark][2025.11.13] */
+          FROM SY_PROCESSTEMP_TM
+         WHERE PROCESSCREATOR = #{gUserId}
+           AND PROCESSTYPE    = #{processtype}
+           AND SPID           = #{gSpid}
+    </delete>
+
+</mapper>

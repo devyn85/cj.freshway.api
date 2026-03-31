@@ -1,0 +1,587 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="dpUnloadService">
+    <!-- 문서헤더정보 데이터셋 전달 -->
+    <select id="getMasterList" resultType="cjfw.wms.dp.dto.DpUnloadResDto">
+        SELECT /* [dpUnloadService.sqlx][dpUnloadService.getDataHeaderList][하차등록] */
+            '0' AS CHECKYN /* 체크여부 */
+            , DM_DOCUMENT_H.DCCODE AS DCCODE /* 센터코드 */
+            , DM_DOCUMENT_H.STORERKEY AS STORERKEY /* 화주코드 */
+            , DM_DOCUMENT_H.FROM_CUSTKEY AS FROM_CUSTKEY /* 출발거래처코드 */
+            , DM_DOCUMENT_H.FROM_CUSTNAME AS FROM_CUSTNAME /* 출발거래처명 */
+            , DP_INPLAN.SLIPDT AS SLIPDT /* 입고예정일 */
+        FROM DM_DOCUMENT_D
+        JOIN CM_USER_AUTHORITY
+            ON CM_USER_AUTHORITY.USERID = #{gUserId}
+            AND CM_USER_AUTHORITY.DCCODE = DM_DOCUMENT_D.DCCODE
+            AND CM_USER_AUTHORITY.STORERKEY = DM_DOCUMENT_D.STORERKEY
+            AND CM_USER_AUTHORITY.ORGANIZE = DM_DOCUMENT_D.ORGANIZE
+            AND CM_USER_AUTHORITY.AREA = DM_DOCUMENT_D.AREA
+            <if test="fixdccode != null and fixdccode != ''">
+                AND CM_USER_AUTHORITY.DCCODE = #{fixdccode}
+            </if>
+            <if test="gStorerkey != null and gStorerkey != ''">
+                AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey}
+            </if>
+            <if test="gOrganize != null and gOrganize != ''">
+                AND CM_USER_AUTHORITY.ORGANIZE = #{gOrganize}
+            </if>
+            <if test="gArea != null and gArea != ''">
+                AND CM_USER_AUTHORITY.AREA = #{gArea}
+            </if>
+            <!-- 창고 다중선택 -->
+            <if test="gMultiOrganize != null and gMultiOrganize != ''">
+                AND CM_USER_AUTHORITY.ORGANIZE IN
+                (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                FROM (SELECT #{gMultiOrganize} AS VAL FROM DUAL) A
+                CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+            </if>
+        JOIN DM_DOCUMENT_H
+            ON DM_DOCUMENT_D.DCCODE = DM_DOCUMENT_H.DCCODE
+            AND DM_DOCUMENT_D.DOCTYPE = DM_DOCUMENT_H.DOCTYPE
+            AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+            AND DM_DOCUMENT_D.DOCNO = DM_DOCUMENT_H.DOCNO
+            AND DM_DOCUMENT_H.DEL_YN = 'N'
+            <!-- 협력사 다중선택 -->
+            <if test="fromCustkey != null and fromCustkey != ''">
+                AND DM_DOCUMENT_H.FROM_CUSTKEY IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                FROM (SELECT #{fromCustkey} AS VAL FROM DUAL) A
+                CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+            </if>
+            <!-- 배송그룹 공통조회 조건 -->
+            <if test="gMultiCourier != null and gMultiCourier != ''">
+                AND DM_DOCUMENT_H.COURIER = #{gMultiCourier}
+            </if>
+        JOIN DP_INPLAN
+            ON DP_INPLAN.DCCODE = DM_DOCUMENT_D.DCCODE
+            AND DP_INPLAN.DOCTYPE = DM_DOCUMENT_D.DOCTYPE
+            AND DP_INPLAN.SLIPDT = DM_DOCUMENT_D.DELIVERYDATE
+            AND DP_INPLAN.DOCNO = DM_DOCUMENT_D.DOCNO
+            AND DP_INPLAN.DOCLINE = DM_DOCUMENT_D.DOCLINE
+            AND DP_INPLAN.DEL_YN = 'N'
+        JOIN MS_SKU
+            ON MS_SKU.STORERKEY = DM_DOCUMENT_D.STORERKEY
+            AND MS_SKU.SKU = DM_DOCUMENT_D.SKU
+            AND MS_SKU.DEL_YN = 'N'
+            <if test="storagetype != null and storagetype != ''">
+                AND MS_SKU.STORAGETYPE LIKE #{storagetype}
+            </if>
+        <if test='joinfg == "Y"'>
+            JOIN DP_UNLOADCARLOG
+                ON DP_UNLOADCARLOG.STORERKEY = DP_INPLAN.STORERKEY
+                AND DP_UNLOADCARLOG.DCCODE = DP_INPLAN.DCCODE
+                AND DP_UNLOADCARLOG.SLIPDT = DP_INPLAN.SLIPDT
+                AND DP_UNLOADCARLOG.CUSTKEY = DP_INPLAN.CUSTKEY
+            <if test='tempoptiyn != null and tempoptiyn != ""'>
+                AND (DP_UNLOADCARLOG.OTHER01 = #{tempoptiyn} OR DP_UNLOADCARLOG.OTHER01 IS NULL)
+            </if>
+        </if>
+        LEFT JOIN DP_QRSCANLOG
+            ON DM_DOCUMENT_H.DOCNO = DP_QRSCANLOG.DOCNO
+            AND  DM_DOCUMENT_H.FROM_CUSTKEY = DP_QRSCANLOG.CUSTKEY
+            AND  DM_DOCUMENT_H.DELIVERYDATE = DP_QRSCANLOG.DELIVERYDATE
+        WHERE 1=1
+            AND DM_DOCUMENT_D.DOCTYPE = 'DP'
+            <if test='moveYn == "Y"'>
+                AND DM_DOCUMENT_H.WORKPROCESSCODE != 'STO'
+            </if>
+            <if test="slipdtFrom != null and slipdtFrom != ''">
+                AND DM_DOCUMENT_D.DELIVERYDATE <![CDATA[>=]]> #{slipdtFrom}
+            </if>
+            <if test="slipdtTo != null and slipdtTo != ''">
+                AND DM_DOCUMENT_D.DELIVERYDATE <![CDATA[<=]]> #{slipdtTo}
+            </if>
+            <if test="docdtFrom != null and docdtFrom != ''">
+                AND DM_DOCUMENT_D.DOCDT <![CDATA[>=]]> #{docdtFrom}
+            </if>
+            <if test="docdtTo != null and docdtTo != ''">
+                AND DM_DOCUMENT_D.DOCDT <![CDATA[<=]]> #{docdtTo}
+            </if>
+            <!-- 상품 다중선택 -->
+            <if test="sku != null and sku != ''">
+                AND DM_DOCUMENT_D.SKU IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                FROM (SELECT #{sku} AS VAL FROM DUAL) A
+                CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+            </if>
+            <if test="channel != null and channel != ''">
+                AND DM_DOCUMENT_D.CHANNEL LIKE #{channel}
+            </if>
+            <if test="unloadtimeFrom != null and unloadtimeFrom != ''">
+                AND TO_CHAR(DP_QRSCANLOG.ADDDATE, 'hh24mi') <![CDATA[>=]]> #{unloadtimeFrom}
+            </if>
+            <if test="unloadtimeTo != null and unloadtimeTo != ''">
+                AND TO_CHAR(DP_QRSCANLOG.ADDDATE, 'hh24mi') <![CDATA[<=]]> #{unloadtimeTo}
+            </if>
+        GROUP BY
+            DM_DOCUMENT_H.DCCODE
+            , DM_DOCUMENT_H.STORERKEY
+            , DM_DOCUMENT_H.FROM_CUSTKEY
+            , DM_DOCUMENT_H.FROM_CUSTNAME
+            , DP_INPLAN.SLIPDT
+        ORDER BY
+            DP_INPLAN.SLIPDT
+            , DM_DOCUMENT_H.FROM_CUSTKEY
+    </select>
+
+    <!-- 하차등록상세 -->
+    <select id="getCarLogList" resultType="cjfw.wms.dp.dto.DpUnloadResCarLogDto">
+        SELECT /* [dpUnloadService.sqlx][dpUnloadService.getCarLogList][하차등록] */
+            '0' AS CHECKYN /* 체크여부 */
+            , #{dccode} AS DCCODE /* 센터코드 */
+            , #{storerkey} AS STORERKEY /* 화주코드 */
+            , #{slipdt} AS SLIPDT /* 입고예정일 */
+            , #{fromCustkey} AS CUSTKEY /* 거래처코드 */
+            , DM_DOCUMENT_H.DOCNO AS DOCNO /* 인보이스 */
+            , TO_CHAR(DP_QRSCANLOG.ADDDATE, 'hh24:mi') AS INSPTIME /* 입차시간 */
+            , DP_UNLOADCARLOG.SERIALKEY AS SERIALKEY /* 운송업체코드 */
+            , DP_UNLOADCARLOG.CARRIERKEY AS CARRIERKEY /* 운송업체코드 */
+            , DP_UNLOADCARLOG.DELIVERYGROUP AS DELIVERYGROUP /* 배송그룹 */
+            , DP_UNLOADCARLOG.TEMPERATURE1 AS TEMPERATURE1 /* 온도1 */
+            , DP_UNLOADCARLOG.TEMPERATURE2 AS TEMPERATURE2 /* 온도2 */
+            , CASE 
+                WHEN DP_UNLOADCARLOG.OTHER01 IS NULL AND DP_UNLOADCARLOG.TEMPERATURE1 IS NOT NULL AND DP_UNLOADCARLOG.TEMPERATURE2 IS NULL
+                    AND (DP_UNLOADCARLOG.TEMPERATURE1 <![CDATA[>=]]> 0 AND DP_UNLOADCARLOG.TEMPERATURE1 <![CDATA[<=]]> 10) THEN 'S'
+                WHEN DP_UNLOADCARLOG.OTHER01 IS NULL AND DP_UNLOADCARLOG.TEMPERATURE1 IS NULL AND DP_UNLOADCARLOG.TEMPERATURE2 IS NOT NULL
+                    AND DP_UNLOADCARLOG.TEMPERATURE2 <![CDATA[<=]]> -18 THEN 'S'
+                WHEN DP_UNLOADCARLOG.OTHER01 IS NULL AND DP_UNLOADCARLOG.TEMPERATURE1 IS NOT NULL AND DP_UNLOADCARLOG.TEMPERATURE2 IS NOT NULL
+                    AND (DP_UNLOADCARLOG.TEMPERATURE1 <![CDATA[>=]]> 0 AND DP_UNLOADCARLOG.TEMPERATURE1 <![CDATA[<=]]> 10 AND DP_UNLOADCARLOG.TEMPERATURE2 <![CDATA[<=]]> -18) THEN 'S'
+                WHEN DP_UNLOADCARLOG.OTHER01 IS NULL AND DP_UNLOADCARLOG.TEMPERATURE1 IS NULL AND DP_UNLOADCARLOG.TEMPERATURE2 IS NULL THEN ''
+                WHEN DP_UNLOADCARLOG.OTHER01 IS NOT NULL THEN TO_CHAR(DP_UNLOADCARLOG.OTHER01)
+                ELSE 'F'
+            END AS TEMPOPTITYPE /* 온도적정성 */
+            , NVL(DP_UNLOADCARLOG.DELIVERYTIME, '') AS DELIVERYTIME /* 배송시간 */
+            , NVL(DP_UNLOADCARLOG.DELIVERYMEMO, '') AS DELIVERYMEMO /* 배송메모 */
+            , 'U' AS IUFLAG /* 입력수정구분 */
+            , CASE WHEN DP_UNLOADCARLOG.CHANNEL IS NOT NULL
+                THEN DP_UNLOADCARLOG.CHANNEL
+                ELSE (
+                    SELECT max(DM_DOCUMENT_D.CHANNEL)
+                    FROM DM_DOCUMENT_D
+                    WHERE DM_DOCUMENT_D.DCCODE       = DM_DOCUMENT_H.DCCODE
+                    AND DM_DOCUMENT_D.DOCTYPE      = DM_DOCUMENT_H.DOCTYPE
+                    AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+                    AND DM_DOCUMENT_D.DOCNO        = DM_DOCUMENT_H.DOCNO
+                )
+                END AS CHANNEL /* 채널 */
+            , MS_INTIME.TO_INTIME AS TO_INTIME
+        FROM DM_DOCUMENT_H
+        LEFT JOIN DP_QRSCANLOG
+            ON DM_DOCUMENT_H.DOCNO = DP_QRSCANLOG.DOCNO
+            AND  DM_DOCUMENT_H.STORERKEY = DP_QRSCANLOG.STORERKEY
+            AND  DM_DOCUMENT_H.FROM_CUSTKEY = DP_QRSCANLOG.CUSTKEY
+            AND  DM_DOCUMENT_H.DELIVERYDATE = DP_QRSCANLOG.DELIVERYDATE
+        LEFT JOIN DP_UNLOADCARLOG
+            ON DM_DOCUMENT_H.DCCODE = DP_UNLOADCARLOG.DCCODE
+            AND DM_DOCUMENT_H.STORERKEY = DP_UNLOADCARLOG.STORERKEY
+            AND DM_DOCUMENT_H.DELIVERYDATE = DP_UNLOADCARLOG.SLIPDT
+            AND DM_DOCUMENT_H.FROM_CUSTKEY = DP_UNLOADCARLOG.CUSTKEY
+            AND DM_DOCUMENT_H.DOCNO = DP_UNLOADCARLOG.DOCNO
+            AND DP_QRSCANLOG.DELIVERYGROUP = DP_UNLOADCARLOG.DELIVERYGROUP
+        LEFT JOIN MS_INTIME
+        	ON MS_INTIME.DCCODE = DM_DOCUMENT_H.DCCODE
+        	AND MS_INTIME.STORERKEY = DM_DOCUMENT_H.STORERKEY
+        	AND MS_INTIME.CUSTKEY = DM_DOCUMENT_H.FROM_CUSTKEY
+        	AND MS_INTIME.CHANNEL= (SELECT max(DM_DOCUMENT_D.CHANNEL)
+                                    FROM DM_DOCUMENT_D
+                                    WHERE DM_DOCUMENT_D.DCCODE       = DM_DOCUMENT_H.DCCODE
+                                    AND DM_DOCUMENT_D.DOCTYPE      = DM_DOCUMENT_H.DOCTYPE
+                                    AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+                                    AND DM_DOCUMENT_D.DOCNO        = DM_DOCUMENT_H.DOCNO)
+        WHERE DM_DOCUMENT_H.DCCODE = #{dccode}
+            AND DM_DOCUMENT_H.STORERKEY = #{storerkey}
+            AND DM_DOCUMENT_H.DELIVERYDATE = #{slipdt}
+            AND DM_DOCUMENT_H.FROM_CUSTKEY = #{fromCustkey}
+            <if test="unloadtimeFrom != null and unloadtimeFrom != ''">
+                AND TO_CHAR(DP_QRSCANLOG.ADDDATE, 'hh24mi') <![CDATA[>=]]> #{unloadtimeFrom}
+            </if>
+            <if test="unloadtimeTo != null and unloadtimeTo != ''">
+                AND TO_CHAR(DP_QRSCANLOG.ADDDATE, 'hh24mi') <![CDATA[<=]]> #{unloadtimeTo}
+            </if>
+            <if test='tempoptiyn != null and tempoptiyn != ""'>
+                AND (DP_UNLOADCARLOG.OTHER01 = #{tempoptiyn} OR DP_UNLOADCARLOG.OTHER01 IS NULL)
+            </if>
+            <if test="channel != null and channel != ''">
+                AND CASE WHEN DP_UNLOADCARLOG.CHANNEL IS NOT NULL
+                    THEN DP_UNLOADCARLOG.CHANNEL
+                    ELSE (
+                        SELECT max(DM_DOCUMENT_D.CHANNEL)
+                        FROM DM_DOCUMENT_D
+                        WHERE DM_DOCUMENT_D.DCCODE       = DM_DOCUMENT_H.DCCODE
+                        AND DM_DOCUMENT_D.DOCTYPE      = DM_DOCUMENT_H.DOCTYPE
+                        AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+                        AND DM_DOCUMENT_D.DOCNO        = DM_DOCUMENT_H.DOCNO
+                    )
+                END = #{channel}
+            </if>
+    </select>
+    <!-- 하차등록상세 -->
+    <select id="getDetailList" resultType="cjfw.wms.dp.dto.DpUnloadResDetailDto">
+        SELECT /* [dpUnloadService.sqlx][dpUnloadService.getDetailList][하차등록] */
+            DM_DOCUMENT_D.DOCNO AS DOCNO /* 문서번호 */
+            , DM_DOCUMENT_D.CHANNEL AS CHANNEL /* 채널 */
+            , FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY,'PUTAWAYTYPE', DM_DOCUMENT_D.CHANNEL) AS CHANNEL_NAME /* 채널명 */
+            , DM_DOCUMENT_H.ORDERTYPE AS ORDERTYPE /* 주문유형 */
+            , FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY,'ORDERTYPE_DP', DM_DOCUMENT_H.ORDERTYPE) AS ORDERTYPE_NAME /* 주문유형명 */
+            , DM_DOCUMENT_H.DOCDT AS DOCDT /* 문서일자 */
+            , DM_DOCUMENT_D.DOCLINE AS DOCLINE /* 문서라인 */
+            , DP_INPLAN.SLIPDT AS SLIPDT /* 입고예정일 */
+            , DP_INPLAN.SLIPNO AS SLIPNO /* 입고예정번호 */
+            , DM_DOCUMENT_D.SKU AS SKU /* 상품코드 */
+            , DM_DOCUMENT_D.UOM AS UOM /* 단위 */
+            , MS_SKU.DESCRIPTION AS SKUNAME /* 상품명 */
+            , MS_SKU.STORAGETYPE AS STORAGETYPE /* 보관유형 */
+            , FN_CODEDESCR(MS_SKU.STORERKEY,'STORAGETYPE', MS_SKU.STORAGETYPE) AS STORAGETYPE_NAME /* 보관유형명 */
+            , DM_DOCUMENT_D.ORDERQTY AS ORDERQTY /* 주문수량 */
+            , DM_DOCUMENT_D.CONFIRMQTY AS CONFIRMQTY /* 확정수량 */
+            , DM_DOCUMENT_D.PLANT AS PLANT /* 공장 */
+            , '['||DM_DOCUMENT_D.PLANT||']'||FN_DESCR_PLANT(DM_DOCUMENT_D.PLANT) AS PLANT_DESCR /* 공장명 */
+        FROM DM_DOCUMENT_H
+        JOIN DM_DOCUMENT_D
+            ON DM_DOCUMENT_D.DCCODE = DM_DOCUMENT_H.DCCODE
+            AND DM_DOCUMENT_D.DOCTYPE = DM_DOCUMENT_H.DOCTYPE
+            AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+            AND DM_DOCUMENT_D.DOCNO = DM_DOCUMENT_H.DOCNO
+            <!-- 상품 다중선택 -->
+            <if test="sku != null and sku != ''">
+                AND DM_DOCUMENT_D.SKU IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                FROM (SELECT #{sku} AS VAL FROM DUAL) A
+                CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+            </if>
+            <if test="channel != null and channel != ''">
+                AND DM_DOCUMENT_D.CHANNEL LIKE #{channel}
+            </if>
+        JOIN CM_USER_AUTHORITY
+            ON CM_USER_AUTHORITY.USERID = #{gUserId}
+            AND CM_USER_AUTHORITY.DCCODE = #{dccode}
+            AND CM_USER_AUTHORITY.STORERKEY = #{storerkey}
+            AND CM_USER_AUTHORITY.DCCODE = DM_DOCUMENT_D.DCCODE
+            AND CM_USER_AUTHORITY.STORERKEY = DM_DOCUMENT_D.STORERKEY
+            AND CM_USER_AUTHORITY.ORGANIZE = DM_DOCUMENT_D.ORGANIZE
+            AND CM_USER_AUTHORITY.AREA = DM_DOCUMENT_D.AREA
+            <!-- 창고 다중선택 -->
+            <if test="gMultiOrganize != null and gMultiOrganize != ''">
+                AND CM_USER_AUTHORITY.ORGANIZE IN
+                (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                FROM (SELECT #{gMultiOrganize} AS VAL FROM DUAL) A
+                CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+            </if>
+        JOIN MS_SKU
+            ON MS_SKU.STORERKEY = DM_DOCUMENT_D.STORERKEY
+            AND MS_SKU.SKU = DM_DOCUMENT_D.SKU
+            AND MS_SKU.DEL_YN = 'N'
+            <if test="storagetype != null and storagetype != ''">
+                AND MS_SKU.STORAGETYPE LIKE #{storagetype}
+            </if>
+        JOIN DP_INPLAN
+            ON DP_INPLAN.DCCODE = DM_DOCUMENT_D.DCCODE
+            AND DP_INPLAN.DOCTYPE = DM_DOCUMENT_D.DOCTYPE
+            AND DP_INPLAN.SLIPDT = DM_DOCUMENT_D.DELIVERYDATE
+            AND DP_INPLAN.DOCNO = DM_DOCUMENT_D.DOCNO
+            AND DP_INPLAN.DOCLINE = DM_DOCUMENT_D.DOCLINE
+            AND DP_INPLAN.DEL_YN = 'N'
+            AND DP_INPLAN.SLIPDT = #{slipdt}
+        WHERE DM_DOCUMENT_H.DOCTYPE = 'DP'
+            AND DM_DOCUMENT_H.DEL_YN = 'N'
+            AND DM_DOCUMENT_H.DCCODE = #{dccode}
+            AND DM_DOCUMENT_H.STORERKEY = #{storerkey}
+            AND DM_DOCUMENT_H.FROM_CUSTKEY = #{fromCustkey}
+        ORDER BY 
+            DM_DOCUMENT_D.DOCNO
+            , DM_DOCUMENT_D.SKU
+    </select>
+    <!-- 하차등록상세 -->
+    <select id="getDataMaxDetailList" resultType="integer">
+        SELECT /* [dpUnloadService.sqlx][dpUnloadService.getDataMaxDetailList][하차등록]*/
+            MAX(NVL(to_number(DP_UNLOADCARLOG.DELIVERYGROUP),0))+1 AS DELIVERYGROUP /* 배송그룹 */
+        FROM DP_UNLOADCARLOG
+        WHERE DP_UNLOADCARLOG.DCCODE = #{dccode}
+            AND DP_UNLOADCARLOG.STORERKEY = #{storerkey}
+            AND DP_UNLOADCARLOG.SLIPDT = #{slipdt}
+            AND DP_UNLOADCARLOG.CUSTKEY = #{fromCustkey}
+    </select>
+
+    <!-- 엑셀추출-->
+    <select id="getExcelList" resultType="cjfw.wms.dp.dto.DpUnloadResExcelDto">
+		SELECT /* [dpUnloadService.sqlx][dpUnloadService.getCarLogList][하차등록] */
+            DM_DOCUMENT_H.DELIVERYDATE AS SLIPDT /* 입고예정일 */
+            , DM_DOCUMENT_H.DCCODE AS DCCODE /* 센터코드 */
+            , DM_DOCUMENT_H.DOCNO
+            , DM_DOCUMENT_H.FROM_CUSTKEY AS FROM_CUSTKEY /* 거래처코드 */
+            , DM_DOCUMENT_H.FROM_CUSTNAME AS FROM_CUSTNAME
+            , DP_UNLOADCARLOG.DELIVERYGROUP AS DELIVERYGROUP /* 배송그룹 */
+            , NVL(DP_UNLOADCARLOG.TEMPERATURE1, '') AS TEMPERATURE1 /* 온도1 */
+            , NVL(DP_UNLOADCARLOG.TEMPERATURE2, '') AS TEMPERATURE2 /* 온도2 */
+            , CASE WHEN DP_UNLOADCARLOG.OTHER01 IS NOT NULL THEN CASE WHEN TO_CHAR(DP_UNLOADCARLOG.OTHER01) = 'S' THEN '적정' WHEN TO_CHAR(DP_UNLOADCARLOG.OTHER01) = 'F' THEN '이탈' ELSE '' END
+            ELSE ''
+            END AS TEMPOPTITYPE /* 온도적정성 */
+            , NVL(DP_UNLOADCARLOG.DELIVERYTIME, '') AS DELIVERYTIME /* 배송시간 */
+            , NVL(DP_UNLOADCARLOG.DELIVERYMEMO, '') AS DELIVERYMEMO /* 배송메모 */
+            , CASE WHEN DP_UNLOADCARLOG.CHANNEL IS NOT NULL
+                THEN DP_UNLOADCARLOG.CHANNEL
+                ELSE (
+                    SELECT max(DM_DOCUMENT_D.CHANNEL)
+                    FROM DM_DOCUMENT_D
+                    WHERE DM_DOCUMENT_D.DCCODE       = DM_DOCUMENT_H.DCCODE
+                    AND DM_DOCUMENT_D.DOCTYPE      = DM_DOCUMENT_H.DOCTYPE
+                    AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+                    AND DM_DOCUMENT_D.DOCNO        = DM_DOCUMENT_H.DOCNO
+                )
+                END AS CHANNELCODE /* 채널 */
+            , FN_CODEDESCR(DM_DOCUMENT_H.STORERKEY,'PUTAWAYTYPE',CASE WHEN DP_UNLOADCARLOG.CHANNEL IS NOT NULL
+                THEN DP_UNLOADCARLOG.CHANNEL
+                ELSE (
+                    SELECT max(DM_DOCUMENT_D.CHANNEL)
+                    FROM DM_DOCUMENT_D
+                    WHERE DM_DOCUMENT_D.DCCODE       = DM_DOCUMENT_H.DCCODE
+                    AND DM_DOCUMENT_D.DOCTYPE      = DM_DOCUMENT_H.DOCTYPE
+                    AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+                    AND DM_DOCUMENT_D.DOCNO        = DM_DOCUMENT_H.DOCNO
+                )
+                END) AS CHANNEL
+            , TO_CHAR(DP_QRSCANLOG.ADDDATE, 'hh24:mi') AS INSPTIME /* 입차시간 */
+        FROM DM_DOCUMENT_H
+        LEFT JOIN DP_QRSCANLOG
+            ON DM_DOCUMENT_H.DOCNO = DP_QRSCANLOG.DOCNO
+            AND  DM_DOCUMENT_H.STORERKEY = DP_QRSCANLOG.STORERKEY
+            AND  DM_DOCUMENT_H.FROM_CUSTKEY = DP_QRSCANLOG.CUSTKEY
+            AND  DM_DOCUMENT_H.DELIVERYDATE = DP_QRSCANLOG.DELIVERYDATE
+        LEFT JOIN DP_UNLOADCARLOG
+            ON DM_DOCUMENT_H.DCCODE = DP_UNLOADCARLOG.DCCODE
+            AND DM_DOCUMENT_H.STORERKEY = DP_UNLOADCARLOG.STORERKEY
+            AND DM_DOCUMENT_H.DELIVERYDATE = DP_UNLOADCARLOG.SLIPDT
+            AND DM_DOCUMENT_H.FROM_CUSTKEY = DP_UNLOADCARLOG.CUSTKEY
+            AND DM_DOCUMENT_H.DOCNO = DP_UNLOADCARLOG.DOCNO
+            AND DP_QRSCANLOG.DELIVERYGROUP = DP_UNLOADCARLOG.DELIVERYGROUP
+        WHERE DM_DOCUMENT_H.DCCODE = #{fixdccode}
+            AND DM_DOCUMENT_H.STORERKEY = #{gStorerkey}
+            <if test="slipdtFrom != null and slipdtFrom != ''">AND DM_DOCUMENT_H.DELIVERYDATE    <![CDATA[>=]]> #{slipdtFrom}</if>
+            <if test="slipdtTo != null and slipdtTo != ''">AND DM_DOCUMENT_H.DELIVERYDATE    <![CDATA[<=]]> #{slipdtTo}</if>
+            <!-- 협력사 다중선택 -->
+            <if test="fromCustkeyMulti != null and fromCustkeyMulti != '' ">
+                <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                    <foreach collection="fromCustkeyMulti" item="item">
+                        OR DM_DOCUMENT_H.FROM_CUSTKEY IN
+                        <foreach collection="item" item="code" open="(" close=")" separator=",">
+                            #{code}
+                        </foreach>
+                    </foreach>
+                </trim>
+            </if>
+            <!-- 상품 다중선택 -->
+			<if test="skuMulti != null and skuMulti != '' ">
+				<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+					<foreach collection="skuMulti" item="item">
+						AND EXISTS (SELECT 1
+                            FROM DM_DOCUMENT_D Z
+                            WHERE Z.DCCODE = DM_DOCUMENT_H.DCCODE
+                                AND Z.DOCTYPE = DM_DOCUMENT_H.DOCTYPE
+                                AND Z.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+                                AND Z.DOCNO = DM_DOCUMENT_H.DOCNO
+                                AND Z.SKU IN
+						<foreach collection="item" item="code" open="(" close=")" separator=",">
+							#{code}
+						</foreach>
+                        )
+					</foreach>
+				</trim>
+			</if>
+            <if test="channel != null and channel != ''">
+                EXISTS (SELECT 1
+                        FROM DM_DOCUMENT_D Z
+                            WHERE Z.DCCODE = DM_DOCUMENT_H.DCCODE
+					        AND Z.DOCTYPE = DM_DOCUMENT_H.DOCTYPE
+					        AND Z.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+					        AND Z.DOCNO = DM_DOCUMENT_H.DOCNO
+					        AND Z.CHANNEL LIKE #{channel}
+                )
+            </if>
+        ORDER BY 1, 3, 5, 6
+    </select>
+
+
+    <!-- 엑셀추출-->
+    <select id="getExcelListForSKU" resultType="cjfw.wms.dp.dto.DpUnloadResExcelDto">
+		SELECT /* [dpUnloadService.sqlx][dpUnloadService.getCarLogList][하차등록] */
+            DM_DOCUMENT_H.DELIVERYDATE AS SLIPDT /* 입고예정일 */
+            , DM_DOCUMENT_H.DCCODE AS DCCODE /* 센터코드 */
+            , DM_DOCUMENT_H.DOCNO
+            , DM_DOCUMENT_H.FROM_CUSTKEY AS FROM_CUSTKEY /* 거래처코드 */
+            , DM_DOCUMENT_H.FROM_CUSTNAME AS FROM_CUSTNAME
+            , DP_UNLOADCARLOG.DELIVERYGROUP AS DELIVERYGROUP /* 배송그룹 */
+            , NVL(DP_UNLOADCARLOG.TEMPERATURE1, '') AS TEMPERATURE1 /* 온도1 */
+            , NVL(DP_UNLOADCARLOG.TEMPERATURE2, '') AS TEMPERATURE2 /* 온도2 */
+            , CASE WHEN DP_UNLOADCARLOG.OTHER01 IS NOT NULL THEN CASE WHEN TO_CHAR(DP_UNLOADCARLOG.OTHER01) = 'S' THEN '적정' WHEN TO_CHAR(DP_UNLOADCARLOG.OTHER01) = 'F' THEN '이탈' ELSE '' END
+            ELSE ''
+            END AS TEMPOPTITYPE /* 온도적정성 */
+            , NVL(DP_UNLOADCARLOG.DELIVERYTIME, '') AS DELIVERYTIME /* 배송시간 */
+            , NVL(DP_UNLOADCARLOG.DELIVERYMEMO, '') AS DELIVERYMEMO /* 배송메모 */
+            , CASE WHEN DP_UNLOADCARLOG.CHANNEL IS NOT NULL
+                THEN DP_UNLOADCARLOG.CHANNEL
+                ELSE (
+                    SELECT max(DM_DOCUMENT_D.CHANNEL)
+                    FROM DM_DOCUMENT_D
+                    WHERE DM_DOCUMENT_D.DCCODE       = DM_DOCUMENT_H.DCCODE
+                    AND DM_DOCUMENT_D.DOCTYPE      = DM_DOCUMENT_H.DOCTYPE
+                    AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+                    AND DM_DOCUMENT_D.DOCNO        = DM_DOCUMENT_H.DOCNO
+                )
+                END AS CHANNELCODE /* 채널 */
+            , FN_CODEDESCR(DM_DOCUMENT_H.STORERKEY,'PUTAWAYTYPE',CASE WHEN DP_UNLOADCARLOG.CHANNEL IS NOT NULL
+                THEN DP_UNLOADCARLOG.CHANNEL
+                ELSE (
+                    SELECT max(DM_DOCUMENT_D.CHANNEL)
+                    FROM DM_DOCUMENT_D
+                    WHERE DM_DOCUMENT_D.DCCODE       = DM_DOCUMENT_H.DCCODE
+                    AND DM_DOCUMENT_D.DOCTYPE      = DM_DOCUMENT_H.DOCTYPE
+                    AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+                    AND DM_DOCUMENT_D.DOCNO        = DM_DOCUMENT_H.DOCNO
+                )
+                END) AS CHANNEL
+            , TO_CHAR(DP_QRSCANLOG.ADDDATE, 'hh24:mi') AS INSPTIME /* 입차시간 */
+            , FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY,'ORDERTYPE_DP', DM_DOCUMENT_H.ORDERTYPE) AS ORDERTYPE_NAME
+            , DM_DOCUMENT_D.DOCLINE
+			,MS_SKU.SKU            					/* 상품코드	*/
+			,MS_SKU.DESCRIPTION          					AS SKU_NAME/* 상품명		*/
+			,'[' || DM_DOCUMENT_D.PLANT || ']' || fn_descr_plant(DM_DOCUMENT_D.PLANT) AS PLANT_DESCR
+            ,FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY, 'PUTAWAYTYPE', DM_DOCUMENT_D.CHANNEL) AS CHANNEL_NAME
+            ,MS_SKU.STORAGETYPE AS STORAGETYPE
+            ,FN_CODEDESCR(MS_SKU.STORERKEY,'STORAGETYPE', MS_SKU.STORAGETYPE) AS STORAGETYPE_NAME
+            ,DM_DOCUMENT_D.STORERUOM AS UOM
+	        ,DM_DOCUMENT_D.ORDERQTY AS ORDERQTY
+	        ,DM_DOCUMENT_D.CONFIRMQTY AS CONFIRMQTY
+        FROM DM_DOCUMENT_H
+        JOIN DM_DOCUMENT_D
+		    ON DM_DOCUMENT_D.DCCODE = DM_DOCUMENT_H.DCCODE
+            AND DM_DOCUMENT_D.DOCTYPE = DM_DOCUMENT_H.DOCTYPE
+            AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+            AND DM_DOCUMENT_D.DOCNO = DM_DOCUMENT_H.DOCNO
+		JOIN MS_SKU
+			ON MS_SKU.STORERKEY = DM_DOCUMENT_D.STORERKEY
+			AND MS_SKU.SKU = DM_DOCUMENT_D.SKU
+			AND MS_SKU.DEL_YN = 'N'
+        LEFT JOIN DP_QRSCANLOG
+            ON DM_DOCUMENT_H.DOCNO = DP_QRSCANLOG.DOCNO
+            AND  DM_DOCUMENT_H.STORERKEY = DP_QRSCANLOG.STORERKEY
+            AND  DM_DOCUMENT_H.FROM_CUSTKEY = DP_QRSCANLOG.CUSTKEY
+            AND  DM_DOCUMENT_H.DELIVERYDATE = DP_QRSCANLOG.DELIVERYDATE
+        LEFT JOIN DP_UNLOADCARLOG
+            ON DM_DOCUMENT_H.DCCODE = DP_UNLOADCARLOG.DCCODE
+            AND DM_DOCUMENT_H.STORERKEY = DP_UNLOADCARLOG.STORERKEY
+            AND DM_DOCUMENT_H.DELIVERYDATE = DP_UNLOADCARLOG.SLIPDT
+            AND DM_DOCUMENT_H.FROM_CUSTKEY = DP_UNLOADCARLOG.CUSTKEY
+            AND DM_DOCUMENT_H.DOCNO = DP_UNLOADCARLOG.DOCNO
+            AND DP_QRSCANLOG.DELIVERYGROUP = DP_UNLOADCARLOG.DELIVERYGROUP
+        WHERE DM_DOCUMENT_H.DCCODE = #{fixdccode}
+            AND DM_DOCUMENT_H.STORERKEY = #{gStorerkey}
+            <if test="slipdtFrom != null and slipdtFrom != ''">AND DM_DOCUMENT_H.DELIVERYDATE    <![CDATA[>=]]> #{slipdtFrom}</if>
+            <if test="slipdtTo != null and slipdtTo != ''">AND DM_DOCUMENT_H.DELIVERYDATE    <![CDATA[<=]]> #{slipdtTo}</if>
+            <!-- 협력사 다중선택 -->
+            <if test="fromCustkeyMulti != null and fromCustkeyMulti != '' ">
+                <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                    <foreach collection="fromCustkeyMulti" item="item">
+                        OR DM_DOCUMENT_H.FROM_CUSTKEY IN
+                        <foreach collection="item" item="code" open="(" close=")" separator=",">
+                            #{code}
+                        </foreach>
+                    </foreach>
+                </trim>
+            </if>
+            <!-- 상품 다중선택 -->
+			<if test="skuMulti != null and skuMulti != '' ">
+				<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+					<foreach collection="skuMulti" item="item">
+						OR DM_DOCUMENT_D.SKU IN
+						<foreach collection="item" item="code" open="(" close=")" separator=",">
+							#{code}
+						</foreach>
+					</foreach>
+				</trim>
+			</if>
+            <if test="channel != null and channel != ''">
+                AND DM_DOCUMENT_D.CHANNEL LIKE #{channel}
+            </if>
+        ORDER BY 1, 3, 5, 6, DM_DOCUMENT_D.DOCLINE
+    </select>
+
+    <!-- 하차등록유무 체크 -->
+    <select id="checkDataDetailList" resultType="integer">
+        SELECT COUNT(1) as CHECK_CNT /* 체크건수 */
+        FROM DP_UNLOADCARLOG
+        WHERE DP_UNLOADCARLOG.DCCODE = #{dccode}
+        AND DP_UNLOADCARLOG.STORERKEY = #{storerkey}
+        AND DP_UNLOADCARLOG.SLIPDT = #{slipdt}
+        AND DP_UNLOADCARLOG.CUSTKEY = #{fromCustkey}
+        <if test="unloadtimeFrom != null and unloadtimeFrom != ''">AND DP_UNLOADCARLOG.DELIVERYTIME    <![CDATA[>=]]> #{unloadtimeFrom}</if>
+        <if test="unloadtimeTo != null and unloadtimeTo != ''">AND DP_UNLOADCARLOG.DELIVERYTIME    <![CDATA[<=]]> #{unloadtimeTo}</if>
+        <if test='tempoptiyn != null and tempoptiyn != ""'>
+            <if test='tempoptiyn == "S"'>
+                AND (DP_UNLOADCARLOG.OTHER01 LIKE #{tempoptiyn}
+                OR (DP_UNLOADCARLOG.TEMPERATURE1 IS NOT NULL AND DP_UNLOADCARLOG.TEMPERATURE2 IS NULL AND DP_UNLOADCARLOG.TEMPERATURE1 <![CDATA[>=]]> 0 AND DP_UNLOADCARLOG.TEMPERATURE1 <![CDATA[<=]]> 10)
+                OR (DP_UNLOADCARLOG.TEMPERATURE1 IS NULL AND DP_UNLOADCARLOG.TEMPERATURE2 IS NOT NULL AND DP_UNLOADCARLOG.TEMPERATURE2 <![CDATA[<=]]> -18)
+                OR (DP_UNLOADCARLOG.TEMPERATURE1 IS NOT NULL AND DP_UNLOADCARLOG.TEMPERATURE2 IS NOT NULL AND DP_UNLOADCARLOG.TEMPERATURE1 <![CDATA[>=]]> 0 AND DP_UNLOADCARLOG.TEMPERATURE1 <![CDATA[<=]]> 10 AND DP_UNLOADCARLOG.TEMPERATURE2 <![CDATA[<=]]> -18)
+                OR (DP_UNLOADCARLOG.TEMPERATURE1 IS NULL AND DP_UNLOADCARLOG.TEMPERATURE2 IS NULL))
+            </if>
+            <if test='tempoptiyn == "F"'>
+                AND (DP_UNLOADCARLOG.OTHER01 LIKE #{tempoptiyn}
+                OR (DP_UNLOADCARLOG.TEMPERATURE1 IS NOT NULL AND DP_UNLOADCARLOG.TEMPERATURE2 IS NULL AND (DP_UNLOADCARLOG.TEMPERATURE1 <![CDATA[<]]> 0 OR DP_UNLOADCARLOG.TEMPERATURE1 <![CDATA[>]]> 10))
+                OR (DP_UNLOADCARLOG.TEMPERATURE1 IS NULL AND DP_UNLOADCARLOG.TEMPERATURE2 IS NOT NULL AND DP_UNLOADCARLOG.TEMPERATURE2 <![CDATA[>]]> -18)
+                OR (DP_UNLOADCARLOG.TEMPERATURE1 IS NOT NULL AND DP_UNLOADCARLOG.TEMPERATURE2 IS NOT NULL AND (DP_UNLOADCARLOG.TEMPERATURE1 <![CDATA[<]]> 0 OR DP_UNLOADCARLOG.TEMPERATURE1 <![CDATA[>]]> 10 OR DP_UNLOADCARLOG.TEMPERATURE2 <![CDATA[>]]> -18)))
+            </if>
+        </if>
+        <if test="channel != null and channel != ''">
+            <if test="channel == '3'">
+                AND DP_UNLOADCARLOG.CHANNEL = '2'
+            </if>
+            <if test="channel != '3'">
+                AND DP_UNLOADCARLOG.CHANNEL LIKE #{channel}
+            </if>
+        </if>
+        <if test="storagetype != null and storagetype != ''">
+            <if test="storagetype == '10'">
+                AND DP_UNLOADCARLOG.TEMPERATURE1 IS NULL AND DP_UNLOADCARLOG.TEMPERATURE2 IS NULL
+            </if>
+            <if test="storagetype == '20'">
+                AND DP_UNLOADCARLOG.TEMPERATURE1 IS NOT NULL
+            </if>
+            <if test="storagetype == '30'">
+                AND DP_UNLOADCARLOG.TEMPERATURE2 IS NOT NULL
+            </if>
+        </if>
+    </select>
+
+    <!-- 하차등록유무 체크 -->
+    <select id="getQrDataList" resultType="cjfw.wms.dp.dto.DpUnloadResCarLogDto">
+        SELECT /* [dpUnloadService.sqlx][dpUnloadService.getQrDataList][하차등록] */
+            ROWNUM AS DELIVERYGROUP /* 배송그룹 */
+            ,'N' AS CARLOGYN /* 차량로그여부 */
+            ,TO_CHAR(ADDDATE, 'YYYYMMDDHH24MISS') AS INSPTIME /* 검수시간 */
+        FROM DP_QRSCANLOG
+        WHERE DP_QRSCANLOG.STORERKEY = #{storerkey}
+        AND DP_QRSCANLOG.CUSTKEY = #{fromCustkey}
+        AND DP_QRSCANLOG.DELIVERYDATE = #{slipdt}
+        AND DP_QRSCANLOG.DCCODE = #{dccode}
+        ORDER BY ADDDATE
+    </select>
+
+    <delete id="deleteCarLog">
+        DELETE FROM DP_UNLOADCARLOG
+        WHERE DCCODE = #{dccode}
+        AND STORERKEY = #{storerkey}
+        AND CUSTKEY = #{custkey}
+        AND DOCNO = #{docno}
+        AND SLIPDT = #{slipdt}
+        AND DELIVERYGROUP = #{deliverygroup}
+    </delete>
+
+    <delete id="deleteQrLog">
+        DELETE FROM DP_QRSCANLOG
+        WHERE DCCODE = #{dccode}
+        AND STORERKEY = #{storerkey}
+        AND CUSTKEY = #{custkey}
+        AND DOCNO = #{docno}
+        AND DELIVERYDATE = #{slipdt}
+        AND DELIVERYGROUP = #{deliverygroup}
+    </delete>
+</mapper>

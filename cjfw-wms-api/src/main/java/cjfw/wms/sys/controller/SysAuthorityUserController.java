@@ -1,0 +1,68 @@
+package cjfw.wms.sys.controller;
+
+import java.util.List;
+
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import cjfw.core.model.ApiResult;
+import cjfw.wms.sys.dto.SysAuthorityUserReqDto;
+import cjfw.wms.sys.dto.SysAuthorityUserResDto;
+import cjfw.wms.sys.service.SysAuthorityUserService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+
+/**
+ * Copyright 2025. CJ OliveNetworks Co. all rights reserved.
+ * @author : JangGwangSeok (breaker3317@cj.net) 
+ * @date : 2025.08.20 
+ * @description : ADMIN > 시스템운영 > 권한그룹별 사용자 관리
+ * @issues :<pre> 
+ * ----------------------------------------------------------- 
+ * DATE       AUTHOR                MAJOR_ISSUE 
+ * ----------------------------------------------------------- 
+ * 2025.08.20 JangGwangSeok (breaker3317@cj.net) 생성 </pre>
+ */
+@Tag(name = "ADMIN > 시스템운영 > 권한그룹별 사용자 관리", description = "권한그룹별 사용자 관리")
+@RestController
+@Slf4j
+@RequiredArgsConstructor
+@RequestMapping("api/sys/authorityUser")
+public class SysAuthorityUserController {
+
+	private final SysAuthorityUserService sysAuthorityUserService;
+	
+	/**
+	 * @description : 권한그룹별 사용자 조회
+	 * @issues :<pre> 
+	 * ----------------------------------------------------------- 
+	 * DATE       AUTHOR                MAJOR_ISSUE 
+	 * ----------------------------------------------------------- 
+	 * 2025.08.20 JangGwangSeok (breaker3317@cj.net) 생성 </pre>
+	 */
+	@Operation(summary = "권한그룹별 사용자 조회", description = "권한그룹별 사용자 조회")
+	@GetMapping(value = "/v1.0/getAuthorityUserList")
+	public ApiResult<List<SysAuthorityUserResDto>> getAuthorityUserList(@Valid SysAuthorityUserReqDto sysAuthorityUserReqDto) {
+		return ApiResult.createResult(sysAuthorityUserService.getAuthorityUserList(sysAuthorityUserReqDto));
+	}
+	
+	/**
+	 * @description : 권한그룹별 사용자 저장
+	 * @issues :<pre> 
+	 * ----------------------------------------------------------- 
+	 * DATE       AUTHOR                MAJOR_ISSUE 
+	 * ----------------------------------------------------------- 
+	 * 2025.08.21 JangGwangSeok (breaker3317@cj.net) 생성 </pre>
+	 */
+	@Operation(summary = "권한그룹별 사용자 저장", description = "권한그룹별 사용자 저장")
+	@PostMapping(value = "/v1.0/saveAuthorityUser")
+	public ApiResult<String> saveAuthorityUser(@RequestBody @Valid SysAuthorityUserReqDto sysAuthorityUserReqDto) {
+		return ApiResult.createResult(sysAuthorityUserService.saveAuthorityUser(sysAuthorityUserReqDto));
+	}
+}

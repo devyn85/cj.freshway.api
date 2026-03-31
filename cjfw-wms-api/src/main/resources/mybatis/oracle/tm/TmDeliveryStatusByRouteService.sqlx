@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="tmDeliveryStatusByRouteService">
+
+    <select id="getDeliveryStatusByRoute" resultType="TmDeliveryStatusByRouteResDto">
+        SELECT /* [TmDeliveryStatusByRouteService.sqlx][getDeliveryStatusByRoute][배송현황(경로별) 조회][System] */
+              TM_INPLAN.STORERKEY
+            , TM_INPLAN.DELIVERYDT
+            , TM_INPLAN.DCCODE
+            , FN_DESCR_DC(TM_INPLAN.DCCODE) AS DCNAME
+            , NVL(LEVEL_TB.LEVEL1_CODE, '미정의') AS COURSE
+            , NVL(MAX(LEVEL_TB.LEVEL1_NAME), '미정의') AS COURSE_NAME
+            , COUNT(DISTINCT COUNT_KEY) AS ALERT_CUST_CNT
+            , COUNT(DISTINCT CASE WHEN TM_INPLAN.IS_DELIVERY_CUST = 'Y' THEN COUNT_KEY END) AS ALERT_CNT
+            , COUNT(DISTINCT CASE WHEN TM_INPLAN.IS_DELIVERY_CUST = 'Y' THEN COUNT_KEY END)
+              / COUNT(DISTINCT COUNT_KEY) * 100 AS ALERT_RATE
+        FROM (
+            SELECT
+                  TM_INPLAN.STORERKEY
+                , TM_INPLAN.DELIVERYDT
+                , TM_INPLAN.DCCODE
+                , MS_CUST.CUSTSTRATEGY3
+                , TM_INPLAN.CARNO
+                , TM_INPLAN.PRIORITY
+                , TM_INPLAN.TRUTHCUSTKEY
+                , TM_INPLAN.CARNO || '-' || TM_INPLAN.PRIORITY || '-' ||  TM_INPLAN.TRUTHCUSTKEY AS COUNT_KEY
+                , MAX(CASE
+                        WHEN TM_INPLAN.CUSTARRIVALDT IS NOT NULL
+                          OR TM_INPLAN.CUSTDEPARTUREDT IS NOT NULL
+                        THEN 'Y' ELSE 'N'
+                      END) AS IS_DELIVERY_CUST
+            FROM (
+                SELECT DELIVERYDT, SLIPDT, DCCODE, CARNO, PRIORITY, TRUTHCUSTKEY, STORERKEY, CUSTTYPE, DELIVERYPRIORITY, DELIVERYPLANDT, CUSTARRIVALDT, CUSTDEPARTUREDT, STATUS, TM_DELIVERYTYPE, CONTRACTTYPE
+                FROM TM_INPLAN
+                WHERE DEL_YN = 'N'
+                  AND SPLIT_DELIVERY_YN = 'N'
+                UNION ALL
+                SELECT DELIVERYDT, SLIPDT, DCCODE, CARNO, PRIORITY, TRUTHCUSTKEY, STORERKEY, CUSTTYPE, DELIVERYPRIORITY, DELIVERYPLANDT, CUSTARRIVALDT, CUSTDEPARTUREDT, STATUS, TM_DELIVERYTYPE, CONTRACTTYPE
+                FROM TM_INPLAN_SPLIT
+                WHERE DEL_YN = 'N'
+            ) TM_INPLAN
+            JOIN MS_CUST
+                ON MS_CUST.STORERKEY = TM_INPLAN.STORERKEY
+               AND MS_CUST.CUSTKEY   = TM_INPLAN.TRUTHCUSTKEY
+               AND MS_CUST.CUSTTYPE  = TM_INPLAN.CUSTTYPE
+            WHERE TM_INPLAN.DCCODE     = #{dccode}
+              AND TM_INPLAN.DELIVERYDT = #{deliverydt}
+              AND TM_INPLAN.SLIPDT BETWEEN TO_CHAR(TRUNC(ADD_MONTHS(TO_DATE(#{deliverydt}, 'YYYYMMDD'), -1), 'MM'), 'YYYYMMDD')
+                                       AND #{deliverydt}
+              AND TM_INPLAN.STATUS     = '90'
+              AND TM_INPLAN.TM_DELIVERYTYPE IN ('1','2')
+              AND TM_INPLAN.CONTRACTTYPE != 'SELF'
+              AND TM_INPLAN.DCCODE NOT IN ('1000','2170','2900')
+            GROUP BY
+                  TM_INPLAN.STORERKEY
+                , TM_INPLAN.DELIVERYDT
+                , TM_INPLAN.DCCODE
+                , MS_CUST.CUSTSTRATEGY3
+                , TM_INPLAN.CARNO
+                , TM_INPLAN.PRIORITY
+                , TM_INPLAN.TRUTHCUSTKEY
+        ) TM_INPLAN
+        LEFT JOIN (
+            SELECT
+                  T3.STORERKEY
+                , T3.BASECODE  AS LEVEL3_CODE
+                , T3.BASEDESCR AS LEVEL3_NAME
+                , T2.BASECODE  AS LEVEL2_CODE
+                , T2.BASEDESCR AS LEVEL2_NAME
+                , T1.BASECODE  AS LEVEL1_CODE
+                , T1.BASEDESCR AS LEVEL1_NAME
+            FROM CM_CODE T3
+            LEFT JOIN CM_CODE T2
+                ON  T3.DATA4 = T2.BASECODE
+                AND T2.DATA3 = '2'
+                AND T3.CODELIST = T2.CODELIST
+            LEFT JOIN CM_CODE T1
+                ON  T2.DATA4 = T1.BASECODE
+                AND T1.DATA3 = '1'
+                AND T2.CODELIST = T1.CODELIST
+            WHERE T3.DATA3 = '3'
+              AND T3.CODELIST = 'CUSHRC'
+        ) LEVEL_TB
+            ON  LEVEL_TB.LEVEL3_CODE = TM_INPLAN.CUSTSTRATEGY3
+            AND LEVEL_TB.STORERKEY   = TM_INPLAN.STORERKEY
+        GROUP BY
+              TM_INPLAN.STORERKEY
+            , TM_INPLAN.DELIVERYDT
+            , TM_INPLAN.DCCODE
+            , LEVEL_TB.LEVEL1_CODE
+        ORDER BY
+              TM_INPLAN.DELIVERYDT
+            , TM_INPLAN.DCCODE
+            , COURSE
+    </select>
+
+</mapper>
+

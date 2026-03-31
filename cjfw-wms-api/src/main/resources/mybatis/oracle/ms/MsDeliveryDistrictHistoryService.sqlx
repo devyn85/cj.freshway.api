@@ -1,0 +1,232 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="msDeliveryDistrictHistoryService">
+	<!-- 배송 권역 이력 목록 조회 -->
+    <select id="getDlvDistrictHisList" resultType="MsDeliveryDistrictHistoryResDto">
+    	SELECT /* [MsDeliveryDistrictHistoryService.sqlx][msDeliveryDistrictHistoryService.getHistoryList][배송 권역 이력 목록 조회] */
+		    h.DCCODE
+    	    , d.DCNAME
+    	    , TO_CHAR(h.LOG_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS') AS HISDATE
+    	    , h.DLVGROUP_ID
+    	    , h.DLVGROUP_NM
+    	    , h.DLVDISTRICT_ID
+    	    , h.DLVDISTRICT_NM
+    	    , h.POPNO
+    	    , h.POPNAME
+    	    , h.FROMDATE AS FROM_DATE
+        	, h.TODATE AS TO_DATE
+            , SUBSTR(LPAD(h.FROMHOUR, 4, '0'), 1, 2) || ':' || SUBSTR(LPAD(h.FROMHOUR, 4, '0'), 3, 2) AS FROM_HOUR
+            , SUBSTR(LPAD(h.TOHOUR, 4, '0'), 1, 2) || ':' || SUBSTR(LPAD(h.TOHOUR, 4, '0'), 3, 2) AS TO_HOUR
+    	    , h.CTP_KOR_NM
+    	    , h.SIG_KOR_NM
+        	, h.HJDONG_NM
+    	    , h.HJDONG_CD
+    	    , h.ADDWHO
+    	    , TO_CHAR(h.ADDDATE, 'YYYY-MM-DD') AS ADDDATE
+    	    , h.EDITWHO
+    	    , TO_CHAR(h.EDITDATE, 'YYYY-MM-DD') AS EDITDATE
+    	    , h.DEL_YN
+		FROM MS_DLV_DISTRICT_HIS h
+	    LEFT JOIN CM_DC d ON h.DCCODE = d.DCCODE
+		WHERE (#{effectiveDate} BETWEEN h.FROMDATE AND h.TODATE OR h.TODATE >= #{effectiveDate})
+        AND h.DCCODE = #{dccode}
+        <if test="dlvgroupNm != null and dlvgroupNm != ''">
+          AND h.DLVGROUP_NM LIKE '%' || #{dlvgroupNm} || '%'
+        </if>
+        <if test="dlvdistrictNm != null and dlvdistrictNm != ''">
+          AND h.DLVDISTRICT_NM LIKE '%' || #{dlvdistrictNm} || '%'
+        </if>
+        <if test="hjDistrictNm != null and hjDistrictNm != ''">
+          AND (h.CTP_KOR_NM LIKE '%' || #{hjDistrictNm} || '%' OR h.SIG_KOR_NM LIKE '%' || #{hjDistrictNm} || '%' OR h.HJDONG_NM LIKE '%' || #{hjDistrictNm} || '%')
+        </if>
+        ORDER BY h.ADDDATE DESC
+    </select>
+
+    <insert id="saveDlvDistrictHistory" parameterType="MsDeliveryDistrictHistoryReqDto">
+        INSERT INTO MS_DLV_DISTRICT_HIS (
+            DCCODE, LOG_TIMESTAMP, DLVGROUP_ID, DLVGROUP_NM, POPNO
+            , POPNAME, FROMHOUR, TOHOUR, DLVDISTRICT_ID, DLVDISTRICT_NM
+            , CTP_KOR_NM, SIG_KOR_NM, HJDONG_NM, HJDONG_CD, FROMDATE
+            , TODATE, DEL_YN, ADDDATE, EDITDATE, ADDWHO
+            , EDITWHO
+        )
+        VALUES (
+            #{dccode}, SYSTIMESTAMP, #{dlvgroupId}, #{dlvgroupNm}, #{popno}
+            , #{popname}, #{fromhour}, #{tohour}, #{dlvdistrictId}, #{dlvdistrictNm}
+            , #{ctpKorNm}, #{sigKorNm}, #{hjdongNm}, #{hjdongCd}, #{fromdate}
+            , #{todate}, #{delYn}, SYSDATE, SYSDATE, NVL(#{gUserId}, 'SYSTEM')
+            , NVL(#{gUserId}, 'SYSTEM')
+        )
+    </insert>
+
+    <insert id="saveHistoryListByDlvHjdong" parameterType="MsDistrictValidationReqDto">
+        <![CDATA[
+        INSERT INTO MS_DLV_DISTRICT_HIS (
+            DCCODE, LOG_TIMESTAMP, DLVGROUP_ID, DLVGROUP_NM, POPNO
+            , POPNAME, FROMHOUR, TOHOUR, DLVDISTRICT_ID, DLVDISTRICT_NM
+            , CTP_KOR_NM, SIG_KOR_NM, HJDONG_NM, HJDONG_CD, FROMDATE
+            , TODATE, DEL_YN, ADDDATE, EDITDATE, ADDWHO
+            , EDITWHO
+        )
+    	SELECT DISTINCT
+			 H.DCCODE, SYSTIMESTAMP, D.DLVGROUP_ID, G.DLVGROUP_NM, NVL(P2.POPNO, P1.POPNO) AS POPNO
+            , NVL(P2.POPNAME, P1.POPNAME) AS POPNAME, DP.FROMHOUR, DP.TOHOUR, H.DLVDISTRICT_ID, D.DLVDISTRICT_NM
+    	    , HP.CTP_KOR_NM, HP.SIG_KOR_NM, HP.HJDONG_NM, H.HJDONG_CD, H.FROMDATE
+    	    , H.TODATE, H.DEL_YN, SYSDATE, SYSDATE, NVL(#{gUserId}, 'SYSTEM')
+    	    , NVL(#{gUserId}, 'SYSTEM')
+		FROM MS_DLV_DISTRICT_HJDONG H
+		JOIN MS_DLV_DISTRICT D ON D.DLVDISTRICT_ID = H.DLVDISTRICT_ID AND D.FROMDATE <= H.TODATE AND D.TODATE >= H.FROMDATE
+		JOIN MS_DLV_DISTRICTGROUP G ON G.DLVGROUP_ID = D.DLVGROUP_ID AND G.FROMDATE <= D.TODATE AND D.TODATE >= G.FROMDATE
+		JOIN MS_HJDONG_POLYGON HP ON HP.HJDONG_CD = H.HJDONG_CD AND HP.FROMDATE <= H.TODATE AND HP.TODATE >= H.FROMDATE
+		LEFT JOIN MS_DISTRICTGROUP_POP P1 ON P1.DCCODE = H.DCCODE AND P1.BASE_YN = 'Y' AND P1.FROMDATE <= H.TODATE AND P1.TODATE >= H.FROMDATE
+        LEFT JOIN MS_DLV_DISTRICTGROUP_POP DP ON DP.DCCODE = G.DCCODE AND DP.DLVGROUP_ID = G.DLVGROUP_ID AND DP.FROMDATE <= G.TODATE AND DP.TODATE >= G.FROMDATE
+		LEFT JOIN MS_DISTRICTGROUP_POP P2 ON P2.DCCODE = DP.DCCODE AND P2.POPNO = DP.POPNO AND P2.FROMDATE <= DP.TODATE AND P2.TODATE >= DP.FROMDATE
+        WHERE H.SERIALKEY IN
+        ]]>
+        <foreach collection="serialkeySet" item="key" open="(" separator="," close=")">
+            #{key}
+        </foreach>
+    </insert>
+
+    <insert id="saveHistoryListByDlvHjdongBatchKey" parameterType="MsDistrictValidationReqDto">
+        <![CDATA[
+        INSERT INTO MS_DLV_DISTRICT_HIS (
+            DCCODE, LOG_TIMESTAMP, DLVGROUP_ID, DLVGROUP_NM, POPNO
+            , POPNAME, FROMHOUR, TOHOUR, DLVDISTRICT_ID, DLVDISTRICT_NM
+            , CTP_KOR_NM, SIG_KOR_NM, HJDONG_NM, HJDONG_CD, FROMDATE
+            , TODATE, DEL_YN, ADDDATE, EDITDATE, ADDWHO
+            , EDITWHO
+        )
+    	SELECT DISTINCT
+			 H.DCCODE, SYSTIMESTAMP, D.DLVGROUP_ID, G.DLVGROUP_NM, NVL(P2.POPNO, P1.POPNO) AS POPNO
+            , NVL(P2.POPNAME, P1.POPNAME) AS POPNAME, DP.FROMHOUR, DP.TOHOUR, H.DLVDISTRICT_ID, D.DLVDISTRICT_NM
+    	    , HP.CTP_KOR_NM, HP.SIG_KOR_NM, HP.HJDONG_NM, H.HJDONG_CD, H.FROMDATE
+    	    , H.TODATE, H.DEL_YN, SYSDATE, SYSDATE, NVL(#{gUserId}, 'SYSTEM')
+    	    , NVL(#{gUserId}, 'SYSTEM')
+		FROM MS_DLV_DISTRICT_HJDONG H
+		JOIN MS_DLV_DISTRICT D ON D.DLVDISTRICT_ID = H.DLVDISTRICT_ID AND D.FROMDATE <= H.TODATE AND D.TODATE >= H.FROMDATE
+		JOIN MS_DLV_DISTRICTGROUP G ON G.DLVGROUP_ID = D.DLVGROUP_ID AND G.FROMDATE <= D.TODATE AND D.TODATE >= G.FROMDATE
+		JOIN MS_HJDONG_POLYGON HP ON HP.HJDONG_CD = H.HJDONG_CD AND HP.FROMDATE <= H.TODATE AND HP.TODATE >= H.FROMDATE
+		LEFT JOIN MS_DISTRICTGROUP_POP P1 ON P1.DCCODE = H.DCCODE AND P1.BASE_YN = 'Y' AND P1.FROMDATE <= H.TODATE AND P1.TODATE >= H.FROMDATE
+        LEFT JOIN MS_DLV_DISTRICTGROUP_POP DP ON DP.DCCODE = G.DCCODE AND DP.DLVGROUP_ID = G.DLVGROUP_ID AND DP.FROMDATE <= G.TODATE AND DP.TODATE >= G.FROMDATE
+		LEFT JOIN MS_DISTRICTGROUP_POP P2 ON P2.DCCODE = DP.DCCODE AND P2.POPNO = DP.POPNO AND P2.FROMDATE <= DP.TODATE AND P2.TODATE >= DP.FROMDATE
+        WHERE H.EDITDATE = TO_DATE(#{editDate}, 'YYYYMMDDHH24MISS') AND H.EDITWHO = #{editWho}
+        ]]>
+    </insert>
+
+    <insert id="saveHistoryListByDlvGroup" parameterType="MsDistrictValidationReqDto">
+        <![CDATA[
+        INSERT INTO MS_DLV_DISTRICT_HIS (
+            DCCODE, LOG_TIMESTAMP, DLVGROUP_ID, DLVGROUP_NM, POPNO
+            , POPNAME, FROMHOUR, TOHOUR, DLVDISTRICT_ID, DLVDISTRICT_NM
+            , CTP_KOR_NM, SIG_KOR_NM, HJDONG_NM, HJDONG_CD, FROMDATE
+            , TODATE, DEL_YN, ADDDATE, EDITDATE, ADDWHO
+            , EDITWHO
+        )
+    	SELECT
+			 G.DCCODE, SYSTIMESTAMP, G.DLVGROUP_ID, G.DLVGROUP_NM, NULL
+            , NULL, NULL, NULL, NULL, NULL
+    	    , NULL, NULL, NULL, NULL, G.FROMDATE
+    	    , G.TODATE, G.DEL_YN, SYSDATE, SYSDATE, NVL(#{gUserId}, 'SYSTEM')
+    	    , NVL(#{gUserId}, 'SYSTEM')
+		FROM MS_DLV_DISTRICTGROUP G
+        WHERE G.SERIALKEY IN
+        ]]>
+        <foreach collection="serialkeySet" item="key" open="(" separator="," close=")">
+            #{key}
+        </foreach>
+    </insert>
+
+    <insert id="saveHistoryListByDlvGroupPop" parameterType="MsDistrictValidationReqDto">
+        <![CDATA[
+        INSERT INTO MS_DLV_DISTRICT_HIS (
+            DCCODE, LOG_TIMESTAMP, DLVGROUP_ID, DLVGROUP_NM, POPNO
+            , POPNAME, FROMHOUR, TOHOUR, DLVDISTRICT_ID, DLVDISTRICT_NM
+            , CTP_KOR_NM, SIG_KOR_NM, HJDONG_NM, HJDONG_CD, FROMDATE
+            , TODATE, DEL_YN, ADDDATE, EDITDATE, ADDWHO
+            , EDITWHO
+        )
+    	SELECT
+			 DP.DCCODE, SYSTIMESTAMP, DP.DLVGROUP_ID, G.DLVGROUP_NM, DP.POPNO
+            , P.POPNAME, DP.FROMHOUR, DP.TOHOUR, NULL, NULL
+    	    , NULL, NULL, NULL, NULL, DP.FROMDATE
+    	    , DP.TODATE, DP.DEL_YN, SYSDATE, SYSDATE, NVL(#{gUserId}, 'SYSTEM')
+    	    , NVL(#{gUserId}, 'SYSTEM')
+		FROM MS_DLV_DISTRICTGROUP_POP DP
+		JOIN MS_DISTRICTGROUP_POP P ON P.DCCODE = DP.DCCODE AND P.POPNO = DP.POPNO AND DP.FROMDATE <= P.TODATE AND DP.TODATE >= P.FROMDATE
+		JOIN MS_DLV_DISTRICTGROUP G ON G.DLVGROUP_ID = DP.DLVGROUP_ID AND DP.FROMDATE <= G.TODATE AND DP.TODATE >= G.FROMDATE
+        WHERE DP.SERIALKEY IN
+        ]]>
+        <foreach collection="serialkeySet" item="key" open="(" separator="," close=")">
+            #{key}
+        </foreach>
+    </insert>
+
+    <insert id="saveHistoryListByDlv" parameterType="MsDistrictValidationReqDto">
+        <![CDATA[
+        INSERT INTO MS_DLV_DISTRICT_HIS (
+            DCCODE, LOG_TIMESTAMP, DLVGROUP_ID, DLVGROUP_NM, POPNO
+            , POPNAME, FROMHOUR, TOHOUR, DLVDISTRICT_ID, DLVDISTRICT_NM
+            , CTP_KOR_NM, SIG_KOR_NM, HJDONG_NM, HJDONG_CD, FROMDATE
+            , TODATE, DEL_YN, ADDDATE, EDITDATE, ADDWHO
+            , EDITWHO
+        )
+    	SELECT DISTINCT
+			 D.DCCODE, SYSTIMESTAMP, D.DLVGROUP_ID, G.DLVGROUP_NM, DP.POPNO
+            , P.POPNAME, DP.FROMHOUR, DP.TOHOUR, D.DLVDISTRICT_ID, D.DLVDISTRICT_NM
+    	    , NULL, NULL, NULL, NULL, D.FROMDATE
+    	    , D.TODATE, D.DEL_YN, SYSDATE, SYSDATE, NVL(#{gUserId}, 'SYSTEM')
+    	    , NVL(#{gUserId}, 'SYSTEM')
+		FROM MS_DLV_DISTRICT D
+		JOIN MS_DLV_DISTRICTGROUP G ON G.DLVGROUP_ID = D.DLVGROUP_ID AND G.FROMDATE <= D.TODATE AND G.TODATE >= D.FROMDATE
+		LEFT JOIN MS_DLV_DISTRICTGROUP_POP DP ON DP.DLVGROUP_ID = G.DLVGROUP_ID AND DP.FROMDATE <= G.TODATE AND DP.TODATE >= G.FROMDATE
+		LEFT JOIN MS_DISTRICTGROUP_POP P ON P.DCCODE = D.DCCODE AND P.POPNO = DP.POPNO AND DP.FROMDATE <= P.TODATE AND DP.TODATE >= P.FROMDATE
+		WHERE D.SERIALKEY IN
+        ]]>
+        <foreach collection="serialkeySet" item="key" open="(" separator="," close=")">
+            #{key}
+        </foreach>
+    </insert>
+
+    <insert id="saveHistoryListByPop" parameterType="MsDistrictValidationReqDto">
+		<![CDATA[
+        INSERT INTO MS_DLV_DISTRICT_HIS (
+            DCCODE, LOG_TIMESTAMP, DLVGROUP_ID, DLVGROUP_NM, POPNO
+            , POPNAME, FROMHOUR, TOHOUR, DLVDISTRICT_ID, DLVDISTRICT_NM
+            , CTP_KOR_NM, SIG_KOR_NM, HJDONG_NM, HJDONG_CD, FROMDATE
+            , TODATE, DEL_YN, ADDDATE, EDITDATE, ADDWHO
+            , EDITWHO
+        )
+    	SELECT
+			 p.DCCODE, SYSTIMESTAMP, NULL, NULL, p.POPNO,
+			 p.POPNAME, NULL, NULL, NULL, NULL,
+			 NULL, NULL, NULL, NULL, p.FROMDATE,
+    	     p.TODATE, p.DEL_YN, SYSDATE, SYSDATE, NVL(#{gUserId}, 'SYSTEM'), NVL(#{gUserId}, 'SYSTEM')
+		FROM MS_DISTRICTGROUP_POP p
+		WHERE p.SERIALKEY IN
+		]]>
+        <foreach collection="serialkeySet" item="key" open="(" separator="," close=")">
+            #{key}
+        </foreach>
+    </insert>
+
+    <insert id="saveHistoryListByBatchKey" parameterType="MsDistrictValidationReqDto">
+		<![CDATA[
+        INSERT INTO MS_DLV_DISTRICT_HIS (
+            DCCODE, LOG_TIMESTAMP, DLVGROUP_ID, DLVGROUP_NM, POPNO
+            , POPNAME, FROMHOUR, TOHOUR, DLVDISTRICT_ID, DLVDISTRICT_NM
+            , CTP_KOR_NM, SIG_KOR_NM, HJDONG_NM, HJDONG_CD, FROMDATE
+            , TODATE, DEL_YN, ADDDATE, EDITDATE, ADDWHO
+            , EDITWHO
+        )
+    	SELECT
+			 p.DCCODE, SYSTIMESTAMP, NULL, NULL, p.POPNO,
+			 p.POPNAME, NULL, NULL, NULL, NULL,
+			 NULL, NULL, NULL, NULL, p.FROMDATE,
+    	     p.TODATE, p.DEL_YN, SYSDATE, SYSDATE, NVL(#{gUserId}, 'SYSTEM'), NVL(#{gUserId}, 'SYSTEM')
+		FROM MS_DISTRICTGROUP_POP p
+		WHERE p.EDITWHO = #{batchKey}
+		]]>
+    </insert>
+</mapper>
+

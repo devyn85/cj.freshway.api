@@ -1,0 +1,450 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="stConvertCgExDcService">
+
+ <select id="getStConertCgExDcHeaderList" resultType="StConvertCgExDcHeaderListResDto">
+        SELECT  /* [stConvertCGService.sqlx][stConvertCGService.getDataHeaderList][재고속성변경][채승미][20140919] */
+	            MS_LOCATION.WHAREA                                                       AS WHAREA            /* 창고영역 */
+	          , FN_CODEDESCR(ST_STOCK.STORERKEY,'WHAREA'     ,MS_LOCATION.WHAREA)        AS WHAREANAME        /* 창고영역명 */
+	          , MS_LOCATION.WHAREAFLOOR                                                  AS WHAREAFLOOR       /* 층 */
+	          , FN_CODEDESCR(ST_STOCK.STORERKEY,'WHAREAFLOOR',MS_LOCATION.WHAREAFLOOR)   AS WHAREAFLOORNAME   /* 층명 */
+	          , MS_LOCATION.ZONE                                                         AS ZONE              /* 존 */
+	          , MIN(MS_ZONE.DESCRIPTION)                                                 AS ZONENAME          /* 존명 */
+	          , COUNT(DISTINCT ST_STOCK.LOC)                                             AS LOCCNT            /* 로케이션수 */
+	          , COUNT(DISTINCT ST_STOCK.SKU)                                             AS SKUCNT            /* SKU수 */
+	          , COUNT(DISTINCT ST_STOCK.STOCKID)                                         AS IDCNT             /* 재고ID수 */
+	    FROM    ST_STOCK
+	    JOIN    CM_USER_AUTHORITY
+	              ON CM_USER_AUTHORITY.USERID      = #{gUserId}
+	            <if test="dcCode    != null and dcCode    != ''">  AND CM_USER_AUTHORITY.DCCODE    = #{dcCode}    </if>
+	            <if test="gStorerkey != null and gStorerkey != ''">  AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey} </if>
+	            <if test="gOrganize  != null and gOrganize  != ''">  AND CM_USER_AUTHORITY.ORGANIZE  = #{gOrganize}  </if>
+	            <if test="gArea      != null and gArea      != ''">  AND CM_USER_AUTHORITY.AREA      = #{gArea}      </if>
+	
+	            AND CM_USER_AUTHORITY.DCCODE    = ST_STOCK.DCCODE
+	            AND CM_USER_AUTHORITY.STORERKEY = ST_STOCK.STORERKEY
+	            AND CM_USER_AUTHORITY.ORGANIZE  = ST_STOCK.ORGANIZE
+	            AND CM_USER_AUTHORITY.AREA      = ST_STOCK.AREA
+	
+	    <!-- 조직 다중 선택 -->
+	    <if test="organize != null">
+	        AND ST_STOCK.ORGANIZE IN (
+	              SELECT  TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL))
+	              FROM   (SELECT #{organize} AS VAL FROM DUAL)
+	              CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) > 0
+	        )
+	    </if>
+	
+	    JOIN    MS_SKU
+	              ON MS_SKU.STORERKEY = ST_STOCK.STORERKEY
+	             AND MS_SKU.SKU       = ST_STOCK.SKU
+	             AND MS_SKU.DEL_YN    = 'N'
+	
+	    <!-- SKU 다중 선택 -->
+	    <if test="sku != null">
+	        AND MS_SKU.SKU IN (
+	              SELECT  TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL))
+	              FROM   (SELECT #{sku} AS VAL FROM DUAL)
+	              CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) > 0
+	        )
+	    </if>
+	
+	    JOIN    CM_LOT
+	              ON CM_LOT.STORERKEY = ST_STOCK.STORERKEY
+	             AND CM_LOT.LOT       = ST_STOCK.LOT
+	             AND CM_LOT.DEL_YN    = 'N'
+	
+	    JOIN    MS_LOCATION
+	              ON MS_LOCATION.DCCODE = ST_STOCK.DCCODE
+	             AND MS_LOCATION.LOC    = ST_STOCK.LOC
+	
+	    <if test="whArea   != null and whArea   != ''">  AND MS_LOCATION.WHAREA LIKE #{whArea}   </if>
+	    <if test="fromZone != null and fromZone != ''">  AND MS_LOCATION.ZONE  <![CDATA[>=]]> #{fromZone} </if>
+	    <if test="toZone   != null and toZone   != ''">  AND MS_LOCATION.ZONE  <![CDATA[<=]]> #{toZone}   </if>
+	    <if test="fromLoc  != null and fromLoc  != ''">  AND MS_LOCATION.LOC   <![CDATA[>=]]> #{fromLoc}  </if>
+	    <if test="toLoc    != null and toLoc    != ''">  AND MS_LOCATION.LOC   <![CDATA[<=]]> #{toLoc}    </if>
+	
+	    LEFT JOIN MS_ZONE
+	              ON MS_ZONE.DCCODE = MS_LOCATION.DCCODE
+	             AND MS_ZONE.ZONE   = MS_LOCATION.ZONE
+	
+	    <!-- BL 존재여부에 따른 JOIN -->
+	    <choose>
+	        <when test="searchBl != null and searchBl != ''">
+	            JOIN ST_SNINFO ST_SERIALINFO
+	              ON ST_SERIALINFO.STORERKEY = ST_STOCK.STORERKEY
+	             AND ST_SERIALINFO.SKU       = ST_STOCK.SKU
+	             AND ST_SERIALINFO.STOCKID   = ST_STOCK.STOCKID
+	             AND ST_SERIALINFO.DEL_YN    = 'N'
+	        </when>
+	        <otherwise>
+	            LEFT JOIN ST_SNINFO ST_SERIALINFO
+	                   ON ST_SERIALINFO.STORERKEY = ST_STOCK.STORERKEY
+	                  AND ST_SERIALINFO.SKU       = ST_STOCK.SKU
+	                  AND ST_SERIALINFO.STOCKID   = ST_STOCK.STOCKID
+	                  AND ST_SERIALINFO.DEL_YN    = 'N'
+	        </otherwise>
+    </choose>
+
+    WHERE   1 = 1
+        <if test="stockGrade != null and stockGrade != ''"> AND ST_STOCK.STOCKGRADE   LIKE #{stockGrade} </if>
+        <if test="blNoMulti != null and blNoMulti != ''">
+                   AND    ST_SERIALINFO.CONVSERIALNO      IN
+                 <foreach collection="blNoMulti" item="item" open="(" separator="," close=")">
+                     #{item}
+                 </foreach> 
+        </if>
+        <if test="organize   != null and organize   != ''"> AND ST_STOCK.ORGANIZE    = #{organize}     </if>
+
+    GROUP BY MS_LOCATION.WHAREA
+           , MS_LOCATION.WHAREAFLOOR
+           , MS_LOCATION.ZONE
+           , ST_STOCK.STORERKEY
+
+    ORDER BY MS_LOCATION.WHAREA
+           , MS_LOCATION.WHAREAFLOOR
+           , MS_LOCATION.ZONE
+    </select>
+    
+  
+	<select id="getStConertCgExDcHeaderSubList" resultType="StConvertCgExDcHeaderSubListResDto">
+	    SELECT  /* [stConvertCGService.sqlx][getStConertCgExDcHeaderSubList][재고속성변경][채승미][20140919] */
+	            ST_STOCK.STOCKGRADE                                         AS STOCKGRADE        /* 재고등급 */
+	        ,   FN_CODEDESCR(ST_STOCK.STORERKEY
+	                       , 'STOCKGRADE'
+	                       , ST_STOCK.STOCKGRADE)                           AS STOCKGRADENAME    /* 재고등급명 */
+	        ,   COUNT( ST_STOCK.LOT)                                AS LOTCNT            /* LOT 수  */
+	        ,   COUNT( ST_STOCK.LOC)                                AS LOCCNT            /* LOC 수  */
+	        ,   COUNT( ST_STOCK.SKU)                                AS SKUCNT            /* SKU 수  */
+	        ,   COUNT( ST_STOCK.STOCKID)                            AS IDCNT             /* 재고ID 수 */
+	
+	    FROM    ST_STOCK
+	
+	    /* ───────── 권한 JOIN ───────── */
+	    JOIN    CM_USER_AUTHORITY
+	              ON CM_USER_AUTHORITY.USERID = #{gUserId}
+	            <if test="dcCode    != null and dcCode    != ''">  AND CM_USER_AUTHORITY.DCCODE    = #{dcCode}    </if>
+	            <if test="gStorerkey != null and gStorerkey != ''">  AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey} </if>
+	            <if test="gArea      != null and gArea      != ''">  AND CM_USER_AUTHORITY.AREA      = #{gArea}      </if>
+	
+	            <!-- ORGANIZE 다중 선택 -->
+	            <if test="organize != null and organize != ''">
+	                AND CM_USER_AUTHORITY.ORGANIZE IN (
+	                      SELECT  TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL))
+	                        FROM (SELECT #{organize} AS VAL FROM DUAL)
+	                       CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) > 0
+	                )
+	            </if>
+	
+	            AND CM_USER_AUTHORITY.DCCODE    = ST_STOCK.DCCODE
+	            AND CM_USER_AUTHORITY.STORERKEY = ST_STOCK.STORERKEY
+	            AND CM_USER_AUTHORITY.ORGANIZE  = ST_STOCK.ORGANIZE
+	            AND CM_USER_AUTHORITY.AREA      = ST_STOCK.AREA
+	
+	    /* ───────── SKU / LOT / LOCATION ───────── */
+	    JOIN    MS_SKU
+	              ON MS_SKU.STORERKEY = ST_STOCK.STORERKEY
+	             AND MS_SKU.SKU       = ST_STOCK.SKU
+	             AND MS_SKU.DEL_YN    = 'N'
+	
+	            <!-- SKU 다중 선택 -->
+	            <if test="sku != null and sku != ''">
+	                AND MS_SKU.SKU IN (
+	                      SELECT  TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL))
+	                        FROM (SELECT #{sku} AS VAL FROM DUAL)
+	                       CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) > 0
+	                )
+	            </if>
+	
+	    JOIN    CM_LOT
+	              ON CM_LOT.STORERKEY = ST_STOCK.STORERKEY
+	             AND CM_LOT.LOT       = ST_STOCK.LOT
+	             AND CM_LOT.DEL_YN    = 'N'
+	
+	    JOIN    MS_LOCATION
+	              ON MS_LOCATION.DCCODE = ST_STOCK.DCCODE
+	             AND MS_LOCATION.LOC    = ST_STOCK.LOC
+	
+	            <!-- 위치 조건 -->
+	            <if test="zone        != null and zone        != ''">  AND MS_LOCATION.ZONE        LIKE #{zone}        </if>
+	            <if test="whArea      != null and whArea      != ''">  AND MS_LOCATION.WHAREA      LIKE #{whArea}      </if>
+	            <if test="whAreaFloor != null and whAreaFloor != ''">  AND MS_LOCATION.WHAREAFLOOR LIKE #{whAreaFloor} </if>
+	            <if test="fromLoc     != null and fromLoc     != ''">  AND MS_LOCATION.LOC <![CDATA[>=]]> #{fromLoc}   </if>
+	            <if test="toLoc       != null and toLoc       != ''">  AND MS_LOCATION.LOC <![CDATA[<=]]> #{toLoc}     </if>
+	
+	    /* ───────── BL 존재 여부에 따른 시리얼 JOIN ───────── */
+	    <choose>
+	        <when test="searchBl != null and searchBl != ''">
+	            JOIN ST_SNINFO ST_SERIALINFO
+	              ON ST_SERIALINFO.STORERKEY = ST_STOCK.STORERKEY
+	             AND ST_SERIALINFO.SKU       = ST_STOCK.SKU
+	             AND ST_SERIALINFO.STOCKID   = ST_STOCK.STOCKID
+	             AND ST_SERIALINFO.DEL_YN    = 'N'
+	        </when>
+	        <otherwise>
+	            LEFT JOIN ST_SNINFO ST_SERIALINFO
+	                   ON ST_SERIALINFO.STORERKEY = ST_STOCK.STORERKEY
+	                  AND ST_SERIALINFO.SKU       = ST_STOCK.SKU
+	                  AND ST_SERIALINFO.STOCKID   = ST_STOCK.STOCKID
+	                  AND ST_SERIALINFO.DEL_YN    = 'N'
+	        </otherwise>
+	    </choose>
+	
+	    WHERE   1 = 1
+	        <if test="stockGrade != null and stockGrade != ''">
+	            AND ST_STOCK.STOCKGRADE LIKE #{stockGrade}
+	        </if>
+	
+	    <!-- 센터 2170 예외 -->
+	    <choose>
+	        <when test="dcCode == '2170'">
+	            AND ( ST_STOCK.OPENQTY    <![CDATA[>]]> 0
+	               OR ST_STOCK.BOXQTY <![CDATA[>]]> 0 )
+	        </when>
+	        <otherwise>
+	            AND ST_STOCK.QTY <![CDATA[>]]> 0
+	        </otherwise>
+	    </choose>
+	
+	        <if test="blNoMulti != null and blNoMulti != ''">
+                   AND    ST_SERIALINFO.CONVSERIALNO      IN
+                 <foreach collection="blNoMulti" item="item" open="(" separator="," close=")">
+                     #{item}
+                 </foreach> 
+		</if>
+	        <if test="organize != null and organize != ''">
+	            AND ST_STOCK.ORGANIZE = #{organize}
+	        </if>
+	
+	    GROUP BY ST_STOCK.STOCKGRADE
+	           , ST_STOCK.STORERKEY
+	
+	    ORDER BY ST_STOCK.STOCKGRADE
+	</select>
+	
+	<select id="getStConertCgExDcDetailList" resultType="StConvertCgExDcDetailListResDto">
+		SELECT  /* [stConvertCGService.sqlx][getStConertCgExDcDetailList][재고속성변경][채승미][20140919] */
+            '0'                              AS CHECKYN         /* 체크여부(고정 0) */
+        ,   ST_STOCK.SERIALKEY              AS SERIALKEY        /* 재고식별KEY    */
+        ,   ST_STOCK.DCCODE                 AS DCCODE           /* 센터코드        */
+        ,   ST_STOCK.STORERKEY              AS STORERKEY        /* 보관업체        */
+        ,   ST_STOCK.ORGANIZE               AS ORGANIZE         /* 창고            */
+        ,   CM_ORGANIZE.DESCRIPTION		    AS ORGANIZENM
+        ,   ST_STOCK.AREA                   AS AREA             /* AREA            */
+        ,   FN_DESCR_AREA(
+                ST_STOCK.STORERKEY
+              , ST_STOCK.AREA
+            )                              AS AREANAME          /* AREA명          */
+        ,   ST_STOCK.LOC                    AS FROMLOC          /* FROM LOC        */
+        ,   ST_STOCK.SKU                    AS SKU              /* SKU             */
+        ,   MS_SKU.DESCRIPTION              AS SKUNAME          /* 상품명          */
+        ,   ST_STOCK.LOT                    AS FROMLOT          /* FROM LOT        */
+        ,   MS_SKU.PUTAWAYTYPE              AS PUTAWAYTYPE      /* 적치타입        */
+        ,   FN_CODEDESCR(
+                MS_SKU.STORERKEY
+              , 'PUTAWAYTYPE'
+              , MS_SKU.PUTAWAYTYPE
+            )                              AS PUTAWAYTYPENAME   /* 적치타입명      */
+        ,   MS_SKU.SKUGROUP                 AS MC               /* MC              */
+        ,   REPLACE(
+                FN_DESCR_SKUSPEC(
+                    MS_SKU.STORERKEY
+                  , 'SKUGROUP'
+                  , MS_SKU.SKUGROUP
+                )
+              , 'UNKNOWN'
+              )                           AS MCNAME             /* MC명            */
+        ,   ST_STOCK.QTY                    AS QTY              /* 수량            */
+        ,   ST_STOCK.OPENQTY                AS OPENQTY          /* 미배정수량      */
+        ,   ST_STOCK.QTYALLOCATED           AS QTYALLOCATED     /* 할당수량        */
+        ,   ST_STOCK.QTYPICKED              AS QTYPICKED        /* 피킹수량        */
+        ,   ST_STOCK.OPENQTY                AS TRANQTY          /* 이동수량        */
+        ,   ST_STOCK.UOM                    AS UOM              /* UOM             */
+        ,   CASE
+                WHEN ST_STOCK.DCCODE = '2170'
+                 AND NVL(MS_SKU.LINE01,'N') = 'Y'
+                 AND TO_NUMBER(NVL(MS_SKU.LINE02,0)) <![CDATA[<>]]> 0
+                THEN TO_NUMBER(NVL(MS_SKU.LINE02,0))
+                ELSE 0
+            END                            AS AVGWEIGHT         /* 평균중량        */
+        ,   ROUND(
+                CASE
+                    WHEN ST_STOCK.DCCODE = '2170'
+                     AND NVL(MS_SKU.LINE01,'N') = 'Y'
+                     AND TO_NUMBER(NVL(MS_SKU.LINE02,0)) <![CDATA[<>]]> 0
+                     AND ST_STOCK.UOM = 'KG'
+                    THEN ST_STOCK.QTY / TO_NUMBER(NVL(MS_SKU.LINE02,0))
+                    ELSE 0
+                END
+              , 3)                         AS CALBOX            /* 계산BOX         */
+        ,   CASE
+                WHEN ST_STOCK.DCCODE = '2170'
+                 AND NVL(MS_SKU.LINE01,'N') = 'Y'
+                THEN ROUND(ST_STOCK.BOXQTY,3)
+                ELSE 0
+            END                            AS REALOPENBOX       /* 실제OPENBOX     */
+        ,   CASE
+                WHEN ST_STOCK.DCCODE = '2170'
+                 AND NVL(MS_SKU.LINE01,'N') = 'Y'
+                THEN ROUND(ST_STOCK.BOXQTY,3)
+                ELSE 0
+            END                            AS REALCFMBOX        /* 실제CFMBOX      */
+        ,   0                               AS TRANBOX          /* 이동BOX         */
+        ,   CASE
+                WHEN ST_STOCK.DCCODE = '2170'
+                 AND NVL(MS_SKU.LINE01,'N') = 'Y'
+                THEN 'Y'
+                ELSE 'N'
+            END                            AS BOXFLAG           /* BOX 플래그      */
+        ,   ST_STOCK.STOCKGRADE             AS FROMSTOCKGRADE   /* FROM 등급       */
+        ,   FN_CODEDESCR(
+                ST_STOCK.STORERKEY
+              , 'STOCKGRADE'
+              , ST_STOCK.STOCKGRADE
+            )                              AS STOCKGRADENAME    /* 등급명          */
+        ,   CM_LOT.LOTTABLE01               AS LOTTABLE01       /* LOT1            */
+        ,   FN_LOTDURATION(
+                MS_SKU.STORERKEY
+              , MS_SKU.DURATIONTYPE
+              , MS_SKU.DURATION
+              , CM_LOT.LOTTABLE01
+              , 'N'
+            ) || '/' || MS_SKU.DURATION    AS DURATIONTERM      /* 유통기한(일)    */
+        ,   ST_STOCK.STOCKID                AS FROMSTOCKID      /* FROM 재고ID     */
+        ,   ST_STOCK.STOCKTYPE              AS FROMSTOCKTYPE    /* FROM 재고TYPE   */
+        ,   ST_SERIALINFO.SERIALNO          AS SERIALNO         /* 시리얼번호      */
+        ,   ST_SERIALINFO.CONVSERIALNO      AS CONVSERIALNO     /* BL번호          */
+        ,   ''                               AS REASONCODE       /* 사유코드        */
+        ,   ''                               AS REASONMSG        /* 사유내용        */
+        ,   ''                               AS TOSTOCKGRADE     /* TO 등급         */
+        ,   MS_SKU.DURATION                 AS DURATION         /* 기준유통기한    */
+        ,   MS_SKU.DURATIONTYPE             AS DURATIONTYPE     /* 기간타입        */
+        ,   ST_SERIALINFO.POKEY             AS POKEY            /* PO번호          */
+        ,   ST_SERIALINFO.POLINE            AS POLINE           /* PO항번          */
+
+    FROM    ST_STOCK
+
+    /* ────── 권한 JOIN ────── */
+    JOIN    CM_USER_AUTHORITY
+              ON CM_USER_AUTHORITY.USERID = #{gUserId}
+            <if test="dcCode    != null and dcCode    != ''">  AND CM_USER_AUTHORITY.DCCODE    = #{dcCode}    </if>
+            <if test="gStorerkey != null and gStorerkey != ''">  AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey} </if>
+            <if test="gArea      != null and gArea      != ''">  AND CM_USER_AUTHORITY.AREA      = #{gArea}      </if>
+
+            <!-- 다중 ORGANIZE -->
+            <if test="organize != null and organize != ''">
+                AND CM_USER_AUTHORITY.ORGANIZE IN (
+                    SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL))
+                      FROM (SELECT #{organize} AS VAL FROM DUAL)
+                    CONNECT BY INSTR(VAL,',',1,LEVEL-1) > 0
+                )
+            </if>
+
+            AND CM_USER_AUTHORITY.DCCODE    = ST_STOCK.DCCODE
+            AND CM_USER_AUTHORITY.STORERKEY = ST_STOCK.STORERKEY
+            AND CM_USER_AUTHORITY.ORGANIZE  = ST_STOCK.ORGANIZE
+            AND CM_USER_AUTHORITY.AREA      = ST_STOCK.AREA
+
+    /* ────── SKU / LOT / LOCATION ────── */
+    JOIN    MS_SKU
+              ON MS_SKU.STORERKEY = ST_STOCK.STORERKEY
+             AND MS_SKU.SKU       = ST_STOCK.SKU
+             AND MS_SKU.DEL_YN    = 'N'
+
+            <!-- 다중 SKU -->
+            <if test="sku != null and sku != ''">
+                AND MS_SKU.SKU IN (
+                    SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL))
+                      FROM (SELECT #{sku} AS VAL FROM DUAL)
+                    CONNECT BY INSTR(VAL,',',1,LEVEL-1) > 0
+                )
+            </if>
+
+    JOIN    CM_LOT
+              ON CM_LOT.STORERKEY = ST_STOCK.STORERKEY
+             AND CM_LOT.LOT       = ST_STOCK.LOT
+             AND CM_LOT.DEL_YN    = 'N'
+
+    JOIN    MS_LOCATION
+              ON MS_LOCATION.DCCODE = ST_STOCK.DCCODE
+             AND MS_LOCATION.LOC    = ST_STOCK.LOC
+    JOIN    CM_ORGANIZE
+            ON CM_ORGANIZE.ORGANIZE = ST_STOCK.ORGANIZE
+           AND CM_ORGANIZE.DEL_YN = 'N'
+            <!-- 위치 조건 -->
+            <if test="zone        != null and zone        != ''">  AND MS_LOCATION.ZONE        LIKE #{zone}        </if>
+            <if test="whArea      != null and whArea      != ''">  AND MS_LOCATION.WHAREA      LIKE #{whArea}      </if>
+            <if test="whAreaFloor != null and whAreaFloor != ''">  AND MS_LOCATION.WHAREAFLOOR LIKE #{whAreaFloor} </if>
+            <if test="fromLoc     != null and fromLoc     != ''">  AND MS_LOCATION.LOC <![CDATA[>=]]> #{fromLoc}   </if>
+            <if test="toLoc       != null and toLoc       != ''">  AND MS_LOCATION.LOC <![CDATA[<=]]> #{toLoc}     </if>
+            <if test="locCategory != null and locCategory != ''">  AND MS_LOCATION.LOCCATEGORY LIKE #{locCategory} </if>
+            <if test="locType     != null and locType     != ''">  AND MS_LOCATION.LOCTYPE     LIKE #{locType}     </if>
+
+    /* ────── BL 여부에 따른 시리얼 JOIN ────── */
+    <choose>
+        <when test="searchBl != null and searchBl != ''">
+            JOIN ST_SNINFO ST_SERIALINFO
+              ON ST_SERIALINFO.STORERKEY = ST_STOCK.STORERKEY
+             AND ST_SERIALINFO.SKU       = ST_STOCK.SKU
+             AND ST_SERIALINFO.STOCKID   = ST_STOCK.STOCKID
+             AND ST_SERIALINFO.DEL_YN    = 'N'
+        </when>
+        <otherwise>
+            LEFT JOIN ST_SNINFO ST_SERIALINFO
+                   ON ST_SERIALINFO.STORERKEY = ST_STOCK.STORERKEY
+                  AND ST_SERIALINFO.SKU       = ST_STOCK.SKU
+                  AND ST_SERIALINFO.STOCKID   = ST_STOCK.STOCKID
+                  AND ST_SERIALINFO.DEL_YN    = 'N'
+        </otherwise>
+    </choose>
+
+    WHERE   1 = 1
+        <if test="stockGrade != null and stockGrade != ''"> AND ST_STOCK.STOCKGRADE LIKE #{stockGrade} </if>
+        <if test="stockType  != null and stockType  != ''"> AND ST_STOCK.STOCKTYPE  LIKE #{stockType}  </if>
+
+    <!-- 센터 2170 예외 -->
+    <choose>
+        <when test="dcCode == '2170'">
+            AND ( ST_STOCK.OPENQTY <![CDATA[>]]> 0
+               OR ST_STOCK.BOXQTY  <![CDATA[>]]> 0 )
+        </when>
+        <otherwise>
+            AND ST_STOCK.OPENQTY <![CDATA[>]]> 0
+        </otherwise>
+    </choose>
+
+        <if test="blNoMulti != null and blNoMulti != ''">
+                   AND    ST_SERIALINFO.CONVSERIALNO      IN
+                 <foreach collection="blNoMulti" item="item" open="(" separator="," close=")">
+                     #{item}
+                 </foreach> 
+		</if>
+        <if test="organize != null and organize != ''">
+            AND ST_STOCK.ORGANIZE = #{organize}
+        </if>
+
+    <!-- ────── 정렬 ────── -->
+    <choose>
+        <when test="sortKey == 'DATE'">
+            ORDER BY ST_STOCK.DCCODE
+                   , ST_STOCK.STORERKEY
+                   , ST_STOCK.ORGANIZE
+                   , ST_STOCK.SKU
+                   , CM_LOT.LOTTABLE01
+                   , ST_STOCK.STOCKGRADE
+        </when>
+        <otherwise>
+            ORDER BY ST_STOCK.DCCODE
+                   , ST_STOCK.STORERKEY
+                   , ST_STOCK.ORGANIZE
+                   , ST_STOCK.AREA
+                   , ST_STOCK.LOC
+                   , ST_STOCK.SKU
+                   , CM_LOT.LOTTABLE01
+                   , ST_STOCK.STOCKGRADE
+        </otherwise>
+    </choose>
+
+
+	</select>  
+</mapper>

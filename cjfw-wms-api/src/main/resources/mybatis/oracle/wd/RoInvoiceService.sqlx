@@ -1,0 +1,214 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+  PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+  "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="roInvoiceService">
+    <!-- 반품납품서출력 헤더 -->
+    <select id="getMasterList" resultType="cjfw.wms.wd.dto.RoInvoiceResDto">
+        SELECT /* [roInvoiceService.sqlx][roInvoiceService.getMasterList][반품납품서출력] */
+            '0'                      AS CHECKYN
+            ,TM_INPLAN.CARNO          AS CARNO
+            ,CASE WHEN FN_ISNUMBER(RIGHT(TM_INPLAN.CARNO,4)) = 1
+            THEN RIGHT(TM_INPLAN.CARNO,4)
+            ELSE '9999' END AS SHORTNO						/* 1차에서는 관리 안함, 2차는 CM_CAR.SHORTNO로 변경해야 함 */
+            ,TM_INPLAN.PRIORITY       AS PRIORITY
+            ,TM_INPLAN.DELIVERYDT     AS DELIVERYDT
+            ,TM_INPLAN.DELIVERYGROUP  AS DELIVERYGROUP
+            ,COUNT(DISTINCT TM_INPLAN.CUSTKEY) AS CUSTCNT
+            ,COUNT(DISTINCT TM_INPLAN.SLIPNO)  AS SLIPCNT
+        FROM TM_INPLAN
+        JOIN DM_DOCUMENT_H
+          ON TM_INPLAN.DCCODE  = DM_DOCUMENT_H.DCCODE
+            AND TM_INPLAN.DOCTYPE = DM_DOCUMENT_H.DOCTYPE
+            AND TM_INPLAN.SLIPDT  = DM_DOCUMENT_H.DELIVERYDATE
+            AND TM_INPLAN.DOCNO   = DM_DOCUMENT_H.DOCNO
+         AND DM_DOCUMENT_H.DEL_YN = 'N'
+         AND DM_DOCUMENT_H.DOCTYPE = 'WD'
+         AND DM_DOCUMENT_H.WORKPROCESSCODE = DECODE(DM_DOCUMENT_H.STORERKEY, 'CJFW', 'PO', DM_DOCUMENT_H.WORKPROCESSCODE)
+         AND DM_DOCUMENT_H.ordertype IN ('NB','SNB','RP')
+        JOIN DM_DOCUMENT_D
+          ON DM_DOCUMENT_D.DCCODE       = DM_DOCUMENT_H.DCCODE
+        AND DM_DOCUMENT_D.DOCTYPE      = DM_DOCUMENT_H.DOCTYPE
+        AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+        AND DM_DOCUMENT_D.DOCNO        = DM_DOCUMENT_H.DOCNO
+         AND DM_DOCUMENT_D.DOCTYPE = DM_DOCUMENT_H.DOCTYPE
+         AND DM_DOCUMENT_D.DEL_YN = 'N'
+        WHERE 1=1
+        <!-- START.권한센터 -->
+        AND EXISTS (SELECT 1
+        FROM CM_USER_AUTHORITY
+        WHERE CM_USER_AUTHORITY.DCCODE = DM_DOCUMENT_D.DCCODE
+        AND CM_USER_AUTHORITY.STORERKEY = DM_DOCUMENT_D.STORERKEY
+        AND CM_USER_AUTHORITY.ORGANIZE = DM_DOCUMENT_D.ORGANIZE
+        AND CM_USER_AUTHORITY.AREA = DM_DOCUMENT_D.AREA
+        AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey}
+        AND CM_USER_AUTHORITY.USERID    = #{gUserId}
+        AND CM_USER_AUTHORITY.DCCODE    = #{fixdccode}
+        AND CM_USER_AUTHORITY.AREA      = #{gArea}
+        )
+        <!-- END.권한센터	-->
+        <if test="invoicedt != null and invoicedt != ''"> AND TM_INPLAN.DELIVERYDT = #{invoicedt} </if>
+         <if test="deliverygroup != null and deliverygroup != ''"> AND TM_INPLAN.DELIVERYGROUP = #{deliverygroup} </if>
+         <if test="carno != null and carno != ''">
+             AND TM_INPLAN.CARNO IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                 FROM (SELECT #{carno} AS VAL FROM DUAL) A
+                 CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+         </if>
+        <if test="toCustkey != null and toCustkey != ''">
+            AND DM_DOCUMENT_H.TO_CUSTKEY IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+            FROM (SELECT #{toCustkey} AS VAL FROM DUAL) A
+            CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+        </if>
+         <if test="gMultiCourier != null and gMultiCourier != ''"> AND DM_DOCUMENT_H.COURIER = #{gMultiCourier} </if>
+        GROUP BY TM_INPLAN.CARNO, TM_INPLAN.PRIORITY, TM_INPLAN.DELIVERYDT, TM_INPLAN.DELIVERYGROUP
+        ORDER BY TM_INPLAN.DELIVERYDT, TM_INPLAN.CARNO, TM_INPLAN.PRIORITY, TM_INPLAN.DELIVERYGROUP
+    </select>
+
+    <!-- 반품납품서출력 상세 -->
+    <select id="getDetailList" resultType="cjfw.wms.wd.dto.RoInvoiceResDetailDto">
+        SELECT /* [roInvoiceService.sqlx][roInvoiceService.getDetailList][반품납품서출력] */
+            '0'                        AS CHECKYN/** 체크여부 */
+          ,DM_DOCUMENT_H.STORERKEY	  AS STORERKEY/** 화주코드 */
+          ,TM_INPLAN.DELIVERYDT       AS DELIVERYDT/** 배송일자 */
+           ,TM_INPLAN.CARNO            AS CARNO/** 차량번호 */
+           ,TM_INPLAN.PRIORITY         AS PRIORITY/** 우선순위 */
+           ,TM_INPLAN.DELIVERYGROUP    AS DELIVERYGROUP/** 배차그룹 */
+          ,DM_DOCUMENT_H.TO_CUSTKEY   AS CUSTKEY/** 거래처코드 */
+          ,MIN(MS_CUST.DESCRIPTION)   AS CUSTNAME/** 거래처명 */
+          ,''                         AS DOCNO /** 문서번호 */
+          ,FN_CODEDESCR(DM_DOCUMENT_H.STORERKEY, 'INVOICETYPE', DM_DOCUMENT_H.INVOICETYPE)  AS INVOICETYPEDESC/** 세금계산서유형명 */
+          ,''                         AS ORDERTYPE/** 주문유형 */
+          ,''                         AS PRINTYN /** 출력여부 */
+          ,DM_DOCUMENT_H.INVOICETYPE  AS INVOICETYPE/** 세금계산서유형 */
+          ,''                         AS SLIPDT/** 전표일자 */
+           ,''                         AS SLIPNO   /** 전표번호 */
+        FROM TM_INPLAN
+        JOIN DM_DOCUMENT_H
+          ON DM_DOCUMENT_H.DCCODE = TM_INPLAN.DCCODE
+         AND DM_DOCUMENT_H.STORERKEY = TM_INPLAN.storerkey
+         AND DM_DOCUMENT_H.DOCDT = TM_INPLAN.docdt
+         AND DM_DOCUMENT_H.DOCNO = TM_INPLAN.docno
+         AND DM_DOCUMENT_H.DOCTYPE = TM_INPLAN.doctype
+         AND DM_DOCUMENT_H.DOCTYPE = 'WD'
+         AND DM_DOCUMENT_H.DEL_YN = 'N'
+        <if test="toCustkey != null and toCustkey != ''">
+            AND DM_DOCUMENT_H.TO_CUSTKEY IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+            FROM (SELECT #{toCustkey} AS VAL FROM DUAL) A
+            CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+        </if>
+        JOIN MS_CUST
+          ON MS_CUST.STORERKEY = DM_DOCUMENT_H.STORERKEY
+         AND MS_CUST.CUSTKEY = DM_DOCUMENT_H.TO_CUSTKEY
+         AND MS_CUST.CUSTTYPE = DM_DOCUMENT_H.TO_CUSTTYPE
+        WHERE 1=1
+         AND TM_INPLAN.CARNO = #{carno}
+         AND TM_INPLAN.PRIORITY = #{priority}
+         AND TM_INPLAN.DELIVERYDT = #{deliverydt}
+         AND TM_INPLAN.DELIVERYGROUP = 'RO'
+        GROUP BY DM_DOCUMENT_H.STORERKEY, TM_INPLAN.DELIVERYDT, TM_INPLAN.CARNO, TM_INPLAN.PRIORITY, TM_INPLAN.DELIVERYGROUP, DM_DOCUMENT_H.TO_CUSTKEY, DM_DOCUMENT_H.INVOICETYPE
+        ORDER BY DM_DOCUMENT_H.TO_CUSTKEY, DM_DOCUMENT_H.INVOICETYPE
+    </select>
+
+    <!-- 납품서 RD 헤더 -->
+    <select id="getPrintList" resultType="cjfw.wms.wd.dto.RoInvoiceResPrintDto">
+        SELECT /* [roInvoiceService.sqlx][roInvoiceService.getPrintList][반품납품서출력] */
+               FN_FORMAT_MASK(SY_INVOICE_HEADER.DOCDT, '########-####-####')                 AS DELIVERYDT      /** 배송일자 */
+             		      ,SY_INVOICE_HEADER.FROM_VATNO                                                  AS FROM_VATNO  /** 공급자사업자번호 */
+             		      ,SY_INVOICE_HEADER.FROM_VATCUSTNAME                                            AS FROM_VATNAME  /** 공급자상호 */
+             		      ,SY_INVOICE_HEADER.FROM_VATOWNER                                               AS FROM_VATOWNER  /** 공급자대표자 */
+             		      ,SY_INVOICE_HEADER.FROM_VATTYPE                                                AS FROM_VATTYPE  /** 공급자업태 */
+             		      ,SY_INVOICE_HEADER.FROM_VATCATEGORY                                            AS FROM_VATCATEGORY  /** 공급자업종 */
+             		      ,SY_INVOICE_HEADER.FROM_VATADDRESS1 ||' '|| SY_INVOICE_HEADER.FROM_VATADDRESS2 AS FROM_VATADDRESS       /** 공급자주소 */
+             		      ,SY_INVOICE_HEADER.CUSTKEY                                                     AS TO_CUSTKEY /** 거래처코드 */
+             		      ,FN_FORMAT_MASK(SY_INVOICE_HEADER.TO_VATNO, '######-####-##########')          AS TO_VATNO /** 거래처사업자번호 */
+             		      ,SY_INVOICE_HEADER.TO_VATCUSTNAME                                              AS TO_VATNAME /** 거래처상호 */
+             		      ,SY_INVOICE_HEADER.TO_VATOWNER                                                 AS TO_VATOWNER /** 거래처대표자 */
+             		      ,SY_INVOICE_HEADER.TO_VATADDRESS1												 AS TO_VATADDRESS1 /** 거래처주소1 */
+             		      ,SY_INVOICE_HEADER.TO_VATADDRESS2     										 AS TO_VATADDRESS2 /** 거래처주소2 */
+             		      ,SY_INVOICE_HEADER.TO_VATTYPE                                                  AS TO_VATTYPE /** 거래처업태 */
+             		      ,SY_INVOICE_HEADER.TO_VATCATEGORY                                              AS TO_VATCATEGORY /** 거래처업종 */
+             		      ,SY_INVOICE_HEADER.CSTEAM_EMPNAME                                              AS CS_PERSON /** CS담당자 */
+             		      ,SY_INVOICE_HEADER.CSTEAM_EMPPHONE                                             AS CS_TEL /** CS전화번호 */
+             		      ,SY_INVOICE_HEADER.EMPNAME                                                     AS EMPNAME /** 담당자명 */
+             		      ,DAMO.DEC(SY_INVOICE_HEADER.EMPPHONE)                                                    AS EMPPHONE /** 담당자전화번호 */
+             		      ,SY_INVOICE_HEADER.DCCODE                                                      AS FROM_CUSTKEY /** 센터코드 */
+             		      ,SY_INVOICE_HEADER.DCNAME                                                      AS FROM_CUSTNAME /** 센터명 */
+             		      ,SY_INVOICE_HEADER.DCADDRESS1 ||' '|| SY_INVOICE_HEADER.DCADDRESS2             AS FROM_ADDRESS /** 센터주소 */
+             		      ,SY_INVOICE_HEADER.CARNO                                                       AS CARNO /** 차량번호 */
+             		      ,SY_INVOICE_HEADER.DELIVERYGROUP                                               AS DELIVERYGROUP /** 배차그룹 */
+             		      ,SY_INVOICE_HEADER.DRIVERNAME                                                  AS DRIVERNAME  /** 기사명 */
+             		      ,DAMO.DEC(SY_INVOICE_HEADER.DRIVER_PHONE)                                                AS DRIVER_PHONE /** 기사전화번호 */
+             		      ,SY_INVOICE_HEADER.DLV_CUSTNAME                                                AS TO_CUSTNAME /** 납품처명 */
+             		      ,DAMO.DEC(SY_INVOICE_HEADER.DLV_PHONE)                                                   AS TO_PHONE /** 납품처전화번호 */
+             		      ,SY_INVOICE_HEADER.DLV_ADDRESS1											     AS TO_ADDRESS1 /** 납품처주소1 */
+             		      ,SY_INVOICE_HEADER.DLV_ADDRESS2         										 AS TO_ADDRESS2             /** 납품처주소2 */
+             		      ,''                                                                            AS INVOICETYPE /** 세금계산서유형 */
+             		      ,SY_INVOICE_HEADER.DOCTYPE                                                     AS DOCTYPE /** 문서유형 */
+             		      ,SY_INVOICE_HEADER.HEADERKEY                                                   AS HEADERKEY /** 헤더키 */
+             		      ,SY_INVOICE_HEADER.MEMO1       /** 비고 */
+        FROM SY_INVOICE_HEADER
+        WHERE SY_INVOICE_HEADER.PROCESSTYPE = #{processtype}
+          AND SY_INVOICE_HEADER.PROCESSCREATOR = #{gUserId}
+          AND SY_INVOICE_HEADER.SPID = #{gSpid}
+        ORDER BY SY_INVOICE_HEADER.CARNO, SY_INVOICE_HEADER.DELIVERYGROUP, SY_INVOICE_HEADER.PRIORITY, SY_INVOICE_HEADER.CUSTKEY
+    </select>
+
+    <!-- 납품서 RD 상세 -->
+    <select id="getPrintDetailList" resultType="cjfw.wms.wd.dto.RoInvoiceResPrintDetailDto">
+    SELECT /* [roInvoiceService.sqlx][roInvoiceService.getDetailPrintInvoice][반품납품서출력] */
+        SY_INVOICE_DETAIL.SKU                         AS SKU
+        ,replace(SY_INVOICE_DETAIL.SKUNAME,'!@','! @') AS SKUNAME
+        ,SY_INVOICE_DETAIL.UOM                         AS UOM
+        ,SY_INVOICE_DETAIL.CONFIRMQTY                  AS CONFIRMQTY
+        ,SY_INVOICE_DETAIL.UNITPRICE                   AS UNITPRICE
+        ,SY_INVOICE_DETAIL.SUPPLYPRICE                 AS SUPPLYPRICE
+        ,SY_INVOICE_DETAIL.TAXAMOUNT                   AS TAXAMOUNT
+        ,SY_INVOICE_DETAIL.TOTAMOUNT                   AS TOTAMOUNT
+        ,SY_INVOICE_DETAIL.HEADERKEY                   AS HEADERKEY
+        ,SY_INVOICE_DETAIL.DOCNO		                 AS DOCNO
+        ,SY_INVOICE_DETAIL.STORAGETYPE                 AS STORAGETYPE
+    FROM   SY_INVOICE_DETAIL
+        WHERE SY_INVOICE_DETAIL.PROCESSTYPE = #{processtype}
+          AND SY_INVOICE_DETAIL.PROCESSCREATOR = #{gUserId}
+          AND SY_INVOICE_DETAIL.SPID = #{gSpid}
+    ORDER BY SY_INVOICE_DETAIL.HEADERKEY, SY_INVOICE_DETAIL.DOCNO, SY_INVOICE_DETAIL.LINENO
+    </select>
+
+    <!-- 임시 테이블 -->
+    <insert id="insertTemp" parameterType="java.util.List" >
+        INSERT /* [roInvoiceService.sqlx][insertTemp][임시 Tabele 등록] */
+        INTO SY_PROCESSTEMP_WD (PROCESSTYPE,PROCESSCREATOR,SPID,ADDWHO,EDITWHO
+        /**/
+        ,DELIVERYDT
+        ,CARNO
+        ,PRIORITY
+        ,DELIVERYGROUP
+        ,PICK_LIST_NO
+        <if test="list[0].processtype == 'RO_INVOICE'">
+        ,CUSTKEY
+        ,DOCNO
+        ,SLIPDT
+        ,SLIPNO
+        </if>
+        /**/
+        )
+        <foreach collection="list" item="item" separator="UNION ALL">
+            SELECT
+            #{item.processtype},#{item.gUserId},#{item.gSpid},#{item.gUserId},#{item.gUserId}
+            /**/
+            ,#{item.deliverydt}
+            ,#{item.carno}
+            ,#{item.priority}
+            ,#{item.deliverygroup}
+            ,#{item.pickListNo}
+            <if test="list[0].processtype == 'RO_INVOICE'">
+            ,#{item.custkey}
+            ,#{item.docno}
+            ,#{item.slipdt}
+            ,#{item.slipno}
+            </if>
+            /**/
+            FROM DUAL
+        </foreach>
+    </insert>
+</mapper>

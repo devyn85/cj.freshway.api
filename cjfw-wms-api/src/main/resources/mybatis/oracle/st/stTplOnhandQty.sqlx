@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper   PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+  "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="stTplOnhandQtyService">
+    <!-- 위탁재고 조회 -->
+    <select id="getMasterList" resultType="cjfw.wms.st.dto.StTplOnhandQtyResDto">
+   
+    SELECT
+           CUST.DESCRIPTION           AS TPL_USER 
+         , ST_STOCK.STOCKTYPE                                                             AS STOCKTYPE
+         , LOGISONESVC.FN_CODEDESCR(ST_STOCK.STORERKEY, 'STOCKTYPE',ST_STOCK.STOCKTYPE)   AS STOCKTYPENM  -- 재고위치
+         , ST_STOCK.STOCKGRADE                                                            AS STOCKGRADE 
+         , LOGISONESVC.FN_CODEDESCR(ST_STOCK.STORERKEY, 'STOCKGRADE',ST_STOCK.STOCKGRADE) AS STOCKGRADEDESC --재고속성
+         , ST_STOCK.SKU                                  AS SKU
+         , MS_SKU.DESCRIPTION                            AS SKUNM
+         , ST_STOCK.UOM                                   AS UOM
+         , ST_STOCK.QTY                                  AS QTY
+         , DM_DOCUMENT_D.DELIVERYDATE                    AS DELIVERYDATE
+         , CASE   WHEN ST_STOCK.UOM IN ('KG', 'BOX') THEN ST_STOCK.QTY
+                  ELSE CASE
+                          WHEN LOGISONESVC.FN_CONV_UOM(ST_STOCK.STORERKEY, ST_STOCK.SKU, 'BOX', ST_STOCK.UOM, 1) = 0
+                               THEN ST_STOCK.QTY
+                          ELSE TRUNC(LOGISONESVC.FN_CONV_UOM(ST_STOCK.STORERKEY, ST_STOCK.SKU,
+                                                   ST_STOCK.UOM, 'BOX', ST_STOCK.QTY))
+                         END
+                 END                                                              AS BOXQTY /* 수량(BOX)_정수 */
+         , DM_DOCUMENT_D.DELIVERYDATE                    AS DELIVERYDATE
+         , ST_SERIALINFO.SERIALNO                       AS SERIALNO  -- 이력번호  
+         , ST_SERIALINFO.CONVSERIALNO                   AS CONVSERIALNO -- BL번호 
+         , NVL(CASE WHEN MS_SKU.DURATIONTYPE != '1' AND REGEXP_LIKE(ST_SERIALINFO.LOTTABLE01, '^[0-9]{8}$')
+                            THEN TO_CHAR(TO_DATE(ST_SERIALINFO.LOTTABLE01,'YYYYMMDD') + MS_SKU.DURATION, 'YYYYMMDD')
+                            ELSE ST_SERIALINFO.LOTTABLE01 END,'STD')                      AS  DURATION            /*소비기한*/
+         , CASE WHEN ST_SERIALINFO.LOTTABLE01 IS NULL THEN ''
+                ELSE LOGISONESVC.FN_LOTDURATION(MS_SKU.STORERKEY,MS_SKU.DURATIONTYPE,MS_SKU.DURATION,ST_SERIALINFO.LOTTABLE01,'N')
+                ||'/'|| MS_SKU.DURATION END                                                   AS DURATIONTERM  
+         , LOGISONESVC.FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, ST_SERIALINFO.LOTTABLE01, 'R') || '%'   AS DURATION_RATE /*소비기한잔여일/총*/ 
+      FROM ST_STOCK    
+      JOIN MS_SKU
+        ON MS_SKU.STORERKEY = ST_STOCK.STORERKEY
+       AND MS_SKU.SKU       = ST_STOCK.SKU
+      LEFT JOIN ST_SNINFO ST_SERIALINFO
+        ON  ST_STOCK.STORERKEY = ST_SERIALINFO.STORERKEY
+       AND ST_STOCK.SKU       = ST_SERIALINFO.SKU
+       AND ST_STOCK.STOCKID   = ST_SERIALINFO.STOCKID
+       AND ST_SERIALINFO.DEL_YN = 'N'
+      JOIN MS_EXDCRATE
+        ON MS_EXDCRATE.DCCODE = ST_STOCK.DCCODE
+       AND MS_EXDCRATE.ORGANIZE = ST_STOCK.ORGANIZE
+       AND MS_EXDCRATE.STORERKEY = ST_STOCK.STORERKEY
+       AND MS_EXDCRATE.SKU = ST_STOCK.SKU
+       AND MS_EXDCRATE.CUSTKEY= #{custkey}
+      LEFT JOIN DP_INPLAN
+        ON DP_INPLAN.DCCODE = ST_STOCK.DCCODE
+       AND DP_INPLAN.STORERKEY = ST_STOCK.STORERKEY
+       AND DP_INPLAN.ORGANIZE = ST_STOCK.ORGANIZE
+       AND DP_INPLAN.SKU = ST_STOCK.SKU
+       AND DP_INPLAN.STOCKID = ST_STOCK.STOCKID
+       AND (DP_INPLAN.IF_SEND_TYPE ='IE' OR DP_INPLAN.IF_SEND_TYPE ='PO')
+      LEFT OUTER  JOIN DM_DOCUMENT_D
+        ON DM_DOCUMENT_D.DOCNO = DP_INPLAN.DOCNO
+       AND DM_DOCUMENT_D.DOCTYPE = 'DP'
+       AND DM_DOCUMENT_D.DELIVERYDATE = DP_INPLAN.SLIPDT
+       AND DM_DOCUMENT_D.DCCODE = DP_INPLAN.DCCODE
+       AND DM_DOCUMENT_D.DOCLINE = DP_INPLAN.DOCLINE
+       LEFT JOIN DM_DOCUMENT_H 
+		       ON DM_DOCUMENT_D.DCCODE       = DM_DOCUMENT_H.DCCODE
+		      AND DM_DOCUMENT_D.DOCTYPE      = DM_DOCUMENT_H.DOCTYPE
+		      AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+		      AND DM_DOCUMENT_D.DOCNO        = DM_DOCUMENT_H.DOCNO
+		      AND DM_DOCUMENT_D.DEL_YN       = 'N'  
+      LEFT JOIN MS_CUST CUST                   
+        ON CUST.CUSTKEY =  #{custkey}
+       AND CUST.STORERKEY   =  'FW00'
+       AND CUST.CUSTTYPE    ='C'              /*협력사명 */
+     WHERE 1=1 
+       AND ST_STOCK.STORERKEY = 'FW00'         
+       AND ST_STOCK.DCCODE = #{dcCode}
+       AND ST_STOCK.QTY <![CDATA[<>]]> 0
+       <if test="organize != null and organize != ''">
+       AND  ST_STOCK.ORGANIZE IN (
+                    SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS ORGANIZE
+                     FROM (SELECT #{organize} AS VAL FROM DUAL)
+                    CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) > 0
+                  )
+               </if>
+      <if test="sku != null and sku != ''">
+       AND ST_STOCK.SKU IN (
+                        SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS SKU
+                        FROM (SELECT #{sku} AS VAL FROM DUAL)
+                        CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) > 0
+                    )
+                </if>
+     <if test="serialNo != null and serialNo != ''">       
+            AND    ST_SERIALINFO.SERIALNO      =  #{serialNo}                                                       /* 유통이력번호 */
+     </if>
+     <if test="convserialno != null and convserialno != ''">       
+            AND    ST_SERIALINFO.CONVSERIALNO      =  #{convserialno}                                                       /* 유통이력번호 */
+     </if>
+     <if test="tplUser != null and tplUser != ''">     
+		       AND DM_DOCUMENT_H.TPL_BCNR_ID = #{tplUser}
+		   </if>
+    </select>
+</mapper>

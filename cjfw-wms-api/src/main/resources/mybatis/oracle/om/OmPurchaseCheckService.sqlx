@@ -1,0 +1,171 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="omPurchaseCheckService">
+	<select id="getMasterListPO" resultType="OmPurchaseCheckResDto">
+		WITH T_RESULT AS (
+		    SELECT DM_DOCUMENT_D.DCCODE
+		          ,DM_DOCUMENT_D.DELIVERYDATE
+		          ,DM_DOCUMENT_D.STORERKEY
+		          ,DM_DOCUMENT_D.SKU
+		          ,'BOX' AS UOM
+		          ,DM_DOCUMENT_D.WORKPROCESSCODE
+		          <!-- ,SUM(DM_DOCUMENT_D.ORDERQTY + DM_DOCUMENT_D.ORDERADJUSTQTY ) POQTY -->
+		          ,CEIL(FN_CONV_UOM(DM_DOCUMENT_D.STORERKEY, DM_DOCUMENT_D.SKU, DM_DOCUMENT_D.UOM, 'BOX', SUM(DM_DOCUMENT_D.ORDERQTY + DM_DOCUMENT_D.ORDERADJUSTQTY ))) AS POQTY
+		    FROM   DM_DOCUMENT_D    
+		    WHERE  1=1
+		    <if test='dcCode != null and dcCode.length > 0'>
+			  AND DM_DOCUMENT_D.DCCODE IN
+			   <foreach collection="dcCode" item="dccodeItem" open="(" separator="," close=")">
+			      #{dccodeItem}
+			   </foreach>
+			</if>
+		    AND    DM_DOCUMENT_D.STORERKEY    = #{gStorerkey}
+		    AND    DM_DOCUMENT_D.DOCTYPE      = 'DP'
+		    AND    DM_DOCUMENT_D.DELIVERYDATE <![CDATA[<=]]> #{slipDt}
+		    AND    DM_DOCUMENT_D.DELIVERYDATE <![CDATA[>=]]> TO_CHAR(ADD_MONTHS(TO_DATE(#{slipDt},'YYYYMMDD'),-1), 'YYYYMMDD') 
+		    AND    DM_DOCUMENT_D.CHANNEL      = '1'
+			<if test="sku != null and sku != ''">
+	            AND DM_DOCUMENT_D.SKU IN
+	              (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+		                        FROM (SELECT #{sku} AS VAL FROM DUAL) A
+		                     CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+	        </if>
+		    AND    DM_DOCUMENT_D.WORKPROCESSCODE ='PO'
+		    GROUP BY DM_DOCUMENT_D.DCCODE
+		            ,DM_DOCUMENT_D.DELIVERYDATE
+		            ,DM_DOCUMENT_D.STORERKEY
+		            ,DM_DOCUMENT_D.SKU
+		            ,DM_DOCUMENT_D.UOM
+		            ,DM_DOCUMENT_D.WORKPROCESSCODE
+		)
+		SELECT /* [omInplanService.sqlx][omPurchaseCheckPOService.getMasterList][월간주간발주량체크PO 마스터 조회][jangjaehyun][20250711] */ 
+			   T_RESULT.DCCODE                                                AS DCCODE
+		      ,T_RESULT.STORERKEY                                             AS STORERKEY
+		      ,T_RESULT.SKU                                                   AS SKU
+		      ,MAX(MS_SKU.DESCRIPTION)                                        AS SKUNAME
+		      ,T_RESULT.UOM                                                   AS UOM
+		      ,SUM(CASE WHEN DELIVERYDATE = #{slipDt} THEN POQTY ELSE 0 END)  AS THEDAY		      
+		      <!-- /* 주차이 */
+		      ,SUM(CASE WHEN DELIVERYDATE = #{slipDt} THEN POQTY ELSE 0 END)
+		       - TRUNC(FN_ZERODIVIDE( SUM(CASE WHEN DELIVERYDATE <![CDATA[>=]]> TO_CHAR(TO_DATE(#{slipDt},'YYYYMMDD')-7 ,'YYYYMMDD') THEN POQTY ELSE 0 END)
+		                           ,SUM(CASE WHEN DELIVERYDATE <![CDATA[>=]]> TO_CHAR(TO_DATE(#{slipDt},'YYYYMMDD')-7 ,'YYYYMMDD') THEN 1     ELSE 0 END) )
+		            )                                                         AS WEEK_DIFF -->		      
+		      <!-- /* 월차이 */
+		      ,SUM(CASE WHEN DELIVERYDATE = #{slipDt} THEN POQTY ELSE 0 END) 
+		       - TRUNC(FN_ZERODIVIDE( SUM(POQTY) ,COUNT(1) ))                 AS MONTH_DIFF -->
+		      ,SUM(POQTY)                                                     AS MONTH_TOTAL_QTY  /* 월 총 입고량 (30일) */
+		      ,COUNT(1)                                                       AS MONTH_COUNT      /* 월 입고횟수 (30일) */
+		      /* 주간통계 */
+		      ,TRUNC(FN_ZERODIVIDE( SUM(CASE WHEN DELIVERYDATE <![CDATA[>=]]> TO_CHAR(TO_DATE(#{slipDt},'YYYYMMDD')-7 ,'YYYYMMDD') THEN POQTY ELSE 0 END)
+		                           ,SUM(CASE WHEN DELIVERYDATE <![CDATA[>=]]> TO_CHAR(TO_DATE(#{slipDt},'YYYYMMDD')-7 ,'YYYYMMDD') THEN 1     ELSE 0 END) )
+		            )                                                         AS WEEK_AVG
+		      ,MAX(CASE WHEN DELIVERYDATE <![CDATA[>=]]> TO_CHAR(TO_DATE(#{slipDt},'YYYYMMDD')-7 ,'YYYYMMDD') THEN POQTY ELSE 0 END) AS WEEK_MAX
+		      ,MIN(CASE WHEN DELIVERYDATE <![CDATA[>=]]> TO_CHAR(TO_DATE(#{slipDt},'YYYYMMDD')-7 ,'YYYYMMDD') THEN POQTY ELSE 0 END) AS WEEK_MIN
+		      ,TRUNC(FN_ZERODIVIDE( SUM(POQTY) ,COUNT(1) ))                   AS MONTH_AVG
+		      ,MAX(POQTY)                                                     AS MONTH_MAX
+		      ,MIN(POQTY)                                                     AS MONTH_MIN
+		FROM   T_RESULT
+		JOIN   MS_SKU
+		ON     MS_SKU.STORERKEY = T_RESULT.STORERKEY
+		AND    MS_SKU.SKU       = T_RESULT.SKU
+		GROUP BY T_RESULT.DCCODE
+		        ,T_RESULT.STORERKEY
+		        ,T_RESULT.SKU
+		        ,T_RESULT.UOM
+		ORDER BY CASE WHEN (SUM(CASE WHEN DELIVERYDATE = #{slipDt} THEN POQTY ELSE 0 END)
+		                        - TRUNC(FN_ZERODIVIDE( SUM(CASE WHEN DELIVERYDATE <![CDATA[>=]]> TO_CHAR(TO_DATE(#{slipDt},'YYYYMMDD')-7 ,'YYYYMMDD') THEN POQTY ELSE 0 END)
+		                               ,SUM(CASE WHEN DELIVERYDATE <![CDATA[>=]]> TO_CHAR(TO_DATE(#{slipDt},'YYYYMMDD')-7 ,'YYYYMMDD') THEN 1     ELSE 0 END) )
+		                               )
+		                        ) <![CDATA[>]]> 0 THEN 1
+		              WHEN (SUM(CASE WHEN DELIVERYDATE = #{slipDt} THEN POQTY ELSE 0 END)
+		                        - TRUNC(FN_ZERODIVIDE( SUM(CASE WHEN DELIVERYDATE <![CDATA[>=]]> TO_CHAR(TO_DATE(#{slipDt},'YYYYMMDD')-7 ,'YYYYMMDD') THEN POQTY ELSE 0 END)
+		                               ,SUM(CASE WHEN DELIVERYDATE <![CDATA[>=]]> TO_CHAR(TO_DATE(#{slipDt},'YYYYMMDD')-7 ,'YYYYMMDD') THEN 1     ELSE 0 END) )
+		                               )
+		                        ) <![CDATA[<]]> 0 THEN 2
+		              ELSE 3
+		         END
+		        ,ABS(SUM(CASE WHEN DELIVERYDATE = #{slipDt} THEN POQTY ELSE 0 END)
+		             - TRUNC(FN_ZERODIVIDE( SUM(CASE WHEN DELIVERYDATE <![CDATA[>=]]> TO_CHAR(TO_DATE(#{slipDt},'YYYYMMDD')-7 ,'YYYYMMDD') THEN POQTY ELSE 0 END)
+		                               ,SUM(CASE WHEN DELIVERYDATE <![CDATA[>=]]> TO_CHAR(TO_DATE(#{slipDt},'YYYYMMDD')-7 ,'YYYYMMDD') THEN 1     ELSE 0 END) )
+		            )) DESC
+
+    </select>
+
+	<select id="getMasterListSTO" resultType="OmPurchaseCheckResDto">
+		WITH T_RESULT AS (
+            SELECT DM_DOCUMENT_D.DCCODE
+                  ,DM_DOCUMENT_D.DELIVERYDATE
+                  ,DM_DOCUMENT_D.STORERKEY
+                  ,DM_DOCUMENT_D.SKU
+                  <!-- ,DM_DOCUMENT_D.UOM -->
+                  ,'BOX' AS UOM
+                  ,DM_DOCUMENT_D.WORKPROCESSCODE
+                  <!-- ,SUM(DM_DOCUMENT_D.ORDERQTY + DM_DOCUMENT_D.ORDERADJUSTQTY ) POQTY -->
+                  ,CEIL(FN_CONV_UOM(DM_DOCUMENT_D.STORERKEY, DM_DOCUMENT_D.SKU, DM_DOCUMENT_D.UOM, 'BOX', SUM(DM_DOCUMENT_D.ORDERQTY + DM_DOCUMENT_D.ORDERADJUSTQTY ))) AS POQTY
+            FROM   DM_DOCUMENT_D    
+            WHERE  DM_DOCUMENT_D.DCCODE       = #{gDccode}
+            AND    DM_DOCUMENT_D.STORERKEY    = #{gStorerkey}
+            AND    DM_DOCUMENT_D.DOCTYPE      = 'DP'
+            AND    DM_DOCUMENT_D.DELIVERYDATE <![CDATA[<=]]> #{slipDt}
+            AND    DM_DOCUMENT_D.DELIVERYDATE <![CDATA[>=]]> TO_CHAR(ADD_MONTHS(TO_DATE(#{slipDt},'YYYYMMDD'),-1), 'YYYYMMDD') 
+            AND    DM_DOCUMENT_D.CHANNEL      = '1'
+            <if test="sku != null and sku != ''">
+            AND    DM_DOCUMENT_D.SKU         LIKE #{sku}
+            </if>
+            AND    DM_DOCUMENT_D.WORKPROCESSCODE ='STO'
+            GROUP BY DM_DOCUMENT_D.DCCODE
+                    ,DM_DOCUMENT_D.DELIVERYDATE
+                    ,DM_DOCUMENT_D.STORERKEY
+                    ,DM_DOCUMENT_D.SKU
+                    ,DM_DOCUMENT_D.UOM
+                    ,DM_DOCUMENT_D.WORKPROCESSCODE
+        )
+        SELECT T_RESULT.DCCODE                                                AS DCCODE
+              ,T_RESULT.STORERKEY                                             AS STORERKEY
+              ,T_RESULT.SKU                                                   AS SKU
+              ,MAX(MS_SKU.DESCRIPTION)                                        AS SKUNAME
+              ,T_RESULT.UOM                                                   AS UOM
+              ,SUM(CASE WHEN DELIVERYDATE = #{slipDt} THEN POQTY ELSE 0 END) AS THEDAY
+              ,SUM(CASE WHEN DELIVERYDATE = #{slipDt} THEN POQTY ELSE 0 END)
+               - TRUNC(FN_ZERODIVIDE( SUM(CASE WHEN DELIVERYDATE <![CDATA[>=]]> TO_CHAR(TO_DATE(#{slipDt},'YYYYMMDD')-7 ,'YYYYMMDD') THEN POQTY ELSE 0 END)
+                                   ,SUM(CASE WHEN DELIVERYDATE <![CDATA[>=]]> TO_CHAR(TO_DATE(#{slipDt},'YYYYMMDD')-7 ,'YYYYMMDD') THEN 1     ELSE 0 END) )
+                    )                                                         AS WEEK_DIFF
+              ,SUM(CASE WHEN DELIVERYDATE = #{slipDt} THEN POQTY ELSE 0 END) 
+               - TRUNC(FN_ZERODIVIDE( SUM(POQTY) ,COUNT(1) ))                 AS MONTH_DIFF
+              ,SUM(POQTY)                                                     AS MONTH_TOTAL_QTY  /* 월 총 입고량 (30일) */
+		      ,COUNT(1)                                                       AS MONTH_COUNT      /* 월 입고횟수 (30일) */
+              ,TRUNC(FN_ZERODIVIDE( SUM(CASE WHEN DELIVERYDATE <![CDATA[>=]]> TO_CHAR(TO_DATE(#{slipDt},'YYYYMMDD')-7 ,'YYYYMMDD') THEN POQTY ELSE 0 END)
+                                   ,SUM(CASE WHEN DELIVERYDATE <![CDATA[>=]]> TO_CHAR(TO_DATE(#{slipDt},'YYYYMMDD')-7 ,'YYYYMMDD') THEN 1     ELSE 0 END) )
+                    )                                                         AS WEEK_AVG
+              ,MAX(CASE WHEN DELIVERYDATE <![CDATA[>=]]> TO_CHAR(TO_DATE(#{slipDt},'YYYYMMDD')-7 ,'YYYYMMDD') THEN POQTY ELSE 0 END) AS WEEK_MAX
+              ,MIN(CASE WHEN DELIVERYDATE <![CDATA[>=]]> TO_CHAR(TO_DATE(#{slipDt},'YYYYMMDD')-7 ,'YYYYMMDD') THEN POQTY ELSE 0 END) AS WEEK_MIN
+              ,TRUNC(FN_ZERODIVIDE( SUM(POQTY) ,COUNT(1) ))                   AS MONTH_AVG
+              ,MAX(POQTY)                                                     AS MONTH_MAX
+              ,MIN(POQTY)                                                     AS MONTH_MIN
+        FROM   T_RESULT
+        JOIN   MS_SKU
+        ON     MS_SKU.STORERKEY = T_RESULT.STORERKEY
+        AND    MS_SKU.SKU       = T_RESULT.SKU
+        GROUP BY T_RESULT.DCCODE
+                ,T_RESULT.STORERKEY
+                ,T_RESULT.SKU
+                ,T_RESULT.UOM
+        ORDER BY CASE WHEN (SUM(CASE WHEN DELIVERYDATE = #{slipDt} THEN POQTY ELSE 0 END)
+                                - TRUNC(FN_ZERODIVIDE( SUM(CASE WHEN DELIVERYDATE <![CDATA[>=]]> TO_CHAR(TO_DATE(#{slipDt},'YYYYMMDD')-7 ,'YYYYMMDD') THEN POQTY ELSE 0 END)
+                                       ,SUM(CASE WHEN DELIVERYDATE <![CDATA[>=]]> TO_CHAR(TO_DATE(#{slipDt},'YYYYMMDD')-7 ,'YYYYMMDD') THEN 1     ELSE 0 END) )
+                                       )
+                                ) <![CDATA[>]]> 0 THEN 1
+                      WHEN (SUM(CASE WHEN DELIVERYDATE = #{slipDt} THEN POQTY ELSE 0 END)
+                                - TRUNC(FN_ZERODIVIDE( SUM(CASE WHEN DELIVERYDATE <![CDATA[>=]]> TO_CHAR(TO_DATE(#{slipDt},'YYYYMMDD')-7 ,'YYYYMMDD') THEN POQTY ELSE 0 END)
+                                       ,SUM(CASE WHEN DELIVERYDATE <![CDATA[>=]]> TO_CHAR(TO_DATE(#{slipDt},'YYYYMMDD')-7 ,'YYYYMMDD') THEN 1     ELSE 0 END) )
+                                       )
+                                ) <![CDATA[<]]> 0 THEN 2
+                      ELSE 3
+                 END
+                ,ABS(SUM(CASE WHEN DELIVERYDATE = #{slipDt} THEN POQTY ELSE 0 END)
+                     - TRUNC(FN_ZERODIVIDE( SUM(CASE WHEN DELIVERYDATE <![CDATA[>=]]> TO_CHAR(TO_DATE(#{slipDt},'YYYYMMDD')-7 ,'YYYYMMDD') THEN POQTY ELSE 0 END)
+                                       ,SUM(CASE WHEN DELIVERYDATE <![CDATA[>=]]> TO_CHAR(TO_DATE(#{slipDt},'YYYYMMDD')-7 ,'YYYYMMDD') THEN 1     ELSE 0 END) )
+                    )) DESC
+
+    </select>
+</mapper>

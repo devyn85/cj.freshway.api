@@ -1,0 +1,221 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="dpTaskService">
+    <select id="getMasterList" resultType="cjfw.wms.dp.dto.DpTaskResDto">
+        SELECT /* [dpTaskService.sqlx][dpTaskService.getDataHeaderList][입고검수지정] */
+            '0' AS CHECKYN /** 체크여부 */
+            ,MS_CUSTXSKU.DCCODE AS DCCODE /** 센터코드 */
+            ,MS_CUSTXSKU.STORERKEY AS STORERKEY /** 화주코드 */
+            ,DP_INSPECTPLAN.FROMTASKDT AS FROMTASKDT /** 검수시작일 */
+            ,DP_INSPECTPLAN.TOTASKDT AS TOTASKDT /** 검수종료일 */
+            ,MS_CUSTXSKU.CUSTKEY AS CUSTKEY /** 거래처코드 */
+            ,MIN(MS_CUST.DESCRIPTION) AS CUSTNAME /** 거래처명 */
+            ,'0' AS CUSTYN /** 거래처여부 */
+            ,'Y' AS DEL_YN /** 삭제여부 */
+            ,'CUST' AS PLANTYPE /** 계획유형 */
+            ,MAX(FN_CODEDESCR (MS_CUST.STORERKEY,'ISSUETYPE_CUST', MS_CUST.ISSUETYPE)) AS ISSUETYPE /** 발행유형 */
+        FROM
+            MS_CUSTXSKU
+            JOIN MS_SKU
+                ON MS_SKU.STORERKEY = MS_CUSTXSKU.STORERKEY
+                AND MS_SKU.SKU = MS_CUSTXSKU.SKU
+            JOIN MS_CUST
+                ON MS_CUST.STORERKEY = MS_CUSTXSKU.STORERKEY
+                AND MS_CUST.CUSTKEY = MS_CUSTXSKU.CUSTKEY
+            JOIN DP_INSPECTPLAN
+                ON DP_INSPECTPLAN.DCCODE = MS_CUSTXSKU.DCCODE
+                AND DP_INSPECTPLAN.CUSTKEY = MS_CUSTXSKU.CUSTKEY
+                AND DP_INSPECTPLAN.STORERKEY = MS_CUSTXSKU.STORERKEY
+                <if test="docdtFrom != null and docdtFrom != ''">AND DP_INSPECTPLAN.TOTASKDT <![CDATA[>=]]> #{docdtFrom}</if>
+                <if test="docdtTo != null and docdtTo != ''">AND DP_INSPECTPLAN.FROMTASKDT <![CDATA[<=]]> #{docdtTo}</if>
+                AND DP_INSPECTPLAN.DEL_YN = 'N'
+        WHERE 1 = 1
+            <if test="fixdccode != null and fixdccode != ''">AND MS_CUSTXSKU.DCCODE = #{fixdccode}</if>
+            <if test="gStorerkey != null and gStorerkey != ''">AND MS_CUSTXSKU.STORERKEY = #{gStorerkey}</if>
+            <!-- 협력사 다중선택 -->
+            <if test="fromcustkey != null and fromcustkey != ''">
+                AND MS_CUSTXSKU.CUSTKEY IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                FROM (SELECT #{fromcustkey} AS VAL FROM DUAL) A
+                CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+            </if>
+        GROUP BY
+            MS_CUSTXSKU.DCCODE
+            ,MS_CUSTXSKU.STORERKEY
+            ,DP_INSPECTPLAN.FROMTASKDT
+            ,DP_INSPECTPLAN.TOTASKDT
+            ,MS_CUSTXSKU.CUSTKEY
+        ORDER BY 
+            MS_CUSTXSKU.DCCODE
+            ,MS_CUSTXSKU.STORERKEY
+            ,DP_INSPECTPLAN.FROMTASKDT
+            ,DP_INSPECTPLAN.TOTASKDT
+            ,MS_CUSTXSKU.CUSTKEY
+    </select>
+
+    <select id="getDetailList" resultType="cjfw.wms.dp.dto.DpTaskResDetailDto">
+        SELECT /* [dpTaskService.sqlx][dpTaskService.getDataDetailList][입고검수지정] */
+            '0' AS CHECKYN /** 체크여부 */
+            ,MS_CUSTXSKU.DCCODE AS DCCODE /** 센터코드 */
+            ,MS_CUSTXSKU.STORERKEY AS STORERKEY /** 화주코드 */
+            ,MS_CUSTXSKU.CUSTKEY AS CUSTKEY /** 거래처코드 */
+            ,MS_CUSTXSKU.SKU AS SKU /** 상품코드 */
+            ,MIN(MS_CUSTXSKU.DESCRIPTION) AS SKUNAME /** 상품명 */
+            ,FN_CODEDESCR (MS_CUSTXSKU.STORERKEY,'PUTAWAYTYPE', MAX(MS_CUSTXSKU.PUTAWAYTYPE)) AS PUTAWAYTYPE /** 보관유형 */
+            ,MAX((SELECT MS_SKUSPEC.SPECDESCR
+                FROM MS_SKUSPEC
+                WHERE MS_SKUSPEC.SPECCODE = LEFT(MS_SKU.SKUGROUP, 6)
+                AND MS_SKUSPEC.SPECCATEGORY = 'SKUGROUP'
+                AND SPECCLASS = 'MC1')) AS SKUGROUP1 /** 상품그룹1 */
+            ,MAX((SELECT MS_SKUSPEC.SPECDESCR
+                FROM MS_SKUSPEC
+                WHERE MS_SKUSPEC.SPECCODE = MS_SKU.SKUGROUP
+                AND MS_SKUSPEC.SPECCATEGORY = 'SKUGROUP'
+                AND SPECCLASS = 'MC')) AS SKUGROUP2 /** 상품그룹2 */
+            ,'0' AS SKUYN /** 상품여부 */
+            ,DP_INSPECTPLAN.FROMTASKDT AS FROMTASKDT /** 검수시작일 */
+            ,DP_INSPECTPLAN.TOTASKDT AS TOTASKDT /** 검수종료일 */
+            ,'Y' AS DEL_YN /** 삭제여부 */
+            ,'SKU' AS PLANTYPE /** 계획유형 */
+        FROM
+            MS_CUSTXSKU
+            JOIN MS_SKU
+                ON MS_SKU.STORERKEY = MS_CUSTXSKU.STORERKEY
+                AND MS_SKU.SKU = MS_CUSTXSKU.SKU
+                <if test="skugroup1 != null and skugroup1 != ''">AND MS_SKU.SKUGROUP LIKE #{skugroup1}||'%'</if>
+                <if test="skugroup2 != null and skugroup2 != ''">AND MS_SKU.SKUGROUP LIKE #{skugroup2}||'%'</if>
+            JOIN MS_CUST
+                ON MS_CUST.STORERKEY = MS_CUSTXSKU.STORERKEY
+                AND MS_CUST.CUSTKEY = MS_CUSTXSKU.CUSTKEY
+            JOIN DP_INSPECTPLAN
+                ON DP_INSPECTPLAN.DCCODE = MS_CUSTXSKU.DCCODE
+                AND DP_INSPECTPLAN.SKU = MS_CUSTXSKU.SKU
+                AND DP_INSPECTPLAN.STORERKEY = MS_CUSTXSKU.STORERKEY
+                <if test="docdtFrom != null and docdtFrom != ''">AND DP_INSPECTPLAN.TOTASKDT <![CDATA[>=]]> #{docdtFrom}</if>
+                <if test="docdtTo != null and docdtTo != ''">AND DP_INSPECTPLAN.FROMTASKDT <![CDATA[<=]]> #{docdtTo}</if>
+                AND DP_INSPECTPLAN.DEL_YN = 'N'
+        WHERE 1 = 1
+            <if test="fixdccode != null and fixdccode != ''">AND MS_CUSTXSKU.DCCODE = #{fixdccode}</if>
+            <if test="gStorerkey != null and gStorerkey != ''">AND MS_CUSTXSKU.STORERKEY = #{gStorerkey}</if>
+            <!-- 상품 다중선택 -->
+            <if test="sku != null and sku != ''">
+                AND MS_CUSTXSKU.SKU IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                FROM (SELECT #{sku} AS VAL FROM DUAL) A
+                CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+            </if>
+            <if test="putawaytype != null and putawaytype != ''">AND MS_CUSTXSKU.PUTAWAYTYPE LIKE #{putawaytype}</if>
+        GROUP BY 
+            MS_CUSTXSKU.DCCODE
+            ,MS_CUSTXSKU.STORERKEY
+            ,MS_CUSTXSKU.CUSTKEY
+            ,MS_CUSTXSKU.SKU
+            ,DP_INSPECTPLAN.FROMTASKDT
+            ,DP_INSPECTPLAN.TOTASKDT
+        ORDER BY 
+            MS_CUSTXSKU.DCCODE
+            ,MS_CUSTXSKU.STORERKEY
+            ,MS_CUSTXSKU.CUSTKEY
+            ,MS_CUSTXSKU.SKU
+    </select>
+
+    <select id="getMasterList2" resultType="cjfw.wms.dp.dto.DpTaskResDto">
+        SELECT /* [dpTaskService.sqlx][dpTaskService.getDataHeaderList][입고검수지정] */
+            '0' AS CHECKYN /** 체크여부 */
+            ,MS_CUSTXSKU.DCCODE AS DCCODE /** 센터코드 */
+            ,MS_CUSTXSKU.STORERKEY AS STORERKEY /** 화주코드 */
+            ,#{docdtFrom} AS FROMTASKDT /** 검수시작일 */
+            ,#{docdtTo} AS TOTASKDT /** 검수종료일 */
+            ,MS_CUSTXSKU.CUSTKEY AS CUSTKEY /** 거래처코드 */
+            ,MIN(MS_CUST.DESCRIPTION) AS CUSTNAME /** 거래처명 */
+            ,'0' AS CUSTYN /** 거래처여부 */
+            ,'N' AS DEL_YN /** 삭제여부 */
+            ,'CUST' AS PLANTYPE /** 계획유형 */
+            ,DECODE(MS_CUST.ISSUETYPE,'Y','1','0') AS ISSUETYPE /** 발행유형 */
+        FROM
+            MS_CUSTXSKU
+            JOIN MS_CUST
+                ON MS_CUST.STORERKEY = MS_CUSTXSKU.STORERKEY
+                AND MS_CUST.CUSTKEY = MS_CUSTXSKU.CUSTKEY
+                AND MS_CUST.CUSTTYPE = 'P'
+        WHERE 1 = 1
+            <if test="fixdccode != null and fixdccode != ''">AND MS_CUSTXSKU.DCCODE = #{fixdccode}</if>
+            <if test="gStorerkey != null and gStorerkey != ''">AND MS_CUSTXSKU.STORERKEY = #{gStorerkey}</if>
+            <!-- 협력사 다중선택 -->
+            <if test="fromcustkey != null and fromcustkey != ''">
+                AND MS_CUSTXSKU.CUSTKEY IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                FROM (SELECT #{fromcustkey} AS VAL FROM DUAL) A
+                CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+            </if>
+            AND MS_CUSTXSKU.DEL_YN = 'N'
+            AND MS_CUSTXSKU.CHANNEL IN ('2','3') /** 저장품은 검수 지정하지 않는다.*/
+        GROUP BY 
+            MS_CUSTXSKU.DCCODE
+            ,MS_CUSTXSKU.STORERKEY
+            ,MS_CUSTXSKU.CUSTKEY
+            ,MS_CUST.ISSUETYPE
+        ORDER BY 
+            MS_CUSTXSKU.DCCODE
+            ,MS_CUSTXSKU.STORERKEY
+            ,MS_CUST.ISSUETYPE DESC
+            ,MS_CUSTXSKU.CUSTKEY
+    </select>
+
+    <select id="getDetailList2" resultType="cjfw.wms.dp.dto.DpTaskResDetailDto">
+        SELECT /* [dpTaskService.sqlx][dpTaskService.getDataDetailSubList][입고검수지정] */
+            '0' AS CHECKYN /** 체크여부 */
+            ,MS_CUSTXSKU.DCCODE AS DCCODE /** 센터코드 */
+            ,MS_CUSTXSKU.STORERKEY AS STORERKEY /** 화주코드 */
+            ,MS_CUSTXSKU.CUSTKEY AS CUSTKEY /** 거래처코드 */
+            ,MS_CUSTXSKU.SKU AS SKU /** 상품코드 */
+            ,MIN(MS_CUSTXSKU.DESCRIPTION) AS SKUNAME /** 상품명 */
+            ,FN_CODEDESCR (MS_CUSTXSKU.STORERKEY,'PUTAWAYTYPE', MAX(MS_CUSTXSKU.PUTAWAYTYPE)) AS PUTAWAYTYPE /** 보관유형 */
+            ,MAX((SELECT MS_SKUSPEC.SPECDESCR
+                FROM MS_SKUSPEC
+                WHERE MS_SKUSPEC.SPECCODE = LEFT(MS_SKU.SKUGROUP, 6)
+                AND MS_SKUSPEC.SPECCATEGORY = 'SKUGROUP'
+                AND SPECCLASS = 'MC1')) AS SKUGROUP1 /** 상품그룹1 */
+            ,MAX((SELECT MS_SKUSPEC.SPECDESCR
+                FROM MS_SKUSPEC
+                WHERE MS_SKUSPEC.SPECCODE = MS_SKU.SKUGROUP
+                AND MS_SKUSPEC.SPECCATEGORY = 'SKUGROUP'
+                AND SPECCLASS = 'MC')) AS SKUGROUP2 /** 상품그룹2 */
+            ,'0' AS SKUYN /** 상품여부 */
+            ,#{docdtFrom} AS FROMTASKDT /** 검수시작일 */
+            ,#{docdtTo} AS TOTASKDT /** 검수종료일 */
+            ,'N' AS DEL_YN /** 삭제여부 */
+            ,'SKU' AS PLANTYPE /** 계획유형 */
+        FROM
+            MS_CUSTXSKU
+            JOIN MS_SKU
+                ON MS_SKU.STORERKEY = MS_CUSTXSKU.STORERKEY
+                AND MS_SKU.SKU = MS_CUSTXSKU.SKU
+                <if test="skugroup1 != null and skugroup1 != ''">AND MS_SKU.SKUGROUP LIKE #{skugroup1}||'%'</if>
+                <if test="skugroup2 != null and skugroup2 != ''">AND MS_SKU.SKUGROUP LIKE #{skugroup2}||'%'</if>
+            JOIN MS_CUST
+                ON MS_CUST.STORERKEY = MS_CUSTXSKU.STORERKEY
+                AND MS_CUST.CUSTKEY = MS_CUSTXSKU.CUSTKEY
+        WHERE 1 = 1
+            <if test="fixdccode != null and fixdccode != ''">AND MS_CUSTXSKU.DCCODE = #{fixdccode}</if>
+            <if test="gStorerkey != null and gStorerkey != ''">AND MS_CUSTXSKU.STORERKEY = #{gStorerkey}</if>
+            <!-- 상품 다중선택 -->
+            <if test="sku != null and sku != ''">
+                AND MS_CUSTXSKU.SKU IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                FROM (SELECT #{sku} AS VAL FROM DUAL) A
+                CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+            </if>
+            <if test="putawaytype != null and putawaytype != ''">AND MS_CUSTXSKU.PUTAWAYTYPE LIKE #{putawaytype}</if>
+            AND MS_CUSTXSKU.DEL_YN = 'N'
+            AND MS_CUSTXSKU.CHANNEL IN ('2','3') /** 저장품은 검수 지정하지 않는다.*/
+        GROUP BY 
+            MS_CUSTXSKU.DCCODE
+            ,MS_CUSTXSKU.STORERKEY
+            ,MS_CUSTXSKU.CUSTKEY
+            ,MS_CUSTXSKU.SKU
+        ORDER BY 
+            MS_CUSTXSKU.DCCODE
+            ,MS_CUSTXSKU.STORERKEY
+            ,MS_CUSTXSKU.CUSTKEY
+            ,MS_CUSTXSKU.SKU
+    </select>
+</mapper>

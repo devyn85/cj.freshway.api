@@ -1,0 +1,487 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="rtReceiptConfirmService">
+    <!-- 반품확정 헤더  -->
+    <select id="getMasterList" resultType="cjfw.wms.rt.dto.RtReceiptConfirmResDto">
+        <!--2025-12-26  FWNEXTWMS-5258 부분확정 합쳐서 보이기-->
+<!--        WITH T_RESULT AS (-->
+<!--            SELECT 0 AS INPLAN-->
+<!--            ,RT_INPLAN.*-->
+<!--            FROM RT_INPLAN-->
+<!--            WHERE ORDERQTY > INSPECTQTY-->
+<!--            AND INSPECTQTY > 0-->
+<!--            UNION ALL-->
+<!--            SELECT 1 AS INPLAN-->
+<!--            ,RT_INPLAN.*-->
+<!--            FROM RT_INPLAN-->
+<!--        )-->
+        SELECT /* [rtReceiptConfirmService.sqlx][rtReceiptConfirmService.getDataHeaderList][반품확정 헤더] */
+            '0' AS CHECKYN
+            , DM_DOCUMENT_H.DCCODE AS DCCODE
+            , CM_DC.DCNAME AS DCNAME
+            , DM_DOCUMENT_D.SOURCEKEY AS DOCNO_WD
+            , DM_DOCUMENT_D.ORGANIZE AS ORGANIZE
+            , fn_descr_organize(DM_DOCUMENT_D.DCCODE,DM_DOCUMENT_D.ORGANIZE) AS ORGANIZENAME
+            , DM_DOCUMENT_D.AREA AS AREA
+            , DM_DOCUMENT_H.DOCNO AS DOCNO
+            , DM_DOCUMENT_H.CONFIRMDATE AS CONFIRMDATE
+            , DM_DOCUMENT_D.STORERKEY AS STORERKEY
+            , DM_DOCUMENT_H.DOCDT AS DOCDT
+            , DM_DOCUMENT_H.POTYPE AS POTYPE
+            , FN_CODEDESCR(DM_DOCUMENT_H.STORERKEY,'SOTYPE', DM_DOCUMENT_D.SOTYPE) AS POTYPENAME
+            , DM_DOCUMENT_D.STATUS AS STATUS
+            , FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY,'STATUS_RT', DM_DOCUMENT_D.STATUS) AS STATUSNAME
+            , DM_DOCUMENT_D.DOCLINE AS DOCLINE
+            , DM_DOCUMENT_D.SKU AS SKU
+            , MS_SKU.DESCRIPTION AS SKUNAME
+            , MS_SKU.QTYPERBOX AS QTYPERBOX
+            , FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY,'PUTAWAYTYPE', DM_DOCUMENT_D.CHANNEL) AS CHANNEL
+            , FN_CODEDESCR(MS_SKU.STORERKEY,'STORAGETYPE', MS_SKU.STORAGETYPE) AS STORAGETYPE
+            ,DM_DOCUMENT_D.STORERUOM AS UOM
+            ,DM_DOCUMENT_D.BUNJA AS BUNJA
+            ,DM_DOCUMENT_D.BUNMO AS BUNMO
+            ,FN_UOMCAL ( DM_DOCUMENT_D.BUNMO
+            ,DM_DOCUMENT_D.BUNJA
+            ,RT_INPLAN.ORDERQTY + RT_INPLAN.CANCELQTY ) AS ORDERQTY
+            ,FN_UOMCAL ( DM_DOCUMENT_D.BUNMO
+            ,DM_DOCUMENT_D.BUNJA
+            ,NVL(RT_INSPECT.INSPECTQTY,0) ) AS INSPECTQTY
+            ,FN_UOMCAL ( DM_DOCUMENT_D.BUNMO
+            ,DM_DOCUMENT_D.BUNJA
+            ,NVL(RT_INSPECT.CONFIRMQTY,0) ) AS CONFIRMQTY
+            ,FN_UOMCAL ( DM_DOCUMENT_D.BUNMO
+            ,DM_DOCUMENT_D.BUNJA
+            ,RT_INPLAN.CANCELQTY ) AS SHORTAGEQTY
+            ,0 AS SHORTAGETRANQTY
+            ,0 AS TRANQTY
+            ,NVL(RT_INSPECT.TOLOC
+            , CORE_CM_STRATEGY.FN_GETTOLOC ( RT_INPLAN.DOCTYPE
+            ,RT_INPLAN.DCCODE
+            ,RT_INPLAN.STORERKEY
+            ,RT_INPLAN.ORDERTYPE
+            ,RT_INPLAN.SLIPTYPE )) AS TOLOC
+            , NVL(RT_INSPECT.LOTTABLE01,'STD') AS LOTTABLE01
+            , NVL(CASE WHEN MS_SKU.DURATIONTYPE = '1' AND REGEXP_LIKE(NVL(RT_INSPECT.LOTTABLE01,'STD'), '^[0-9]{8}$')
+            THEN TO_CHAR(TO_DATE(NVL(RT_INSPECT.LOTTABLE01,'STD'),'YYYYMMDD') - (MS_SKU.DURATION - 1), 'YYYYMMDD')
+            ELSE NVL(RT_INSPECT.LOTTABLE01,'STD')
+            END,'STD') AS LOT_MANUFACTURE                    /** 제조 */
+            , NVL(CASE WHEN MS_SKU.DURATIONTYPE != '1' AND REGEXP_LIKE(NVL(RT_INSPECT.LOTTABLE01,'STD'), '^[0-9]{8}$')
+            THEN TO_CHAR(TO_DATE(NVL(RT_INSPECT.LOTTABLE01,'STD'),'YYYYMMDD') + (MS_SKU.DURATION - 1), 'YYYYMMDD')
+            ELSE NVL(RT_INSPECT.LOTTABLE01,'STD')
+            END,'STD') AS LOT_EXPIRE                         /** 유통 */
+            , FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, NVL(RT_INSPECT.LOTTABLE01,'STD'), 'N') ||'/'|| MS_SKU.DURATION AS DURATION_TERM
+            , NVL(RT_INSPECT.STOCKGRADE,RT_INPLAN.STOCKGRADE) AS STOCKGRADE
+            , NVL(RT_INSPECT.STOCKID,'STD') AS STOCKID
+            , NVL(RT_CLAIMINFO.PACKINGMETHOD,DM_DOCUMENT_D.PACKINGMETHOD) AS PACKINGMETHOD
+            , DM_DOCUMENT_D.RETURNTYPE AS RETURNTYPE
+            , FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY,'RETURNTYPE_RT', DM_DOCUMENT_D.RETURNTYPE) AS RETURTYPENNAME
+            , DM_DOCUMENT_D.REASONCODE AS REASONCODE
+            , FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY,'REASONCODE_RT', DM_DOCUMENT_D.REASONCODE) AS REASONCODENAME
+            , DM_DOCUMENT_D.REASONMSG AS REASONMSG
+            , FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY,'OTHER01_DMD', RT_CLAIMINFO.IMPUTEDEVCD) AS OTHER01
+            , FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY,'OTHER01_DMD', RT_INPLAN.CHG_REQ_DEPT_CD) AS CHG_REQ_DEPT_NM
+            , FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY, 'BLNGDEPTCD', RT_CLAIMINFO.BLNGDEPTCD) AS BLNGDEPTNAME
+            , DM_DOCUMENT_D.ORDERTYPE AS ORDERTYPE
+            , FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY,'ORDERTYPE_RT', DM_DOCUMENT_D.ORDERTYPE) AS ORDERTYPENAME
+            , FN_CODEDESCR(MS_CUST.STORERKEY,'SALEORGANIZE', MS_CUST.OTHER04) AS SALEORGANIZE
+            , FN_CODEDESCR(MS_CUST.STORERKEY,'SALEGROUP', MS_CUST.SALEGROUP) AS SALEGROUP
+            , FN_CODEDESCR(MS_CUST.STORERKEY,'SALEDEPARTMENT', MS_CUST.SALEDEPARTMENT) AS SALEDEPARTMENT
+            , FN_CODEDESCR(MS_CUST.STORERKEY,'CUSTGROUP', MS_CUST.CUSTGROUP) AS CUSTGROUP
+            , DM_DOCUMENT_H.FROM_CUSTKEY AS FROM_CUSTKEY
+            , DM_DOCUMENT_H.FROM_CUSTNAME AS FROM_CUSTNAME
+            , MS_CUST.BILLTOCUSTKEY AS BILLTOCUSTKEY
+            , FN_DESCR_CUST(MS_CUST.STORERKEY, MS_CUST.BILLTOCUSTKEY) AS BILLTOCUSTNAME
+
+            , FN_DESCR_CODESPEC(DM_DOCUMENT_D.STORERKEY, 'CLAIMTYPE', 'S' ,RT_CLAIMINFO.CLAIMDTLIDS) AS OTHER03
+            , FN_DESCR_CODESPEC(DM_DOCUMENT_D.STORERKEY, 'CLAIMTYPE', 'D' ,RT_CLAIMINFO.CLAIMDTLID) AS OTHER04
+            , CASE WHEN RT_CLAIMINFO.BLNGDEPTCD = '10' AND DM_DOCUMENT_D.CHANNEL <![CDATA[<>]]> '1'
+            THEN FN_CODEDESCR (DM_DOCUMENT_D.STORERKEY,'VENDORETURNYN', 'Y')
+            ELSE FN_CODEDESCR (DM_DOCUMENT_D.STORERKEY,'VENDORETURNYN', 'N')
+            END AS VENDORETURN
+            , FN_PURCHASECUST( DM_DOCUMENT_D.DCCODE, DM_DOCUMENT_D.STORERKEY, DM_DOCUMENT_D.SKU, DM_DOCUMENT_D.PLANT, DM_DOCUMENT_D.DELIVERYDATE, 'CUSTNAME') AS CUSTNAME
+            , DM_DOCUMENT_H.DOCTYPE AS DOCTYPE
+            , RT_INPLAN.SLIPDT AS SLIPDT
+            , RT_INPLAN.SLIPNO AS SLIPNO
+            , RT_INPLAN.SLIPLINE AS SLIPLINE
+            , DECODE(DM_DOCUMENT_D.DCCODE,'2170','Y',MS_SKU.SERIALYN) AS SERIALYN
+            , MS_SKU.DURATION AS DURATION
+            , MS_SKU.DURATIONTYPE AS DURATIONTYPE
+            ,DM_DOCUMENT_D.PLANT AS PLANT
+            ,'['||DM_DOCUMENT_D.PLANT||']'||fn_descr_plant(DM_DOCUMENT_D.PLANT) AS PLANT_DESCR
+            , RT_INSPECT.SERIALKEY AS INSPECTSERIALKEY
+            , CASE WHEN RT_INSPECT.SERIALKEY IS NOT NULL AND RT_INSPECT.BATCHNO IS NULL
+                THEN 'FALSE'
+                ELSE 'TRUE'
+                END AS FORCEINSPECT
+            , NVL(MS_SKU.LINE01,'N') AS LINE01 <!-- 이력상품 비정량 상품인 경우 'Y' -->
+            ,RT_INPLAN.CHG_REQ_DEPT_CD AS CHG_REQ_DEPT_CD                 /* 변경요청귀책부서 */
+            ,RT_INPLAN.EMAIL_SEND_DATE AS EMAIL_SEND_DATE                 /* 이메일발송일시 */
+            ,MS_SKU.REFERENCE15
+        FROM DM_DOCUMENT_H
+        JOIN DM_DOCUMENT_D
+            ON DM_DOCUMENT_D.DCCODE = DM_DOCUMENT_H.DCCODE
+            AND DM_DOCUMENT_D.DOCTYPE = DM_DOCUMENT_H.DOCTYPE
+            AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+            AND DM_DOCUMENT_D.DOCNO = DM_DOCUMENT_H.DOCNO
+            AND DM_DOCUMENT_D.DEL_YN = 'N'
+            <if test="status != null and status != ''">AND DM_DOCUMENT_D.STATUS LIKE #{status}</if>
+            <!--  AND   DM_DOCUMENT_H.STATUS <![CDATA[<]]> '90'   -->
+            <!-- 상품 다중선택 -->
+            <if test="sku != null and sku != ''">
+                AND DM_DOCUMENT_D.SKU IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                FROM (SELECT #{sku} AS VAL FROM DUAL) A
+                CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+            </if>
+        JOIN CM_USER_AUTHORITY
+            ON CM_USER_AUTHORITY.USERID = #{gUserId}
+            AND CM_USER_AUTHORITY.DCCODE = DM_DOCUMENT_D.DCCODE
+            AND CM_USER_AUTHORITY.STORERKEY = DM_DOCUMENT_D.STORERKEY
+            AND CM_USER_AUTHORITY.ORGANIZE = DM_DOCUMENT_D.ORGANIZE
+            AND CM_USER_AUTHORITY.AREA = DM_DOCUMENT_D.AREA
+            <if test="fixdccode != null and fixdccode != ''">AND CM_USER_AUTHORITY.DCCODE = #{fixdccode}</if>
+            <if test="gStorerkey != null and gStorerkey != ''">AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey}</if>
+            <if test="fixdccode != null and fixdccode != ''">AND CM_USER_AUTHORITY.ORGANIZE = #{fixdccode}</if>
+            <if test="gArea != null and gArea != ''">AND CM_USER_AUTHORITY.AREA = #{gArea}</if>
+        JOIN MS_SKU
+            ON MS_SKU.STORERKEY = DM_DOCUMENT_D.STORERKEY
+            AND MS_SKU.SKU = DM_DOCUMENT_D.SKU
+            AND MS_SKU.DEL_YN = 'N'
+            <if test="serialyn != null and serialyn != ''">AND MS_SKU.SERIALYN LIKE #{serialyn}</if>
+            <if test="storagetype != null and storagetype != ''">AND MS_SKU.STORAGETYPE LIKE #{storagetype}</if>
+        JOIN MS_CUST
+            ON MS_CUST.STORERKEY = DM_DOCUMENT_H.STORERKEY
+            AND MS_CUST.CUSTKEY = DM_DOCUMENT_H.FROM_CUSTKEY
+            AND MS_CUST.CUSTTYPE = 'C'
+            AND MS_CUST.DEL_YN = 'N'
+        JOIN CM_DC
+            ON CM_DC.DCCODE = DM_DOCUMENT_H.DCCODE
+            AND CM_DC.DEL_YN = 'N'
+        JOIN RT_INPLAN
+            ON RT_INPLAN.DCCODE = DM_DOCUMENT_D.DCCODE
+            AND RT_INPLAN.DOCTYPE = DM_DOCUMENT_D.DOCTYPE
+            AND RT_INPLAN.SLIPDT = DM_DOCUMENT_D.DELIVERYDATE
+            AND RT_INPLAN.DOCNO = DM_DOCUMENT_D.DOCNO
+            AND RT_INPLAN.DOCLINE = DM_DOCUMENT_D.DOCLINE
+<!--            /** 결품으로만 확정완료된건은 안보이게 하기위해서 */-->
+<!--            AND RT_INPLAN.ORDERQTY  <![CDATA[>]]> 0-->
+            <if test="slipdtFrom != null and slipdtFrom != ''">
+                AND RT_INPLAN.SLIPDT          <![CDATA[>=]]> #{slipdtFrom}
+            </if>
+            <if test="slipdtTo != null and slipdtTo != ''">
+                AND RT_INPLAN.SLIPDT          <![CDATA[<=]]> #{slipdtTo}
+            </if>
+        LEFT OUTER JOIN RT_INSPECT
+            ON RT_INSPECT.DCCODE = RT_INPLAN.DCCODE
+            AND RT_INSPECT.STORERKEY = RT_INPLAN.STORERKEY
+            AND RT_INSPECT.ORGANIZE = RT_INPLAN.ORGANIZE
+            AND RT_INSPECT.AREA = RT_INPLAN.AREA
+            AND RT_INSPECT.DOCDT = RT_INPLAN.DOCDT
+            AND RT_INSPECT.DOCNO = RT_INPLAN.DOCNO
+            AND RT_INSPECT.DOCLINE = RT_INPLAN.DOCLINE
+            AND RT_INSPECT.DOCTYPE = RT_INPLAN.DOCTYPE
+            AND RT_INSPECT.SLIPDT = RT_INPLAN.SLIPDT
+            AND RT_INSPECT.SLIPNO = RT_INPLAN.SLIPNO
+            AND RT_INSPECT.SLIPLINE = RT_INPLAN.SLIPLINE
+            AND RT_INSPECT.DEL_YN = 'N'
+        <!--2025-12-26  FWNEXTWMS-5258 부분확정 합쳐서 보이기-->
+<!--            AND RT_INPLAN.INPLAN = 1-->
+            AND RT_INSPECT.OPENQTY > 0
+            <if test="serialCheck != null and serialCheck != ''">
+                JOIN
+                ST_SNINFO
+                ON RT_INSPECT.STORERKEY = ST_SNINFO.STORERKEY
+                AND RT_INSPECT.STOCKID = ST_SNINFO.STOCKID
+                AND RT_INSPECT.SKU = ST_SNINFO.SKU
+                AND ST_SNINFO.DEL_YN = 'N'
+                <if test="blno != null and blno != ''">
+                    AND ST_SNINFO.CONVSERIALNO = #{blno}
+                </if>
+                <if test="serialno != null and serialno != ''">
+                    AND ST_SNINFO.SERIALNO = #{serialno}
+                </if>
+                <if test="wdCustkey != null and wdCustkey != ''">
+                    AND ST_SNINFO.CONTRACTCUSTKEY = #{wdCustkey}
+                </if>
+            </if>
+        LEFT OUTER JOIN RT_CLAIMINFO
+            ON RT_CLAIMINFO.DCCODE = DM_DOCUMENT_D.DCCODE
+            AND RT_CLAIMINFO.STORERKEY = DM_DOCUMENT_D.STORERKEY
+            AND RT_CLAIMINFO.DOCNO = DM_DOCUMENT_D.DOCNO
+            AND RT_CLAIMINFO.DOCLINE = DM_DOCUMENT_D.DOCLINE
+            AND RT_CLAIMINFO.DEL_YN = 'N'
+        WHERE
+            DM_DOCUMENT_H.DOCTYPE = 'RT'
+            AND DM_DOCUMENT_H.DEL_YN = 'N'
+            <!--  AND   DM_DOCUMENT_H.STATUS <![CDATA[<]]> '90'  -->
+            <if test="docdtFrom != null and docdtFrom != ''">AND DM_DOCUMENT_H.DOCDT          <![CDATA[>=]]> #{docdtFrom}</if>
+            <if test="docdtTo != null and docdtTo != ''">AND DM_DOCUMENT_H.DOCDT          <![CDATA[<=]]> #{docdtTo}</if>
+            <if test="confirmdateFrom != null and confirmdateFrom != ''">AND DM_DOCUMENT_H.CONFIRMDATE    <![CDATA[>=]]> #{confirmdateFrom}</if>
+            <if test="confirmdateTo != null and confirmdateTo != ''">AND DM_DOCUMENT_H.CONFIRMDATE    <![CDATA[<=]]> #{confirmdateTo}</if>
+            <!-- 문서번호 다중선택 -->
+            <if test="docnoMulti != null and docnoMulti != ''">
+                AND DM_DOCUMENT_H.DOCNO IN
+                <foreach collection="docnoMulti" item="code" open="(" close=")" separator=",">
+                    #{code}
+                </foreach>
+            </if>
+            <if test="docnoWdMulti != null and docnoWdMulti != ''">
+                AND DM_DOCUMENT_D.SOURCEKEY IN
+                <foreach collection="docnoWdMulti" item="code" open="(" close=")" separator=",">
+                    #{code}
+                </foreach>
+            </if>
+            <if test="returntype != null and returntype != ''">AND DM_DOCUMENT_D.RETURNTYPE LIKE #{returntype}</if>
+            <if test="channel != null and channel != ''">AND DM_DOCUMENT_D.CHANNEL LIKE #{channel}</if>
+            <if test="potype != null and potype != ''">AND DM_DOCUMENT_D.SOTYPE LIKE #{potype}</if>
+            <if test="packingmethod != null and packingmethod != ''">AND RT_CLAIMINFO.PACKINGMETHOD LIKE #{packingmethod}</if>
+            <if test='vendoreturn == "Y"'>
+                AND DM_DOCUMENT_D.CHANNEL    <![CDATA[<>]]> '1'
+                AND RT_CLAIMINFO.BLNGDEPTCD = '10'
+            </if>
+            <if test='vendoreturn == "N"'>
+                AND NOT ( DM_DOCUMENT_D.CHANNEL    <![CDATA[<>]]> '1'
+                AND RT_CLAIMINFO.BLNGDEPTCD = '10' )
+            </if>
+            <!-- 배송그룹 공통조회 조건 -->
+            <if test="gMultiCourier != null and gMultiCourier != ''">AND DM_DOCUMENT_H.COURIER = #{gMultiCourier}</if>
+            <!-- 고객 다중선택 -->
+            <if test="fromCustkey != null and fromCustkey != ''">
+                AND DM_DOCUMENT_H.FROM_CUSTKEY IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                FROM (SELECT #{fromCustkey} AS VAL FROM DUAL) A
+                CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+            </if>
+            AND NOT EXISTS ( SELECT 1
+                FROM RT_RECEIPTQC
+                WHERE RT_RECEIPTQC.DCCODE = RT_INPLAN.DCCODE
+                AND RT_RECEIPTQC.STORERKEY = RT_INPLAN.STORERKEY
+                AND RT_RECEIPTQC.ORGANIZE = RT_INPLAN.ORGANIZE
+                AND RT_RECEIPTQC.SLIPDT = RT_INPLAN.SLIPDT
+                AND RT_RECEIPTQC.SLIPNO = RT_INPLAN.SLIPNO
+                AND RT_RECEIPTQC.SLIPLINE = RT_INPLAN.SLIPLINE
+                AND RT_RECEIPTQC.DEL_YN = 'N'
+                AND (RT_RECEIPTQC.RETURNOUTQTY > 0
+                OR RT_RECEIPTQC.DISUSEQTY > 0
+                OR RT_RECEIPTQC.GOODQTY > 0 )
+            ) /** 판정또는판정처리한 데이타는 다시 확정할 수 없다*/
+        ORDER BY
+            DM_DOCUMENT_H.DCCODE
+            ,DM_DOCUMENT_H.DOCNO
+            ,DM_DOCUMENT_H.CONFIRMDATE
+            ,DM_DOCUMENT_D.SOURCEKEY
+            ,RT_INPLAN.SLIPDT
+    </select>
+    <!-- 반품확정상세 -->
+    <select id="getDetailList" resultType="cjfw.wms.rt.dto.RtReceiptConfirmResDetailDto">
+        SELECT /* [rtReceiptConfirmService.sqlx][rtReceiptConfirmService.getDataDetailList][반품확정 상세조회] */
+            '0' AS CHECKYN
+            ,DM_DOCUMENT_D.STORERKEY AS STORERKEY
+            ,DM_DOCUMENT_D.DCCODE AS DCCODE
+            ,DM_DOCUMENT_D.SOURCEKEY AS SOURCEKEY
+            ,DM_DOCUMENT_D.ORGANIZE AS ORGANIZE
+            ,DM_DOCUMENT_D.AREA AS AREA
+            ,DM_DOCUMENT_D.DOCNO AS DOCNO
+            ,DM_DOCUMENT_D.DOCDT AS DOCDT
+            ,DM_DOCUMENT_D.DOCLINE AS DOCLINE
+            ,DM_DOCUMENT_D.SKU AS SKU
+            ,MS_SKU.DESCRIPTION AS SKUNAME
+            ,FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY,'PUTAWAYTYPE', DM_DOCUMENT_D.CHANNEL) AS CHANNEL
+            ,FN_CODEDESCR(MS_SKU.STORERKEY,'STORAGETYPE', MS_SKU.STORAGETYPE) AS STORAGETYPE
+            ,DM_DOCUMENT_D.STORERUOM AS UOM
+            ,FN_UOMCAL ( DM_DOCUMENT_D.BUNMO
+            ,DM_DOCUMENT_D.BUNJA
+            ,RT_INPLAN.ORDERQTY + RT_INPLAN.CANCELQTY ) AS ORDERQTY
+            ,FN_UOMCAL ( DM_DOCUMENT_D.BUNMO
+            ,DM_DOCUMENT_D.BUNJA
+            ,RT_INPLAN.CONFIRMQTY ) AS TRANQTY
+            ,RT_INPLAN.TOLOC AS TOLOC
+            ,RT_INPLAN.STOCKGRADE AS STOCKGRADE
+            ,NVL(ST_SNINFO.LOTTABLE01,RT_INPLAN.LOTTABLE01) AS LOTTABLE01
+            , NVL(CASE WHEN MS_SKU.DURATIONTYPE = '1' AND REGEXP_LIKE(NVL(ST_SNINFO.LOTTABLE01,RT_INPLAN.LOTTABLE01), '^[0-9]{8}$')
+            THEN TO_CHAR(TO_DATE(NVL(ST_SNINFO.LOTTABLE01,RT_INPLAN.LOTTABLE01),'YYYYMMDD') - (MS_SKU.DURATION - 1), 'YYYYMMDD')
+            ELSE NVL(ST_SNINFO.LOTTABLE01,RT_INPLAN.LOTTABLE01)
+            END,'STD') AS LOT_MANUFACTURE                    /** 제조 */
+            , NVL(CASE WHEN MS_SKU.DURATIONTYPE != '1' AND REGEXP_LIKE(NVL(ST_SNINFO.LOTTABLE01,RT_INPLAN.LOTTABLE01), '^[0-9]{8}$')
+            THEN TO_CHAR(TO_DATE(NVL(ST_SNINFO.LOTTABLE01,RT_INPLAN.LOTTABLE01),'YYYYMMDD') + (MS_SKU.DURATION - 1), 'YYYYMMDD')
+            ELSE NVL(ST_SNINFO.LOTTABLE01,RT_INPLAN.LOTTABLE01)
+            END,'STD') AS LOT_EXPIRE                         /** 유통 */
+            ,FN_LOTDURATION(MS_SKU.STORERKEY
+            ,MS_SKU.DURATIONTYPE
+            ,MS_SKU.DURATION
+            ,NVL(ST_SNINFO.LOTTABLE01,RT_INPLAN.LOTTABLE01)
+            ,'N') ||'/'|| MS_SKU.DURATION AS DURATION_TERM
+            ,ST_SNINFO.SERIALNO AS SERIALNO
+            ,ST_SNINFO.CONVSERIALNO AS CONVSERIALNO
+            ,ST_SNINFO.SERIALLEVEL AS SERIALLEVEL
+            ,ST_SNINFO.SERIALTYPE AS SERIALTYPE
+            ,ST_SNINFO.FACTORYNAME AS FACTORYNAME
+            ,ST_SNINFO.PLACEOFORIGIN AS PLACEOFORIGIN
+            ,MS_SKU.COLORDESCR AS COLORDESCR
+            ,RT_INPLAN.SLIPDT AS SLIPDT
+            ,RT_INPLAN.SLIPNO AS SLIPNO
+            ,RT_INPLAN.SLIPLINE AS SLIPLINE
+            , 1 AS PRINTEDQTY
+            <!-- ,NVL(ST_SNINFOSLIP.PRINT_YN,'N')                 																		    AS PRINT_YN  -->
+            ,'RT' AS DOCTYPE
+            <!-- ,ST_SNINFOSLIP.BARCODE																									    AS BARCODE -->
+            ,CASE
+            WHEN MS_SKU.SERIALYN = 'Y' THEN RT_INSPECT.STOCKID
+            ELSE UNISTR('')
+            END AS BARCODE
+            ,DM_DOCUMENT_D.STATUS AS STATUS
+            ,FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY,'STATUS_RT', DM_DOCUMENT_D.STATUS) AS STATUSNAME
+            ,MS_SKU.DURATION AS DURATION
+            ,MS_SKU.DURATIONTYPE AS DURATIONTYPE
+
+            ,ST_SNINFO.CONTRACTCUSTKEY AS CONTRACTCOMPANY
+            ,( SELECT DESCRIPTION FROM MS_CUST
+            WHERE CUSTKEY = ST_SNINFO.CONTRACTCUSTKEY
+            AND ROWNUM = 1 ) AS CONTRACTCOMPANYNAME
+            ,FN_CODEDESCR(ST_SNINFO.STORERKEY,'CONTRACTTYPE_SN',ST_SNINFO.CONTRACTTYPE) AS CONTRACTTYPE
+            ,ST_SNINFO.BUTCHERYDT AS BUTCHERYDT
+            ,ST_SNINFO.FROMVALIDDT AS FROMVALIDDT
+            ,ST_SNINFO.TOVALIDDT AS TOVALIDDT
+            ,ST_SNINFO.STOCKID AS BARCODE_SN
+            , RT_INSPECT.INSPECTQTY AS SERIALORDERQTY
+            , RT_INSPECT.CONFIRMQTY AS SERIALINSPECTQTY
+            , CASE WHEN RT_INPLAN.STORERKEY = 'CJFW' THEN CASE WHEN RT_INPLAN.UOM = 'KG' THEN RT_INSPECT.CONFIRMQTY
+            ELSE RT_INSPECT.CONFIRMQTY * ST_SNINFO.NETWEIGHT
+            END
+            ELSE FN_CONV_UOM(RT_INPLAN.STORERKEY,RT_INPLAN.SKU,RT_INPLAN.UOM,'KG',RT_INSPECT.CONFIRMQTY)
+            END AS SERIALSCANWEIGHT
+            ,'['||DM_DOCUMENT_D.PLANT||']'||fn_descr_plant(DM_DOCUMENT_D.PLANT) AS PLANT_DESCR
+        FROM DM_DOCUMENT_D
+        JOIN CM_USER_AUTHORITY
+            ON CM_USER_AUTHORITY.USERID = #{gUserId}
+            AND CM_USER_AUTHORITY.DCCODE = #{dccode}
+            AND CM_USER_AUTHORITY.STORERKEY = #{storerkey}
+            AND CM_USER_AUTHORITY.DCCODE = DM_DOCUMENT_D.DCCODE
+            AND CM_USER_AUTHORITY.STORERKEY = DM_DOCUMENT_D.STORERKEY
+            AND CM_USER_AUTHORITY.ORGANIZE = DM_DOCUMENT_D.ORGANIZE
+            AND CM_USER_AUTHORITY.AREA = DM_DOCUMENT_D.AREA
+            <if test="gMultiArea != null and gMultiArea != ''">AND CM_USER_AUTHORITY.AREA = #{gMultiArea}</if>
+        JOIN MS_SKU
+            ON MS_SKU.STORERKEY = DM_DOCUMENT_D.STORERKEY
+            AND MS_SKU.SKU = DM_DOCUMENT_D.SKU
+            AND MS_SKU.DEL_YN = 'N'
+            AND MS_SKU.SERIALYN = DECODE(DM_DOCUMENT_D.DCCODE,'2170',MS_SKU.SERIALYN,'Y')
+<!--            <if test="storagetype != null and storagetype != ''">AND MS_SKU.STORAGETYPE LIKE #{storagetype}</if>-->
+        JOIN RT_INPLAN
+            ON RT_INPLAN.DCCODE = DM_DOCUMENT_D.DCCODE
+            AND RT_INPLAN.DOCTYPE = DM_DOCUMENT_D.DOCTYPE
+            AND RT_INPLAN.SLIPDT = DM_DOCUMENT_D.DELIVERYDATE
+            AND RT_INPLAN.DOCNO = DM_DOCUMENT_D.DOCNO
+            AND RT_INPLAN.DOCLINE = DM_DOCUMENT_D.DOCLINE
+            <!-- 고객 다중선택 -->
+            <if test="fromCustkey != null and fromCustkey != ''">
+                AND RT_INPLAN.CUSTKEY IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                FROM (SELECT #{fromCustkey} AS VAL FROM DUAL) A
+                CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+            </if>
+        LEFT OUTER JOIN RT_INSPECT
+            ON RT_INSPECT.DCCODE = RT_INPLAN.DCCODE
+            AND RT_INSPECT.STORERKEY = RT_INPLAN.STORERKEY
+            AND RT_INSPECT.ORGANIZE = RT_INPLAN.ORGANIZE
+            AND RT_INSPECT.AREA = RT_INPLAN.AREA
+            AND RT_INSPECT.SLIPDT = RT_INPLAN.SLIPDT
+            AND RT_INSPECT.SLIPNO = RT_INPLAN.SLIPNO
+            AND RT_INSPECT.SLIPLINE = RT_INPLAN.SLIPLINE
+            AND RT_INSPECT.SKU = RT_INPLAN.SKU
+            AND RT_INSPECT.DEL_YN = 'N'
+        LEFT OUTER JOIN ST_SNINFO
+            ON ST_SNINFO.STORERKEY = RT_INSPECT.STORERKEY
+            AND ST_SNINFO.SKU = RT_INSPECT.SKU
+            AND ST_SNINFO.STOCKID = RT_INSPECT.STOCKID
+            AND ST_SNINFO.DEL_YN = 'N'
+        LEFT OUTER JOIN RT_CLAIMINFO
+            ON RT_CLAIMINFO.DCCODE = DM_DOCUMENT_D.DCCODE
+            AND RT_CLAIMINFO.STORERKEY = DM_DOCUMENT_D.STORERKEY
+            AND RT_CLAIMINFO.DOCNO = DM_DOCUMENT_D.DOCNO
+            AND RT_CLAIMINFO.DOCLINE = DM_DOCUMENT_D.DOCLINE
+            AND RT_CLAIMINFO.DEL_YN = 'N'
+        WHERE 1= 1
+            AND DM_DOCUMENT_D.DOCTYPE = 'RT'
+            AND DM_DOCUMENT_D.DEL_YN = 'N'
+            <!--  AND   DM_DOCUMENT_D.STATUS <![CDATA[<]]> '90'  -->
+            AND DM_DOCUMENT_D.DCCODE = #{dccode}
+            AND DM_DOCUMENT_D.STORERKEY = #{storerkey}
+            AND DM_DOCUMENT_D.DOCDT = #{docdt}
+            AND DM_DOCUMENT_D.DOCNO = #{docno}
+            AND DM_DOCUMENT_D.SKU = #{sku}
+            <if test="returntype != null and returntype != ''">AND DM_DOCUMENT_D.RETURNTYPE LIKE #{returntype}</if>
+<!--            <if test="channel != null and channel != ''">AND DM_DOCUMENT_D.CHANNEL LIKE #{channel}</if>-->
+
+            <if test="blno != null and blno != ''">AND ST_SNINFOSLIP.CONVSERIALNO = #{blno}</if>
+            <if test="serialno != null and serialno != ''">AND ST_SNINFOSLIP.SERIALNO = #{serialno}</if>
+            <if test="wdCustkey != null and wdCustkey != ''">AND ST_SNINFOSLIP.CONTRACTCUSTKEY = #{wdCustkey}</if>
+            <if test="packingmethod != null and packingmethod != ''">AND RT_CLAIMINFO.PACKINGMETHOD LIKE #{packingmethod}</if>
+        ORDER BY DM_DOCUMENT_D.SKU
+    </select>
+
+    <select id="getDetailList2" resultType="cjfw.wms.rt.dto.RtReceiptConfirmResDetailDto">
+        SELECT /* [RtInplanTotalService.sqlx][getDetailList][반품진행현황 클레임내역 조회] */
+        RT_CLAIMINFO.SAPCLAIMNO                           AS SAPCLAIMNO	/*클레임번호*/
+        , RT_CLAIMINFO.SKU                                  AS SKU			/*상품코드*/
+        , MS_SKU.DESCRIPTION                                AS SKUNAME		/*상품명칭*/
+        , RT_CLAIMINFO.MEMO                                 AS MEMO			/*세부내역*/
+        , RT_CLAIMINFO.WRITER                               AS WRITER		/*작성자*/
+        , RT_CLAIMINFO.WRITEDATE                            AS WRITEDATE	/*작성일자*/
+        , TRIM(RT_CLAIMINFO.WRITETIME)                      AS WRITETIME	/*작성시간*/
+        FROM RT_CLAIMINFO
+        JOIN MS_SKU
+        ON MS_SKU.STORERKEY = RT_CLAIMINFO.STORERKEY
+        AND MS_SKU.SKU       = RT_CLAIMINFO.SKU
+        WHERE RT_CLAIMINFO.DCCODE         = #{dccode}
+        AND RT_CLAIMINFO.STORERKEY      = #{storerkey}
+        AND RT_CLAIMINFO.DOCNO          = #{docno}
+        AND RT_CLAIMINFO.DOCLINE        = #{docline}
+        ORDER BY RT_CLAIMINFO.SAPCLAIMNO
+    </select>
+
+    <update id="tempSaveMaster">
+        UPDATE RT_INPLAN SET
+            CHG_REQ_DEPT_CD = #{chgReqDeptCd}
+        WHERE SLIPNO = #{slipno}
+        AND SLIPLINE = #{slipline}
+        AND DCCODE = #{dccode}
+    </update>
+
+    <update id="saveMasterEmail">
+        UPDATE RT_INPLAN SET
+            EMAIL_SEND_DATE = SYSDATE
+        WHERE SLIPNO = #{slipno}
+        AND SLIPLINE = #{slipline}
+        AND DCCODE = #{dccode}
+    </update>
+
+    <update id="cancelMaster">
+        UPDATE RT_INPLAN SET
+            CHG_REQ_DEPT_CD = NULL
+            ,EMAIL_SEND_DATE = NULL
+        WHERE SLIPNO = #{slipno}
+        AND SLIPLINE = #{slipline}
+        AND DCCODE = #{dccode}
+    </update>
+
+    <select id="getMaMdInfoList" resultType="cjfw.wms.rt.dto.RtReceiptConfirmResDto">
+        SELECT WRAP.*
+        FROM (SELECT  'MD' AS GUBUN , A.SOMDCODE, B.DATA4 AS EMP_NO ,A.SOMDNAME ,C.MAIL_ID
+            FROM MS_SKU A
+            JOIN CM_CODE B
+                ON A.SOMDCODE = B.BASECODE
+            JOIN FRAMEONE_EMP C
+                ON B.DATA4= C.EMP_NO
+            WHERE A.SKU = #{sku}
+                AND B.CODELIST ='PURCHASEGROUP'
+            UNION
+            SELECT 'MA' AS GUBUN,'' SOMDCODE, B.EMP_NO, A.MANAME AS SOMDNAME, B.MAIL_ID
+            FROM MS_CUST A
+            JOIN FRAMEONE_EMP B
+                ON A.MA = B.EMP_NO
+            WHERE A.CUSTKEY = #{fromCustkey}
+        ) WRAP
+        WHERE 1=1
+        AND GUBUN = #{gubun}
+    </select>
+</mapper>

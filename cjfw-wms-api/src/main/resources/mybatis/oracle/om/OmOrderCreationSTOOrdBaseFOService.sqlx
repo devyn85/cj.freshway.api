@@ -1,0 +1,757 @@
+<?xml version="1.0" encoding="UTF-8"?><!--Converted at: Tue Mar 10 15:17:16 KST 2026-->
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="omOrderCreationSTOOrdBaseFOService">
+                   
+    <select id="getDataHeaderList" resultType="OmOrderCreationSTOOrdBaseFOResDto">
+         SELECT /* [omOrderCreationSTOOrdBaseFOService.sqlx][omOrderCreationSTOOrdBaseFOService.getDataHeaderlist][이동대상조회][sunho.kim][20260310] */
+            '0' AS CHECKYN                                   /*선택*/
+            ,T.STORERKEY                                     /*회사코드*/
+            ,T.DCCODE                                        /*센터코드*/
+            ,T.SKU                                           /*상품코드*/
+            ,T.DESCRIPTION                                   /*상품명*/
+            ,T.STOCKGRADE                                    /*재고속성*/
+            ,T.UOM                                           /*단위 ( 주문, 재고 모두 기본단위를 기준으로 처리함을 원칙으로 하기에 아래 수량정보에 별도의 변환작업을 하지 않음)*/
+            ,T.FROM_CROSSDOCKTYPE                            /*공급센터 크로스타입*/
+            ,T.TO_CROSSDOCKTYPE                              /*공급받는센터 크로스타입*/
+            ,T.FROM_CROSSDOCKTYPE_NAME                       /*공급센터 크로스타입명*/
+            ,T.TO_CROSSDOCKTYPE_NAME                         /*공급받는센터 크로스타입명*/
+            ,T.OPENQTY1                                      /*DC_A 가용재고*/
+            ,T.OPENQTY9                                      /*발주센터 가용재고*/
+            ,T.DP_QTY                                        /*입고예정량*/
+            ,T.ORDERQTY                                      /*주문량 ( SO주문량, 저장품, 배분량 제외 )*/
+            ,T.REQ_ORDERQTY                                  /*발주예정량 ( 주문량 - 발주센터재고 - 입고예정 )*/
+            ,(T.REQ_ORDERQTY - T.REQ1)   AS  UN_ORDERQTY     /*미발주량 ( 발주예정량 - 공급센터1 발주량)*/
+            ,T.PROCESSQTY                                    /*분배량 */
+            ,T.REQ1                                          /*공급센터1 발주량(보유재고량을 최대값으로 발주예정량 우선 적용)*/
+            ,T.OPENQTY5                                      /*발주센터 가용재고 20250121 추가 */
+            ,T.DOCNO_LIST                                    /*문서번호 리스트 */
+        FROM (
+            SELECT
+                   T.STORERKEY
+                  ,T.DCCODE   
+                  ,T.SKU      
+                  ,T.DESCRIPTION
+                  ,T.STOCKGRADE 
+                  ,T.UOM        
+                  ,T.FROM_CROSSDOCKTYPE
+                  ,T.TO_CROSSDOCKTYPE
+                  ,T.FROM_CROSSDOCKTYPE_NAME
+                  ,T.TO_CROSSDOCKTYPE_NAME
+                  ,T.OPENQTY1      
+                  ,T.OPENQTY9      
+                  ,T.DP_QTY        
+                  ,T.ORDERQTY      
+                  ,T.REQ_ORDERQTY  
+                  ,T.PROCESSQTY    
+                  ,NVL(CASE WHEN #{ignorecrossyn} = '1' THEN REQ_ORDERQTY
+                          WHEN T.FROM_CROSSDOCKTYPE = 'CROSS' THEN REQ_ORDERQTY
+                          WHEN T.REQ_ORDERQTY <![CDATA[>]]> 0 AND T.OPENQTY1 <![CDATA[>]]> 0 AND T.OPENQTY1 <![CDATA[>=]]> T.REQ_ORDERQTY  THEN  T.REQ_ORDERQTY
+                          WHEN T.REQ_ORDERQTY <![CDATA[>]]> 0 AND T.OPENQTY1 <![CDATA[>]]> 0 AND T.OPENQTY1 <![CDATA[<]]>  T.REQ_ORDERQTY  THEN  T.OPENQTY1
+                          ELSE 0
+                       END,0) AS REQ1
+                  ,T.OPENQTY5 
+                  ,T.DOCNO_LIST                               /* 문서번호 리스트 */
+            FROM  ( SELECT ORDER_TB.STORERKEY
+                          ,ORDER_TB.DCCODE
+                          ,ORDER_TB.SKU
+                          ,ORDER_TB.DESCRIPTION
+                          ,ORDER_TB.STOCKGRADE
+                          ,ORDER_TB.UOM
+                          ,FROM_SKUDCSET.CROSSDOCKTYPE        AS FROM_CROSSDOCKTYPE
+                          ,TO_SKUDCSET.CROSSDOCKTYPE          AS TO_CROSSDOCKTYPE
+                          ,NVL(STO_STOCK_TB1.OPENQTY,0)       AS OPENQTY1 
+                          ,NVL(STOCK_TB.OPENQTY,0)            AS OPENQTY9
+                          ,NVL(DP_TB.DP_QTY,0)                AS DP_QTY
+                          ,NVL(ORDER_TB.ORDERQTY ,0)          AS ORDERQTY
+                          ,NVL(ORDER_TB.PROCESSQTY,0)         AS PROCESSQTY
+                          ,(CASE WHEN NVL(#{onlyordqty},'0') = '1' THEN NVL(ORDER_TB.ORDERQTY,0)
+                                 WHEN NVL(#{stuseyn},'0') = '1' THEN 
+                                      CASE WHEN NVL(ORDER_TB.ORDERQTY, 0) <![CDATA[<]]> (NVL(DP_TB.DP_QTY, 0)) THEN 0 
+                                           ELSE NVL(ORDER_TB.ORDERQTY, 0) - (NVL(DP_TB.DP_QTY, 0)) 
+                                      END
+                                 WHEN NVL(ORDER_TB.ORDERQTY,0) <![CDATA[<]]> (NVL(DP_TB.DP_QTY,0) + NVL(STOCK_TB.OPENQTY,0)) THEN 0
+                                 ELSE NVL(ORDER_TB.ORDERQTY,0) - (NVL(DP_TB.DP_QTY,0) + NVL(STOCK_TB.OPENQTY,0))
+                             END )                            AS REQ_ORDERQTY
+                          ,NVL(STOCK_TB2.OPENQTY, 0) AS OPENQTY5
+                          ,CD1.BASEDESCR                      AS FROM_CROSSDOCKTYPE_NAME
+                          ,CD2.BASEDESCR                      AS TO_CROSSDOCKTYPE_NAME
+                          ,ORDER_TB.DOCNO_LIST                AS DOCNO_LIST
+                    FROM   (SELECT DM_DOCUMENT_D.STORERKEY
+                                 , DM_DOCUMENT_D.DCCODE
+                                 , DM_DOCUMENT_D.SKU
+                                 , DM_DOCUMENT_D.STOCKGRADE
+                                 , DM_DOCUMENT_D.UOM
+                                 , SUM(DM_DOCUMENT_D.ORDERQTY+DM_DOCUMENT_D.ORDERADJUSTQTY) AS ORDERQTY
+                                 , SUM(DM_DOCUMENT_D.PROCESSQTY) AS PROCESSQTY
+                                 , MAX(MS_SKU.DESCRIPTION) AS DESCRIPTION
+                                 , RTRIM(XMLAGG(XMLELEMENT(E, DM_DOCUMENT_D.DOCNO, ',').EXTRACT('//text()') ORDER BY DM_DOCUMENT_D.DOCNO).GETCLOBVAL(), ',') AS DOCNO_LIST
+                            FROM   DM_DOCUMENT_H
+                            JOIN   DM_DOCUMENT_D
+                            ON     DM_DOCUMENT_H.DELIVERYDATE     = DM_DOCUMENT_D.DELIVERYDATE
+                            AND    DM_DOCUMENT_H.DOCTYPE          = DM_DOCUMENT_D.DOCTYPE
+                            AND    DM_DOCUMENT_H.DOCNO            = DM_DOCUMENT_D.DOCNO
+                            AND    'N'                            = DM_DOCUMENT_D.DEL_YN
+                            AND    '1'                            = DM_DOCUMENT_D.CHANNEL
+                            JOIN   MS_SKU 
+                            ON     MS_SKU.STORERKEY             =  DM_DOCUMENT_D.STORERKEY         
+                            AND    MS_SKU.SKU                   =  DM_DOCUMENT_D.SKU
+                            AND    MS_SKU.DEL_YN                = 'N'       
+                        <if test="serialyn == 1"> 
+                            AND    MS_SKU.SERIALYN = 'N'  
+                        </if>
+                        <if test="storagetype != null and storagetype != ''">
+                            AND    MS_SKU.STORAGETYPE           = #{storagetype}  
+                        </if>
+                            JOIN MS_CUST MSC
+                            ON     DM_DOCUMENT_H.STORERKEY    = MSC.STORERKEY
+                            AND    DM_DOCUMENT_H.TO_CUSTKEY   = MSC.CUSTKEY
+                            AND    DM_DOCUMENT_H.TO_CUSTTYPE  = MSC.CUSTTYPE
+                            LEFT OUTER JOIN MS_SKUDCSET
+                            ON     MS_SKUDCSET.STORERKEY      = DM_DOCUMENT_D.STORERKEY
+                            AND    MS_SKUDCSET.DCCODE         = DM_DOCUMENT_D.DCCODE
+                            AND    MS_SKUDCSET.SKU            = DM_DOCUMENT_D.SKU
+                            WHERE  1=1
+                            AND    DM_DOCUMENT_D.STORERKEY       = #{gStorerkey}
+                            AND    DM_DOCUMENT_D.DELIVERYDATE    = #{deliverydate}
+                            AND    DM_DOCUMENT_D.DCCODE          = #{toDccode}
+                            AND    DM_DOCUMENT_D.DOCTYPE         = 'WD'
+                            AND    DM_DOCUMENT_D.WORKPROCESSCODE IN ( 'SO', 'JASO' )
+                            AND    DM_DOCUMENT_D.DEL_YN          = 'N'
+                        <if test="ordcrossyn == 1"> 
+                            AND    MS_SKUDCSET.CROSSDOCKTYPE     = 'CROSS' /* 당일광역보충발주(FO)의 대상상품은 CROSS로 고정한다. */
+                        </if>
+                        <if test="custorderclosetype != null and custorderclosetype != ''">
+                            AND    MSC.CUSTSTRATEGY4 = #{custorderclosetype}
+                        </if>
+                        <if test="skuMulti != null and skuMulti.size() > 0">
+                            <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                                <foreach collection="skuMulti" item="item">
+                                    OR DM_DOCUMENT_D.SKU IN
+                                    <foreach collection="item" item="code" open="(" close=")" separator=",">
+                                        #{code}      
+                                    </foreach>
+                                </foreach>
+                            </trim>  
+                        </if>
+                        <if test="skuexceptMulti != null and skuexceptMulti.size() > 0">
+                            <trim prefix="AND (" suffix=")" prefixOverrides="AND">
+                                <foreach collection="skuexceptMulti" item="item" separator="AND">
+                                    DM_DOCUMENT_D.SKU  NOT IN
+                                    <foreach collection="item" item="code" open="(" close=")" separator=",">
+                                        #{code}
+                                    </foreach>
+                                </foreach>
+                            </trim>
+                        </if>
+                        <if test="distancetypeMulti != null and distancetypeMulti.size() > 0">
+                            AND EXISTS (SELECT 'x'
+                                            FROM   MS_CUSTDLVINFO 
+                                            WHERE  MS_CUSTDLVINFO.STORERKEY     = DM_DOCUMENT_H.STORERKEY
+                                            AND    MS_CUSTDLVINFO.CUSTTYPE      = DM_DOCUMENT_H.TO_CUSTTYPE
+                                            AND    MS_CUSTDLVINFO.DLVCUSTKEY    = DM_DOCUMENT_H.TO_CUSTKEY
+                                            AND    MS_CUSTDLVINFO.DISTANCETYPE IN
+                                                <foreach collection="distancetypeMulti" item="item" separator="," close=")" open="(">
+                                                #{item}
+                                                </foreach> 
+                                            )
+                        </if>
+                        <if test="setdistancetypeMulti != null and setdistancetypeMulti.size() > 0">
+                            AND NOT EXISTS (SELECT 'x'
+                                        FROM   MS_CUSTDLVINFO 
+                                        WHERE  MS_CUSTDLVINFO.STORERKEY     = DM_DOCUMENT_H.STORERKEY
+                                        AND    MS_CUSTDLVINFO.CUSTTYPE      = DM_DOCUMENT_H.TO_CUSTTYPE
+                                        AND    MS_CUSTDLVINFO.DLVCUSTKEY    = DM_DOCUMENT_H.TO_CUSTKEY 
+                                        AND    MS_CUSTDLVINFO.DISTANCETYPE IN
+                                        <foreach collection="setdistancetypeMulti" item="item" separator="," close=")" open="(">
+                                        #{item}
+                                        </foreach>
+                                        )
+                        </if>
+                        GROUP BY DM_DOCUMENT_D.STORERKEY
+                                , DM_DOCUMENT_D.DCCODE
+                                , DM_DOCUMENT_D.SKU
+                                , DM_DOCUMENT_D.STOCKGRADE
+                                , DM_DOCUMENT_D.UOM ) ORDER_TB
+                   
+                    LEFT OUTER JOIN (SELECT ST_STOCK.STORERKEY
+                                           ,ST_STOCK.DCCODE
+                                           ,ST_STOCK.SKU
+                                           ,ST_STOCK.STOCKGRADE
+                                           ,SUM(CASE WHEN #{stqtyyn} = '1' THEN ST_STOCK.QTY
+                                                     ELSE  CASE WHEN MS_SKUDCSET.CROSSDOCKTYPE = 'CROSS' THEN 
+                                                                      CASE WHEN ST_STOCK.OPENQTY <![CDATA[<]]> ST_STOCK.QTYEXPECTED THEN 0
+                                                                           ELSE ST_STOCK.OPENQTY - ST_STOCK.QTYEXPECTED                                             
+                                                                      END  
+                                                                 ELSE ST_STOCK.OPENQTY
+                                                            END
+                                                END ) AS OPENQTY  /* CROSS상품일 경우 OPENQTY와 QTYEXPECTED가 동시 증가하게됨 이경우 작업진행중이라면 QTYEXPECTED가 OPENQTY보다 클수 있기에 음수값일 경우 0으로 취급함 */
+                                           ,MAX(UOM) AS UOM
+                                     FROM   ST_STOCK             
+                                     LEFT OUTER JOIN MS_SKUDCSET
+                                     ON   MS_SKUDCSET.STORERKEY = ST_STOCK.STORERKEY
+                                     AND  MS_SKUDCSET.DCCODE    = ST_STOCK.DCCODE
+                                     AND  MS_SKUDCSET.SKU       = ST_STOCK.SKU
+                                     WHERE  1=1
+                                     AND    ST_STOCK.STORERKEY    = #{gStorerkey}
+                                     AND    ST_STOCK.DCCODE       = #{toDccode}
+                                     AND    ST_STOCK.STOCKTYPE    = 'GOOD'
+                                 <if test="stockcrossyn == 0">  
+                                     AND    ST_STOCK.LOC          != 'CROSS'  
+                                 </if>
+                                 <if test="skuMulti != null and skuMulti.size() > 0">
+                                        <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                                            <foreach collection="skuMulti" item="item">
+                                                OR ST_STOCK.SKU IN
+                                                <foreach collection="item" item="code" open="(" close=")" separator=",">
+                                                    #{code}      
+                                                </foreach>
+                                            </foreach>
+                                        </trim>  
+                                </if>
+                                <if test="skuexceptMulti != null and skuexceptMulti.size() > 0">
+                                    <trim prefix="AND (" suffix=")" prefixOverrides="AND">
+                                        <foreach collection="skuexceptMulti" item="item" separator="AND">
+                                            ST_STOCK.SKU  NOT IN
+                                            <foreach collection="item" item="code" open="(" close=")" separator=",">
+                                                #{code}
+                                            </foreach>
+                                        </foreach>
+                                    </trim>
+                                </if>
+                               GROUP BY ST_STOCK.STORERKEY,ST_STOCK.DCCODE,ST_STOCK.SKU,ST_STOCK.STOCKGRADE ) STOCK_TB
+                    ON  ORDER_TB.STORERKEY  = STOCK_TB.STORERKEY
+                    AND ORDER_TB.DCCODE     = STOCK_TB.DCCODE
+                    AND ORDER_TB.SKU        = STOCK_TB.SKU
+                    AND ORDER_TB.STOCKGRADE = STOCK_TB.STOCKGRADE
+                    
+                    LEFT OUTER JOIN (SELECT ST_STOCK.STORERKEY
+                                           ,ST_STOCK.DCCODE
+                                           ,ST_STOCK.SKU
+                                           ,ST_STOCK.STOCKGRADE
+                                           ,SUM(CASE WHEN #{stqtyyn} = '1' THEN ST_STOCK.QTY
+                                                     ELSE  CASE WHEN MS_SKUDCSET.CROSSDOCKTYPE = 'CROSS' THEN 
+                                                                      CASE WHEN ST_STOCK.OPENQTY <![CDATA[<]]> ST_STOCK.QTYEXPECTED THEN 0
+                                                                           ELSE ST_STOCK.OPENQTY - ST_STOCK.QTYEXPECTED    
+                                                                      END  
+                                                                 ELSE ST_STOCK.OPENQTY
+                                                            END
+                                                END ) as OPENQTY  /* CROSS상품일 경우 OPENQTY와 QTYEXPECTED가 동시 증가하게됨 이경우 작업진행중이라면 QTYEXPECTED가 OPENQTY보다 클수 있기에 음수값일 경우 0으로 취급함 */
+                                           ,MAX(UOM) as UOM
+                                     FROM   ST_STOCK
+                                     LEFT OUTER JOIN MS_SKUDCSET
+                                     ON   MS_SKUDCSET.STORERKEY = ST_STOCK.STORERKEY
+                                     AND  MS_SKUDCSET.Dccode    = ST_STOCK.Dccode
+                                     AND  MS_SKUDCSET.SKU       = ST_STOCK.sku
+                                     WHERE  1=1
+                                     AND    ST_STOCK.STORERKEY    = #{gStorerkey}
+                                     AND    ST_STOCK.DCCODE       = #{dcA}
+                                     AND    ST_STOCK.STOCKTYPE    = 'GOOD'
+                                     <if test="stockcrossyn == 0"> 
+                                     AND    ST_STOCK.LOC          != 'CROSS'  
+                                     </if>
+                                     <if test="skuMulti != null and skuMulti.size() > 0">
+                                        <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                                            <foreach collection="skuMulti" item="item">
+                                                OR ST_STOCK.SKU IN
+                                                <foreach collection="item" item="code" open="(" close=")" separator=",">
+                                                    #{code}      
+                                                </foreach>
+                                            </foreach>
+                                        </trim>  
+                                    </if>
+                                    <if test="skuexceptMulti != null and skuexceptMulti.size() > 0">
+                                        <trim prefix="AND (" suffix=")" prefixOverrides="AND">
+                                            <foreach collection="skuexceptMulti" item="item" separator="AND">
+                                                ST_STOCK.SKU  NOT IN
+                                                <foreach collection="item" item="code" open="(" close=")" separator=",">
+                                                    #{code}
+                                                </foreach>
+                                            </foreach>
+                                        </trim>
+                                    </if>
+                             GROUP BY ST_STOCK.STORERKEY,ST_STOCK.DCCODE,ST_STOCK.SKU,ST_STOCK.STOCKGRADE ) STO_STOCK_TB1
+                    ON  ORDER_TB.STORERKEY  = STO_STOCK_TB1.STORERKEY
+                    AND ORDER_TB.SKU        = STO_STOCK_TB1.SKU
+                    AND ORDER_TB.STOCKGRADE = STO_STOCK_TB1.STOCKGRADE        
+                    
+                    LEFT OUTER JOIN (SELECT ST_STOCK.STORERKEY
+                                           ,ST_STOCK.DCCODE
+                                           ,ST_STOCK.SKU
+                                           ,ST_STOCK.STOCKGRADE
+                                           ,SUM(CASE WHEN #{opqtyyn} = '1' THEN ST_STOCK.QTY
+                                                     ELSE  CASE WHEN MS_SKUDCSET.CROSSDOCKTYPE = 'CROSS' THEN 
+                                                                      CASE WHEN ST_STOCK.OPENQTY <![CDATA[<]]> ST_STOCK.QTYEXPECTED THEN 0
+                                                                           ELSE ST_STOCK.OPENQTY - ST_STOCK.QTYEXPECTED    
+                                                                      END  
+                                                                 ELSE ST_STOCK.OPENQTY
+                                                            END
+                                                END ) AS OPENQTY  /* CROSS상품일 경우 OPENQTY와 QTYEXPECTED가 동시 증가하게됨 이경우 작업진행중이라면 QTYEXPECTED가 OPENQTY보다 클수 있기에 음수값일 경우 0으로 취급함 */
+                                           ,MAX(UOM) AS UOM
+                                     FROM   ST_STOCK             
+                                     LEFT OUTER JOIN MS_SKUDCSET
+                                     ON   MS_SKUDCSET.STORERKEY = ST_STOCK.STORERKEY
+                                     AND  MS_SKUDCSET.Dccode    = ST_STOCK.Dccode
+                                     AND  MS_SKUDCSET.SKU       = ST_STOCK.SKU
+                                     WHERE  1=1
+                                     AND    ST_STOCK.STORERKEY    = #{gStorerkey}
+                                     AND    ST_STOCK.DCCODE       = #{toDccode}
+                                     AND    ST_STOCK.STOCKTYPE    = 'GOOD'
+                                <if test="stockcrossyn == 0">  
+                                     AND    ST_STOCK.LOC          != 'CROSS'
+                                </if>
+                                <if test="skuMulti != null and skuMulti.size() > 0">
+                                        <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                                            <foreach collection="skuMulti" item="item">
+                                                OR ST_STOCK.SKU IN
+                                                <foreach collection="item" item="code" open="(" close=")" separator=",">
+                                                    #{code}      
+                                                </foreach>
+                                            </foreach>
+                                        </trim>  
+                                </if>
+                                <if test="skuexceptMulti != null and skuexceptMulti.size() > 0">
+                                    <trim prefix="AND (" suffix=")" prefixOverrides="AND">
+                                        <foreach collection="skuexceptMulti" item="item" separator="AND">
+                                            ST_STOCK.SKU  NOT IN
+                                            <foreach collection="item" item="code" open="(" close=")" separator=",">
+                                                #{code}
+                                            </foreach>
+                                        </foreach>
+                                    </trim>
+                                </if>
+                               GROUP BY ST_STOCK.STORERKEY,ST_STOCK.DCCODE,ST_STOCK.SKU,ST_STOCK.STOCKGRADE ) STOCK_TB2
+                    ON  ORDER_TB.STORERKEY  = STOCK_TB2.STORERKEY
+                    AND ORDER_TB.DCCODE     = STOCK_TB2.DCCODE
+                    AND ORDER_TB.SKU        = STOCK_TB2.SKU
+                    AND ORDER_TB.STOCKGRADE = STOCK_TB2.STOCKGRADE    
+                    
+                    LEFT OUTER JOIN ( SELECT DM_DOCUMENT_D.STORERKEY
+                                           , DM_DOCUMENT_D.DCCODE
+                                           , DM_DOCUMENT_D.SKU
+                                           , DM_DOCUMENT_D.STOCKGRADE
+                                           , DM_DOCUMENT_D.UOM
+                                           , SUM(DM_DOCUMENT_D.ORDERQTY+DM_DOCUMENT_D.ORDERADJUSTQTY-DM_DOCUMENT_D.CONFIRMQTY) as DP_QTY
+                                      FROM   DM_DOCUMENT_H
+                                      JOIN   DM_DOCUMENT_D
+                                      ON     DM_DOCUMENT_H.DOCDT   = DM_DOCUMENT_D.DOCDT
+                                      AND    DM_DOCUMENT_H.DOCTYPE = DM_DOCUMENT_D.DOCTYPE
+                                      AND    DM_DOCUMENT_H.DOCNO   = DM_DOCUMENT_D.DOCNO
+                                      AND    'N'                   = DM_DOCUMENT_D.DEL_YN
+                                      AND    '90'                  <![CDATA[>]]> DM_DOCUMENT_D.STATUS
+                                      AND    '1'                   = DM_DOCUMENT_D.CHANNEL
+                                      JOIN   MS_SKU 
+                                      ON     MS_SKU.STORERKEY      = DM_DOCUMENT_D.STORERKEY         
+                                      AND    MS_SKU.SKU            = DM_DOCUMENT_D.SKU
+                                      AND    MS_SKU.DEL_YN         = 'N'        
+                                  <if test="storagetype != null and storagetype != ''">
+                                      AND    MS_SKU.STORAGETYPE    = #{storagetype}  
+                                  </if>
+                                      WHERE  1=1
+                                      AND    DM_DOCUMENT_D.STORERKEY       = #{gStorerkey}
+                                      AND    DM_DOCUMENT_D.DELIVERYDATE    = #{deliverydate}
+                                      AND    DM_DOCUMENT_D.DCCODE          = #{toDccode}
+                                      AND    DM_DOCUMENT_D.DOCTYPE         = 'DP'
+                                  <if test="poyn == 1"> 
+                                      AND    DM_DOCUMENT_D.WORKPROCESSCODE != 'PO'  
+                                  </if>
+                                  <if test="stoyn == 1"> 
+                                      AND    DM_DOCUMENT_D.WORKPROCESSCODE != 'STO'  
+                                  </if>
+                                  <if test="kxyn == 1">
+                                      AND    DM_DOCUMENT_H.FROM_CUSTKEY NOT LIKE '1000%'  
+                                  </if>
+                                      AND    DM_DOCUMENT_H.DEL_YN          = 'N'
+                                  <if test="skuMulti != null and skuMulti.size() > 0">
+                                        <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                                            <foreach collection="skuMulti" item="item">
+                                                OR DM_DOCUMENT_D.SKU IN
+                                                <foreach collection="item" item="code" open="(" close=")" separator=",">
+                                                    #{code}      
+                                                </foreach>
+                                            </foreach>
+                                        </trim>  
+                                </if>
+                                <if test="skuexceptMulti != null and skuexceptMulti.size() > 0">
+                                    <trim prefix="AND (" suffix=")" prefixOverrides="AND">
+                                        <foreach collection="skuexceptMulti" item="item" separator="AND">
+                                            DM_DOCUMENT_D.SKU  NOT IN
+                                            <foreach collection="item" item="code" open="(" close=")" separator=",">
+                                                #{code}
+                                            </foreach>
+                                        </foreach>
+                                    </trim>
+                                </if>
+                                      GROUP BY DM_DOCUMENT_D.STORERKEY
+                                             , DM_DOCUMENT_D.DCCODE
+                                             , DM_DOCUMENT_D.SKU
+                                             , DM_DOCUMENT_D.STOCKGRADE
+                                             , DM_DOCUMENT_D.UOM ) DP_TB 
+                    ON  ORDER_TB.STORERKEY  = DP_TB.STORERKEY
+                    AND ORDER_TB.DCCODE     = DP_TB.DCCODE
+                    AND ORDER_TB.SKU        = DP_TB.SKU
+                    AND ORDER_TB.STOCKGRADE = DP_TB.STOCKGRADE 
+                    AND ORDER_TB.UOM        = DP_TB.UOM
+                    LEFT OUTER JOIN MS_SKUDCSET FROM_SKUDCSET
+                    ON  FROM_SKUDCSET.STORERKEY = #{gStorerkey}
+                    AND FROM_SKUDCSET.DCCODE    = #{dcA}
+                    AND FROM_SKUDCSET.SKU       = ORDER_TB.SKU
+                    LEFT OUTER JOIN MS_SKUDCSET TO_SKUDCSET
+                    ON  TO_SKUDCSET.STORERKEY = #{gStorerkey}
+                    AND TO_SKUDCSET.DCCODE    = #{toDccode}
+                    AND TO_SKUDCSET.SKU       = ORDER_TB.SKU
+                    LEFT OUTER JOIN CM_CODE_STORER CD1
+                    ON  CD1.STORERKEY   = #{gStorerkey}
+                    AND CD1.CODELIST    = 'CROSSDOCKTYPE'
+                    AND CD1.BASECODE    = FROM_SKUDCSET.CROSSDOCKTYPE
+                    LEFT OUTER JOIN CM_CODE_STORER CD2
+                    ON  CD2.STORERKEY   = #{gStorerkey}
+                    AND CD2.CODELIST    = 'CROSSDOCKTYPE'
+                    AND CD2.BASECODE    = TO_SKUDCSET.CROSSDOCKTYPE
+                    
+                    /*WHERE ORDER_TB.ORDERQTY <![CDATA[>]]> ( NVL(STOCK_TB.OPENQTY,0)+NVL(DP_TB.DP_QTY,0) )*/
+                ) T
+            
+        ) T     
+              
+        ORDER BY T.SKU,T.STOCKGRADE
+    </select>
+
+    <select id="getDataResultList" resultType="OmOrderCreationSTOOrdBaseFOResultDto">
+        SELECT /* [omOrderCreationSTOOrdBaseFOService.sqlx][omOrderCreationSTOOrdBaseService.getDataResultlist][처리결과조회][sunho.kim][20260310] */
+               SY_PROCESSTEMP_ST.FROM_STORERKEY
+              ,SY_PROCESSTEMP_ST.FROM_DCCODE
+              ,SY_PROCESSTEMP_ST.FROM_ORGANIZE
+              ,SY_PROCESSTEMP_ST.FROM_AREA
+              ,SY_PROCESSTEMP_ST.FROM_SKU
+              ,SY_PROCESSTEMP_ST.FROM_UOM
+              ,SY_PROCESSTEMP_ST.FROM_STOCKGRADE
+              ,SY_PROCESSTEMP_ST.TO_ORDERQTY
+              ,SY_PROCESSTEMP_ST.TO_DCCODE
+              ,SY_PROCESSTEMP_ST.TO_ORGANIZE
+              ,SY_PROCESSTEMP_ST.TO_AREA
+              ,SY_PROCESSTEMP_ST.TO_SKU
+              ,SY_PROCESSTEMP_ST.TO_UOM
+              ,SY_PROCESSTEMP_ST.TO_STOCKGRADE
+              ,SY_PROCESSTEMP_ST.PROCESSFLAG
+              ,SY_PROCESSTEMP_ST.PROCESSMSG
+              ,MS_SKU.DESCRIPTION AS DESCRIPTION
+              ,(SELECT DCNAME FROM CM_DC WHERE CM_DC.DCCODE = SY_PROCESSTEMP_ST.FROM_DCCODE AND ROWNUM = 1) AS FROM_DCNAME
+              ,(SELECT DCNAME FROM CM_DC WHERE CM_DC.DCCODE = SY_PROCESSTEMP_ST.TO_DCCODE AND ROWNUM = 1) AS TO_DCNAME
+        FROM   SY_PROCESSTEMP_ST 
+        JOIN   MS_SKU
+        ON     MS_SKU.STORERKEY         = SY_PROCESSTEMP_ST.FROM_STORERKEY
+        AND    MS_SKU.SKU               = SY_PROCESSTEMP_ST.FROM_SKU
+        AND    MS_SKU.DEL_YN            = 'N'
+        WHERE  SY_PROCESSTEMP_ST.PROCESSTYPE    = #{processtype}
+        AND    SY_PROCESSTEMP_ST.PROCESSCREATOR = #{gUserId}
+        AND    SY_PROCESSTEMP_ST.SPID           = #{gSpid}
+        ORDER BY SY_PROCESSTEMP_ST.FROM_DCCODE
+                ,SY_PROCESSTEMP_ST.FROM_LOC
+                ,SY_PROCESSTEMP_ST.FROM_STORERKEY
+                ,SY_PROCESSTEMP_ST.FROM_SKU
+    </select>   
+    
+    <select id="getDataOrderDetail" resultType="OmOrderCreationSTOOrdBaseFOStoResDto">
+        SELECT     /* [omOrderCreationSTOOrdBaseFOService.sqlx][getDataHeaderStolist][이체대상정보]][sunho.kim][20260310] */
+                    DM_DOCUMENT_D.STORERKEY
+                   ,DM_DOCUMENT_D.DCCODE
+                   ,DM_DOCUMENT_D.DOCDT
+                   ,DM_DOCUMENT_D.DOCTYPE
+                   ,DM_DOCUMENT_D.DOCNO
+                   ,DM_DOCUMENT_D.DOCLINE
+                   ,DM_DOCUMENT_D.DELIVERYDATE
+                   ,DM_DOCUMENT_D.SKU
+                   ,DM_DOCUMENT_D.UOM
+                   ,NVL(DM_DOCUMENT_D.ORDERQTY, 0) + NVL(DM_DOCUMENT_D.ORDERADJUSTQTY, 0) AS ORDERQTY
+             FROM   DM_DOCUMENT_H
+             JOIN   DM_DOCUMENT_D
+             ON     DM_DOCUMENT_H.DOCDT   = DM_DOCUMENT_D.DOCDT
+             AND    DM_DOCUMENT_H.DOCTYPE = DM_DOCUMENT_D.DOCTYPE
+             AND    DM_DOCUMENT_H.DOCNO   = DM_DOCUMENT_D.DOCNO
+             AND    'N'                   = DM_DOCUMENT_D.DEL_YN
+             AND    '1'                   = DM_DOCUMENT_D.CHANNEL
+        JOIN   MS_SKU 
+        ON     MS_SKU.STORERKEY             =  DM_DOCUMENT_D.STORERKEY
+        AND    MS_SKU.SKU                   =  DM_DOCUMENT_D.SKU
+        AND    MS_SKU.DEL_YN                = 'N'       
+        JOIN MS_CUST MSC
+        ON     DM_DOCUMENT_H.STORERKEY    = MSC.STORERKEY
+        AND    DM_DOCUMENT_H.TO_CUSTKEY   = MSC.CUSTKEY
+        AND    DM_DOCUMENT_H.TO_CUSTTYPE  = MSC.CUSTTYPE
+        WHERE  1=1
+        AND    DM_DOCUMENT_D.STORERKEY       = #{gStorerkey}
+        AND    DM_DOCUMENT_D.DELIVERYDATE    = #{deliverydate}
+        AND    DM_DOCUMENT_D.DCCODE          = #{toDccode}
+        AND    DM_DOCUMENT_D.DOCTYPE         = 'WD'
+        AND    DM_DOCUMENT_D.WORKPROCESSCODE IN ( 'SO', 'JASO' )
+        AND    DM_DOCUMENT_D.DEL_YN          = 'N'
+        AND    DM_DOCUMENT_D.SKU             = #{sku}
+        ORDER BY DM_DOCUMENT_D.ORDERQTY+DM_DOCUMENT_D.ORDERADJUSTQTY ASC
+    </select>
+    
+    <select id="getDataHeaderStoList" resultType="OmOrderCreationSTOOrdBaseFOStoResDto">
+        SELECT /* [omOrderCreationSTOOrdBaseFOService.sqlx][getDataHeaderStoList][이체대상정보]][sunho.kim][20260310] */
+             REPL.DOCNO                                                        AS STO_DOCNO             /* 이체 문서번호 */ 
+            ,REPL.SOKEY                                                        AS DOCNO                 /* 출고 문서번호 */ 
+            ,REPL.SOLINE                                                       AS DOCLINE               /* 출고 문서라인 */ 
+            ,REPL.WD_DCCODE                                                    AS STO_DCCODE            /* 공급센터 센터 */
+            ,FN_DESCR_DC(REPL.WD_DCCODE)                                       AS STO_DCCODENAME        /* 공급센터 센터명 */  
+            ,REPL.MOVE_QTY                                                     AS STO_ORDERQTY          /* 이체량 */    
+            ,DMD_SO.SKU                                                        AS SKU                   /* 상품코드 */
+            ,FN_DESCR_SKU('FW00',DMD_SO.SKU)                                   AS SKUNAME               /* 상품명 */
+            ,FN_CODEDESCR(DMH_SO.STORERKEY, 'STORAGETYPE', MS_SKU.STORAGETYPE) AS STORAGETYPE           /* 저장조건 */
+            ,DMD_SO.UOM                                                        AS UOM                   /* 단위 */
+            ,DMH_SO.DCCODE                                                     AS DCCODE                /* 공급받는센터 센터 */
+            ,FN_DESCR_DC(DMH_SO.DCCODE)                                        AS DCCODENAME            /* 공급받는센터 센터명 */
+            ,FROM_SKUDCSET.CROSSDOCKTYPE                                       AS FROM_CROSSDOCKTYPE    /* 공급센터 크로스타입 */
+            ,TO_SKUDCSET.CROSSDOCKTYPE                                         AS TO_CROSSDOCKTYPE      /* 공급받는센터 크로스타입 */
+            ,CD1.BASEDESCR                                                     AS FROM_CROSSDOCKTYPE_NAME/* 공급센터 크로스타입명 */
+            ,CD2.BASEDESCR                                                     AS TO_CROSSDOCKTYPE_NAME  /* 공급받는센터 크로스타입명 */
+            ,DMH_SO.TO_CUSTKEY                                                 AS TO_CUSTKEY            /* 고객사 */
+            ,FN_DESCR_CUST('FW00', DMH_SO.TO_CUSTKEY)                          AS TO_CUSTKEYNAME        /* 고객사명 */
+            ,REPL.ADDWHO                                                       AS ADDWHO                /* 등록자 */
+            ,FN_GETUSERNAME(REPL.ADDWHO)                                       AS ADDWHONAME            /* 등록자명 */
+            ,TO_CHAR(REPL.ADDDATE,'YYYY-MM-DD HH24:MI')                        AS ADDDATE               /* 등록일시 */
+        FROM   OM_SDY_REGN_REPL_D REPL
+        JOIN   DM_DOCUMENT_H DMH_SO
+        ON     1=1
+        AND    DMH_SO.DOCNO        = REPL.SOKEY
+        AND    DMH_SO.DELIVERYDATE = REPL.MOVE_DT 
+        JOIN   DM_DOCUMENT_D DMD_SO
+        ON     1=1
+        AND    DMD_SO.DOCNO        = REPL.SOKEY
+        AND    DMD_SO.DOCLINE      = REPL.SOLINE
+        AND    DMD_SO.DELIVERYDATE = REPL.MOVE_DT
+        AND    DMD_SO.DEL_YN     = 'N'
+        JOIN   MS_SKU 
+        ON     MS_SKU.STORERKEY    = DMD_SO.STORERKEY
+        AND    MS_SKU.SKU          = DMD_SO.SKU
+        AND    MS_SKU.DEL_YN       = 'N' 
+        LEFT OUTER JOIN MS_SKUDCSET FROM_SKUDCSET
+        ON     FROM_SKUDCSET.STORERKEY = DMD_SO.STORERKEY
+        AND    FROM_SKUDCSET.DCCODE    = REPL.WD_DCCODE
+        AND    FROM_SKUDCSET.SKU       = DMD_SO.SKU
+        LEFT OUTER JOIN MS_SKUDCSET TO_SKUDCSET
+        ON     TO_SKUDCSET.STORERKEY = DMD_SO.STORERKEY
+        AND    TO_SKUDCSET.DCCODE    = DMH_SO.DCCODE
+        AND    TO_SKUDCSET.SKU       = DMD_SO.SKU
+        LEFT OUTER JOIN CM_CODE_STORER CD1
+        ON  CD1.STORERKEY   = 'FW00'
+        AND CD1.CODELIST    = 'CROSSDOCKTYPE'
+        AND CD1.BASECODE    = FROM_SKUDCSET.CROSSDOCKTYPE
+        LEFT OUTER JOIN CM_CODE_STORER CD2
+        ON  CD2.STORERKEY   = 'FW00'
+        AND CD2.CODELIST    = 'CROSSDOCKTYPE'
+        AND CD2.BASECODE    = TO_SKUDCSET.CROSSDOCKTYPE
+        
+        WHERE  1=1
+            AND REPL.INPUT_DISP_TYPE = 'FO' 
+            AND REPL.MOVE_DT = #{deliverydate}
+        <if test="toDccode != null and toDccode != ''">
+            AND DMH_SO.DCCODE = #{toDccode}   
+        </if>
+        <if test="fromDccode != null and fromDccode != ''">
+            AND REPL.WD_DCCODE = #{fromDccode} 
+        </if>
+        <if test="stoDocno != null and stoDocno != ''">
+            AND REPL.DOCNO = #{stoDocno} 
+        </if>
+        <if test="skuMulti != null and skuMulti.size() > 0">
+            <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                <foreach collection="skuMulti" item="item">
+                    OR DMD_SO.SKU IN
+                    <foreach collection="item" item="code" open="(" close=")" separator=",">
+                        #{code}      
+                    </foreach>
+                </foreach>
+            </trim>  
+        </if>
+        <if test="docnoMulti != null and docnoMulti != ''">
+            AND  REPL.SOKEY IN
+             <foreach collection="docnoMulti" item="item" open="(" separator="," close=")">
+                 #{item}
+             </foreach> 
+        </if>
+        <if test="toCustkeyMulti != null and toCustkeyMulti != ''">
+            AND  DMH_SO.TO_CUSTKEY IN
+             <foreach collection="toCustkeyMulti" item="item" separator="," close=")" open="(">
+                   #{item}
+            </foreach>
+        </if>
+    </select>
+    
+    <select id="getCallYn" resultType="String">
+        SELECT FN_CODEDESCR( 'FW00','ORDER_CRT_STO_IF_CALL_YN','Interface 호출여부' ) AS CALL_YN FROM DUAL
+    </select>
+
+    <insert id="insertDmDocumentDMap">
+        INSERT /* [omOrderCreationSTOOrdBaseFOService.sqlx][insertDmDocumentDMap][SO/STO매핑테이블등록][sunho.kim][20260310] */
+          INTO DM_DOCUMENT_D_MAP(
+               SERIALKEY
+              ,STORERKEY
+              ,DOCDT
+              ,DOCTYPE
+              ,DOCNO
+              ,DOCLINE
+              ,DCCODE
+              ,DELIVERYDATE
+              ,STO_DOCDT
+              ,STO_DOCTYPE
+              ,STO_DOCNO
+              ,STO_DOCLINE
+              ,STO_DCCODE
+              ,STO_DELIVERYDATE
+              ,SKU
+              ,ORDERQTY
+              ,STO_ORDERQTY
+              ,DEL_YN
+              ,ADDWHO
+              ,ADDDATE
+              ,EDITWHO
+              ,EDITDATE)
+        VALUES(
+               (SELECT NVL(MAX(SERIALKEY), 0) + 1 FROM DM_DOCUMENT_D_MAP)
+              ,#{storerkey}
+              ,#{docdt}
+              ,#{doctype}
+              ,#{docno}
+              ,#{docline}
+              ,#{dccode}
+              ,#{deliverydate}
+              ,#{stoDocdt}
+              ,#{stoDoctype}
+              ,#{stoDocno}
+              ,#{stoDocline}
+              ,#{stoDccode}
+              ,#{stoDeliverydate}
+              ,#{sku}
+              ,#{orderqty}
+              ,#{stoOrderqty}
+              ,#{delYn}
+              ,#{gUserId}
+              ,SYSDATE
+              ,#{gUserId}
+              ,SYSDATE)       
+    </insert>
+       
+    <insert id="insertSyProcessTempST" parameterType="java.util.List">
+        INSERT    /* [omOrderCreationSTOOrdBaseFOService.sqlx][insertSyProcessTempSt][임시저장 정보 ST 저장][sunho.kim][2025.07.09] */
+            INTO SY_PROCESSTEMP_ST (
+                PROCESSTYPE
+              , PROCESSCREATOR
+              , SPID
+              , PROCESSFLAG
+              , FROM_STORERKEY
+              , FROM_DCCODE 
+              , FROM_ORGANIZE
+              , FROM_AREA
+              , FROM_SKU
+              , FROM_UOM
+              , FROM_STOCKGRADE
+              , TO_STORERKEY
+              , TO_DCCODE
+              , TO_ORGANIZE
+              , TO_AREA
+              , TO_SKU
+              , TO_UOM
+              , TO_STOCKGRADE
+              , TO_ORDERQTY
+              , MEMO1
+              , CROSSDOCKTYPE
+              , ADDDATE
+              , EDITDATE 
+              , ADDWHO
+              , EDITWHO
+        )
+        <foreach collection="list" item="item" separator="UNION ALL">
+            SELECT
+                #{item.processtype}             AS PROCESSTYPE
+              , #{item.gUserId}                 AS PROCESSCREATOR
+              , #{item.gSpid}                   AS SPID
+              , #{item.processflag}             AS PROCESSFLAG
+              , #{item.fromStorerkey}           AS FROM_STORERKEY
+              , #{item.fromDccode}              AS FROM_DCCODE
+              , #{item.fromOrganize}            AS FROM_ORGANIZE
+              , #{item.fromArea}                AS FROM_AREA
+              , #{item.fromSku}                 AS FROM_SKU
+              , #{item.fromUom}                 AS FROM_UOM
+              , #{item.fromStockgrade}          AS FROM_STOCKGRADE
+              , #{item.toStorerkey}             AS TO_STORERKEY
+              , #{item.toDccode}                AS TO_DCCODE
+              , #{item.toOrganize}              AS TO_ORGANIZE
+              , #{item.toArea}                  AS TO_AREA
+              , #{item.toSku}                   AS TO_SKU
+              , #{item.toUom}                   AS TO_UOM
+              , #{item.toStockgrade}            AS TO_STOCKGRADE
+              , #{item.toOrderqty}              AS TO_ORDERQTY
+              , #{item.memo1}                   AS MEMO1
+              , #{item.crossdocktype}           AS CROSSDOCKTYPE
+              , SYSDATE                         AS ADDDATE
+              , SYSDATE                         AS EDITDATE
+              , #{item.gUserId}                 AS ADDWHO
+              , #{item.gUserId}                 AS EDITWHO
+            FROM DUAL
+        </foreach>
+    </insert>
+    
+    <select id="getDcname" resultType="OmOrderCreationSTOOrdBaseFODcDto">
+        SELECT   /* [omOrderCreationSTOOrdBaseFOService.sqlx][omOrderCreationSTOOrdBaseFOService.getDcname][물류센터조회][sunho.kim][20260310] */
+               CM_DC.DCCODE                         AS DCCODE         /* 센터코드 */
+              ,CM_DC.DCNAME                         AS DCNAME         /* 센터명 */
+        FROM CM_DC
+        WHERE  1=1
+          AND  CM_DC.DCCODE = #{dccode}
+    </select>
+    
+    <select id="callProcedure" statementType="CALLABLE">
+        {   
+            CALL /* [omOrderCreationSTOOrdBaseFOService.sqlx][callProcedure][프로시저 호출][sunho.kim][20260310] */ ${packagename}.EXECUTE
+            (
+                 AVC_SYSTEM      => #{avc_SYSTEM,       mode=IN,    jdbcType=VARCHAR} /*시스템*/
+                ,AVC_EXECUTEMODE => #{avc_EXECUTEMODE,  mode=IN,    jdbcType=VARCHAR} /*수행모드*/
+                ,AVC_COMMAND     => #{avc_COMMAND,      mode=IN,    jdbcType=VARCHAR} /*수행명령어*/
+                ,AVC_DCCODE      => #{avc_DCCODE,       mode=IN,    jdbcType=VARCHAR} /*센터코드*/
+                ,AVC_STORERKEY   => #{avc_STORERKEY,    mode=IN,    jdbcType=VARCHAR} /*고객사코드*/
+                ,AVC_ORGANIZE    => #{avc_ORGANIZE,     mode=IN,    jdbcType=VARCHAR} /*조직코드*/
+                ,AVC_AREA        => #{avc_AREA,         mode=IN,    jdbcType=VARCHAR} /*창고코드*/
+                ,AVC_REQUESTCODE => #{avc_REQUESTCODE,  mode=IN,    jdbcType=VARCHAR} /*요청코드*/
+                ,AVC_REQUESTMSG  => #{avc_REQUESTMSG,   mode=IN,    jdbcType=VARCHAR} /*요청문자열*/
+                ,AVC_WORKER      => #{avc_WORKER,       mode=IN,    jdbcType=VARCHAR} /*작업자*/
+                ,AVC_SECURITYKEY => #{avc_SECURITYKEY,  mode=IN,    jdbcType=VARCHAR} /*보안KEY*/
+                ,AI_SPID         => #{ai_SPID,          mode=IN,    jdbcType=INTEGER} /*SPID*/
+                ,AI_HASHID       => #{ai_HASHID,        mode=IN,    jdbcType=INTEGER} /*HASH_ID*/
+                ,I_ERR           => #{resultCode,       mode=INOUT, jdbcType=VARCHAR} /*에러코드(0:성공)*/
+                ,VC_RESULTMSG    => #{resultMessage,    mode=INOUT, jdbcType=VARCHAR} /*결과메세지-UI용(정상적으로 처리되었습니다./XXX은(는) 처리 불가한 명령입니다.)*/
+                ,VC_RETURNMSG    => #{returnMessage,    mode=INOUT, jdbcType=VARCHAR} /*결과메세지-로그수집용(ORA-1400 발생..)*/
+            )
+        }
+    </select>
+    
+    <!-- 저장 타입이 주문일 경우 이체 우선순위 식별을 위한 고유값 생성 -->
+    <update id="updateSyProcessTempSt">
+        BEGIN
+            /* [omOrderCreationSTOOrdBaseFOService.sqlx][updateSyProcessTempSt][저장 타입이 주문일 경우 이체 우선순위 식별을 위한 고유값 생성][sunho.kim][20260310] */
+            UPDATE SY_PROCESSTEMP_ST A
+                SET BATCH_NO = (
+                    SELECT MIN_GUID 
+                    FROM (
+                        SELECT FROM_SKU, RAWTOHEX(SYS_GUID()) as MIN_GUID
+                          FROM SY_PROCESSTEMP_ST
+                         WHERE PROCESSCREATOR = #{avc_WORKER}
+                           AND PROCESSTYPE    = #{processtype}
+                           AND SPID           = #{ai_SPID}
+                           AND PROCESSFLAG    = 'N'
+                           -- 병렬 수행을 위한 코드추가
+                           AND ORA_HASH(SERIALKEY, 2) = #{ai_HASHID}
+                         GROUP BY FROM_SKU 
+                        ) B
+                        WHERE A.FROM_SKU = B.FROM_SKU
+                    )                   
+                WHERE PROCESSCREATOR = #{avc_WORKER}
+                  AND PROCESSTYPE    = #{processtype}
+                  AND SPID           = #{ai_SPID}
+                  AND PROCESSFLAG    = 'N';
+        END;
+    </update>    
+    
+</mapper>

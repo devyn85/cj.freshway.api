@@ -1,0 +1,204 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper   PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+  "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="stTplTransactionsService">
+
+    <!-- 위탁입출고현황 조회 -->
+    <select id="getMasterList" resultType="cjfw.wms.st.dto.StTplTransactionsResDto">
+     SELECT 
+            AB.DELIVERYDATE AS DOCDT
+          , AB.DOCTYPE                                               AS INOUT_TYPE
+          ,ST_STOCK.STOCKTYPE                                             AS STOCKTYPE
+          , LOGISONESVC.FN_CODEDESCR(ST_STOCK.STORERKEY, 'STOCKTYPE',ST_STOCK.STOCKTYPE)    AS STOCKTYPENM
+          ,ST_STOCK.STOCKGRADE                                            AS STOCKGRADE
+          , LOGISONESVC.FN_CODEDESCR(ST_STOCK.STORERKEY, 'STOCKGRADE',ST_STOCK.STOCKGRADE)  AS STOCKGRADEDESC
+          , MS_SKU.SKU                                                   AS SKU
+          , MS_SKU.DESCRIPTION                                           AS SKUNM
+          , MS_SKU.BASEUOM                                                   AS UOM
+          , AB.CONFIRMQTY                                            AS QTY
+          , ST_SNINFO.CONVSERIALNO                        AS CONVSERIALNO
+          , ST_SNINFO.SERIALNO                          AS SERIALNO /*이력번호*/
+          , AB.DOCNO                                            AS REQUESTNO /*요청번호*/
+          , NVL(CASE WHEN MS_SKU.DURATIONTYPE = '1' AND REGEXP_LIKE(ST_SNINFO.LOTTABLE01, '^[0-9]{8}$')
+            THEN TO_CHAR(TO_DATE(ST_SNINFO.LOTTABLE01,'YYYYMMDD') - MS_SKU.DURATION, 'YYYYMMDD')
+            ELSE ST_SNINFO.LOTTABLE01 END,'STD')                                                                                                        AS LOT /*기준일자*/ 
+--          , ST_SNINFO.LOTTABLE01 as LOTTABLE01                                                                                          /*유통기한*/ 
+          , NVL(CASE WHEN MS_SKU.DURATIONTYPE != '1' AND REGEXP_LIKE(ST_SNINFO.LOTTABLE01, '^[0-9]{8}$')
+                        THEN TO_CHAR(TO_DATE(ST_SNINFO.LOTTABLE01,'YYYYMMDD') + MS_SKU.DURATION, 'YYYYMMDD')
+                        ELSE ST_SNINFO.LOTTABLE01 END,'STD')     AS  DURATION            /*소비기한*/
+          , CASE WHEN ST_SNINFO.LOTTABLE01 IS NULL THEN ''
+            ELSE LOGISONESVC.FN_LOTDURATION(MS_SKU.STORERKEY,MS_SKU.DURATIONTYPE,MS_SKU.DURATION,ST_SNINFO.LOTTABLE01,'N')
+            ||'/'|| MS_SKU.DURATION END  AS DURATIONTERM  
+          , LOGISONESVC.FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, ST_SNINFO.LOTTABLE01, 'R') || '%'   AS DURATION_RATE /*소비기한잔여일/총*/ 
+          , AB.RMK AS RMK
+       FROM (
+             SELECT A.DELIVERYDATE         AS DELIVERYDATE
+                  , A.DOCDT                AS DOCDT
+                  , A.DOCNO                AS DOCNO
+                  , A.DCCODE        AS DCCODE
+                  , A.STORERKEY         AS STORERKEY
+                  , A.REF_DOCID            AS REF_DOCID
+                  , A.REF_CUST_DOCID       AS REF_CUST_DOCID
+                  , A.DOCLINE              AS DOCLINE
+                  , A.SKU                  AS SKU
+                  , A.AREA AS AREA
+                  , A.ORGANIZE             AS ORGANIZE
+                  , CASE
+                                          WHEN A.DOCTYPE = 'DP' THEN 'DP_PO'
+                                          WHEN A.DOCTYPE = 'RT' THEN 'RT'
+                                          WHEN A.DOCTYPE = 'WD' AND A.WORKPROCESSCODE IN ('SO', 'JASO') THEN 'WD_SO'
+                                          WHEN A.DOCTYPE = 'WD' AND A.WORKPROCESSCODE = 'PO' THEN 'WD_PO'
+                                          WHEN A.DOCTYPE = 'AJ' AND A.IOTYPE  <![CDATA[<>]]> 'DP' AND A.ORDERTYPE LIKE 'DD%' THEN 'WD_AJ_DC'
+                                          WHEN A.DOCTYPE = 'AJ' AND A.IOTYPE <![CDATA[=]]> 'DP' AND A.ORDERTYPE LIKE 'DD%' THEN 'DP_AJ_DC'
+                                          WHEN A.DOCTYPE = 'AJ' AND A.IOTYPE  <![CDATA[<>]]>'DP' AND A.ORDERTYPE LIKE 'DU%' THEN 'WD_AJ_DU'
+                                          ELSE A.DOCTYPE
+                                      END                  AS DOCTYPE
+                  , A.IOTYPE               AS IOTYPE
+                  , A.ORDERTYPE            AS ORDERTYPE
+                  , A.WORKPROCESSCODE      AS WORKPROCESSCODE
+                  , B.MAPKEY_NO            AS MAPKEY_NO
+                  , CASE
+                        WHEN A.DOCTYPE = 'WD' THEN WD_TB.CONFIRMQTY
+                        WHEN A.DOCTYPE = 'DP' THEN DP_TB.CONFIRMQTY
+                        WHEN A.DOCTYPE = 'AJ' THEN AJ_TB.CONFIRMQTY
+                        WHEN A.DOCTYPE = 'RT' THEN RT_TB.CONFIRMQTY
+                        END   AS CONFIRMQTY
+                  , CASE
+                        WHEN A.DOCTYPE = 'WD' THEN WD_TB.ETCQTY2
+                        WHEN A.DOCTYPE = 'DP' THEN DP_TB.ETCQTY2
+                        WHEN A.DOCTYPE = 'AJ' THEN AJ_TB.ETCQTY2
+                        WHEN A.DOCTYPE = 'RT' THEN RT_TB.ETCQTY2
+                        END                    AS CONFIRMBOX
+                  , CASE
+                        WHEN A.DOCTYPE = 'WD' THEN WD_TB.STOCKID
+                        WHEN A.DOCTYPE = 'DP' THEN DP_TB.STOCKID
+                        WHEN A.DOCTYPE = 'AJ' THEN AJ_TB.STOCKID
+                        WHEN A.DOCTYPE = 'RT' THEN RT_TB.STOCKID
+                        END                    AS STOCKID
+                  , A.ADDDATE              AS ADDDATE
+                  , A.ADDWHO               AS ADDWHO
+                  , CASE
+                        WHEN A.DOCTYPE = 'WD' THEN WD_TB.EDITWHO
+                        WHEN A.DOCTYPE = 'DP' THEN DP_TB.EDITWHO
+                        WHEN A.DOCTYPE = 'AJ' THEN AJ_TB.EDITWHO
+                        WHEN A.DOCTYPE = 'RT' THEN RT_TB.EDITWHO
+                        END                    AS EDITWHO
+                  , A.MEMO1              AS RMK
+               FROM DM_DOCUMENT_D A
+               JOIN  DM_DOCUMENT_H B
+                 ON  A.DCCODE       = B.DCCODE
+                AND A.DOCTYPE      = B.DOCTYPE
+                AND A.DELIVERYDATE = B.DELIVERYDATE
+                AND A.DOCNO        = B.DOCNO
+                AND A.ORDERTYPE    = 'ZTP'
+                AND A.STATUS       = '90' 
+                AND A.DEL_YN       = 'N' 
+               LEFT OUTER JOIN AJ_INPLAN AJ_TB
+                ON  A.DCCODE   = AJ_TB.DCCODE
+                AND A.DOCNO    = AJ_TB.SLIPNO
+                AND A.DOCLINE  = AJ_TB.SLIPLINE
+                AND A.DOCTYPE  = 'AJ'
+             LEFT OUTER JOIN WD_INPLAN WD_TB
+					 ON  A.DCCODE       = WD_TB.DCCODE
+					AND A.ORGANIZE     = WD_TB.ORGANIZE
+					AND A.STORERKEY    = WD_TB.STORERKEY
+					AND A.DELIVERYDATE        = WD_TB.SLIPDT
+					AND A.DOCNO        = WD_TB.DOCNO
+					AND A.DOCLINE      = WD_TB.DOCLINE
+					AND A.DOCTYPE      = 'WD'
+					AND WD_TB.STATUS       = '90'
+					LEFT OUTER JOIN DP_INPLAN DP_TB
+					 ON  A.DCCODE       = DP_TB.DCCODE
+					AND A.ORGANIZE     = DP_TB.ORGANIZE
+					AND A.STORERKEY    = DP_TB.STORERKEY
+					AND A.DELIVERYDATE = DP_TB.SLIPDT
+					AND A.DOCNO        = DP_TB.DOCNO
+					AND A.DOCLINE      = DP_TB.DOCLINE
+					AND A.DOCTYPE      = 'DP'
+					AND DP_TB.STATUS       = '90'
+               LEFT OUTER JOIN RT_INSPECT RT_TB
+                 ON  A.DCCODE    = RT_TB.DCCODE
+                AND A.ORGANIZE  = RT_TB.ORGANIZE
+                AND A.STORERKEY = RT_TB.STORERKEY
+                AND A.DOCNO     = RT_TB.DOCNO
+                AND A.DOCLINE   = RT_TB.DOCLINE
+                AND A.DOCTYPE   = 'RT'
+                
+              WHERE 1=1
+                AND B.STATUS       = '90'  --기본조건       
+                AND B.DEL_YN       = 'N'                      --기본조건
+                AND A.WORKPROCESSCODE <![CDATA[<>]]> 'STO'  --기본조건
+               <if test="dcCode != null and dcCode != ''">     
+                  AND B.DCCODE LIKE #{dcCode}
+               </if>
+               
+               <if test="organize != null and organize != ''">
+                   AND  B.ORGANIZE IN (
+                    SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS ORGANIZE
+                     FROM (SELECT #{organize} AS VAL FROM DUAL)
+                    CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) > 0
+                  )
+               </if>
+               <if test="fromDate != null and fromDate != ''">     
+                  AND B.DELIVERYDATE BETWEEN #{fromDate} AND #{toDate}
+               </if>
+               <if test="tplUser != null and tplUser != ''">     
+                  AND B.tpl_bcnr_id = #{tplUser}
+               </if>
+               <if test="sku != null and sku != ''">
+                    AND A.SKU IN (
+                        SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS SKU
+                        FROM (SELECT #{sku} AS VAL FROM DUAL)
+                        CONNECT BY INSTR(VAL, ',', 1, LEVEL - 1) > 0
+                    )
+                </if>
+               <choose>
+               <when test="iotype != null and iotype != ''">     
+                  <if test="iotype == 'DP_PO' ">   
+                     AND A.DOCTYPE = 'DP'
+                  </if>
+                  <if test="iotype == 'RT' ">   
+                     AND A.DOCTYPE = 'RT'
+                  </if>
+                  <if test="iotype == 'WD_SO' ">   
+                     AND A.DOCTYPE = 'WD'
+                     AND A.WORKPROCESSCODE IN ('SO', 'JASO')
+                  </if>
+                  <if test="iotype == 'WD_PO' ">   
+                     AND A.DOCTYPE = 'WD'
+                     AND A.WORKPROCESSCODE = 'PO'
+                  </if>
+                  <if test="iotype == 'WD_AJ_DC' ">   
+                     AND A.DOCTYPE = 'AJ'
+                     AND A.IOTYPE  <![CDATA[<>]]> 'DP' AND A.ORDERTYPE LIKE 'DD%'
+                  </if>
+                  <if test="iotype == 'DP_AJ_DC' ">   
+                     AND A.DOCTYPE = 'AJ'
+                     AND A.IOTYPE <![CDATA[=]]> 'DP' AND A.ORDERTYPE LIKE 'DD%'
+                  </if>
+                  <if test="iotype == 'WD_AJ_DU' ">   
+                     AND A.DOCTYPE = 'AJ'
+                     AND A.IOTYPE  <![CDATA[<>]]>'DP' AND A.ORDERTYPE LIKE 'DU%'
+                  </if>
+                </when>
+               </choose>
+               )  AB
+       LEFT JOIN ST_STOCK 
+         ON AB.STOCKID  =ST_STOCK.STOCKID 
+          AND AB.SKU = ST_STOCK.SKU
+          AND AB.DCCODE =ST_STOCK.DCCODE
+          AND AB.STORERKEY = ST_STOCK.STORERKEY
+       LEFT JOIN MS_SKU ON MS_SKU.STORERKEY =AB.STORERKEY
+        AND MS_SKU.SKU       =AB.SKU
+        AND MS_SKU.DEL_YN    = 'N'
+       LEFT OUTER JOIN LOGISONESVC.ST_SNINFO ON AB.STORERKEY = ST_SNINFO.STORERKEY
+        AND AB.SKU       = ST_SNINFO.SKU
+        AND AB.STOCKID   = ST_SNINFO.STOCKID
+      WHERE 1=1
+      AND AB.CONFIRMQTY <![CDATA[<>]]> 0
+      ORDER BY AB.DELIVERYDATE DESC,  AB.DOCNO DESC
+    </select>
+
+
+
+</mapper>

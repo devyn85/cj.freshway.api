@@ -1,0 +1,448 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+  PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+  "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="stInquiryMoveService">
+    <select id="getMasterList" resultType="cjfw.wms.st.dto.StInquiryMoveResDto">
+	    SELECT /* [stInquiryMoveService.getMasterList][재고조사결과처리(Header)][sss][20251105]*/
+	           ST_INQUIRY.INQUIRYDT                   AS INQUIRYDT         /*조사일자*/
+	         , MAX(ST_INQUIRY.INQUIRYNO)              AS INQUIRYNO         /*조사번호 - 최종*/
+             , ST_INQUIRY.INQUIRY_NAME                AS INQUIRY_NAME      /*별칭*/  
+	         , COUNT(DISTINCT ST_INQUIRY.LOC)         AS LOCCNT            /*로케이션수*/
+	         , COUNT(DISTINCT ST_INQUIRY.SKU)         AS SKUCNT            /*상품수*/
+	         , MAX(ST_INQUIRY.SOURCEKEY)              AS SOURCEKEY         /*소스키*/
+	         , MAX(ST_INQUIRY.MEMO)                   AS MEMO              /*메모*/
+	         , MAX(ST_INQUIRY.ADDDATE)                AS ADDDATE           /*등록일자*/
+	         , MAX(ST_INQUIRY.ADDWHO)                 AS ADDWHO            /*등록자*/
+	         , MAX(CM_USER.USERNAME)                  AS USERNAME          /*사용자명*/
+	         , ST_INQUIRY.DCCODE                      AS DCCODE            /*센터코드*/
+	         , ST_INQUIRY.STORERKEY                   AS STORERKEY         /*화주코드*/
+	         , ST_INQUIRY.ORGANIZE                    AS ORGANIZE          /*조직*/
+	         , ST_INQUIRY.AREA                        AS AREA              /*구역*/
+	         , FN_CODEDESCR(ST_INQUIRY.STORERKEY, 'STATUS_INQUIRY', 
+	             CASE WHEN MAX(ST_INQUIRY.STATUS) = '00' THEN '00'
+	                  WHEN MIN(ST_INQUIRY.STATUS) = '90' THEN '90'
+	                  ELSE '85'
+	             END)                                 AS STATUS            /*상태(00:조사예정,85:불일치,90:일치,91:종료)*/
+	         --
+	         ,MAX(ST_INQUIRY.PRIORITY)                AS LASTPRIORITY  /*최종차수*/    
+	     FROM ST_INQUIRY
+	LEFT JOIN ST_STOCK
+	       ON ST_STOCK.STORERKEY   = ST_INQUIRY.STORERKEY
+	      AND ST_STOCK.DCCODE      = ST_INQUIRY.DCCODE
+	      AND ST_STOCK.ORGANIZE    = ST_INQUIRY.ORGANIZE
+	      AND ST_STOCK.AREA        = ST_INQUIRY.AREA
+	      AND ST_STOCK.SKU         = ST_INQUIRY.SKU
+	      AND ST_STOCK.STOCKID     = ST_INQUIRY.STOCKID
+	      AND ST_STOCK.STOCKGRADE  = ST_INQUIRY.STOCKGRADE
+	      AND ST_STOCK.LOC         = ST_INQUIRY.LOC
+	      AND ST_STOCK.QTY         <![CDATA[>]]> 0
+	     JOIN MS_SKU
+	       ON MS_SKU.STORERKEY = ST_INQUIRY.STORERKEY
+	      AND MS_SKU.SKU       = ST_INQUIRY.SKU
+	     JOIN MS_LOCATION
+	       ON MS_LOCATION.DCCODE = ST_INQUIRY.DCCODE
+	      AND MS_LOCATION.LOC    = ST_INQUIRY.LOC
+	    <if test="wharea != null and wharea != ''">     AND MS_LOCATION.WHAREA = #{wharea}              </if>
+	    <if test="fromZone != null and fromZone != ''"> AND MS_LOCATION.ZONE <![CDATA[>=]]> #{fromZone} </if>
+	    <if test="toZone != null and toZone != ''">     AND MS_LOCATION.ZONE <![CDATA[<=]]> #{toZone}   </if>
+	    LEFT JOIN CM_USER
+	           ON CM_USER.USERID = ST_INQUIRY.ADDWHO
+	    WHERE  ST_INQUIRY.DEL_YN    = 'N'
+	      --AND  ST_INQUIRY.COMMIT_YN = 'N'
+		  <!-- START.권한센터 -->
+		  AND EXISTS (SELECT 1
+	                    FROM CM_USER_AUTHORITY 
+	                   WHERE CM_USER_AUTHORITY.DCCODE    = ST_INQUIRY.DCCODE    
+	                     AND CM_USER_AUTHORITY.STORERKEY = ST_INQUIRY.STORERKEY 
+	                     AND CM_USER_AUTHORITY.ORGANIZE  = ST_INQUIRY.ORGANIZE  
+	                     AND CM_USER_AUTHORITY.AREA      = ST_INQUIRY.AREA  
+	                     AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey}
+	                     AND CM_USER_AUTHORITY.USERID    = #{gUserId}
+	                     AND CM_USER_AUTHORITY.DCCODE    = #{fixdccode}
+	                     AND CM_USER_AUTHORITY.AREA      = #{gArea}   
+    			  	     <!-- 창고.다중검색 -->
+			             <if test="organizeMulti != null and organizeMulti != ''">    
+				             AND CM_USER_AUTHORITY.ORGANIZE IN
+				             <foreach collection="organizeMulti" item="code" open="(" close=")" separator=",">
+				               #{code}
+				             </foreach>
+			             </if>                     
+	                 )
+		  <!-- END.권한센터	-->
+	    <!-- 창고.다중검색 -->
+	    <if test="organizeMulti != null and organizeMulti != ''">    
+	       AND ST_INQUIRY.ORGANIZE IN
+	       <foreach collection="organizeMulti" item="code" open="(" close=")" separator=",">
+	         #{code}
+	       </foreach>
+	    </if>  		  
+		  
+		AND ST_INQUIRY.INQUIRYDT <![CDATA[>=]]> #{dt1} 
+	    AND ST_INQUIRY.INQUIRYDT <![CDATA[<=]]> #{dt2}		   	
+		<!-- 실사구분(0:소비기한,0:재고실사) -->        
+	    AND ST_INQUIRY.LOTTYPE     = #{lottype} 
+	    <if test="inquiryno != null and inquiryno != ''">     AND ST_INQUIRY.INQUIRYNO   = #{inquiryno}                  </if>
+	    <if test="status != null and status != ''">           AND ST_INQUIRY.STATUS      = #{status}                     </if>
+	    <if test="inquirytype != null and inquirytype != ''"> AND ST_INQUIRY.INQUIRYTYPE = #{inquirytype}              </if>
+	    <if test="inquiryAlias != null and inquiryAlias != ''"> AND ST_INQUIRY.INQUIRY_NAME LIKE '%'||#{inquiryAlias}||'%'               </if>
+	    <if test="fromLoc != null and fromLoc != ''">         AND ST_INQUIRY.LOC <![CDATA[>=]]> #{fromLoc}             </if>
+	    <if test="toLoc != null and toLoc != ''">             AND ST_INQUIRY.LOC <![CDATA[<=]]> #{toLoc}               </if>
+	    
+	    <!-- START.상품.다중OR검색 -->
+	    <if test="skuMulti != null and skuMulti != '' ">
+	 	<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+	 		<foreach collection="skuMulti" item="item">
+	 			OR ST_INQUIRY.SKU IN
+	 			<foreach collection="item" item="code" open="(" close=")" separator=",">
+	 				#{code} 	 
+	       		</foreach>
+	     	</foreach>
+	   	</trim>			                                    
+	    </if>
+	    <!-- END.상품.다중OR검색 -->	
+	    	
+	    GROUP BY ST_INQUIRY.DCCODE
+	           , ST_INQUIRY.STORERKEY
+	           , ST_INQUIRY.ORGANIZE
+	           , ST_INQUIRY.AREA
+	           , ST_INQUIRY.INQUIRYDT
+	           , ST_INQUIRY.INQUIRY_NAME
+	   
+	   <!-- 실사구분(0:소비기한,1:재고실사) => 재고실사일 경우만 -->        
+	   <if test="lottype == '1'.toString()"> 
+	   --HAVING MAX(ST_INQUIRY.STATUS) <![CDATA[<>]]> '00' /*상태(00:조사예정,85:불일치,90:일치,91:종료)*/
+	   </if>
+	   
+        ORDER BY ST_INQUIRY.INQUIRYDT 
+               , ST_INQUIRY.INQUIRY_NAME
+    </select>
+ 
+	<select id="getDetailList1" resultType="cjfw.wms.st.dto.StInquiryMoveResSkuDto">
+	    SELECT /* [stInquiryMoveService.getDetailList1][재고조사결과처리-소비기한/실사재고(Detail)][sss][20251105]*/
+	           ST_INQUIRY.DCCODE                                                       AS DCCODE       /*센터코드*/ 
+	         , ST_INQUIRY.STORERKEY                                                    AS STORERKEY    /*화주코드*/
+	         , ST_INQUIRY.ORGANIZE                                                     AS ORGANIZE     /*조직*/
+	         , ST_INQUIRY.AREA                                                         AS AREA         /*구역*/
+	         , ST_INQUIRY.INQUIRYDT                                                    AS INQUIRYDT    /*조사일자*/
+	         , ST_INQUIRY.INQUIRYNO                                                    AS INQUIRYNO    /*조사번호*/
+	         , ST_INQUIRY.INQUIRY_NAME                                                 AS INQUIRY_NAME /*조사명(별칭)*/
+	         , ST_INQUIRY.PRIORITY                                                     AS PRIORITY     /*회차*/
+	         , FN_CODEDESCR(ST_INQUIRY.STORERKEY, 'STATUS_INQUIRY', ST_INQUIRY.STATUS) AS STATUS       /*상태*/
+	         , ST_INQUIRY.SKU                                           AS SKU                         /*상품코드*/
+	         , MS_SKU.DESCRIPTION                                       AS SKUNAME                     /*상품명*/
+	         , FN_CODEDESCR(ST_INQUIRY.STORERKEY, 'WHAREA', MS_LOCATION.WHAREA)           AS WHAREA    /*창고구역*/
+	         , FN_CODEDESCR(ST_INQUIRY.STORERKEY, 'WHAREAFLOOR', MS_LOCATION.WHAREAFLOOR) AS WHAREAFLOOR /*창고층*/
+	         , MS_LOCATION.ZONE                                         AS ZONE                /*존*/
+	         , MS_ZONE.DESCRIPTION                                      AS ZONENAME            /*존명*/
+	         , ST_INQUIRY.LOC                                           AS LOC                 /*로케이션*/
+	         , ST_INQUIRY.LOT                                           AS LOT                 /*LOT*/
+	         , ST_INQUIRY.ORDERQTY                                      AS ORDERQTY            /*주문수량*/
+	         , MS_SKU.BASEUOM                                           AS UOM                 /*단위*/
+	         , 0                                                        AS SCANQTY_BOX         /*박스스캔수량(기본값 0)*/
+	         , ST_INQUIRY.SCANQTY_A                                     AS SCANQTY_A           /*스캔수량A*/
+	          /*입고예정량(QTYEXPECTED)  는 빼면 안됨 - */
+	         , ST_STOCK.QTY - ST_STOCK.QTYALLOCATED - ST_STOCK.QTYPICKED - ST_STOCK.QTYRESERVE AS POSBQTY /*이동가능수량*/
+             <!-- 소비기한만 처리했을 때는 재고에서 처리수량을 계산할 때 스캔수량A를 빼서 계산
+             , CASE WHEN (
+                    CASE WHEN ST_INQUIRY.QTYTYPE = '0' THEN ST_STOCK.QTY       /*재고유형(0:실재고,1:가용재고)*/
+                         WHEN ST_INQUIRY.QTYTYPE = '1' THEN ST_STOCK.OPENQTY
+                         ELSE ST_STOCK.QTY END
+                    - DECODE(ST_INQUIRY.CHKEXPECTED, '1', ST_STOCK.QTYEXPECTED, 0)
+                    - DECODE(ST_INQUIRY.CHKRESERVE, '1', ST_STOCK.QTYRESERVE, 0)
+                    - DECODE(ST_INQUIRY.CHKALLOCATED, '1', ST_STOCK.QTYALLOCATED, 0)
+                    - DECODE(ST_INQUIRY.CHKPICKED, '1', ST_STOCK.QTYPICKED, 0)
+                    ) - ST_INQUIRY.SCANQTY_A <![CDATA[ <= ]]> 0 THEN 0
+               ELSE (
+                    CASE WHEN ST_INQUIRY.QTYTYPE = '0' THEN ST_STOCK.QTY
+                         WHEN ST_INQUIRY.QTYTYPE = '1' THEN ST_STOCK.OPENQTY 
+                         ELSE ST_STOCK.QTY END
+                    - DECODE(ST_INQUIRY.CHKEXPECTED, '1', ST_STOCK.QTYEXPECTED, 0)
+                    - DECODE(ST_INQUIRY.CHKRESERVE, '1', ST_STOCK.QTYRESERVE, 0)
+                    - DECODE(ST_INQUIRY.CHKALLOCATED, '1', ST_STOCK.QTYALLOCATED, 0)
+                    - DECODE(ST_INQUIRY.CHKPICKED, '1', ST_STOCK.QTYPICKED, 0)
+                    ) - ST_INQUIRY.SCANQTY_A
+               END                                                      AS TRANQTY             /*처리수량*/
+              --> 
+              <!-- 
+                  TOBE는 소비기한 조사 시 실사수량도 넣어 같이 처리할 수 있어 재고실사의 차이수량 계산로직으로 변경 (2025.11.05) 
+               -->
+             , ST_INQUIRY.SCANQTY_A - ST_INQUIRY.ORDERQTY               AS TRANQTY             /*차이수량*/ 
+             , ST_INQUIRY.STOCKGRADE                                    AS STOCKGRADE          /*재고등급*/ 
+             ,NVL(CD2.BASEDESCR,ST_INQUIRY.STOCKGRADE)                  AS STOCKGRADENM        /*재고등급명*/
+             , CM_LOT.LOTTABLE01                                        AS LOTTABLE01          /*LOT속성1-소비기한*/
+             , ST_INQUIRY.TO_LOT                                        AS TO_LOT              /*소비기한-변경)*/
+             , FN_LOTDURATION(MS_SKU.STORERKEY, MS_SKU.DURATIONTYPE, MS_SKU.DURATION, CM_LOT.LOTTABLE01, 'N')
+               || '/' || MS_SKU.DURATION                                AS DURATION_TERM       /*유통기한*/
+             , ST_SNINFO.SERIALNO                                       AS SERIALNO            /*시리얼번호*/
+             , ST_INQUIRY.EDITDATE                                      AS EDITDATE            /*수정일자*/
+             , ST_INQUIRY.EDITWHO                                       AS EDITWHO             /*수정자*/
+             , CM_USER.USERNAME                                         AS USERNAME            /*사용자명*/
+             , ST_INQUIRY.STOCKID                                       AS STOCKID             /*재고ID*/
+             , MS_SKU.DURATIONTYPE                                      AS DURATIONTYPE        /*유통기한타입*/
+             , MS_SKU.DURATION                                          AS DURATION            /*유통기한*/
+             , ST_INQUIRY.COMMIT_YN	                                    AS COMMIT_YN           /*결과처리여부*/
+         --
+            ,ST_STOCK.LOC                           AS FROM_LOC             /*출고로케이션*/
+            ,ST_STOCK.LOT                           AS FROM_LOT             /*출고로트*/
+            ,ST_STOCK.STOCKID                       AS FROM_STOCKID         /*출고재고ID*/
+            ,ST_STOCK.STOCKTYPE                     AS FROM_STOCKTYPE       /*출고재고유형*/
+            ,ST_STOCK.STOCKGRADE                    AS FROM_STOCKGRADE      /*출고재고등급*/
+            ,CM_LOT.LOTTABLE01                      AS FROM_LOTTABLE01      /*출고LOT속성1*/
+            ,ST_INQUIRY.REASONCODE                  AS REASONCODE           /*사유코드*/
+            ,ST_INQUIRY.REASONMSG                   AS REASONMSG            /*사유메시지*/
+            --
+            ,ST_INQUIRY.INQUIRYTYPE                 AS INQUIRYTYPE          /*유형*/
+             /*
+               MOBILE_ADD_YN : 모바일에서 지시하지 않는 상품을 실사할 경우 'Y'
+                 ->화면에서는 지시여부로 표현함으로 'Y'일 경우는 'N'(지시하지 않는 상품이라는 의미로 표현)
+             */
+             , DECODE(ST_INQUIRY.MOBILE_ADD_YN,'N','Y','Y','N') AS INSTRUCTION_YN   /*지시여부 */
+             , NVL(ST_INQUIRY.MOBILE_ADD_YN,'N')                AS MOBILE_ADD_YN    /*모바일추가여부*/
+        FROM ST_INQUIRY
+   LEFT JOIN ST_STOCK ON ST_STOCK.STORERKEY = ST_INQUIRY.STORERKEY
+         AND ST_STOCK.DCCODE = ST_INQUIRY.DCCODE
+         AND ST_STOCK.ORGANIZE = ST_INQUIRY.ORGANIZE
+         AND ST_STOCK.AREA = ST_INQUIRY.AREA
+         AND ST_STOCK.SKU = ST_INQUIRY.SKU
+         AND ST_STOCK.STOCKID = ST_INQUIRY.STOCKID
+         AND ST_STOCK.STOCKGRADE = ST_INQUIRY.STOCKGRADE
+         AND ST_STOCK.LOC = ST_INQUIRY.LOC
+         AND ST_STOCK.LOT = ST_INQUIRY.LOT
+         AND ST_STOCK.QTY <![CDATA[>]]> 0
+        JOIN MS_SKU ON MS_SKU.STORERKEY = ST_INQUIRY.STORERKEY
+         AND MS_SKU.SKU = ST_INQUIRY.SKU
+        JOIN MS_LOCATION ON MS_LOCATION.DCCODE = ST_INQUIRY.DCCODE
+         AND MS_LOCATION.LOC = ST_INQUIRY.LOC
+        <if test="wharea != null and wharea != ''"> AND MS_LOCATION.WHAREA = #{wharea} </if>
+        <if test="fromZone != null and fromZone != ''"> AND MS_LOCATION.ZONE <![CDATA[>=]]> #{fromZone} </if>
+        <if test="toZone != null and toZone != ''"> AND MS_LOCATION.ZONE <![CDATA[<=]]> #{toZone} </if>
+        JOIN MS_ZONE ON MS_ZONE.DCCODE = MS_LOCATION.DCCODE
+         AND MS_ZONE.ZONE = MS_LOCATION.ZONE
+        JOIN CM_LOT ON CM_LOT.STORERKEY = ST_INQUIRY.STORERKEY
+         AND CM_LOT.LOT = ST_INQUIRY.LOT
+        LEFT OUTER JOIN ST_SNINFO ON ST_INQUIRY.STORERKEY = ST_SNINFO.STORERKEY
+                                AND ST_INQUIRY.SKU = ST_SNINFO.SKU
+                                AND ST_INQUIRY.STOCKID = ST_SNINFO.STOCKID
+        LEFT JOIN CM_USER ON CM_USER.USERID = ST_INQUIRY.EDITWHO
+        LEFT JOIN CM_CODE_STORER CD2 ON CD2.STORERKEY = ST_INQUIRY.STORERKEY AND CD2.CODELIST = 'STOCKGRADE'  AND CD2.BASECODE = ST_INQUIRY.STOCKGRADE /*재고등급*/        
+       WHERE ST_INQUIRY.DCCODE = #{dccode}
+         AND ST_INQUIRY.STORERKEY    = #{storerkey}
+         AND ST_INQUIRY.INQUIRYDT    = #{inquirydt}
+         AND ST_INQUIRY.INQUIRY_NAME = #{inquiryName} 
+         AND ST_INQUIRY.PRIORITY     = #{priority}  /*마지막차수*/
+         AND ST_INQUIRY.DEL_YN       = 'N'
+         AND ST_INQUIRY.LOTTYPE      = #{lottype} 
+        <if test="fromLoc != null and fromLoc != ''"> AND ST_INQUIRY.LOC <![CDATA[>=]]> #{fromLoc} </if>
+        <if test="toLoc != null and toLoc != ''"> AND ST_INQUIRY.LOC <![CDATA[<=]]> #{toLoc} </if>
+	    
+	    <!-- START.상품.다중OR검색 -->
+	    <if test="skuMulti != null and skuMulti != '' ">
+	 	<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+	 		<foreach collection="skuMulti" item="item">
+	 			OR ST_INQUIRY.SKU IN
+	 			<foreach collection="item" item="code" open="(" close=")" separator=",">
+	 				#{code} 	 
+	       		</foreach>
+	     	</foreach>
+	   	</trim>			                                    
+	    </if>
+	    <!-- END.상품.다중OR검색 -->
+		ORDER BY ST_INQUIRY.DCCODE
+		       , ST_INQUIRY.ORGANIZE
+		       , ST_INQUIRY.INQUIRYDT
+		       , ST_INQUIRY.LOC
+		       , ST_INQUIRY.SKU
+		       , ST_INQUIRY.AREA
+	</select>
+	
+	<!-- 
+	마지막 차수 예시
+                                SELECT T1.DCCODE         -1.센터코드                         
+                                      ,T1.INQUIRYDT      -2.조사일자                         
+                                      ,T1.INQUIRYNO      -3.조사번호                         
+                                      ,T1.INQUIRY_NAME   -4.조사명칭                         
+                                      ,T1.PRIORITY       -5.회차                           
+                                      ,T1.INQUIRYTYPE    -6.유형                           
+                                      ,T1.STORERKEY      -7.고객사코드                        
+                                      ,T1.ORGANIZE       -8.조직코드                         
+                                      ,T1.AREA           -9.창고코드 SAP 창고 혹은 별도의 창고 코드     
+                                      ,T1.SKU            -10.상품코드                        
+                                      ,T1.LOC            -11.로케이션                        
+                                      ,T1.LOT            -12.재고 구분 LOT                   
+                                      ,T1.STOCKID        -13.재고 구분 ID                    
+                                      ,T1.STOCKGRADE     -14.재고 등급( ABC )                
+                                      ,T1.MOBILE_ADD_YN  -15.모바일추가여부   
+                                      ,ROW_NUMBER() OVER(PARTITION BY T1.DCCODE         -1.센터코드                         
+                                                                     ,T1.INQUIRYDT      -2.조사일자                         
+                                                                     ,T1.INQUIRYNO      -3.조사번호                         
+                                                                     ,T1.INQUIRY_NAME   -4.조사명칭                         
+                                                                     /*,T1.PRIORITY      -5.회차*/                           
+                                                                     ,T1.INQUIRYTYPE    -6.유형                           
+                                                                     ,T1.STORERKEY      -7.고객사코드                        
+                                                                     ,T1.ORGANIZE       -8.조직코드                         
+                                                                     ,T1.AREA           -9.창고코드 SAP 창고 혹은 별도의 창고 코드     
+                                                                     ,T1.SKU            -10.상품코드                        
+                                                                     ,T1.LOC            -11.로케이션                        
+                                                                     ,T1.LOT            -12.재고 구분 LOT                   
+                                                                     ,T1.STOCKID        -13.재고 구분 ID                    
+                                                                     ,T1.STOCKGRADE     -14.재고 등급( ABC )                
+                                                                     ,T1.MOBILE_ADD_YN  -15.모바일추가여부   
+                                                               ORDER BY T1.PRIORITY DESC
+                                                         ) AS RN -마지막 차수
+                                  FROM ST_INQUIRY T1    
+                                 WHERE T1.DCCODE    = '2600'
+                                   AND T1.STORERKEY = 'FW00'
+                               ORDER BY
+                                 T1.INQUIRY_NAME  
+                                 ,T1.ORGANIZE               
+                                 ,T1.AREA                   
+                                 ,T1.INQUIRYDT              
+                                 ,T1.LOC                    
+                                 ,T1.SKU                    
+                                 ,T1.STOCKID                
+                                 ,T1.STOCKGRADE             
+                                 ,T1.LOT                    
+                                 ,T1.MOBILE_ADD_YN 
+	
+	 -->
+	
+	
+	
+    <!-- 전체 결과처리 UPDATE
+       ->ST_INQUIRY.UPDATE 트리거 적용 
+    -->
+    <update id="updateMasterList" statementType="CALLABLE">
+    <![CDATA[
+	    {
+	        CALL /* [stInquiryMoveService.sqlx][updateMasterTriggerList][조사지시 전체 결과처리(수정)][sss][2025.08.21] */
+	        DECLARE
+	            V_AFTER      ST_INQUIRY%rowtype;
+	            O_SUCCESS    NUMBER := 1;
+	            O_ERRCODE    NUMBER := 0;
+	            O_ERRMSG     VARCHAR2(4000) := '';
+	            SQL_ERROR    EXCEPTION;
+	            --
+	            V_APPLY_CNT  NUMBER := 0; /*적용건수*/
+	        BEGIN
+	            BEGIN
+	                FOR C1 IN (
+	                    SELECT ST_INQUIRY.DCCODE                 --1.센터코드                         
+	                          ,ST_INQUIRY.INQUIRYDT              --2.조사일자                         
+	                          ,ST_INQUIRY.INQUIRYNO              --3.조사번호                         
+	                          ,ST_INQUIRY.INQUIRY_NAME           --4.조사명칭                         
+	                          ,ST_INQUIRY.PRIORITY               --5.회차                           
+	                          ,ST_INQUIRY.INQUIRYTYPE            --6.유형                           
+	                          ,ST_INQUIRY.STORERKEY              --7.고객사코드                        
+	                          ,ST_INQUIRY.ORGANIZE               --8.조직코드                         
+	                          ,ST_INQUIRY.AREA                   --9.창고코드 SAP 창고 혹은 별도의 창고 코드     
+	                          ,ST_INQUIRY.SKU                    --10.상품코드                        
+	                          ,ST_INQUIRY.LOC                    --11.로케이션                        
+	                          ,ST_INQUIRY.LOT                    --12.재고 구분 LOT                   
+	                          ,ST_INQUIRY.STOCKID                --13.재고 구분 ID                    
+	                          ,ST_INQUIRY.STOCKGRADE             --14.재고 등급( ABC )                
+	                          ,NVL(ST_INQUIRY.MOBILE_ADD_YN,'N') --15.모바일추가여부   
+		                  FROM ST_INQUIRY
+						 WHERE ST_INQUIRY.DCCODE       = #{dccode}
+						   AND ST_INQUIRY.INQUIRYDT    = #{inquirydt}
+						   AND ST_INQUIRY.INQUIRYNO    = #{inquiryno}
+						   AND ST_INQUIRY.INQUIRY_NAME = #{inquiryName}
+						   AND ST_INQUIRY.PRIORITY     = #{priority}  
+						   AND ST_INQUIRY.INQUIRYTYPE  = 'STD'
+						   AND ST_INQUIRY.STORERKEY    = #{storerkey}
+						   AND ST_INQUIRY.ORGANIZE     = #{organize}
+						   AND ST_INQUIRY.AREA         = #{area}
+						   AND ST_INQUIRY.SKU          = #{sku}
+						   AND ST_INQUIRY.LOC          = #{loc}
+						   AND ST_INQUIRY.LOT          = #{lot}
+						   AND ST_INQUIRY.STOCKID      = #{stockid}
+						   AND ST_INQUIRY.STOCKGRADE   = #{stockgrade}
+	                ) LOOP  	  
+	                
+			            /*TRIGGER 대상ROW SELECT(1/3)*/
+			            SELECT *
+			              INTO V_AFTER
+			              FROM ST_INQUIRY
+                         WHERE ST_INQUIRY.DCCODE        = C1.DCCODE        --1.센터코드                                
+                           AND ST_INQUIRY.INQUIRYDT     = C1.INQUIRYDT     --2.조사일자                                
+                           AND ST_INQUIRY.INQUIRYNO     = C1.INQUIRYNO     --3.조사번호                                
+                           AND ST_INQUIRY.INQUIRY_NAME  = C1.INQUIRY_NAME  --4.조사명칭                                
+                           AND ST_INQUIRY.PRIORITY      = C1.PRIORITY      --5.회차                                  
+                           AND ST_INQUIRY.INQUIRYTYPE   = C1.INQUIRYTYPE   --6.유형                                  
+                           AND ST_INQUIRY.STORERKEY     = C1.STORERKEY     --7.고객사코드                               
+                           AND ST_INQUIRY.ORGANIZE      = C1.ORGANIZE      --8.조직코드                                
+                           AND ST_INQUIRY.AREA          = C1.AREA          --9.창고코드 SAP 창고 혹은 별도의 창고 코드            
+                           AND ST_INQUIRY.SKU           = C1.SKU           --10.상품코드                               
+                           AND ST_INQUIRY.LOC           = C1.LOC           --11.로케이션                               
+                           AND ST_INQUIRY.LOT           = C1.LOT           --12.재고 구분 LOT                          
+                           AND ST_INQUIRY.STOCKID       = C1.STOCKID       --13.재고 구분 ID                           
+                           AND ST_INQUIRY.STOCKGRADE    = C1.STOCKGRADE    --14.재고 등급( ABC )                       
+                           AND ST_INQUIRY.MOBILE_ADD_YN = C1.MOBILE_ADD_YN --15.모바일추가여부   
+		                   ;	                          
+		                       
+		                /*변경값 할당(2/3)*/ 
+		                V_AFTER.COMMIT_YN  := 'Y';
+		                V_AFTER.EDITDATE   := SYSDATE;
+		                V_AFTER.EDITWHO    := #{gUserId};
+		                    
+		                /*CALL THE PROCEDURE(3/3)*/ 
+			            TRST_INQUIRY.TR_UPDATE(
+			                V_AFTER,
+			                O_SUCCESS,
+			                O_ERRCODE,
+			                O_ERRMSG
+			            );
+			            
+			            IF O_ERRCODE = -20001 THEN
+			                RAISE_APPLICATION_ERROR(-20001, NVL(O_ERRMSG, SQLERRM));
+			            ELSIF O_ERRCODE != 0 THEN
+			                RAISE SQL_ERROR;
+			            END IF;
+			            
+		                V_APPLY_CNT := V_APPLY_CNT + 1;
+	                END LOOP ;		                
+	
+	            EXCEPTION WHEN OTHERS THEN
+	                O_ERRCODE := SQLCODE;
+	                O_ERRMSG := NVL(O_ERRMSG, SQLERRM);
+	            END;
+	            
+	            IF V_APPLY_CNT = 0 THEN
+                     RAISE_APPLICATION_ERROR(-20001, '처리한 데이터가 없습니다.');
+                END IF;
+	
+	            #{success,  mode=OUT, jdbcType=INTEGER, javaType=int}    := O_SUCCESS;
+	            #{errCode,  mode=OUT, jdbcType=INTEGER, javaType=int}    := O_ERRCODE;
+	            #{errMsg,   mode=OUT, jdbcType=VARCHAR, javaType=String} := O_ERRMSG;
+	        END
+	    }
+    ]]>
+	</update>
+		
+	<!-- 부분 결과처리 UPDATE (이동만 처리되는 경우) -->
+    <insert id="updateMasterList01">
+		UPDATE /* [StInquiryMoveService.sqlx][updateMasterList01][부분 결과처리 UPDATE (이동만 처리되는 경우) 상태 변경][sss][2025.07.11] */
+		       ST_INQUIRY
+		   SET STATUS = '89' /*상태(89:이동+기한변경 시 이동만 부득이하게 처리될 경우)*/
+		      ,COMMIT_YN    = 'Y'
+		      ,COMMITDATE   = SYSDATE
+		      ,COMMITWHO    = #{gUserId}
+	     WHERE DCCODE       = #{dccode}
+	       AND INQUIRYDT    = #{inquirydt}
+	       AND INQUIRYNO    = #{inquiryno}
+	       AND INQUIRY_NAME = #{inquiryName}
+	       AND PRIORITY     = #{priority}  
+	       AND INQUIRYTYPE  = 'STD'
+	       AND STORERKEY    = #{storerkey}
+	       AND ORGANIZE     = #{organize}
+	       AND AREA         = #{area}
+	       AND SKU          = #{sku}
+	       AND LOC          = #{loc}
+	       AND LOT          = #{lot}
+	       AND STOCKID      = #{stockid}
+	       AND STOCKGRADE   = #{stockgrade}
+           	 
+    </insert>
+    
+    
+</mapper>

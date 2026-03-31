@@ -1,0 +1,834 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="tmDistanceBandService">
+	
+	<select id="getDataHeaderlist"  resultType="TmDistanceBandListResDto">
+		 /* [courierRangeMapper.xml][selectList][운송구간/행정동 기준정보 목록 조회][ParkJinWoo][20250911] */
+      WITH TEMP AS (
+    /* 시도(2자리) */
+    SELECT DISTINCT
+               SUBSTR(A.HJDONG_CD, 1, 2)           AS CD              /* 코드(시도) */
+        ,      A.CTP_KOR_NM                        AS CTP_KOR_NM      /* 시도명 */
+        ,      CAST(NULL AS VARCHAR2(80))          AS SIG_KOR_NM      /* 시군구명 */
+        ,      CAST(NULL AS VARCHAR2(120))         AS HJDONG_NM       /* 행정동명 */
+        
+  
+      FROM CM_HJDONG A
+
+    UNION ALL
+    /* 시군구(5자리) */
+    SELECT DISTINCT
+               SUBSTR(A.HJDONG_CD, 1, 5)           AS CD              /* 코드(시군구) */
+        ,      A.CTP_KOR_NM                        AS CTP_KOR_NM      /* 시도명 */
+        ,      CASE WHEN A.CTP_KOR_NM = '세종특별자치시' THEN '세종특별자치시' ELSE A.SIG_KOR_NM      END                  AS SIG_KOR_NM      /* 시군구명 */
+        ,      CAST(NULL AS VARCHAR2(120))         AS HJDONG_NM       /* 행정동명 */
+
+      FROM CM_HJDONG A
+
+    UNION ALL
+    /* 행정동(전체 코드) */
+    SELECT
+               A.HJDONG_CD                         AS CD              /* 코드(전체) */
+        ,      A.CTP_KOR_NM                        AS CTP_KOR_NM      /* 시도명 */
+        , CASE WHEN A.CTP_KOR_NM = '세종특별자치시' THEN '세종특별자치시' ELSE A.SIG_KOR_NM      END                  AS SIG_KOR_NM      /* 시군구명 */
+        ,      A.HJDONG_NM                         AS HJDONG_NM       /* 행정동명 */
+
+      FROM CM_HJDONG A
+),
+TEMP3 AS (SELECT
+               CD                                   AS HJDONG_CD             /* 코드 */
+    ,          CTP_KOR_NM                           AS CTP_KOR_NM     /* 시도명 */
+    ,          SIG_KOR_NM                           AS SIG_KOR_NM     /* 시군구명 */
+    ,          HJDONG_NM                            AS HJDONG_NM      /* 행정동명 */
+    ,          CASE
+                   WHEN LENGTH(CD)  =  2  THEN NULL
+                   WHEN LENGTH(CD)  =  5  THEN SUBSTR(CD, 1, 2)
+                   ELSE SUBSTR(CD, 1, 5)
+               END                                  AS PARENT_CD      /* 부모코드 */
+    ,          CASE
+                   WHEN LENGTH(CD)  =  2  THEN NVL(CTP_KOR_NM, HJDONG_NM)
+                   WHEN LENGTH(CD)  =  5  THEN NVL(SIG_KOR_NM, HJDONG_NM)
+                   ELSE NVL(HJDONG_NM, NVL(SIG_KOR_NM, CTP_KOR_NM))
+               END                                  AS CD_NM          /* 코드명(길이별 대표명) */
+
+  FROM TEMP
+    WHERE 1=1
+
+  ) SELECT
+               A.SERIALKEY                         AS SERIALKEY        /* 데이터번호 */
+            ,  A.DCCODE                            AS DCCODE           /* 센터코드 */
+            ,  A.COURIER                           AS COURIER          /* 운송사코드 */
+            ,  A.COURIER_RANGE                     AS COURIER_RANGE    /* 운송구간 */
+            ,  A.COURIER_RANGE                     AS OLD_COURIER_RANGE    /* 운송구간 */
+            ,  A.HJDONG_CD                         AS HJDONG_CD        /* 행정동코드 */
+            ,  A.RMK                               AS RMK              /* 비고 */
+            ,  A.FROMDATE                          AS FROMDATE         /* 적용시작일자 */
+            ,  A.COURIER_RANGE_DTL				   AS COURIER_RANGE_DTL
+            ,  A.TODATE                            AS TODATE           /* 적용종료일자 */
+            ,  TO_CHAR(A.ADDDATE, 'YYYYMMDDHH24MISS') AS ADDDATE       /* 최초등록시간 */
+            ,  TO_CHAR(A.EDITDATE,'YYYYMMDDHH24MISS') AS EDITDATE      /* 최종변경시간 */
+            ,  A.ADDWHO                            AS ADDWHO           /* 최초등록자 */
+            ,  A.EDITWHO                           AS EDITWHO          /* 최종변경자 */
+            ,  USER1.USER_NM                       AS ADDWHONAME       /* 등록자명 */
+            ,  USER2.USER_NM                       AS EDITWHONAME      /* 수정자명 */
+            ,  B.CTP_KOR_NM						   AS CTPKORNM        /* 시도명 */
+            ,  CASE WHEN B.SIG_KOR_NM IS NULL THEN '전체'ELSE B.SIG_KOR_NM END                        AS SIGKORNM        /* 시군구명 */
+            ,  CASE WHEN B.HJDONG_NM IS NULL THEN '전체' ELSE B.HJDONG_NM END                         AS HJDONGNM       /* 읍면동명 */
+            
+        FROM TM_CARRIER_RANGE A
+        JOIN  TEMP3 B
+  		  ON A.HJDONG_CD = B.HJDONG_CD
+        LEFT JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = A.ADDWHO  /*등록자명*/
+        LEFT JOIN FRAMEONE_USER USER2 ON USER2.USER_ID = A.EDITWHO /*수정자명*/
+        WHERE 1=1
+        <if test="dcCode != null and dcCode != ''">
+            AND <![CDATA[ A.DCCODE = #{dcCode} ]]>
+        </if>
+        <if test="courier != null and courier != ''">
+            AND <![CDATA[ A.COURIER = #{courier} ]]>
+        </if>
+        <if test="carrierRange != null and carrierRange != ''">
+            AND <![CDATA[ A.COURIER_RANGE = #{carrierRange} ]]>
+        </if>
+        <if test="hjdongCd != null and hjdongCd != ''">
+            AND <![CDATA[ A.HJDONG_CD = #{hjdongCd} ]]>
+        </if>
+        <if test="serialYn neq 'true'">
+	        <if test="fromDate != null and fromDate != ''">
+	            AND <![CDATA[ A.TODATE   >= #{fromDate} ]]>
+	        </if>
+	        <if test="toDate != null and toDate != ''">
+	            AND <![CDATA[ A.FROMDATE <= #{toDate} ]]> 
+	        </if>
+        </if>
+        ORDER BY
+      B.CTP_KOR_NM   
+     ,B.SIG_KOR_NM
+     ,B.HJDONG_NM
+     , CASE
+         WHEN LENGTH(B.HJDONG_CD) <![CDATA[=]]> 2 THEN 1   /* 시도 */
+         WHEN LENGTH(B.HJDONG_CD) <![CDATA[=]]> 5 THEN 2   /* 시군구 */
+         ELSE 3                                           /* 행정동 */
+       END
+     , CASE
+	     WHEN LENGTH(B.HJDONG_CD) = 2 THEN CTP_KOR_NM
+	     WHEN LENGTH(B.HJDONG_CD) = 5 THEN SIG_KOR_NM
+	     WHEN LENGTH(B.HJDONG_CD) = 10 THEN HJDONG_NM
+	     ELSE B.HJDONG_CD         end    -- 행정동은 코드순
+     , B.HJDONG_CD
+     , A.DCCODE
+     , A.COURIER
+     , A.COURIER_RANGE
+     , A.COURIER_RANGE_DTL
+     , A.FROMDATE
+     , A.TODATE 
+  	</select>
+  	
+  
+    
+        <delete id="deleteDistanceBand">
+        /* [courierRangeMapper.xml][delete][운송구간/행정동 기준정보 삭제][ParkJinWoo][20250911] */
+        DELETE FROM TM_CARRIER_RANGE
+         WHERE <![CDATA[ SERIALKEY = #{serialKey} ]]>
+    </delete>
+    
+    <select id="getHjdCdData"  resultType="TmHjdDataListResDto">
+	/* tmDistanceBandService.getHjdCdData */
+	/* [cmHjdong.sql][getHjdongHierarchy][CD 길이별 부모 코드 추가][ParkJinWoo][20251014] */
+	WITH TEMP_RAW  AS (
+	    /* 시도(2자리) */
+	    SELECT DISTINCT
+	               SUBSTR(A.HJDONG_CD, 1, 2)           AS CD              /* 코드(시도) */
+	        ,      A.CTP_KOR_NM                        AS CTP_KOR_NM      /* 시도명 */
+	        ,      CAST(NULL AS VARCHAR2(80))          AS SIG_KOR_NM      /* 시군구명 */
+	        ,      CAST(NULL AS VARCHAR2(120))         AS HJDONG_NM       /* 행정동명 */
+	        ,    A.MVMN_RES_CD   
+	  
+	      FROM CM_HJDONG A
+		 WHERE NVL( A.MVMN_RES_CD,0) <![CDATA[<>]]> '63'
+	    UNION ALL
+	    /* 시군구(5자리) */
+	    SELECT DISTINCT
+	               SUBSTR(A.HJDONG_CD, 1, 5)           AS CD              /* 코드(시군구) */
+	        ,      A.CTP_KOR_NM                        AS CTP_KOR_NM      /* 시도명 */
+	        ,      CASE WHEN A.CTP_KOR_NM = '세종특별자치시' THEN '세종특별자치시' ELSE A.SIG_KOR_NM      END                  AS SIG_KOR_NM      /* 시군구명 */
+	        ,      CAST(NULL AS VARCHAR2(120))         AS HJDONG_NM       /* 행정동명 */
+	    ,    A.MVMN_RES_CD 
+	      FROM CM_HJDONG A
+		 WHERE NVL( A.MVMN_RES_CD,0) <![CDATA[<>]]> '63'
+	    UNION ALL
+	    /* 행정동(전체 코드) */
+	    SELECT
+	               A.HJDONG_CD                         AS CD              /* 코드(전체) */
+	        ,      A.CTP_KOR_NM                        AS CTP_KOR_NM      /* 시도명 */
+	        ,      CASE WHEN A.CTP_KOR_NM = '세종특별자치시' THEN '세종특별자치시' ELSE A.SIG_KOR_NM      END                  AS SIG_KOR_NM      /* 시군구명 */
+	        ,      A.HJDONG_NM                         AS HJDONG_NM       /* 행정동명 */
+	    ,    A.MVMN_RES_CD   
+	      FROM CM_HJDONG A
+	     WHERE NVL( A.MVMN_RES_CD,0) <![CDATA[<>]]> '63'
+	),
+	TEMP AS (
+	    SELECT
+	           CD
+	         , CTP_KOR_NM
+	         , SIG_KOR_NM
+	         , HJDONG_NM
+	         , MAX(MVMN_RES_CD) KEEP (
+	               DENSE_RANK LAST
+	               ORDER BY CASE WHEN MVMN_RES_CD = '31' THEN 1 ELSE 2 END
+	           ) AS MVMN_RES_CD
+	    FROM TEMP_RAW
+	    GROUP BY
+	           CD
+	         , CTP_KOR_NM
+	         , SIG_KOR_NM
+	         , HJDONG_NM
+	)
+	SELECT
+	              CD                                   AS HJDONG_CD             /* 코드 */
+	    ,          CTP_KOR_NM                           AS CTP_KOR_NM     /* 시도명 */
+	    ,          SIG_KOR_NM                           AS SIG_KOR_NM     /* 시군구명 */
+	    ,          HJDONG_NM                            AS HJDONG_NM      /* 행정동명 */
+	    ,      MVMN_RES_CD
+	    ,          CASE
+	                   WHEN LENGTH(CD)  =  2  THEN NULL
+	                   WHEN LENGTH(CD)  =  5  THEN SUBSTR(CD, 1, 2)
+	                   ELSE SUBSTR(CD, 1, 5)
+	               END                                  AS PARENT_CD      /* 부모코드 */
+	    ,          CASE
+	                   WHEN LENGTH(CD)  =  2  THEN NVL(CTP_KOR_NM, HJDONG_NM)
+	                   WHEN LENGTH(CD)  =  5  THEN NVL(SIG_KOR_NM, HJDONG_NM)
+	                   ELSE NVL(HJDONG_NM, NVL(SIG_KOR_NM, CTP_KOR_NM))
+	               END                                  AS CD_NM          /* 코드명(길이별 대표명) */
+	
+	  FROM TEMP
+	    WHERE 1=1
+	     <!--  AND  NVL(MVMN_RES_CD,0)  <![CDATA[<>]]>  '63' -->
+	
+	   
+	    
+	    ORDER BY
+	       CTP_KOR_NM
+	     , CASE
+	           WHEN LENGTH(CD) = 2 THEN 1
+	           WHEN LENGTH(CD) = 5 THEN 2
+	           ELSE 3
+	       END
+	     , CASE
+	           WHEN LENGTH(CD) = 2 THEN CTP_KOR_NM
+	           WHEN LENGTH(CD) = 5 THEN SIG_KOR_NM
+	           WHEN LENGTH(CD) = 10 THEN HJDONG_NM
+	           ELSE CD             -- 행정동은 코드순
+	       END
+
+  	</select>
+  <select id="getHjdCdDataList"  resultType="TmHjdDataListResDto">	
+	  	SELECT
+	       A.HJDONG_CD       AS HJDONG_CD     /* 행정동코드 */
+	     , A.CTP_KOR_NM      AS CTP_KOR_NM    /* 시도명 */
+	     , A.SIG_KOR_NM      AS SIG_KOR_NM    /* 시군구명 */
+	     , A.HJDONG_NM       AS HJDONG_NM     /* 행정동명 */
+	FROM   Cm_Hjdong A
+	WHERE  1=1
+		<if test="hjdongCd != null and hjdongCd != ''">
+        AND A.HJDONG_CD LIKE #{hjdongCd} || '%'
+        </if>
+        <if test="sigKorNm != null and sigKorNm != ''">
+        AND A.SIG_KOR_NM LIKE #{sigKorNm} || '%'
+        </if>
+	  AND NOT EXISTS (
+	        SELECT 1
+	          FROM TM_CARRIER_RANGE B
+	         WHERE B.DCCODE        = #{dcCode}
+	           AND B.COURIER       = #{courier}
+	          
+	           AND B.HJDONG_CD     = A.HJDONG_CD
+	   )    
+       	</select>
+    
+  <select id="chkValcourierRange" resultType="TmDistanceBandListResDto">
+    SELECT /* [tmDistanceBandService.xml][chkVal][운송구간/행정동 기준정보 엑셀업로드 검증][ParkJinWoo][20250911] */
+           (
+            SELECT CASE WHEN COUNT(*) > 0 THEN 'Y' ELSE 'N' END AS CHK1
+              FROM TM_CARRIER_RANGE X
+             WHERE <![CDATA[ X.DCCODE        = #{dcCode}       ]]>
+               AND <![CDATA[ X.COURIER       = #{courier}      ]]>
+               <!-- AND <![CDATA[ X.COURIER_RANGE = #{courierRange} ]]> -->
+               AND (
+                        <![CDATA[ X.HJDONG_CD = #{hjdongCd} ]]>
+                    
+                   )
+               AND <![CDATA[ X.FROMDATE      = #{fromDate}    ]]>
+           ) AS CHK1 /*체크.기존 자료가 존재하는 경우 수정 대상*/
+
+          ,(
+            SELECT CASE WHEN MAX(X.FROMDATE) IS NOT NULL THEN MAX(X.FROMDATE) ELSE '' END AS STA_DT
+              FROM TM_CARRIER_RANGE X
+             WHERE <![CDATA[ X.DCCODE        = #{dcCode}       ]]>
+               AND <![CDATA[ X.COURIER       = #{courier}      ]]>
+               <!-- AND <![CDATA[ X.COURIER_RANGE = #{courierRange} ]]> -->
+               AND (
+                        <![CDATA[ X.HJDONG_CD LIKE #{hjdongCd} || '%' ]]>
+                     OR <![CDATA[ #{hjdongCd} LIKE X.HJDONG_CD || '%' ]]>
+                   )
+               AND ( <![CDATA[ X.FROMDATE < #{fromDate} ]]> )
+           ) AS STA_DT /*체크.이전 시작일 존재 여부(가장 최근 시작일)*/
+
+          ,(
+            SELECT CASE WHEN MAX(T.SERIALKEY) IS NOT NULL THEN TO_CHAR(MAX(T.SERIALKEY)) ELSE '' END AS SERIALKEY
+              FROM (
+                    SELECT X.SERIALKEY
+                      FROM TM_CARRIER_RANGE X
+                     WHERE <![CDATA[ X.DCCODE        = #{dcCode}       ]]>
+                       AND <![CDATA[ X.COURIER       = #{courier}      ]]>
+                       <!-- AND <![CDATA[ X.COURIER_RANGE = #{courierRange} ]]> -->
+                       AND (
+                                <![CDATA[ X.HJDONG_CD LIKE #{hjdongCd} || '%' ]]>
+                             OR <![CDATA[ #{hjdongCd} LIKE X.HJDONG_CD || '%' ]]>
+                           )
+                       AND ( <![CDATA[ X.FROMDATE < #{fromDate} ]]> )
+                     ORDER BY X.FROMDATE DESC
+                 ) T
+             WHERE ROWNUM = 1
+           ) AS SERIALKEY /*체크.이전 시작일 데이터의 SERIALKEY*/
+
+          ,(
+            SELECT CASE
+                     WHEN MIN(X.FROMDATE) IS NOT NULL
+                     THEN TO_CHAR(TO_DATE(MIN(X.FROMDATE),'YYYYMMDD') - 1, 'YYYYMMDD')
+                     ELSE ''
+                   END AS END_DT
+              FROM TM_CARRIER_RANGE X
+             WHERE <![CDATA[ X.DCCODE        = #{dcCode}       ]]>
+               AND <![CDATA[ X.COURIER       = #{courier}      ]]>
+               <!-- AND <![CDATA[ X.COURIER_RANGE = #{courierRange} ]]> -->
+               AND (
+                        <![CDATA[ X.HJDONG_CD LIKE #{hjdongCd} || '%' ]]>
+                     OR <![CDATA[ #{hjdongCd} LIKE X.HJDONG_CD || '%' ]]>
+                   )
+               AND ( <![CDATA[ X.FROMDATE > #{fromDate} ]]> )
+           ) AS END_DT /*체크.미래 시작일 존재 시 (미래시작일-1) 종료일 후보*/
+      FROM DUAL
+</select>
+
+   <insert id="insertDistanceBand">
+        /* [courierRangeMapper.xml][insert][운송구간/행정동 기준정보 입력][ParkJinWoo][20250911] */
+        INSERT INTO TM_CARRIER_RANGE (
+               SERIALKEY     /* 데이터번호 */
+             , DCCODE        /* 센터코드 */
+             , COURIER       /* 운송사코드 */
+             , COURIER_RANGE /* 운송구간 */
+             , HJDONG_CD     /* 행정동코드 */
+             , RMK           /* 비고 */
+             , FROMDATE      /* 적용시작일자 */
+             , TODATE        /* 적용종료일자 */
+             , ADDDATE       /* 최초등록시간 */
+             , EDITDATE      /* 최종변경시간 */
+             , ADDWHO        /* 최초등록자 */
+             , EDITWHO       /* 최종변경자 */
+             , COURIER_RANGE_DTL 
+        )
+        SELECT
+               (NVL((SELECT MAX(SERIALKEY) 
+               FROM TM_CARRIER_RANGE), 0) + 1) AS SERIALKEY
+             , #{dcCode}       /* 센터코드 */
+             , #{courier}      /* 운송사코드 */
+             , #{courierRange} /* 운송구간 */
+             , #{hjdongCd}     /* 행정동코드 */
+             , #{rmk}          /* 비고 */
+             , #{fromDate}     /* 적용시작일자 */
+             , #{toDate}       /* 적용종료일자 */
+             , SYSDATE         /* 최초등록시간 */
+             , SYSDATE         /* 최종변경시간 */
+             , #{gUserId}      /* 최초등록자(CommonDto) */
+             , #{gUserId}      /* 최종변경자(CommonDto) */
+             , #{courierRangeDtl}
+        FROM DUAL
+        WHERE NOT EXISTS (
+            SELECT 1
+              FROM TM_CARRIER_RANGE X
+             WHERE <![CDATA[ X.DCCODE        = #{dcCode}       ]]>
+               AND <![CDATA[ X.COURIER       = #{courier}      ]]>
+                      AND (
+                X.HJDONG_CD LIKE #{hjdongCd} || '%'
+             OR #{hjdongCd} LIKE X.HJDONG_CD || '%'
+          )
+               
+       AND NOT ( <![CDATA[ X.TODATE   < #{fromDate} ]]>
+             OR <![CDATA[ X.FROMDATE > #{toDate} ]]> )
+        )
+    </insert>
+    
+    <update id="updateDistanceBand">
+        /* [courierRangeMapper.xml][update][운송구간/행정동 기준정보 수정(UK 중복 방지)][ParkJinWoo][20250911] */
+        UPDATE TM_CARRIER_RANGE A
+           SET A.DCCODE        = #{dcCode}        /* 센터코드 */
+             , A.COURIER       = #{courier}       /* 운송사코드 */
+             , A.COURIER_RANGE = #{courierRange}  /* 운송구간 */
+             , A.HJDONG_CD     = #{hjdongCd}      /* 행정동코드 */
+             , A.RMK           = #{rmk}           /* 비고 */
+             , A.FROMDATE      = #{fromDate}      /* 적용시작일자 */
+             , A.TODATE        = #{toDate}        /* 적용종료일자 */
+             <!-- , A.ADDDATE      = SYSDATE          /* 최종변경시간 */
+             , A.ADDWHO       = #{gUserId}       /* 최종변경자(CommonDto) */ -->
+             , A.EDITDATE      = SYSDATE          /* 최종변경시간 */
+             , A.EDITWHO       = #{gUserId}       /* 최종변경자(CommonDto) */
+         WHERE <![CDATA[ A.SERIALKEY = #{serialKey} ]]>
+           AND NOT EXISTS (
+                SELECT 1
+                  FROM TM_CARRIER_RANGE X
+                 WHERE <![CDATA[ X.DCCODE        = #{dcCode}       ]]>
+                   AND <![CDATA[ X.COURIER       = #{courier}      ]]>
+                   
+                             AND (
+					                X.HJDONG_CD LIKE #{hjdongCd} || '%'
+					             OR #{hjdongCd} LIKE X.HJDONG_CD || '%'
+	                                 )				         
+                   AND <![CDATA[ X.SERIALKEY    <> #{serialKey}    ]]>
+                       AND NOT ( <![CDATA[ X.TODATE   < #{fromDate} ]]>
+             OR <![CDATA[ X.FROMDATE > #{toDate} ]]> )
+           )
+    </update>
+ <!-- UPDATE (PK 기준) -->
+  <update id="updateDistanceBand01">
+    UPDATE /* [tmEntityRuleService.sqlx][updatetmEntityRuleService][정산항목 요율 수정][ParkJinWoo][20250811] */
+            TM_CARRIER_RANGE A
+           SET A.DCCODE        = #{dcCode}        /* 센터코드 */
+             , A.COURIER       = #{courier}       /* 운송사코드 */
+             , A.COURIER_RANGE = #{courierRange}  /* 운송구간 */
+             , A.HJDONG_CD     = #{hjdongCd}      /* 행정동코드 */
+             , A.RMK           = #{rmk}           /* 비고 */
+<!--              , A.FROMDATE      = #{fromDate}      /* 적용시작일자 */
+             , A.TODATE        = #{toDate}        /* 적용종료일자 */ -->
+             , A.COURIER_RANGE_DTL = #{courierRangeDtl}
+             <!-- , A.ADDDATE      = SYSDATE          /* 최종변경시간 */
+             , A.ADDWHO        = #{gUserId}       /* 최종변경자(CommonDto) */ -->
+             , A.EDITDATE      = SYSDATE          /* 최종변경시간 */
+             , A.EDITWHO       = #{gUserId}       /* 최종변경자(CommonDto) */
+       WHERE <![CDATA[ A.DCCODE        = #{dcCode}       ]]>
+               AND <![CDATA[ A.COURIER = #{courier}      ]]>
+               <!-- AND A.COURIER_RANGE = #{courierRange}  /* 운송구간 */ -->
+               AND A.HJDONG_CD     = #{hjdongCd}      /* 행정동코드 */
+               AND A.FROMDATE      = #{fromDate}      /* 적용시작일자 */
+   
+
+  </update>
+<!-- <update id="updateDistanceBand02">
+    UPDATE /* [tmEntityRuleService.sqlx][updateDistanceBand02][운송구간 이전기간 종료일 닫기][ParkJinWoo][20250811] */
+           TM_CARRIER_RANGE A
+       SET A.TODATE    = TO_CHAR(TO_DATE(#{fromDate},'YYYYMMDD') - 1,'YYYYMMDD') /* 적용종료일자 */
+         , A.EDITDATE  = SYSDATE                                                 /* 최종변경시간 */
+         , A.EDITWHO   = #{gUserId}                                              /* 최종변경자 */
+     WHERE (A.DCCODE, A.COURIER, A.FROMDATE) = (
+               SELECT X.DCCODE
+                    , X.COURIER
+                    , MAX(X.FROMDATE)
+                 FROM TM_CARRIER_RANGE X
+                WHERE <![CDATA[ X.DCCODE   = #{dcCode}  ]]>
+                  AND <![CDATA[ X.COURIER  = #{courier} ]]>
+                  AND (
+                           <![CDATA[ X.HJDONG_CD LIKE #{hjdongCd} || '%' ]]>
+                        OR <![CDATA[ #{hjdongCd} LIKE X.HJDONG_CD || '%' ]]>
+                      )
+                  AND <![CDATA[ X.FROMDATE < #{fromDate} ]]>
+                GROUP BY X.DCCODE, X.COURIER
+           )
+</update> -->
+<update id="updateDistanceBand02">
+    UPDATE /* [tmEntityRuleService.sqlx][updateDistanceBand02][운송구간 이전기간 종료일 닫기][ParkJinWoo][20250811] */
+           TM_CARRIER_RANGE A
+       SET A.TODATE    = TO_CHAR(TO_DATE(#{fromDate},'YYYYMMDD') - 1,'YYYYMMDD') /* 적용종료일자 */
+         , A.EDITDATE  = SYSDATE                                                 /* 최종변경시간 */
+         , A.EDITWHO   = #{gUserId}                                              /* 최종변경자 */
+     WHERE (A.DCCODE, A.COURIER, A.HJDONG_CD, A.FROMDATE)
+           =
+           (
+               SELECT X.DCCODE
+                    , X.COURIER
+                    , X.HJDONG_CD
+                    , MAX(X.FROMDATE)
+                 FROM TM_CARRIER_RANGE X
+                WHERE <![CDATA[ X.DCCODE   = #{dcCode}  ]]>
+                  AND <![CDATA[ X.COURIER  = #{courier} ]]>
+                  AND (
+                           <![CDATA[ X.HJDONG_CD LIKE #{hjdongCd} || '%' ]]>
+                        OR <![CDATA[ #{hjdongCd} LIKE X.HJDONG_CD || '%' ]]>
+                      )
+                  AND <![CDATA[ X.FROMDATE < #{fromDate} ]]>
+                GROUP BY X.DCCODE, X.COURIER, X.HJDONG_CD
+           )
+</update>
+
+<!-- 구간내역 -->
+     <select id = "tmEntityExcelValChk" resultType = "TmEntityRuleMasterListResDto">
+          WITH TEMP AS (    /* [MsSkuDcSetService.sqlx][getWithTempTable][센터상품속성 엑셀업로드 검증][sunho.kim][2025.05.22] */
+      <foreach collection="list" item="item" separator="UNION ALL">
+		    SELECT
+		               #{item.serialKey}       AS SERIALKEY          /* 데이터번호 */
+		        ,      #{item.sttlItemCd}      AS STTLITEMCD       /* 정산항목코드 */
+		        ,      REGEXP_REPLACE(#{item.dcCode}, '[^0-9]', '')          AS DCCODE            /* 센터코드 */
+		        ,      #{item.area}            AS AREA               /* 창고코드 */
+		        ,      #{item.courier}         AS COURIER            /* 운송사코드 */
+		        ,      #{item.dcCode}
+		        ,      #{item.ton}             AS TON                /* 톤수 */
+		        ,      #{item.closeType}       AS CLOSETYPE         /* 마감유형 */
+		        ,      #{item.base}            AS BASE               /* 기준 */
+		        ,      #{item.amount}          AS AMOUNT             /* 금액 */
+		        <!-- ,      #{item.fromDate}        AS FROMDATE          /* 적용시작일자(YYYYMMDD) */
+		        ,      #{item.toDate}          AS TODATE            /* 적용종료일자(YYYYMMDD) */ -->
+		        ,      #{item.rmk}             AS RMK                /* 비고 */
+		        ,      REPLACE(#{item.fromDate}, '-', '')         AS FROMDATE           /* 최초등록시간 */
+		        ,     REPLACE(#{item.toDate}, '-', '')        AS TODATE          /* 최종변경시간 */
+		        ,      #{item.addWho}          AS ADDWHO            /* 최초등록자 */
+		        ,      #{item.editWho}         AS EDITWHO           /* 최종변경자 */
+		        ,      #{item.addWhoId}        AS ADDWHOID         /* 최초등록자ID */
+		        ,      #{item.editWhoId}       AS EDITWHOID        /* 최종변경자ID */
+		        ,      #{item.rowStatus}       AS ROWSTATUS         /* 행 상태 */
+		        ,      #{item.contractType}    AS CONTRACTTYPE      /* 계약유형 */
+		        ,      #{item.areaNm}          AS AREANM            /* 창고명 */
+		        ,      #{item.courierNm}       AS COURIERNM         /* 운송사명 */
+		    FROM DUAL
+		</foreach>
+        )
+       ,NORM AS (SELECT 
+            T.SERIALKEY                                  AS SERIALKEY          /* 데이터번호 */
+        ,  CD1.BASECODE                                	 AS STTLITEMCD       /* 정산항목코드 */
+        ,  T.DCCODE                                      AS DCCODE            /* 센터코드 */
+        ,  T.DCCODE                                      AS CODE            /* 센터코드 */
+        ,  T.AREA                                        AS AREA               /* 창고코드 */
+        ,  MS_CARRIER.CARRIERKEY                                     AS COURIER            /* 운송사코드 */
+        ,  CD3.BASECODE                                  AS TON                /* 톤수 */
+        ,  NVL( CD2.BASECODE, '10')                                  AS CLOSETYPE         /* 마감유형 */
+        ,  T.BASE                                        AS BASE               /* 기준 */
+        ,  T.AMOUNT                                      AS AMOUNT             /* 금액 */
+        ,  T.FROMDATE                                    AS FROM_DATE          /* 적용시작일자(YYYYMMDD) */
+        ,  T.TODATE                                      AS TODATE            /* 적용종료일자(YYYYMMDD) */
+        ,  T.RMK                                         AS RMK                /* 비고 */
+        ,  NVL(T.ROWSTATUS, 'I')                         AS ROWSTATUS         /* 행 상태 */
+        ,  T.COURIERNM                        AS COURIERNM         /* 운송사명 */
+        ,  NVL(CD4.BASECODE,CD5.BASECODE)                     		 AS CONTRACTTYPE         /* 계약유형 */
+           ,  CASE
+              WHEN NVL(CD4.BASECODE,CD5.BASECODE) = 'DELIVERY'      THEN NVL(LIST1.DELIVERY     ,'N')
+              WHEN NVL(CD4.BASECODE,CD5.BASECODE) = 'FIX'           THEN NVL(LIST1.FIX          ,'N')
+              WHEN NVL(CD4.BASECODE,CD5.BASECODE) = 'FIXTEMPORARY'  THEN NVL(LIST1.FIXTEMPORARY ,'N')
+              WHEN NVL(CD4.BASECODE,CD5.BASECODE) = 'TEMPORARY'     THEN NVL(LIST1.TEMPORARY    ,'N')
+              WHEN NVL(CD4.BASECODE,CD5.BASECODE) = 'MONTHLY'       THEN NVL(LIST1.MONTHLY      ,'N')
+              ELSE 'N'
+           END           AS LIST1_CONTRACT_YN  /* 계약유형등록여부(LIST1) */  
+         FROM TEMP T
+         LEFT JOIN MS_CARRIER 
+		    ON MS_CARRIER.DESCRIPTION = T.COURIERNM 
+		     AND MS_CARRIER.CARRIERTYPE = 'LOCAL'
+		 LEFT OUTER JOIN CM_CODE_STORER CD1
+             ON CD1.STORERKEY  = 'FW00' 
+            AND CD1.CODELIST   = 'TM_CALC_ITEM'
+            AND CD1.BASEDESCR  = T.STTLITEMCD
+            LEFT OUTER JOIN CM_CODE_STORER CD2
+             ON CD2.STORERKEY  = 'FW00' 
+            AND CD2.CODELIST   = 'VIHICLE_TYPE_CD'
+            AND CD2.BASEDESCR  = T.CLOSETYPE
+            LEFT OUTER JOIN CM_CODE_STORER CD3
+             ON CD3.STORERKEY  = 'FW00' 
+            AND CD3.CODELIST   = 'CARCAPACITY'
+            AND CD3.BASEDESCR  = T.TON
+            LEFT OUTER JOIN CM_CODE_STORER CD4
+             ON CD4.STORERKEY  = 'FW00' 
+            AND CD4.CODELIST   = 'CONTRACTTYPE'
+            AND CD4.BASEDESCR  = T.CONTRACTTYPE
+            LEFT OUTER JOIN CM_CODE_STORER CD5
+             ON CD5.STORERKEY  = 'STD' 
+            AND CD5.CODELIST   = 'CONTRACTTYPE'
+            AND CD5.BASEDESCR  = T.CONTRACTTYPE
+             LEFT OUTER JOIN (
+                 SELECT 
+                     NVL(ENTRUSTED_CAR_YN, 'N') AS DELIVERY
+                   , NVL(FIX_CAR_YN, 'N') AS FIX
+                   , NVL(TMP_CAR_YN, 'N') AS FIXTEMPORARY
+                   , NVL(ACTUAL_COST_CAR_YN,'N') AS TEMPORARY
+                   , NVL(MM_CONTRACT_YN,'N')  AS MONTHLY
+                   , COURIER AS COURIER
+                   , STTL_ITEM_CD
+                   , DCCODE
+                   FROM TM_TRSP_COST_STTL_ITEM
+                 WHERE 1=1
+                   AND STTL_ITEM_CD = 'P01'
+                  
+            ) LIST1
+             ON LIST1.COURIER = MS_CARRIER.CARRIERKEY
+
+            AND LIST1.DCCODE = T.DCCODE  
+           ) 
+       ,VALCHK AS( SELECT
+            		 N.*
+            	  , CASE  
+            	      	WHEN N.TODATE <![CDATA[ <  ]]> N.FROM_DATE THEN '종료일자가 시작일자보다 작음'
+						WHEN N.TODATE <![CDATA[ <  ]]>TO_CHAR(TRUNC(SYSDATE), 'YYYYMMDD') THEN '종료일자가 오늘보다 작음'
+						WHEN N.CONTRACTTYPE NOT IN ('FIXTEMPORARY','TEMPORARY','FIX') THEN '고정용차,임시용차,실비용차 만 선택 가능합니다'
+						
+	            	  	WHEN N.CONTRACTTYPE IS NULL THEN '계약조건 미 입력'
+            	  		WHEN N.COURIER IS NULL THEN '운송사 미입력'
+            	  		WHEN N.DCCODE  IS NULL THEN '물류센터 미입력'
+            	  		WHEN N.CLOSETYPE IS NULL THEN '마감유형 미입력'
+            	  		WHEN N.BASE IS NULL THEN '구간 미입력'
+            	  		WHEN N.FROM_DATE IS NULL THEN '시작일자 미입력'
+            	  		WHEN N.TODATE IS NULL THEN '종료일자 미입력'
+            	  		 <!-- WHEN N.STTLITEMCD IS NULL THEN '관리항목 미입력'  -->
+            	  		 WHEN N.LIST1_CONTRACT_YN = 'N' THEN '해당 항목은 정산항목 관리에 등록되지 않았습니다.' 
+							WHEN FN_CHECK_TRSP_CLOSE( N.DCCODE,N.COURIER,N.FROM_DATE) = 'Y' THEN '해당 운송사는 해당월의 마감처리가 된 건 입니다.'
+                        ELSE NULL
+            	  END AS ERRMSG 
+            	    ,CASE 
+            	    	WHEN (
+            	    		SELECT COUNT(*)
+		              FROM TM_TRSP_COST_ALLOWANCE X
+		             WHERE   X.DCCODE        = N.DCCODE      
+		               AND   X.COURIER       = N.COURIER   
+		               AND   NVL(X.TON,0)     		 = NVL(N.TON,0)      
+		               AND   X.CLOSETYPE     		 =  NVL(N.CLOSETYPE,'10')      
+		               AND   X.STTL_ITEM_CD     		 = NVL(N.STTLITEMCD,'P01')     
+		               AND   X.CONTRACTTYPE     		 = N.CONTRACTTYPE
+		     		  AND NOT (   X.TODATE   <![CDATA[ <  ]]> N.FROM_DATE
+		             OR   X.FROMDATE<![CDATA[  >  ]]> N.TODATE   )
+		            		 
+		            	 AND ( X.CONTRACTTYPE IN ('FIXTEMPORARY','TEMPORARY','FIX')
+					      AND X.BASE = N.BASE 
+					      AND X.STTL_ITEM_CD =  NVL(N.STTLITEMCD,'P01') )
+					       ) > 0 THEN 'Y' ELSE 'N' END  VAL_FLAG
+              FROM NORM N
+              )
+                 SELECT 
+              		 A.* 
+              		,CASE WHEN A.ERRMSG IS NOT NULL THEN 'Y' ELSE 'N' END AS ERRYN
+                FROM VALCHK A
+              
+       </select>
+       	<update id = "udpateTmEntityExcelVal">
+       		UPDATE TM_TRSP_COST_ALLOWANCE X
+			   SET X.TODATE = TO_CHAR(TO_DATE(#{fromDate}, 'YYYYMMDD') - 1, 'YYYYMMDD') /* 종료일자(신규시작일 -1) */
+			   	  ,X.EDITDATE = SYSDATE
+			   	  ,X.EDITWHO = #{gUserId}
+			 WHERE <![CDATA[ X.DCCODE       = #{dcCode}       ]]>
+			   AND <![CDATA[ X.COURIER      = #{courier}      ]]>
+			   AND <![CDATA[ NVL(X.TON,0)   = NVL(#{ton},0)   ]]>
+			   AND <![CDATA[ X.CLOSETYPE    = NVL(#{closeType},'10')        ]]>
+			   AND <![CDATA[ X.STTL_ITEM_CD = NVL(#{sttlItemCd}, 'P01') ]]>
+			   AND <![CDATA[ X.CONTRACTTYPE = #{contractType} ]]>
+			   -- 기간이 겹치는 놈만 대상으로
+			   AND NOT ( <![CDATA[ X.TODATE   < #{fromDate} ]]> 
+			             OR <![CDATA[ X.FROMDATE > #{toDate} ]]> )
+			   AND <![CDATA[
+			         ( X.CONTRACTTYPE IN ('FIXTEMPORARY','TEMPORARY','FIX')
+			           AND X.BASE         = #{base}
+			           AND X.STTL_ITEM_CD = NVL(#{sttlItemCd}, 'P01')
+         )
+   			]]>
+       	</update>
+       	  <!-- INSERT -->
+  <insert id="insertTmSettlementItemRate">
+    INSERT /* [tmEntityRuleService.sqlx][insert][정산항목 요율 등록][ParkJinWoo][20250811] */
+    INTO TM_TRSP_COST_ALLOWANCE (
+             SERIALKEY          /* 데이터번호 */
+        , STTL_ITEM_CD       /* 정산항목코드 */
+        , DCCODE             /* 센터코드 */
+        , AREA               /* 창고코드 */
+        , COURIER            /* 운송사코드 */
+        , TON                /* 톤수 */
+        , CLOSETYPE          /* 마감유형 */
+        , BASE               /* 기준 */
+        , AMOUNT             /* 금액 */
+        , FROMDATE           /* 적용시작일자 */
+        , TODATE             /* 적용종료일자 */
+        , RMK                /* 비고 */
+        , ADDDATE            /* 최초등록시간 */
+        , EDITDATE           /* 최종변경시간 */
+        , ADDWHO             /* 최초등록자 */
+        , EDITWHO            /* 최종변경자 */
+        , CONTRACTTYPE      /* 계약유형 */
+    )
+   	SELECT
+          (SELECT NVL(MAX(SERIALKEY), 0) + 1 FROM TM_TRSP_COST_ALLOWANCE) /* 데이터번호 */
+        ,  NVL(#{sttlItemCd},'P01')              /* 정산항목코드 */
+        ,  NVL(#{dcCode},'STD')                  /* 센터코드 */
+        , #{area}                    /* 창고코드 */
+        , #{courier}                  /* 운송사코드 */
+        , #{ton}                      /* 톤수 */
+        , NVL(#{closeType},'10')                /* 마감유형 */
+        , #{base}                     /* 기준 */
+        , #{amount}                   /* 금액 */
+        , #{fromDate}                  /* 적용시작일자 */
+        , #{toDate}                    /* 적용종료일자 */
+        , #{rmk}                       /* 비고 */
+        , SYSDATE                      /* 최초등록시간 */
+        , SYSDATE                      /* 최종변경시간 */
+        , #{gUserId}                    /* 최초등록자 */
+        , #{gUserId}                   /* 최종변경자 */
+        , #{contractType}              /* 계약유형 */
+    FROM DUAL
+   WHERE NOT EXISTS(SELECT 1
+              FROM TM_TRSP_COST_ALLOWANCE X
+             WHERE <![CDATA[ X.DCCODE        = #{dcCode}       ]]>
+               AND <![CDATA[ X.COURIER       = #{courier}      ]]>
+               AND <![CDATA[ NVL(X.TON,0)     		 = NVL(#{ton},0)     ]]>
+               AND <![CDATA[ X.CLOSETYPE     		 = NVL(#{closeType},'10')     ]]>
+               AND <![CDATA[ X.STTL_ITEM_CD     		 = NVL(#{sttlItemCd},'P01')    ]]>
+               AND <![CDATA[ X.CONTRACTTYPE     		 = #{contractType}   ]]>
+               AND <![CDATA[ NVL(X.BASE,'@')     		 = NVL(#{base},'@')   ]]>
+     		  AND NOT ( <![CDATA[ X.TODATE   < #{fromDate} ]]>
+             OR <![CDATA[ X.FROMDATE > #{toDate} ]]> )
+            		 
+            	 AND ( X.CONTRACTTYPE IN ('FIXTEMPORARY','TEMPORARY','FIX')
+			      AND X.BASE = #{base} 
+			      AND X.STTL_ITEM_CD =  NVL(#{sttlItemCd},'P01') )
+			      )
+  </insert>
+       	  <select id="chkVal" resultType="TmEntityRuleMasterListResDto"> 
+      SELECT /* [tmEntityRuleService.sqlx][excelValChk][엑셀업로드 검증][ParkJinWoo][20250811] */
+               (
+                SELECT CASE WHEN COUNT(*) > 0 THEN 'Y' ELSE 'N' END AS CHK1
+              FROM TM_TRSP_COST_ALLOWANCE X
+             WHERE <![CDATA[ X.DCCODE        = #{dcCode}       ]]>
+               AND <![CDATA[ X.COURIER       = #{courier}      ]]>
+               AND <![CDATA[ NVL(X.TON,0)     		 = NVL(#{ton},0)     ]]>
+               AND <![CDATA[ X.CLOSETYPE     		 =  NVL(#{closeType},'10')     ]]>
+               AND <![CDATA[ X.STTL_ITEM_CD     		 = NVL(#{sttlItemCd},'P01')    ]]>
+               AND <![CDATA[ X.CONTRACTTYPE     		 = #{contractType}   ]]>
+                AND <![CDATA[ NVL(X.BASE,'@')     		 = NVL(#{base},'@')   ]]>
+                   AND X.FROMDATE     = #{fromDate} 
+               ) AS CHK1 /*체크.기존 자료가 존재하는 경우 가격 수정*/
+              ,(
+                SELECT CASE WHEN MAX(X.FROMDATE) IS NOT NULL THEN MAX(X.FROMDATE) ELSE '' END AS CHK2
+              FROM TM_TRSP_COST_ALLOWANCE X
+             WHERE <![CDATA[ X.DCCODE        = #{dcCode}       ]]>
+               AND <![CDATA[ X.COURIER       = #{courier}      ]]>
+               AND <![CDATA[ NVL(X.TON,0)     		 = NVL(#{ton},0)     ]]>
+               AND <![CDATA[ X.CLOSETYPE     		 =  NVL(#{closeType},'10')     ]]>
+               AND <![CDATA[ X.STTL_ITEM_CD     		 = NVL(#{sttlItemCd},'P01')    ]]>
+               AND <![CDATA[ X.CONTRACTTYPE     		 = #{contractType}   ]]>
+                AND <![CDATA[ NVL(X.BASE,'@')     		 = NVL(#{base},'@')   ]]>
+     		  AND  ( <![CDATA[ X.FROMDATE   < #{fromDate} ]]>)
+               ) AS STA_DT /*체크.중복.시작일자가 겹치는 지 체크*/
+               ,(
+              SELECT  CASE WHEN TO_CHAR(MAX(X.SERIALKEY)) IS NOT NULL THEN TO_CHAR(MAX(X.SERIALKEY)) ELSE ''  END AS SERIALKEY
+              FROM TM_TRSP_COST_ALLOWANCE X
+             WHERE <![CDATA[ X.DCCODE        = #{dcCode}       ]]>
+               AND <![CDATA[ X.COURIER       = #{courier}      ]]>
+               AND <![CDATA[ NVL(X.TON,0)     		 = NVL(#{ton},0)     ]]>
+               AND <![CDATA[ X.CLOSETYPE     		 =  NVL(#{closeType},'10')     ]]>
+               AND <![CDATA[ X.STTL_ITEM_CD     		 = NVL(#{sttlItemCd},'P01')    ]]>
+               AND <![CDATA[ X.CONTRACTTYPE     		 = #{contractType}   ]]>
+                AND <![CDATA[ NVL(X.BASE,'@')     		 = NVL(#{base},'@')   ]]>
+     		  AND  ( <![CDATA[ X.FROMDATE   < #{fromDate} ]]>)
+               ) AS SERIALKEY /*체크.중복.시작일자가 겹치는 지 체크*/
+              
+              ,(
+                SELECT CASE WHEN MIN(X.FROMDATE) IS NOT NULL THEN TO_CHAR(TO_DATE(MIN(X.FROMDATE),'YYYYMMDD')-1,'YYYYMMDD') ELSE '' END AS END_DT
+                              FROM TM_TRSP_COST_ALLOWANCE X
+             WHERE <![CDATA[ X.DCCODE        = #{dcCode}       ]]>
+               AND <![CDATA[ X.COURIER       = #{courier}      ]]>
+               AND <![CDATA[ NVL(X.TON,0)     		 = NVL(#{ton},0)     ]]>
+               AND <![CDATA[ X.CLOSETYPE     		 =  NVL(#{closeType},'10')     ]]>
+               AND <![CDATA[ X.STTL_ITEM_CD     		 = NVL(#{sttlItemCd},'P01')    ]]>
+               AND <![CDATA[ X.CONTRACTTYPE     		 = #{contractType}   ]]>
+                AND <![CDATA[ NVL(X.BASE,'@')     		 = NVL(#{base},'@')   ]]>
+     		  AND  ( <![CDATA[ X.FROMDATE   > #{fromDate} ]]>)
+               ) AS END_DT /*체크.중복.미래종료일자가 있는지.체크*/
+          FROM DUAL
+           </select>
+           
+           
+  <!-- UPDATE (PK 기준) -->
+  <!-- <update id="updateTmSettlementItemRate01">
+    UPDATE /* [tmEntityRuleService.sqlx][updatetmEntityRuleService][정산항목 요율 수정][ParkJinWoo][20250811] */
+           TM_TRSP_COST_ALLOWANCE
+       SET STTL_ITEM_CD = NVL(#{sttlItemCd},'P01')        /* 정산항목코드 */
+         , DCCODE       = NVL(#{dcCode},'STD')            /* 센터코드 */
+         , AREA         = #{area}              /* 창고코드 */
+         , COURIER      = #{courier}           /* 운송사코드 */
+         , TON          = #{ton}               /* 톤수 */
+         , CLOSETYPE    =  NVL(#{closeType},'10')         /* 마감유형 */
+         , BASE         = #{base}              /* 기준 */
+         , AMOUNT       = #{amount}            /* 금액 */
+         , FROMDATE     = #{fromDate}          /* 적용시작일자 */
+         , TODATE       = #{toDate}            /* 적용종료일자 */
+         , RMK          = #{rmk}               /* 비고 */
+         , EDITDATE     = SYSDATE              /* 최종변경시간 */
+         , EDITWHO      = #{gUserId}           /* 최종변경자 */
+         , CONTRACTTYPE = #{contractType}     /* 계약유형 */
+       WHERE <![CDATA[ DCCODE        = #{dcCode}       ]]>
+               AND <![CDATA[ COURIER       = #{courier}      ]]>
+               AND <![CDATA[ NVL(TON,0)     		 = NVL(#{ton},0)     ]]>
+               AND <![CDATA[ CLOSETYPE     		 = NVL(#{closeType},'10')     ]]>
+               AND <![CDATA[ STTL_ITEM_CD     		 = NVL(#{sttlItemCd},'P01')    ]]>
+               AND <![CDATA[ CONTRACTTYPE     		 = #{contractType}   ]]>
+                AND <![CDATA[ NVL(BASE,'@')     		 = NVL(#{base},'@')   ]]>
+                   AND FROMDATE     = #{fromDate} 
+
+  </update> -->
+    <update id="updateTmSettlementItemRate01">
+    UPDATE /* [tmEntityRuleService.sqlx][updatetmEntityRuleService][정산항목 요율 수정][ParkJinWoo][20250811] */
+           TM_TRSP_COST_ALLOWANCE
+       SET STTL_ITEM_CD = NVL(#{sttlItemCd},'P01')        /* 정산항목코드 */
+         , DCCODE       = NVL(#{dcCode},'STD')            /* 센터코드 */
+         , AREA         = #{area}              /* 창고코드 */
+         , COURIER      = #{courier}           /* 운송사코드 */
+         , TON          = #{ton}               /* 톤수 */
+         , CLOSETYPE    =  NVL(#{closeType},'10')         /* 마감유형 */
+         , BASE         = #{base}              /* 기준 */
+         , AMOUNT       = #{amount}            /* 금액 */
+         , FROMDATE     = #{fromDate}          /* 적용시작일자 */
+         , TODATE       = #{toDate}            /* 적용종료일자 */
+         , RMK          = #{rmk}               /* 비고 */
+        <!--  , ADDDATE	    = SYSDATE
+         , ADDWHO	    = #{gUserId} -->
+         , EDITDATE     = SYSDATE              /* 최종변경시간 */
+         , EDITWHO      = #{gUserId}           /* 최종변경자 */
+         , CONTRACTTYPE = #{contractType}     /* 계약유형 */
+       WHERE <![CDATA[ DCCODE        = #{dcCode}       ]]>
+               AND <![CDATA[ COURIER       = #{courier}      ]]>
+               AND <![CDATA[ NVL(TON,0)     		 = NVL(#{ton},0)     ]]>
+               AND <![CDATA[ CLOSETYPE     		 = NVL(#{closeType},'10')     ]]>
+               AND <![CDATA[ STTL_ITEM_CD     		 = NVL(#{sttlItemCd},'P01')    ]]>
+               AND <![CDATA[ CONTRACTTYPE     		 = #{contractType}   ]]>
+               AND <![CDATA[ NVL(BASE,'@')     		 = NVL(#{base},'@')   ]]> 
+                   AND FROMDATE     = #{fromDate} 
+
+  </update>
+    <!-- UPDATE (PK 기준) -->
+<!--   <update id="updateTmSettlementItemRate02">
+    UPDATE /* [tmEntityRuleService.sqlx][updatetmEntityRuleService][정산항목 요율 수정][ParkJinWoo][20250811] */
+           TM_TRSP_COST_ALLOWANCE
+       SET  TODATE       = TO_CHAR(TO_DATE(#{fromDate},'YYYYMMDD')-1,'YYYYMMDD')            /* 적용종료일자 */
+         , EDITDATE     = SYSDATE              /* 최종변경시간 */
+         , EDITWHO      = #{gUserId}           /* 최종변경자 */
+     WHERE <![CDATA[ SERIALKEY = #{serialKey} ]]>
+      WHERE <![CDATA[ DCCODE        = #{dcCode}       ]]>
+               AND <![CDATA[ COURIER       = #{courier}      ]]>
+               AND <![CDATA[ NVL(TON,0)     		 = NVL(#{ton},0)     ]]>
+               AND <![CDATA[ CLOSETYPE     		 = NVL(#{closeType},'10')     ]]>
+               AND <![CDATA[ STTL_ITEM_CD     		 = NVL(#{sttlItemCd},'P01')    ]]>
+               AND <![CDATA[ CONTRACTTYPE     		 = #{contractType}   ]]>
+                AND <![CDATA[ NVL(BASE,'@')     		 = NVL(#{base},'@')   ]]>
+                  <![CDATA[  AND FROMDATE     < #{fromDate}  ]]>
+  </update> -->
+    <update id="updateTmSettlementItemRate02">
+    UPDATE /* [tmEntityRuleService.sqlx][updatetmEntityRuleService][정산항목 요율 수정][ParkJinWoo][20250811] */
+           TM_TRSP_COST_ALLOWANCE X
+       SET  X.TODATE       = TO_CHAR(TO_DATE(#{fromDate},'YYYYMMDD')-1,'YYYYMMDD')            /* 적용종료일자 */
+         ,X.EDITDATE     = SYSDATE              /* 최종변경시간 */
+         , X.EDITWHO      = #{gUserId}           /* 최종변경자 */
+     <!-- WHERE <![CDATA[ SERIALKEY = #{serialKey} ]]> -->
+ WHERE (X.DCCODE, X.COURIER, NVL(X.TON, 0), X.CLOSETYPE, X.STTL_ITEM_CD, X.CONTRACTTYPE, X.FROMDATE,NVL(X.BASE,'@'))
+       =
+       (SELECT X2.DCCODE, X2.COURIER, NVL(X2.TON, 0), X2.CLOSETYPE, X2.STTL_ITEM_CD, X2.CONTRACTTYPE, MAX(X2.FROMDATE),NVL(X2.BASE,'@')
+          FROM TM_TRSP_COST_ALLOWANCE X2
+         WHERE X2.DCCODE       = #{dcCode}
+           AND X2.COURIER      = #{courier}
+           AND NVL(X2.TON,0)   = NVL(#{ton},0)
+           AND X2.CLOSETYPE    = NVL(#{closeType},'10') 	
+           AND X2.STTL_ITEM_CD = NVL(#{sttlItemCd},'P01')
+           AND X2.CONTRACTTYPE = #{contractType}
+           AND X2.FROMDATE <![CDATA[    < ]]> #{fromDate}
+           <![CDATA[AND NVL(X2.BASE,'@')     		 = NVL(#{base},'@')]]>
+         GROUP BY X2.DCCODE, X2.COURIER, NVL(X2.TON, 0), X2.CLOSETYPE, X2.STTL_ITEM_CD, X2.CONTRACTTYPE,NVL(X2.BASE,'@'))
+  </update>
+</mapper>

@@ -1,0 +1,387 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="tmWorklogByCustomerService">
+
+    <select id="getWorklogByCustomerList" resultType="TmWorklogByCustomerResDto" parameterType="TmWorklogByCustomerReqDto">
+        SELECT /* [TmWorklogByCustomerService.sqlx][getWorklogByCustomerList][배차작업로그(거래처별)목록 조회][KwonJungyun][2025.06.24] */
+               TM_INPLAN.DCCODE
+             , TM_INPLAN.DELIVERYDT
+             , TM_INPLAN.DISTRICTGROUP
+             , TM_INPLAN.DELIVERYGROUP
+             , TM_INPLAN.PRIORITY
+             , TM_INPLAN.CARNO
+             , TM_INPLAN.TRUTHCUSTKEY
+             , MIN(MS_CUST.DESCRIPTION) AS TRUTHCUSTKEYNAME
+             , COUNT(DISTINCT TM_INPLAN.SLIPNO) AS SLIPCNT
+             , SUM( (SELECT SUM(WD_INPLAN.ORDERQTY * FN_GET_SKUCUBE(WD_INPLAN.STORERKEY, WD_INPLAN.SKU, WD_INPLAN.DCCODE) )
+                       FROM WD_INPLAN
+                      WHERE WD_INPLAN.DCCODE    = TM_INPLAN.DCCODE
+                        AND WD_INPLAN.STORERKEY = TM_INPLAN.STORERKEY
+                        AND WD_INPLAN.SLIPDT    = TM_INPLAN.SLIPDT
+                        AND WD_INPLAN.SLIPNO    = TM_INPLAN.SLIPNO) ) AS CUBE
+             , TRUNC(SUM(TM_INPLAN.WEIGHT)) AS WEIGHT
+             , FN_CODEDESCR(TM_INPLAN.STORERKEY, 'STATUS_TM',  MIN(TM_INPLAN.STATUS)) AS STATUS
+             , TM_INPLAN.STORERKEY AS STORERKEY
+          FROM TM_INPLAN
+          LEFT JOIN MS_CUST ON MS_CUST.STORERKEY = TM_INPLAN.STORERKEY
+                           AND MS_CUST.CUSTKEY   = TM_INPLAN.TRUTHCUSTKEY
+                           AND MS_CUST.CUSTTYPE  = 'C'
+         WHERE TM_INPLAN.DCCODE = #{dccode}
+           AND TM_INPLAN.STORERKEY = #{gStorerkey}
+       <if test="deliverydt != null and deliverydt != ''">
+           AND TM_INPLAN.DELIVERYDT = #{deliverydt}
+       </if>
+       <if test="carno != null and carno != ''">
+           AND NVL(TM_INPLAN.CARNO, 'INPLAN') = #{carno}
+       </if>
+       <if test="truthcustkey != null and truthcustkey != ''">
+           AND NVL(TM_INPLAN.TRUTHCUSTKEY, 'INPLAN') IN (SELECT TRIM(REGEXP_SUBSTR(VAL, '[^,]+', 1, LEVEL)) AS VAL
+                                                 FROM (SELECT #{truthcustkey} AS VAL FROM DUAL) A
+                                               CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+       </if>
+         GROUP BY TM_INPLAN.DCCODE
+                , TM_INPLAN.STORERKEY
+                , TM_INPLAN.DELIVERYDT
+                , TM_INPLAN.DISTRICTGROUP
+                , TM_INPLAN.DELIVERYGROUP
+                , TM_INPLAN.PRIORITY
+                , TM_INPLAN.CARNO
+                , TM_INPLAN.TRUTHCUSTKEY
+    </select>
+
+	<select id="getWorklogByCustomerDetailList" resultType="TmWorklogByCustomerDetailResDto" parameterType="TmWorklogByCustomerDetailReqDto">
+		<![CDATA[
+			SELECT /* [TmWorklogByCustomerService.sqlx][getWorklogByCustomerDetailList][배차작업로그(거래처별) 상세 목록 조회][KwonJungyun][2025.06.24] */
+                   SERIALKEY
+                 , DCCODE
+                 , STORERKEY
+                 , DOCTYPE
+                 , DOCDT
+                 , DELIVERYNO
+                 , CASE WHEN PRECARNO_OLD <> PRECARNO
+                        THEN PRECARNO_OLD || '=>' || PRECARNO
+                        ELSE PRECARNO
+                    END AS PRECARNO
+                 , CASE WHEN PREDELIVERYGROUP_OLD <> PREDELIVERYGROUP
+                        THEN PREDELIVERYGROUP_OLD || '=>' || PREDELIVERYGROUP
+                        ELSE PREDELIVERYGROUP
+                    END AS PREDELIVERYGROUP
+                 , CASE WHEN PREPRIORITY_OLD <> PREPRIORITY
+                        THEN PREPRIORITY_OLD || '=>' || PREPRIORITY
+                        ELSE PREPRIORITY
+                    END AS PREPRIORITY
+                 , CASE WHEN DISTRICTGROUP_OLD <> DISTRICTGROUP
+                        THEN DISTRICTGROUP_OLD || '=>' || DISTRICTGROUP
+                        ELSE DISTRICTGROUP
+                    END AS DISTRICTGROUP
+                 , CASE WHEN DELIVERYGROUP_OLD <> DELIVERYGROUP
+                        THEN DELIVERYGROUP_OLD || '=>' || DELIVERYGROUP
+                        ELSE DELIVERYGROUP
+                    END AS DELIVERYGROUP
+                 , CASE WHEN PRIORITY_OLD <> PRIORITY
+                        THEN PRIORITY_OLD || '=>' || PRIORITY
+                        ELSE PRIORITY
+                    END AS PRIORITY
+                 , CASE WHEN CARNO_OLD <> CARNO
+                        THEN CARNO_OLD || '=>' || CARNO
+                        ELSE CARNO
+                    END AS CARNO
+                 , CASE WHEN PRECARNO <> PRECARNO_OLD
+                        THEN '선배차차량변경 '
+                        ELSE ''
+                    END || CASE WHEN PREDELIVERYGROUP <> PREDELIVERYGROUP_OLD
+                                THEN '선배차POP변경 '
+                                ELSE ''
+                            END || CASE WHEN PREPRIORITY <> PREPRIORITY_OLD
+                                        THEN '선배차순위변경 '
+                                        ELSE ''
+                                    END || CASE WHEN DISTRICTTYPE <> DISTRICTTYPE_OLD
+                                                THEN '권역유형변경 '
+                                                ELSE ''
+                                            END || CASE WHEN DISTRICTGROUP <> DISTRICTGROUP_OLD
+                                                        THEN '권역그룸변경 '
+                                                        ELSE ''
+                                                    END || CASE WHEN DISTRICTCODE <> DISTRICTCODE_OLD
+                                                                THEN '권역코드변경 '
+                                                                ELSE ''
+                                                            END || CASE WHEN CARNO <> CARNO_OLD
+                                                                        THEN '차량번호변경 '
+                                                                        ELSE ''
+                                                                   END || CASE WHEN DELIVERYGROUP <> DELIVERYGROUP_OLD
+                                                                               THEN 'POP변경 '
+                                                                               ELSE ''
+                                                                           END || CASE WHEN PRIORITY <> PRIORITY_OLD
+                                                                                       THEN '우선순위변경 '
+                                                                                       ELSE ''
+                                                                                   END || CASE WHEN ROUTE <> ROUTE_OLD
+                                                                                               THEN '경유지변경 '
+                                                                                               ELSE ''
+                                                                                           END || CASE WHEN ORDERQTY <> ORDERQTY_OLD
+                                                                                                       THEN '예정량변경 '
+                                                                                                       ELSE ''
+                                                                                                   END || CASE WHEN CUBE <> CUBE_OLD
+                                                                                                               THEN '체적변경 '
+                                                                                                               ELSE ''
+                                                                                                          END || CASE WHEN WEIGHT <> WEIGHT_OLD
+                                                                                                                      THEN '중량변경 '
+                                                                                                                      ELSE ''
+                                                                                                                 END || CASE WHEN STATUS <> STATUS_OLD
+                                                                                                                             THEN '상태변경 '
+                                                                                                                             ELSE ''
+                                                                                                                        END || CASE WHEN DEL_YN <> DEL_YN_OLD
+                                                                                                                                    THEN '삭제여부변경 '
+                                                                                                                                    ELSE ''
+                                                                                                                                END AS MODIFYLOG
+                 , SLIPNO
+                 , ROUTE
+                 , CUSTKEY
+                 , DOCNO
+                 , ORDERQTY
+                 , CUBE
+                 , WEIGHT
+                 , DECODE(STATUS_OLD || '=>' || STATUS,
+                                               '=>00',
+                                               '신규배차생성',
+                                               '00=>00',
+                                               '배차생성유지',
+                                               '00=>50',
+                                               '가배차처리',
+                                               '=>50',
+                                               '신규생성및가배차처리',
+                                               '50=>50',
+                                               '가배차유지',
+                                               '50=>90',
+                                               '배차확정처리',
+                                               '90=>90',
+                                               '배차확정유지',
+                                               '90=>50',
+                                               '배차확정취소',
+                                               '50=>00',
+                                               '가배차취소',
+                                               '' ) || '[' || STATUS_OLD || '=>' || STATUS || ']' AS STATUS
+                 , CASE WHEN DEL_YN_OLD <> DEL_YN
+                        THEN DEL_YN_OLD || '=>' || DEL_YN
+                        ELSE DEL_YN
+                    END AS DEL_YN
+                 , TO_CHAR(LOGDATE, 'YYYY-MM-DD HH24:MI:SS') AS LOGDATE
+                 , FN_GETUSERNAME(LOGWHO) || '[' || LOGWHO || ']' AS LOGWHO
+                 , ROUTE_OLD
+                 , ORDERQTY_OLD
+                 , CUBE_OLD
+                 , WEIGHT_OLD
+                 , STATUS_OLD
+                 , DEL_YN_OLD
+              FROM TM_INPLAN_LOG
+             WHERE DCCODE = #{dccode}
+               AND DELIVERYDT = #{deliverydt}
+               AND CUSTKEY IN (SELECT MS_CUST.CUSTKEY
+                                 FROM MS_CUST
+                                 JOIN MS_CUSTDLVINFO ON MS_CUSTDLVINFO.STORERKEY  = MS_CUST.STORERKEY
+                                                    AND MS_CUSTDLVINFO.DLVCUSTKEY = MS_CUST.CUSTKEY
+                                                    AND MS_CUSTDLVINFO.CUSTTYPE   = 'C'
+                                WHERE MS_CUSTDLVINFO.TRUTHCUSTKEY = #{truthcustkey})
+             ORDER BY DCCODE
+                    , STORERKEY
+                    , DOCTYPE
+                    , DOCDT
+                    , DELIVERYDT
+                    , CUSTKEY
+                    , DOCNO
+                    , LOGDATE DESC
+                    , CARNO
+                    , DISTRICTGROUP
+                    , DELIVERYGROUP
+                    , PRIORITY
+    ]]>
+	</select>
+
+	<select id="getWorklogByCustomerList_back" resultType="TmWorklogByCustomerResDto" parameterType="TmWorklogByCustomerReqDto">
+        SELECT /* [TmWorklogByCustomerService.sqlx][getWorklogByCustomerList][배차작업로그(거래처별)목록 조회][KwonJungyun][2025.06.24] */
+        	   TM_INPLAN.DCCODE AS DCCODE
+              ,TM_INPLAN.DELIVERYDT AS DELIVERYDT
+              ,TM_INPLAN.DISTRICTGROUP AS DISTRICTGROUP
+              ,TM_INPLAN.DELIVERYGROUP AS DELIVERYGROUP
+              ,TM_INPLAN.PRIORITY AS PRIORITY
+              ,TM_INPLAN.CARNO AS CARNO
+              ,COUNT(DISTINCT TM_INPLAN.SLIPNO) AS SLIPCNT
+              ,SUM((SELECT SUM(WD_INPLAN.ORDERQTY *
+                              FN_GET_SKUCUBE(WD_INPLAN.STORERKEY,
+                                             WD_INPLAN.SKU,
+                                             WD_INPLAN.DCCODE))
+                     FROM WD_INPLAN
+                    WHERE WD_INPLAN.DCCODE =
+                          TM_INPLAN.DCCODE
+                      AND WD_INPLAN.STORERKEY =
+                          TM_INPLAN.STORERKEY
+                      AND WD_INPLAN.SLIPDT =
+                          TM_INPLAN.SLIPDT
+                      AND WD_INPLAN.SLIPNO =
+                          TM_INPLAN.SLIPNO)) AS CUBE
+              ,TRUNC(SUM(TM_INPLAN.WEIGHT)) AS WEIGHT
+              ,FN_CODEDESCR(TM_INPLAN.STORERKEY,
+                            'STATUS_TM',
+                            MIN(TM_INPLAN.STATUS)) AS STATUS
+              ,TM_INPLAN.CUSTKEY AS CUSTKEY
+              ,MIN(MS_CUST.DESCRIPTION) AS CUSTNAME
+              ,MIN(TM_INPLAN.CUSTTYPE) AS CUSTTYPE
+              ,TM_INPLAN.STORERKEY AS STORERKEY
+         FROM TM_INPLAN
+         LEFT JOIN MS_CUST ON MS_CUST.STORERKEY = TM_INPLAN.STORERKEY
+				         	AND MS_CUST.CUSTKEY = TM_INPLAN.CUSTKEY
+				         	AND MS_CUST.CUSTTYPE = 'C'
+         WHERE TM_INPLAN.DCCODE = #{gDccode}
+           AND TM_INPLAN.STORERKEY = #{gStorerkey}
+	        <if test="deliverydt != null and deliverydt != ''">
+	            AND TM_INPLAN.DELIVERYDT = #{deliverydt}
+	        </if>
+	        <if test="carno != null and carno != ''">
+	            AND TM_INPLAN.CARNO LIKE '%' || #{carno} || '%'
+	        </if>
+	        <if test="custCode != null and custCode != ''">
+		        AND TM_INPLAN.CUSTKEY IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+									FROM (SELECT #{custCode} AS VAL FROM DUAL) A
+									CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+	        </if>
+         GROUP BY TM_INPLAN.DCCODE
+                 ,TM_INPLAN.STORERKEY
+                 ,TM_INPLAN.DELIVERYDT
+                 ,TM_INPLAN.DISTRICTGROUP
+                 ,TM_INPLAN.DELIVERYGROUP
+                 ,TM_INPLAN.PRIORITY
+                 ,TM_INPLAN.CARNO
+                 ,TM_INPLAN.CUSTKEY
+    </select>
+
+	<select id="getWorklogByCustomerDetailList_back" resultType="TmWorklogByCustomerDetailResDto" parameterType="TmWorklogByCustomerDetailReqDto">
+		<![CDATA[
+			SELECT /* [TmWorklogByCustomerService.sqlx][getWorklogByCustomerDetailList][배차작업로그(거래처별) 상세 목록 조회][KwonJungyun][2025.06.24] */
+			    TM_INPLAN_LOG.SERIALKEY,
+			    TM_INPLAN_LOG.DELIVERYNO,
+			    CASE
+			        WHEN TM_INPLAN_LOG.PRECARNO_OLD <> TM_INPLAN_LOG.PRECARNO THEN TM_INPLAN_LOG.PRECARNO_OLD || '=>' || TM_INPLAN_LOG.PRECARNO
+			        ELSE TM_INPLAN_LOG.PRECARNO
+			    END AS PRECARNO,
+			    CASE
+			        WHEN TM_INPLAN_LOG.PREDELIVERYGROUP_OLD <> TM_INPLAN_LOG.PREDELIVERYGROUP THEN TM_INPLAN_LOG.PREDELIVERYGROUP_OLD || '=>' || TM_INPLAN_LOG.PREDELIVERYGROUP
+			        ELSE TM_INPLAN_LOG.PREDELIVERYGROUP
+			    END AS PREDELIVERYGROUP,
+			    CASE
+			        WHEN TM_INPLAN_LOG.PREPRIORITY_OLD <> TM_INPLAN_LOG.PREPRIORITY THEN TM_INPLAN_LOG.PREPRIORITY_OLD || '=>' || TM_INPLAN_LOG.PREPRIORITY
+			        ELSE TM_INPLAN_LOG.PREPRIORITY
+			    END AS PREPRIORITY,
+			    CASE
+			        WHEN TM_INPLAN_LOG.DISTRICTGROUP_OLD <> TM_INPLAN_LOG.DISTRICTGROUP THEN TM_INPLAN_LOG.DISTRICTGROUP_OLD || '=>' || TM_INPLAN_LOG.DISTRICTGROUP
+			        ELSE TM_INPLAN_LOG.DISTRICTGROUP
+			    END AS DISTRICTGROUP,
+			    CASE
+			        WHEN TM_INPLAN_LOG.DELIVERYGROUP_OLD <> TM_INPLAN_LOG.DELIVERYGROUP THEN TM_INPLAN_LOG.DELIVERYGROUP_OLD || '=>' || TM_INPLAN_LOG.DELIVERYGROUP
+			        ELSE TM_INPLAN_LOG.DELIVERYGROUP
+			    END AS DELIVERYGROUP,
+			    CASE
+			        WHEN TM_INPLAN_LOG.PRIORITY_OLD <> TM_INPLAN_LOG.PRIORITY THEN TM_INPLAN_LOG.PRIORITY_OLD || '=>' || TM_INPLAN_LOG.PRIORITY
+			        ELSE TM_INPLAN_LOG.PRIORITY
+			    END AS PRIORITY,
+			    CASE
+			        WHEN TM_INPLAN_LOG.CARNO_OLD <> TM_INPLAN_LOG.CARNO THEN TM_INPLAN_LOG.CARNO_OLD || '=>' || TM_INPLAN_LOG.CARNO
+			        ELSE TM_INPLAN_LOG.CARNO
+			    END AS CARNO,
+			    CASE WHEN TM_INPLAN_LOG.PRECARNO <> TM_INPLAN_LOG.PRECARNO_OLD THEN '선배차차량변경 ' ELSE '' END ||
+			    CASE WHEN TM_INPLAN_LOG.PREDELIVERYGROUP <> TM_INPLAN_LOG.PREDELIVERYGROUP_OLD THEN '선배차POP변경 ' ELSE '' END ||
+			    CASE WHEN TM_INPLAN_LOG.PREPRIORITY <> TM_INPLAN_LOG.PREPRIORITY_OLD THEN '선배차순위변경 ' ELSE '' END ||
+			    CASE WHEN TM_INPLAN_LOG.DISTRICTTYPE <> TM_INPLAN_LOG.DISTRICTTYPE_OLD THEN '권역유형변경 ' ELSE '' END ||
+			    CASE WHEN TM_INPLAN_LOG.DISTRICTGROUP <> TM_INPLAN_LOG.DISTRICTGROUP_OLD THEN '권역그룸변경 ' ELSE '' END ||
+			    CASE WHEN TM_INPLAN_LOG.DISTRICTCODE <> TM_INPLAN_LOG.DISTRICTCODE_OLD THEN '권역코드변경 ' ELSE '' END ||
+			    CASE WHEN TM_INPLAN_LOG.CARNO <> TM_INPLAN_LOG.CARNO_OLD THEN '차량번호변경 ' ELSE '' END ||
+			    CASE WHEN TM_INPLAN_LOG.DELIVERYGROUP <> TM_INPLAN_LOG.DELIVERYGROUP_OLD THEN 'POP변경 ' ELSE '' END ||
+			    CASE WHEN TM_INPLAN_LOG.PRIORITY <> TM_INPLAN_LOG.PRIORITY_OLD THEN '우선순위변경 ' ELSE '' END ||
+			    CASE WHEN TM_INPLAN_LOG.ROUTE <> TM_INPLAN_LOG.ROUTE_OLD THEN '경유지변경 ' ELSE '' END ||
+			    CASE WHEN TM_INPLAN_LOG.ORDERQTY <> TM_INPLAN_LOG.ORDERQTY_OLD THEN '예정량변경 ' ELSE '' END ||
+			    CASE WHEN TM_INPLAN_LOG.CUBE <> TM_INPLAN_LOG.CUBE_OLD THEN '체적변경 ' ELSE '' END ||
+			    CASE WHEN TM_INPLAN_LOG.WEIGHT <> TM_INPLAN_LOG.WEIGHT_OLD THEN '중량변경 ' ELSE '' END ||
+			    CASE WHEN TM_INPLAN_LOG.STATUS <> TM_INPLAN_LOG.STATUS_OLD THEN '상태변경 ' ELSE '' END ||
+			    CASE WHEN TM_INPLAN_LOG.DEL_YN <> TM_INPLAN_LOG.DEL_YN_OLD THEN '삭제여부변경 ' ELSE '' END AS MODIFYLOG,
+			    TM_INPLAN_LOG.SLIPNO,
+			    TM_INPLAN_LOG.ROUTE,
+			    TM_INPLAN_LOG.CUSTKEY,
+			    TM_INPLAN_LOG.CUSTTYPE,
+			    TM_INPLAN_LOG.DOCNO,
+			    TM_INPLAN_LOG.ORDERQTY,
+			    TM_INPLAN_LOG.CUBE,
+			    TM_INPLAN_LOG.WEIGHT,
+				CASE TM_INPLAN_LOG.STATUS_OLD || '=>' || TM_INPLAN_LOG.STATUS
+				    WHEN '=>00'     THEN '신규배차생성'
+				    WHEN '00=>00'   THEN '배차생성유지'
+				    WHEN '00=>50'   THEN '가배차처리'
+				    WHEN '=>50'     THEN '신규생성및가배차처리'
+				    WHEN '50=>50'   THEN '가배차유지'
+				    WHEN '50=>90'   THEN '배차확정처리'
+				    WHEN '90=>90'   THEN '배차확정유지'
+				    WHEN '90=>50'   THEN '배차확정취소'
+				    WHEN '50=>00'   THEN '가배차취소'
+				    ELSE TM_INPLAN_LOG.STATUS_OLD || '=>' || TM_INPLAN_LOG.STATUS
+				END AS STATUS,
+			    CASE
+			        WHEN TM_INPLAN_LOG.DEL_YN_OLD <> TM_INPLAN_LOG.DEL_YN THEN TM_INPLAN_LOG.DEL_YN_OLD || '=>' || TM_INPLAN_LOG.DEL_YN
+			        ELSE TM_INPLAN_LOG.DEL_YN
+			    END AS DELYN,
+			    TO_CHAR(TM_INPLAN_LOG.LOGDATE, 'YYYY-MM-DD HH24:MI:SS') AS LOGDATE,
+			  	FN_GETUSERNAME(TM_INPLAN_LOG.LOGWHO) || '[' || TM_INPLAN_LOG.LOGWHO || ']' AS LOGWHO,
+			    TM_INPLAN_LOG.ROUTE_OLD AS ROUTE_OLD,
+			    TM_INPLAN_LOG.ORDERQTY_OLD AS ORDERQTY_OLD,
+			    TM_INPLAN_LOG.CUBE_OLD,
+			    TM_INPLAN_LOG.WEIGHT_OLD,
+			    TM_INPLAN_LOG.STATUS_OLD,
+			    TM_INPLAN_LOG.DEL_YN_OLD
+			FROM TM_INPLAN_LOG
+    	]]>
+			<where>
+			    <if test="dccode != null and dccode != ''">
+			         TM_INPLAN_LOG.DCCODE = #{dccode}
+			    </if>
+			    <if test="deliverydt != null and deliverydt != ''">
+			        AND TM_INPLAN_LOG.DELIVERYDT = #{deliverydt}
+			    </if>
+			    <if test="districtgroup != null and districtgroup != ''">
+			        AND (
+			            NVL(TM_INPLAN_LOG.DISTRICTGROUP, 'INPLAN') = #{districtgroup}
+			            OR NVL(TM_INPLAN_LOG.DISTRICTGROUP_OLD, 'INPLAN') = #{districtgroup}
+			        )
+			    </if>
+			    <if test="deliverygroup != null and deliverygroup != ''">
+			        AND (
+			            NVL(TM_INPLAN_LOG.DELIVERYGROUP, 'INPLAN') = #{deliverygroup}
+			            OR NVL(TM_INPLAN_LOG.DELIVERYGROUP_OLD, 'INPLAN') = #{deliverygroup}
+			        )
+			    </if>
+			    <if test="priority != null and priority != ''">
+			        AND (
+			            NVL(TM_INPLAN_LOG.PRIORITY, 'INPLAN') = #{priority}
+			            OR NVL(TM_INPLAN_LOG.PRIORITY_OLD, 'INPLAN') = #{priority}
+			        )
+			    </if>
+			    <if test="carno != null and carno != ''">
+			        AND (
+			            NVL(TM_INPLAN_LOG.CARNO, 'INPLAN') LIKE '%' || #{carno} || '%'
+			            OR NVL(TM_INPLAN_LOG.CARNO_OLD, 'INPLAN') LIKE '%' || #{carno} || '%'
+			        )
+			    </if>
+		        <if test="custCode != null and custCode != ''">
+			        AND TM_INPLAN_LOG.CUSTKEY IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+										FROM (SELECT #{custCode} AS VAL FROM DUAL) A
+										CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+		        </if>
+		        <if test="custkey != null and custkey != ''">
+			        AND TM_INPLAN_LOG.CUSTKEY = #{custkey}
+		        </if>
+			</where>
+			ORDER BY
+			    TM_INPLAN_LOG.LOGDATE DESC,
+			    TM_INPLAN_LOG.DCCODE,
+			    TM_INPLAN_LOG.DELIVERYDT,
+			    TM_INPLAN_LOG.DISTRICTGROUP,
+			    TM_INPLAN_LOG.DELIVERYGROUP,
+			    TM_INPLAN_LOG.PRIORITY,
+			    TM_INPLAN_LOG.CARNO,
+			    TM_INPLAN_LOG.CUSTKEY
+	</select>
+</mapper>

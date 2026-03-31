@@ -1,0 +1,969 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ibStoWeightService">
+    <!-- 집계내역 조회 -->
+    <select id="getMasterList" resultType="cjfw.wms.ib.dto.IbStoWeightResDto">
+        WITH CALENDAR AS (
+            SELECT
+                TO_DATE(#{yyyymm}||'01','YYYYMMDD') + LEVEL - 1 AS DT
+            FROM dual
+            CONNECT BY LEVEL <![CDATA[<=]]>
+                LAST_DAY(TO_DATE(#{yyyymm}||'01','YYYYMMDD'))
+                - TO_DATE(#{yyyymm}||'01','YYYYMMDD') + 1
+        )
+        , TEMP AS (
+            SELECT SUBSTR(IB_DC_FLOW_SUM.YYYYMMDD,0,6) AS DT
+                , IB_DC_FLOW_SUM.FROM_DCCODE AS DCCODE
+                , IB_DC_FLOW_SUM.TO_DCCODE AS TO_CUSTKEY
+                , IB_DC_FLOW_SUM.STORAGETYPE AS CHANNEL
+            FROM IB_DC_FLOW_SUM
+            WHERE IB_DC_FLOW_SUM.YYYYMMDD LIKE #{yyyymm}||'%'
+              AND IB_DC_FLOW_SUM.FLOW_TYPE = #{flowType}
+              AND IB_DC_FLOW_SUM.FROM_DCCODE IN
+                        <foreach collection="fixdccodeMulti" item="code" open="(" close=")" separator=",">
+                            #{code}
+                        </foreach>
+           GROUP BY SUBSTR(IB_DC_FLOW_SUM.YYYYMMDD,0,6)
+                , IB_DC_FLOW_SUM.FROM_DCCODE
+                , IB_DC_FLOW_SUM.TO_DCCODE
+                , IB_DC_FLOW_SUM.STORAGETYPE
+        )
+        SELECT
+            IB_DC_FLOW_SUM.FLOW_TYPE AS FLOW_TYPE
+            , TO_CHAR(CALENDAR.DT,'YYYY-MM-DD') AS YYYYMMDD
+            , NVL(IB_DC_FLOW_SUM.FROM_DCCODE, TEMP.DCCODE) AS DCCODE
+            , CM_DC.DCNAME AS DCNAME
+            , NVL(IB_DC_FLOW_SUM.TO_DCCODE, TEMP.TO_CUSTKEY) AS TO_CUSTKEY
+            , CM_DC2.DCNAME AS TO_CUSTNAME
+            , NVL(IB_DC_FLOW_SUM.STORAGETYPE, TEMP.CHANNEL) AS CHANNEL
+            , FN_CODEDESCR('FW00','PUTAWAYTYPE',NVL(IB_DC_FLOW_SUM.STORAGETYPE, TEMP.CHANNEL)) AS CHANNEL_NAME
+            , NVL(IB_DC_FLOW_SUM.FLOW_QTY, 0) AS CONFIRMWEIGHT --sto so
+            , NVL(IB_DC_FLOW_SUM.EX_ITEM_RICE_QTY, 0) AS ETC_CONFIRMWEIGHT --sto so
+            , NVL(IB_DC_FLOW_SUM.EX_ITEM_KIMCHI_QTY, 0) AS ETC_CONFIRMWEIGHT_ADD --sto so dp
+            , NVL(IB_DC_FLOW_SUM.EX_QTY1, 0) AS DC_WD_CONFIRMWEIGHT --sto
+            , NVL(IB_DC_FLOW_SUM.EX_QTY2, 0) AS DC_WD_JEJU_CONFIRMWEIGHT --sto
+            , NVL(IB_DC_FLOW_SUM.EX_QTY1, 0) AS ETC_SKU_ETC_CONFIRMWEIGHT --so
+            , NVL(IB_DC_FLOW_SUM.EX_QTY2, 0) AS ETC_CUST_GUN_CONFIRMWEIGHT --so
+            , NVL(IB_DC_FLOW_SUM.EX_CUST_QTY, 0) AS ETC_CUST_ETC_CONFIRMWEIGHT --so
+            , NVL(IB_DC_FLOW_SUM.EXPT_CUST_QTY, 0) AS EX_CUST_CONFIRMWEIGHT --sto so
+            , NVL(IB_DC_FLOW_SUM.EXPT_CUST_QTY, 0) AS EX_PARTNER_CONFIRMWEIGHT --dp
+            , NVL(IB_DC_FLOW_SUM.EX_ITEM_ICE_QTY, 0) AS ETC_SKU_ICE_CONFIRMWEIGHT --so
+            , NVL(IB_DC_FLOW_SUM.EX_PO_CUST_QTY, 0) AS ETC_PARTNER_CONFIRMWEIGHT --so
+            , NVL(IB_DC_FLOW_SUM.EXPT_ITEM_QTY, 0) AS EX_SKU_CONFIRMWEIGHT --sto so dp
+
+            , IB_DC_FLOW_SUM.ADDDATE AS ADDDATE
+            , IB_DC_FLOW_SUM.EDITDATE AS EDITDATE
+            , IB_DC_FLOW_SUM.ADDWHO AS ADDWHO
+            , IB_DC_FLOW_SUM.EDITWHO AS EDITWHO
+        FROM CALENDAR
+        JOIN TEMP
+            ON SUBSTR(TO_CHAR(CALENDAR.DT,'YYYYMMDD'),0,6) = TEMP.DT
+        LEFT JOIN IB_DC_FLOW_SUM
+               ON IB_DC_FLOW_SUM.YYYYMMDD = TO_CHAR(CALENDAR.DT,'YYYYMMDD')
+              AND IB_DC_FLOW_SUM.FROM_DCCODE = TEMP.DCCODE
+              AND IB_DC_FLOW_SUM.TO_DCCODE = TEMP.TO_CUSTKEY
+              AND IB_DC_FLOW_SUM.STORAGETYPE = TEMP.CHANNEL
+              AND IB_DC_FLOW_SUM.FLOW_TYPE = #{flowType}
+        LEFT JOIN CM_DC
+            ON CM_DC.DCCODE                = NVL(IB_DC_FLOW_SUM.FROM_DCCODE, TEMP.DCCODE)
+        LEFT JOIN    CM_DC CM_DC2
+            ON     CM_DC2.DCCODE                = NVL(IB_DC_FLOW_SUM.TO_DCCODE, TEMP.TO_CUSTKEY)
+        ORDER BY 2
+    </select>
+
+    <!-- 마스터 조회 -->
+    <select id="getMasterList2" resultType="cjfw.wms.ib.dto.IbStoWeightResDto">
+        SELECT /* [ibStoWeightService.sqlx][ibStoWeightService.getMasterDatalist][마스터조회] */
+            0 AS CHECKYN
+            ,MS_REPORTKEY.YYYYMM AS YYYYMM
+            ,MS_REPORTKEY.DCCODE AS DCCODE
+            ,CM_DC.DCNAME AS DCNAME
+            ,MS_REPORTKEY.FILTERKEY AS FILTERKEY
+            ,MS_SKU.DESCRIPTION AS SKUNAME
+            ,CM_DC_TO.DCNAME AS TODCNAME
+            ,MS_CUST_C.DESCRIPTION AS CUSTNAME
+            ,MS_CUST_P.DESCRIPTION AS PARTNRNAME
+            ,'' AS PROCESS_YN
+            ,'' AS PROCESS_MSG
+            ,fn_getusername(MS_REPORTKEY.ADDWHO)||'('||MS_REPORTKEY.ADDWHO||')' AS ADDWHO
+            ,to_CHAR(MS_REPORTKEY.ADDDATE,'yyyy-mm-dd hh24:mi:ss') AS ADDDATE
+            ,fn_getusername(MS_REPORTKEY.EDITWHO)||'('||MS_REPORTKEY.EDITWHO||')' AS EDITWHO
+            ,to_CHAR(MS_REPORTKEY.EDITDATE,'yyyy-mm-dd hh24:mi:ss') AS EDITDATE
+            ,MS_REPORTKEY.MASTERKEY AS MASTERKEY
+            ,MS_REPORTKEY.STORERKEY AS STORERKEY
+            ,MS_REPORTKEY.DESCRIPTION AS DESCRIPTION
+            ,MS_REPORTKEY.DEL_YN AS DEL_YN
+            ,MS_REPORTKEY.YYYYMM AS ORG_YYYYMM
+            ,MS_REPORTKEY.DCCODE AS ORG_DCCODE
+            ,MS_REPORTKEY.FILTERKEY AS ORG_FILTERKEY
+        FROM   MS_REPORTKEY
+        LEFT JOIN CM_DC
+            ON MS_REPORTKEY.DCCODE = CM_DC.DCCODE
+        LEFT JOIN   MS_SKU
+          ON     MS_SKU.STORERKEY                = MS_REPORTKEY.STORERKEY
+          AND    MS_SKU.SKU                      = MS_REPORTKEY.FILTERKEY
+<!--          AND    MS_SKU.DEL_YN                   = 'N'-->
+        LEFT JOIN CM_DC CM_DC_TO
+            ON CM_DC_TO.DCCODE = MS_REPORTKEY.FILTERKEY
+        LEFT JOIN MS_CUST MS_CUST_C
+              ON MS_CUST_C.STORERKEY = MS_REPORTKEY.STORERKEY
+             AND MS_CUST_C.CUSTKEY   = MS_REPORTKEY.FILTERKEY
+             AND MS_CUST_C.CUSTTYPE  = 'C'
+<!--             AND MS_CUST_C.DEL_YN    = 'N'-->
+        LEFT JOIN MS_CUST MS_CUST_P
+              ON MS_CUST_P.STORERKEY = MS_REPORTKEY.STORERKEY
+             AND MS_CUST_P.CUSTKEY   = MS_REPORTKEY.FILTERKEY
+             AND MS_CUST_P.CUSTTYPE  = 'P'
+<!--             AND MS_CUST_P.DEL_YN    = 'N'-->
+        WHERE  MS_REPORTKEY.STORERKEY = #{gStorerkey}
+                AND    MS_REPORTKEY.MASTERKEY = #{masterkey}
+                <if test='yyyymm != null and yyyymm !=""'>
+                    AND    MS_REPORTKEY.YYYYMM    = #{yyyymm}
+                </if>
+                AND    MS_REPORTKEY.DEL_YN    = 'N'
+    </select>
+
+    <!-- 마스터 내역 삭제 -->
+    <update id="deleteMaster">
+        /* [ibStoWeightService.sqlx][ibStoWeightService.deleteIbStoWeightMaster][마스터 내역 삭제] */
+        DELETE FROM MS_REPORTKEY
+        WHERE  STORERKEY = #{gStorerkey}
+        AND    MASTERKEY = #{masterkey}
+        AND    YYYYMM    = #{yyyymm}
+        AND    DCCODE    = #{dccode}
+        AND    FILTERKEY    = #{filterkey}
+    </update>
+
+    <!-- 마스터 내역 전체 삭제 -->
+    <update id="deleteMasterList">
+        /* [ibStoWeightService.sqlx][ibStoWeightService.deleteIbStoWeightMaster][마스터 내역 삭제] */
+        DELETE FROM MS_REPORTKEY
+        WHERE  STORERKEY = #{gStorerkey}
+        AND    MASTERKEY = #{masterkey}
+        AND    YYYYMM    = #{toyyyymm}
+    </update>
+
+    <!-- 마스터 전월복사 -->
+    <update id="copyMasterList">
+        /* [ibStoWeightService.sqlx][ibStoWeightService.deleteIbStoWeightMaster][마스터 내역 복사] */
+        INSERT INTO MS_REPORTKEY
+        SELECT STORERKEY
+            ,MASTERKEY
+            , #{toyyyymm}
+            , DCCODE
+            , FILTERKEY
+            , DESCRIPTION
+            , DEL_YN
+            , SYSDATE
+            , SYSDATE
+            , #{gUserId}
+            , #{gUserId}
+        FROM MS_REPORTKEY
+        WHERE  STORERKEY = #{gStorerkey}
+        AND    MASTERKEY = #{masterkey}
+        AND    YYYYMM    = #{yyyymm}
+    </update>
+
+    <!-- 마스터 패키지 임시테이블 -->
+    <insert id="insertTemp" >
+        INSERT /* [ibStoWeightService.sqlx][insertTemp][임시 Tabele 등록] */
+        INTO SY_PROCESSTEMP_TM (PROCESSTYPE,PROCESSCREATOR,SPID,ADDWHO,EDITWHO
+        /**/
+        ,PROCESSFLAG
+        ,STORERKEY
+        ,DCCODE
+        ,DELIVERYGROUP
+        ,DELIVERYDT
+        ,SLIPDT
+        ,SLIPNO
+        ,SLIPTYPE
+        ,CUSTTYPE
+        ,CUSTKEY
+        ,OTHER01
+        ,OTHER02
+        ,OTHER03
+        ,OTHER04
+        ,OTHER05
+        /**/
+        )
+        <foreach collection="list" item="item" separator="UNION ALL">
+            SELECT
+            #{item.processtype} AS PROCESSTYPE
+            ,#{item.gUserId} AS PROCESSCREATOR
+            ,#{item.gSpid} AS SPID
+            ,#{item.gUserId} AS ADDWHO
+            ,#{item.gUserId} AS EDITWHO
+            /**/
+            ,'N' AS PROCESSFLAG
+            ,#{item.storerkey} AS STORERKEY
+            ,#{item.dccode} AS DCCODE
+            ,#{item.deliverygroup} AS DELIVERYGROUP
+            ,' ' AS DELIVERYDT
+            ,' ' AS SLIPDT
+            ,' ' AS SLIPNO
+            ,' ' AS SLIPTYPE
+            ,' ' AS CUSTTYPE
+            ,' ' AS CUSTKEY
+            ,#{item.other01} AS OTHER01
+            ,#{item.other02} AS OTHER02
+            ,#{item.other03} AS OTHER03
+            ,#{item.other04} AS OTHER04
+            ,#{item.other05} AS OTHER05
+            /**/
+            FROM DUAL
+        </foreach>
+    </insert>
+
+    <!-- 동기화전 삭제 -->
+    <delete id="deleteBatch">
+        DELETE FROM LOGISONE.IB_DC_FLOW_SUM
+        WHERE
+            FLOW_TYPE = #{flowType}
+        AND YYYYMMDD LIKE #{yyyymm}||'%'
+        <if test='fixdccodeMulti != null and fixdccodeMulti !=""'>
+        AND IB_DC_FLOW_SUM.FROM_DCCODE IN
+                       <foreach collection="fixdccodeMulti" item="code" open="(" close=")" separator=",">
+                         #{code}
+                       </foreach>
+        </if>
+    </delete>
+
+    <!-- 동기화 총량 -->
+    <insert id="insertBatchSto">
+        INSERT INTO LOGISONE.IB_DC_FLOW_SUM(
+            FLOW_TYPE
+            , YYYYMMDD
+            , FROM_DCCODE
+            , TO_DCCODE
+            , STORAGETYPE
+            , FLOW_QTY
+            , EX_ITEM_RICE_QTY
+            , EX_ITEM_KIMCHI_QTY
+            , EX_QTY1
+            , EX_QTY2
+            , EX_CUST_QTY
+            , EXPT_CUST_QTY
+            , EX_ITEM_ICE_QTY
+            , EX_PO_CUST_QTY
+            , EXPT_ITEM_QTY
+            , ADDDATE
+            , EDITDATE
+            , ADDWHO
+            , EDITWHO
+        )
+        SELECT /* [ibStoWeightService.sqlx][ibStoWeightService.getDataHeaderlist][집계내역조회] */
+            #{flowType} AS FLOW_TYPE
+            ,X.YYYYMMDD           AS YYYYMMDD
+            ,NVL(X.DCCODE,' ')          AS FROM_DCCODE
+            ,NVL(X.TO_CUSTKEY, X.DCCODE)      AS TO_DCCODE
+            ,X.CHANNEL         AS STORAGETYPE
+            ,X.CONFIRMWEIGHT   AS FLOW_QTY
+            ,X.ETC_CONFIRMWEIGHT       AS EX_ITEM_RICE_QTY
+            ,X.ETC_CONFIRMWEIGHT_ADD   AS EX_ITEM_KIMCHI_QTY
+            ,X.DC_WD_CONFIRMWEIGHT AS EX_QTY_1
+            ,X.DC_WD_JEJU_CONFIRMWEIGHT AS EX_QTY_2
+            ,0 AS EX_CUST_QTY
+            ,X.EX_CUST_CONFIRMWEIGHT AS EXPT_CUST_QTY
+            ,0 AS EX_ITEM_ICE_QTY
+            ,0 AS EX_PO_CUST_QTY
+            ,X.EX_SKU_CONFIRMWEIGHT AS EXPT_ITEM_QTY
+            ,SYSDATE AS ADDDATE
+            ,SYSDATE AS EDITDATE
+            ,#{editwho} AS ADDWHO
+            ,#{editwho} AS EDITWHO
+        FROM (<!--STO-->
+            SELECT
+                T.YYYYMMDD              AS YYYYMMDD
+                ,T.DCCODE             AS DCCODE
+                ,T.TO_CUSTKEY         AS TO_CUSTKEY
+                ,T.CHANNEL            AS CHANNEL
+                ,T.CONFIRMWEIGHT      AS CONFIRMWEIGHT
+                ,NVL(T.ETC_CONFIRMWEIGHT,0) AS ETC_CONFIRMWEIGHT
+                ,NVL(T.ETC_CONFIRMWEIGHT_ADD,0) AS ETC_CONFIRMWEIGHT_ADD
+                ,NVL(T.DC_WD_CONFIRMWEIGHT,0) AS DC_WD_CONFIRMWEIGHT
+                ,NVL(T.DC_WD_JEJU_CONFIRMWEIGHT,0) AS DC_WD_JEJU_CONFIRMWEIGHT
+                ,NVL(T.EX_SKU_CONFIRMWEIGHT,0) AS EX_SKU_CONFIRMWEIGHT
+                ,NVL(T.EX_CUST_CONFIRMWEIGHT,0) AS EX_CUST_CONFIRMWEIGHT
+            FROM (
+                SELECT /*+
+                    leading(DM_DOCUMENT_H DM_DOCUMENT_D WD_INPLAN )
+                    FULL(WD_INPLAN) FULL(DM_DOCUMENT_D) FULL(DM_DOCUMENT_H)
+                    USE_HASH(DM_DOCUMENT_D) USE_HASH(WD_INPLAN)
+                */
+                    WD_INPLAN.SLIPDT AS YYYYMMDD
+                    ,DM_DOCUMENT_D.DCCODE AS DCCODE
+                    ,DM_DOCUMENT_H.TO_CUSTKEY AS TO_CUSTKEY
+                    ,DM_DOCUMENT_D.CHANNEL AS CHANNEL
+                    ,ROUND(SUM((SELECT TRUNC(FN_CONV_UOM(WD_INPLAN.STORERKEY,WD_INPLAN.SKU,WD_INPLAN.UOM,'KG',WD_INPLAN.CONFIRMQTY),2) FROM DUAL))) AS CONFIRMWEIGHT
+                    ,ROUND(SUM(CASE WHEN SO_ETC_SKU.FILTERKEY IS NOT NULL
+                        THEN (SELECT TRUNC(FN_CONV_UOM(WD_INPLAN.STORERKEY,WD_INPLAN.SKU,WD_INPLAN.UOM,'KG',WD_INPLAN.CONFIRMQTY),2) FROM DUAL) END)) AS ETC_CONFIRMWEIGHT
+                    ,ROUND(SUM(CASE WHEN SO_ETC_SKU_ADD.FILTERKEY IS NOT NULL
+                        THEN (SELECT TRUNC(FN_CONV_UOM(WD_INPLAN.STORERKEY,WD_INPLAN.SKU,WD_INPLAN.UOM,'KG',WD_INPLAN.CONFIRMQTY),2) FROM DUAL) END)) AS ETC_CONFIRMWEIGHT_ADD
+                    ,0 AS DC_WD_CONFIRMWEIGHT
+                    ,0 AS DC_WD_JEJU_CONFIRMWEIGHT
+                    ,0 AS EX_SKU_CONFIRMWEIGHT
+                    ,0 AS EX_CUST_CONFIRMWEIGHT
+                FROM DM_DOCUMENT_D
+                JOIN DM_DOCUMENT_H
+                ON DM_DOCUMENT_D.DCCODE = DM_DOCUMENT_H.DCCODE
+                    AND DM_DOCUMENT_D.DOCTYPE = DM_DOCUMENT_H.DOCTYPE
+                    AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+                    AND DM_DOCUMENT_D.DOCNO = DM_DOCUMENT_H.DOCNO
+                    AND DM_DOCUMENT_H.DOCTYPE = 'WD'
+                    AND DM_DOCUMENT_H.WORKPROCESSCODE = 'STO'
+                JOIN WD_INPLAN
+                ON WD_INPLAN.DCCODE = DM_DOCUMENT_D.DCCODE
+                    AND WD_INPLAN.DOCTYPE = DM_DOCUMENT_D.DOCTYPE
+                    AND WD_INPLAN.SLIPDT = DM_DOCUMENT_D.DELIVERYDATE
+                    AND WD_INPLAN.DOCNO = DM_DOCUMENT_D.DOCNO
+                    AND WD_INPLAN.DOCLINE = DM_DOCUMENT_D.DOCLINE
+                    AND WD_INPLAN.STORERKEY = #{gStorerkey}
+                    AND WD_INPLAN.DEL_YN = 'N'
+                    AND WD_INPLAN.SLIPDT LIKE #{yyyymm}||'%'
+                LEFT OUTER JOIN MS_REPORTKEY SO_ETC_SKU
+                    ON SO_ETC_SKU.MASTERKEY = 'STO_ETC_SKU'
+                    AND SO_ETC_SKU.STORERKEY = #{gStorerkey}
+                    AND SO_ETC_SKU.YYYYMM = #{yyyymm}
+                    AND SO_ETC_SKU.DCCODE = DM_DOCUMENT_D.DCCODE
+                    AND SO_ETC_SKU.FILTERKEY = DM_DOCUMENT_D.SKU
+                    AND SO_ETC_SKU.DEL_YN = 'N'
+                LEFT OUTER JOIN MS_REPORTKEY SO_ETC_SKU_ADD
+                    ON SO_ETC_SKU_ADD.MASTERKEY = 'STO_ETC_SKU_ADD'
+                    AND SO_ETC_SKU_ADD.STORERKEY = #{gStorerkey}
+                    AND SO_ETC_SKU_ADD.YYYYMM = #{yyyymm}
+                    AND SO_ETC_SKU_ADD.DCCODE = DM_DOCUMENT_D.DCCODE
+                    AND SO_ETC_SKU_ADD.FILTERKEY = DM_DOCUMENT_D.SKU
+                    AND SO_ETC_SKU_ADD.DEL_YN = 'N'
+                WHERE 1=1
+                    AND DM_DOCUMENT_D.STORERKEY = #{gStorerkey}
+                    AND DM_DOCUMENT_D.DOCTYPE = 'WD'
+                    AND DM_DOCUMENT_D.DELIVERYDATE LIKE #{yyyymm}||'%'
+                     <if test='fixdccodeMulti != null and fixdccodeMulti !=""'>
+                        AND DM_DOCUMENT_D.DCCODE IN
+                           <foreach collection="fixdccodeMulti" item="code" open="(" close=")" separator=",">
+                             #{code}
+                           </foreach>
+                    </if>
+                    AND DM_DOCUMENT_D.DEL_YN = 'N'
+                    AND DM_DOCUMENT_D.CONFIRMQTY > 0
+                    AND DM_DOCUMENT_H.STATUS = '90'
+                    AND  EXISTS (
+                            SELECT '1'
+                            FROM MS_REPORTKEY
+                            WHERE MS_REPORTKEY.MASTERKEY = 'STO_DC'
+                                AND MS_REPORTKEY.STORERKEY = #{gStorerkey}
+                                AND MS_REPORTKEY.YYYYMM = 'STD'
+                                AND MS_REPORTKEY.DEL_YN = 'N'
+                                AND MS_REPORTKEY.DCCODE=DM_DOCUMENT_H.DCCODE
+                                AND MS_REPORTKEY.FILTERKEY=DM_DOCUMENT_H.TO_CUSTKEY
+                    )
+                GROUP BY WD_INPLAN.SLIPDT, DM_DOCUMENT_D.DCCODE, DM_DOCUMENT_H.TO_CUSTKEY, DM_DOCUMENT_D.CHANNEL
+            ) T
+            UNION ALL
+            SELECT <!--광역일배-->
+                T.YYYYMMDD AS YYYYMMDD
+                ,T.DCCODE AS DCCODE
+                ,T.TO_CUSTKEY AS TO_CUSTKEY
+                ,T.CHANNEL AS CHANNEL
+                ,T.CONFIRMWEIGHT AS CONFIRMWEIGHT
+                ,NVL(T.ETC_CONFIRMWEIGHT,0) AS ETC_CONFIRMWEIGHT
+                ,NVL(T.ETC_CONFIRMWEIGHT_ADD,0) AS ETC_CONFIRMWEIGHT_ADD
+                ,NVL(T.DC_WD_CONFIRMWEIGHT,0) AS DC_WD_CONFIRMWEIGHT
+                ,NVL(T.DC_WD_JEJU_CONFIRMWEIGHT,0) AS DC_WD_JEJU_CONFIRMWEIGHT
+                ,NVL(T.EX_SKU_CONFIRMWEIGHT,0) AS EX_SKU_CONFIRMWEIGHT
+                ,NVL(T.EX_CUST_CONFIRMWEIGHT,0) AS EX_CUST_CONFIRMWEIGHT
+            FROM (
+                SELECT /*+
+                    leading(DM_DOCUMENT_H DM_DOCUMENT_D WD_INPLAN )
+                    FULL(WD_INPLAN) FULL(DM_DOCUMENT_D) FULL(DM_DOCUMENT_H)
+                    USE_HASH(DM_DOCUMENT_D) USE_HASH(WD_INPLAN)
+                */
+                    WD_INPLAN.SLIPDT AS YYYYMMDD
+                    ,DM_DOCUMENT_D.ROUTE AS DCCODE
+                    ,DM_DOCUMENT_D.DCCODE AS TO_CUSTKEY
+                    ,DM_DOCUMENT_D.CHANNEL AS CHANNEL
+                    ,ROUND(SUM((SELECT TRUNC(FN_CONV_UOM(WD_INPLAN.STORERKEY,WD_INPLAN.SKU,WD_INPLAN.UOM,'KG',WD_INPLAN.CONFIRMQTY),2) FROM DUAL))) AS CONFIRMWEIGHT
+                    ,ROUND(SUM(CASE WHEN SO_ETC_SKU.FILTERKEY IS NOT NULL
+                        THEN (SELECT TRUNC(FN_CONV_UOM(WD_INPLAN.STORERKEY,WD_INPLAN.SKU,WD_INPLAN.UOM,'KG',WD_INPLAN.CONFIRMQTY),2) FROM DUAL) END)) AS ETC_CONFIRMWEIGHT
+                    ,ROUND(SUM(CASE WHEN SO_ETC_SKU_ADD.FILTERKEY IS NOT NULL
+                        THEN (SELECT TRUNC(FN_CONV_UOM(WD_INPLAN.STORERKEY,WD_INPLAN.SKU,WD_INPLAN.UOM,'KG',WD_INPLAN.CONFIRMQTY),2) FROM DUAL) END)) AS ETC_CONFIRMWEIGHT_ADD
+                    ,0 AS DC_WD_CONFIRMWEIGHT
+                    ,0 AS DC_WD_JEJU_CONFIRMWEIGHT
+                    ,ROUND(SUM(CASE WHEN SO_EX_SKU.FILTERKEY IS NOT NULL
+                        THEN (SELECT TRUNC(FN_CONV_UOM(WD_INPLAN.STORERKEY,WD_INPLAN.SKU,WD_INPLAN.UOM,'KG',WD_INPLAN.CONFIRMQTY),2) FROM DUAL) END)) AS EX_SKU_CONFIRMWEIGHT
+                    ,ROUND(SUM(CASE WHEN SO_EX_CUST.FILTERKEY IS NOT NULL
+                        THEN (SELECT TRUNC(FN_CONV_UOM(WD_INPLAN.STORERKEY,WD_INPLAN.SKU,WD_INPLAN.UOM,'KG',WD_INPLAN.CONFIRMQTY),2) FROM DUAL) END)) AS EX_CUST_CONFIRMWEIGHT
+                FROM DM_DOCUMENT_D
+                JOIN DM_DOCUMENT_H
+                ON DM_DOCUMENT_D.DCCODE = DM_DOCUMENT_H.DCCODE
+                    AND DM_DOCUMENT_D.DOCTYPE = DM_DOCUMENT_H.DOCTYPE
+                    AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+                    AND DM_DOCUMENT_D.DOCNO = DM_DOCUMENT_H.DOCNO
+                    AND DM_DOCUMENT_H.DOCTYPE = 'WD'
+                    AND DM_DOCUMENT_H.WORKPROCESSCODE <![CDATA[<>]]> 'STO'
+                    AND NVL(DM_DOCUMENT_H.IF_SEND_TYPE, 'SO') <![CDATA[<>]]> 'STODC'
+                JOIN WD_INPLAN
+                ON WD_INPLAN.DCCODE = DM_DOCUMENT_D.DCCODE
+                    AND WD_INPLAN.DOCTYPE = DM_DOCUMENT_D.DOCTYPE
+                    AND WD_INPLAN.SLIPDT = DM_DOCUMENT_D.DELIVERYDATE
+                    AND WD_INPLAN.DOCNO = DM_DOCUMENT_D.DOCNO
+                    AND WD_INPLAN.DOCLINE = DM_DOCUMENT_D.DOCLINE
+                    AND WD_INPLAN.STORERKEY = #{gStorerkey}
+                    AND WD_INPLAN.DEL_YN = 'N'
+                    AND WD_INPLAN.SLIPDT LIKE #{yyyymm}||'%'
+                    AND WD_INPLAN.ORDERTYPE NOT IN ('18','RP')
+                LEFT OUTER JOIN MS_REPORTKEY SO_ETC_SKU
+                    ON SO_ETC_SKU.MASTERKEY = 'STO_ETC_SKU'
+                    AND SO_ETC_SKU.STORERKEY = #{gStorerkey}
+                    AND SO_ETC_SKU.YYYYMM = #{yyyymm}
+                    AND SO_ETC_SKU.DCCODE = DM_DOCUMENT_D.DCCODE
+                    AND SO_ETC_SKU.FILTERKEY = DM_DOCUMENT_D.SKU
+                    AND SO_ETC_SKU.DEL_YN = 'N'
+                LEFT OUTER JOIN MS_REPORTKEY SO_ETC_SKU_ADD
+                    ON SO_ETC_SKU_ADD.MASTERKEY = 'STO_ETC_SKU_ADD'
+                    AND SO_ETC_SKU_ADD.STORERKEY = #{gStorerkey}
+                    AND SO_ETC_SKU_ADD.YYYYMM = #{yyyymm}
+                    AND SO_ETC_SKU_ADD.DCCODE = DM_DOCUMENT_D.DCCODE
+                    AND SO_ETC_SKU_ADD.FILTERKEY = DM_DOCUMENT_D.SKU
+                    AND SO_ETC_SKU_ADD.DEL_YN = 'N'
+                LEFT OUTER JOIN MS_REPORTKEY SO_EX_SKU
+                    ON SO_EX_SKU.MASTERKEY = 'STO_EX_SKU'
+                    AND SO_EX_SKU.STORERKEY = #{gStorerkey}
+                    AND SO_EX_SKU.YYYYMM = #{yyyymm}
+                    AND SO_EX_SKU.DCCODE = DM_DOCUMENT_D.DCCODE
+                    AND SO_EX_SKU.FILTERKEY = DM_DOCUMENT_D.SKU
+                    AND SO_EX_SKU.DEL_YN = 'N'
+                LEFT OUTER JOIN MS_REPORTKEY SO_EX_CUST
+                    ON SO_EX_CUST.MASTERKEY = 'STO_EX_CUST'
+                    AND SO_EX_CUST.STORERKEY = #{gStorerkey}
+                    AND SO_EX_CUST.YYYYMM = #{yyyymm}
+                    AND SO_EX_CUST.DCCODE = 'STD'
+                    AND SO_EX_CUST.FILTERKEY = DM_DOCUMENT_H.TO_CUSTKEY
+                    AND SO_EX_CUST.DEL_YN = 'N'
+                WHERE 1=1
+                    AND DM_DOCUMENT_D.STORERKEY = #{gStorerkey}
+                    AND DM_DOCUMENT_D.DOCTYPE = 'WD'
+                    <if test='fixdccodeMulti != null and fixdccodeMulti !=""'>
+                    AND DM_DOCUMENT_D.ROUTE IN
+                       <foreach collection="fixdccodeMulti" item="code" open="(" close=")" separator=",">
+                         #{code}
+                       </foreach>
+                    </if>
+                    AND DM_DOCUMENT_D.DELIVERYDATE LIKE #{yyyymm}||'%'
+                    AND DM_DOCUMENT_D.DEL_YN = 'N'
+                    AND DM_DOCUMENT_D.CONFIRMQTY > 0
+                    AND DM_DOCUMENT_D.STATUS = '90'
+                    AND DM_DOCUMENT_D.CHANNEL = '3'
+                    AND  EXISTS (
+                            SELECT '1'
+                            FROM MS_REPORTKEY
+                            WHERE MS_REPORTKEY.MASTERKEY = 'STO_DC'
+                                AND MS_REPORTKEY.STORERKEY = #{gStorerkey}
+                                AND MS_REPORTKEY.YYYYMM = 'STD'
+                                AND MS_REPORTKEY.DEL_YN = 'N'
+                                AND MS_REPORTKEY.FILTERKEY=DM_DOCUMENT_D.DCCODE
+                    )
+                GROUP BY WD_INPLAN.SLIPDT, DM_DOCUMENT_D.ROUTE, DM_DOCUMENT_D.DCCODE, DM_DOCUMENT_D.CHANNEL
+            ) T
+            UNION ALL
+            SELECT
+                TT.YYYYMMDD AS YYYYMMDD
+                ,TT.DCCODE AS DCCODE
+                ,TT.TO_CUSTKEY AS TO_CUSTKEY
+                ,TT.CHANNEL AS CHANNEL
+                ,MAX(TT.CONFIRMWEIGHT) AS CONFIRMWEIGHT
+                ,MAX(TT.ETC_CONFIRMWEIGHT)
+                ,MAX(TT.ETC_CONFIRMWEIGHT_ADD)
+                ,MAX(TT.DC_WD_CONFIRMWEIGHT)
+                ,MAX(TT.DC_WD_JEJU_CONFIRMWEIGHT)
+                ,MAX(TT.EX_SKU_CONFIRMWEIGHT)
+                ,MAX(TT.EX_CUST_CONFIRMWEIGHT)
+            FROM(
+                SELECT <!-- 센터총량출고 CJL-->
+                    T.YYYYMMDD AS YYYYMMDD
+                    ,T.DCCODE AS DCCODE
+                    ,T.TO_CUSTKEY AS TO_CUSTKEY
+                    ,T.CHANNEL AS CHANNEL
+                    ,T.CONFIRMWEIGHT AS CONFIRMWEIGHT
+                    ,NVL(T.ETC_CONFIRMWEIGHT,0) AS ETC_CONFIRMWEIGHT
+                    ,NVL(T.ETC_CONFIRMWEIGHT_ADD,0) AS ETC_CONFIRMWEIGHT_ADD
+                    ,NVL(T.DC_WD_CONFIRMWEIGHT,0) AS DC_WD_CONFIRMWEIGHT
+                    ,NVL(T.DC_WD_JEJU_CONFIRMWEIGHT,0) AS DC_WD_JEJU_CONFIRMWEIGHT
+                    ,NVL(T.EX_SKU_CONFIRMWEIGHT,0) AS EX_SKU_CONFIRMWEIGHT
+                    ,NVL(T.EX_CUST_CONFIRMWEIGHT,0) AS EX_CUST_CONFIRMWEIGHT
+                FROM (
+                    SELECT /*+
+                        leading(dm_document_H dm_document_D WD_INPLAN )
+                    */
+                        WD_INPLAN.SLIPDT AS YYYYMMDD
+                        ,DM_DOCUMENT_D.DCCODE AS DCCODE
+                        ,'' AS TO_CUSTKEY
+                        ,DM_DOCUMENT_D.CHANNEL AS CHANNEL
+                        ,0 AS CONFIRMWEIGHT
+                        ,0 AS ETC_CONFIRMWEIGHT
+                        ,0 AS ETC_CONFIRMWEIGHT_ADD
+                        ,ROUND(SUM((SELECT TRUNC(FN_CONV_UOM(WD_INPLAN.STORERKEY,WD_INPLAN.SKU,WD_INPLAN.UOM,'KG',WD_INPLAN.CONFIRMQTY),2) FROM DUAL))) AS DC_WD_CONFIRMWEIGHT
+                        ,0 AS DC_WD_JEJU_CONFIRMWEIGHT
+                        ,0 AS EX_SKU_CONFIRMWEIGHT
+                        ,0 AS EX_CUST_CONFIRMWEIGHT
+                    FROM DM_DOCUMENT_D
+                    JOIN DM_DOCUMENT_H
+                    ON DM_DOCUMENT_D.DCCODE = DM_DOCUMENT_H.DCCODE
+                        AND DM_DOCUMENT_D.DOCTYPE = DM_DOCUMENT_H.DOCTYPE
+                        AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+                        AND DM_DOCUMENT_D.DOCNO = DM_DOCUMENT_H.DOCNO
+                        AND DM_DOCUMENT_H.DOCTYPE = 'WD'
+                        AND DM_DOCUMENT_H.WORKPROCESSCODE <![CDATA[<>]]> 'STO'
+                        AND NVL(DM_DOCUMENT_H.IF_SEND_TYPE, 'SO') <![CDATA[<>]]> 'STODC'
+                    JOIN WD_INPLAN
+                    ON WD_INPLAN.DCCODE = DM_DOCUMENT_D.DCCODE
+                        AND WD_INPLAN.DOCTYPE = DM_DOCUMENT_D.DOCTYPE
+                        AND WD_INPLAN.SLIPDT = DM_DOCUMENT_D.DELIVERYDATE
+                        AND WD_INPLAN.DOCNO = DM_DOCUMENT_D.DOCNO
+                        AND WD_INPLAN.DOCLINE = DM_DOCUMENT_D.DOCLINE
+                        AND WD_INPLAN.STORERKEY = #{gStorerkey}
+                        AND WD_INPLAN.DEL_YN = 'N'
+                        AND WD_INPLAN.SLIPDT LIKE #{yyyymm}||'%'
+                        AND WD_INPLAN.ORDERTYPE NOT IN ('18','RP')
+                    WHERE 1=1
+                        AND DM_DOCUMENT_D.STORERKEY = #{gStorerkey}
+                        AND DM_DOCUMENT_D.DOCTYPE = 'WD'
+                        AND DM_DOCUMENT_D.DELIVERYDATE LIKE #{yyyymm}||'%'
+                        AND DM_DOCUMENT_D.DEL_YN = 'N'
+                        AND DM_DOCUMENT_D.CONFIRMQTY > 0
+                        AND DM_DOCUMENT_D.STATUS = '90'
+                        <if test='fixdccodeMulti != null and fixdccodeMulti !=""'>
+                        AND DM_DOCUMENT_D.DCCODE IN
+                           <foreach collection="fixdccodeMulti" item="code" open="(" close=")" separator=",">
+                             #{code}
+                           </foreach>
+                        </if>
+                        AND  EXISTS (
+                                SELECT '1'
+                                FROM MS_REPORTKEY
+                                WHERE MS_REPORTKEY.MASTERKEY = 'STO_DC_WD'
+                                    AND MS_REPORTKEY.STORERKEY = #{gStorerkey}
+                                    AND MS_REPORTKEY.YYYYMM = #{yyyymm}
+                                    AND MS_REPORTKEY.DEL_YN = 'N'
+                                    AND MS_REPORTKEY.DCCODE=DM_DOCUMENT_H.DCCODE
+                                    AND MS_REPORTKEY.FILTERKEY=DM_DOCUMENT_H.TO_CUSTKEY
+                        )
+                    GROUP BY WD_INPLAN.SLIPDT, DM_DOCUMENT_D.ROUTE, DM_DOCUMENT_D.DCCODE, DM_DOCUMENT_D.CHANNEL
+                ) T
+                UNION ALL
+                SELECT
+                    T.YYYYMMDD AS YYYYMMDD
+                    ,T.DCCODE AS DCCODE
+                    ,T.TO_CUSTKEY AS TO_CUSTKEY
+                    ,T.CHANNEL AS CHANNEL
+                    ,T.CONFIRMWEIGHT AS CONFIRMWEIGHT
+                    ,NVL(T.ETC_CONFIRMWEIGHT,0) AS ETC_CONFIRMWEIGHT
+                    ,NVL(T.ETC_CONFIRMWEIGHT_ADD,0) AS ETC_CONFIRMWEIGHT_ADD
+                    ,NVL(T.DC_WD_CONFIRMWEIGHT,0) AS DC_WD_CONFIRMWEIGHT
+                    ,NVL(T.DC_WD_JEJU_CONFIRMWEIGHT,0) AS DC_WD_JEJU_CONFIRMWEIGHT
+                    ,NVL(T.EX_SKU_CONFIRMWEIGHT,0) AS EX_SKU_CONFIRMWEIGHT
+                    ,NVL(T.EX_CUST_CONFIRMWEIGHT,0) AS EX_CUST_CONFIRMWEIGHT
+                FROM (<!-- 센터총량출고 제주 -->
+                    SELECT /*+
+                        leading(dm_document_H dm_document_D WD_INPLAN )
+                    */
+                        WD_INPLAN.SLIPDT AS YYYYMMDD
+                        ,DM_DOCUMENT_D.DCCODE AS DCCODE
+                        ,'' AS TO_CUSTKEY
+                        ,DM_DOCUMENT_D.CHANNEL AS CHANNEL
+                        ,0 AS CONFIRMWEIGHT
+                        ,0 AS ETC_CONFIRMWEIGHT
+                        ,0 AS ETC_CONFIRMWEIGHT_ADD
+                        ,0 AS DC_WD_CONFIRMWEIGHT
+                        ,ROUND(SUM((SELECT TRUNC(FN_CONV_UOM(WD_INPLAN.STORERKEY,WD_INPLAN.SKU,WD_INPLAN.UOM,'KG',WD_INPLAN.CONFIRMQTY),2) FROM DUAL))) AS DC_WD_JEJU_CONFIRMWEIGHT
+                        ,0 AS EX_SKU_CONFIRMWEIGHT
+                        ,0 AS EX_CUST_CONFIRMWEIGHT
+                    FROM DM_DOCUMENT_D
+                    JOIN DM_DOCUMENT_H
+                    ON DM_DOCUMENT_D.DCCODE = DM_DOCUMENT_H.DCCODE
+                        AND DM_DOCUMENT_D.DOCTYPE = DM_DOCUMENT_H.DOCTYPE
+                        AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+                        AND DM_DOCUMENT_D.DOCNO = DM_DOCUMENT_H.DOCNO
+                        AND DM_DOCUMENT_H.DOCTYPE = 'WD'
+                        AND DM_DOCUMENT_H.WORKPROCESSCODE <![CDATA[<>]]> 'STO'
+                        AND NVL(DM_DOCUMENT_H.IF_SEND_TYPE, 'SO') <![CDATA[<>]]> 'STODC'
+                    JOIN WD_INPLAN
+                    ON WD_INPLAN.DCCODE = DM_DOCUMENT_D.DCCODE
+                        AND WD_INPLAN.DOCTYPE = DM_DOCUMENT_D.DOCTYPE
+                        AND WD_INPLAN.SLIPDT = DM_DOCUMENT_D.DELIVERYDATE
+                        AND WD_INPLAN.DOCNO = DM_DOCUMENT_D.DOCNO
+                        AND WD_INPLAN.DOCLINE = DM_DOCUMENT_D.DOCLINE
+                        AND WD_INPLAN.STORERKEY = #{gStorerkey}
+                        AND WD_INPLAN.DEL_YN = 'N'
+                        AND WD_INPLAN.SLIPDT LIKE #{yyyymm}||'%'
+                        AND WD_INPLAN.ORDERTYPE NOT IN ('18','RP')
+                    WHERE 1=1
+                        AND DM_DOCUMENT_D.STORERKEY = #{gStorerkey}
+                        AND DM_DOCUMENT_D.DOCTYPE = 'WD'
+                        AND DM_DOCUMENT_D.DELIVERYDATE LIKE #{yyyymm}||'%'
+                        AND DM_DOCUMENT_D.DEL_YN = 'N'
+                        AND DM_DOCUMENT_D.CONFIRMQTY > 0
+                        AND DM_DOCUMENT_D.STATUS = '90'
+                        <if test='fixdccodeMulti != null and fixdccodeMulti !=""'>
+                        AND DM_DOCUMENT_D.DCCODE IN
+                           <foreach collection="fixdccodeMulti" item="code" open="(" close=")" separator=",">
+                             #{code}
+                           </foreach>
+                        </if>
+                        AND  EXISTS (
+                                SELECT '1'
+                                FROM MS_REPORTKEY
+                                WHERE MS_REPORTKEY.MASTERKEY = 'STO_DC_WD_JEJU'
+                                    AND MS_REPORTKEY.STORERKEY = #{gStorerkey}
+                                    AND MS_REPORTKEY.YYYYMM = #{yyyymm}
+                                    AND MS_REPORTKEY.DEL_YN = 'N'
+                                    AND MS_REPORTKEY.DCCODE=DM_DOCUMENT_H.DCCODE
+                                    AND MS_REPORTKEY.FILTERKEY=DM_DOCUMENT_H.TO_CUSTKEY
+                        )
+                    GROUP BY WD_INPLAN.SLIPDT, DM_DOCUMENT_D.ROUTE, DM_DOCUMENT_D.DCCODE, DM_DOCUMENT_D.CHANNEL
+                ) T
+            ) TT
+            GROUP BY TT.YYYYMMDD, TT.DCCODE, TT.TO_CUSTKEY, TT.CHANNEL
+        ) X
+    </insert>
+
+    <!-- 동기화 분류 -->
+    <insert id="insertBatchSo">
+        INSERT INTO LOGISONE.IB_DC_FLOW_SUM(
+            FLOW_TYPE
+            , YYYYMMDD
+            , FROM_DCCODE
+            , TO_DCCODE
+            , STORAGETYPE
+            , FLOW_QTY
+            , EX_ITEM_RICE_QTY
+            , EX_ITEM_KIMCHI_QTY
+            , EX_QTY1
+            , EX_QTY2
+            , EX_CUST_QTY
+            , EXPT_CUST_QTY
+            , EX_ITEM_ICE_QTY
+            , EX_PO_CUST_QTY
+            , EXPT_ITEM_QTY
+            , ADDDATE
+            , EDITDATE
+            , ADDWHO
+            , EDITWHO
+        )
+        SELECT /* [ibSoWeightService.sqlx][ibSoWeightService.getDataHeaderlist][집계내역조회] */
+                  #{flowType} AS FLOW_TYPE
+                  ,T.YYYYMMDD
+      		      ,T.DCCODE AS FROM_DCCODE
+      		      ,T.DCCODE AS TO_DCCODE
+      		      ,T.CHANNEL AS STORAGETYPE
+      		      ,T.CONFIRMWEIGHT as FLOW_QTY
+      			  ,nvl(T.ETC_CONFIRMWEIGHT,0) as EX_ITEM_RICE_QTY
+      		      ,nvl(T.ETC_CONFIRMWEIGHT_ADD,0) as EX_ITEM_KIMCHI_QTY
+      		      ,nvl(T.ETC_SKU_ETC_CONFIRMWEIGHT,0) as EX_QTY1
+      		      ,nvl(T.ETC_CUST_GUN_CONFIRMWEIGHT,0) as EX_QTY2
+      		      ,nvl(T.ETC_CUST_ETC_CONFIRMWEIGHT,0) as EX_CUST_QTY
+      		      ,nvl(T.EX_CUST_CONFIRMWEIGHT,0) as EXPT_CUST_QTY
+      		      ,nvl(T.ETC_SKU_ICE_CONFIRMWEIGHT,0) as EX_ITEM_ICE_QTY
+      		      ,nvl(T.ETC_PARTNER_CONFIRMWEIGHT,0) as EX_PO_CUST_QTY
+      		      ,nvl(T.EX_SKU_CONFIRMWEIGHT,0) as EXPT_ITEM_QTY
+                  ,SYSDATE AS ADDDATE
+                  ,SYSDATE AS EDITDATE
+                  ,#{editwho} AS ADDWHO
+                  ,#{editwho} AS EDITWHO
+      		FROM  ( SELECT /*+
+      		                  LEADING(DM_DOCUMENT_H DM_DOCUMENT_D WD_INPLAN )
+							  FULL(WD_INPLAN) FULL(DM_DOCUMENT_D) FULL(DM_DOCUMENT_H)
+							  USE_HASH(DM_DOCUMENT_D) USE_HASH(WD_INPLAN)
+      		                */
+      		            WD_INPLAN.SLIPDT AS YYYYMMDD
+      		            ,DM_DOCUMENT_D.DCCODE
+      		            ,DM_DOCUMENT_D.CHANNEL
+      		            ,round(SUM((select trunc(FN_CONV_UOM(WD_INPLAN.STORERKEY,WD_INPLAN.SKU,WD_INPLAN.UOM,'KG',WD_INPLAN.CONFIRMQTY),2) from dual))) AS CONFIRMWEIGHT
+      		            ,round(SUM(CASE WHEN SO_ETC_SKU.FILTERKEY IS NOT NULL THEN (select trunc(FN_CONV_UOM(WD_INPLAN.STORERKEY,WD_INPLAN.SKU,WD_INPLAN.UOM,'KG',WD_INPLAN.CONFIRMQTY),2) from dual) END )) AS ETC_CONFIRMWEIGHT
+                        ,round(SUM(CASE WHEN SO_ETC_SKU_ADD.FILTERKEY IS NOT NULL THEN (select trunc(FN_CONV_UOM(WD_INPLAN.STORERKEY,WD_INPLAN.SKU,WD_INPLAN.UOM,'KG',WD_INPLAN.CONFIRMQTY),2) from dual) END )) AS ETC_CONFIRMWEIGHT_ADD
+                        ,round(SUM(CASE WHEN SO_EX_SKU.FILTERKEY IS NOT NULL THEN (select trunc(FN_CONV_UOM(WD_INPLAN.STORERKEY,WD_INPLAN.SKU,WD_INPLAN.UOM,'KG',WD_INPLAN.CONFIRMQTY),2) from dual) END )) AS EX_SKU_CONFIRMWEIGHT
+                        ,round(SUM(CASE WHEN SO_EX_CUST.FILTERKEY IS NOT NULL THEN (select trunc(FN_CONV_UOM(WD_INPLAN.STORERKEY,WD_INPLAN.SKU,WD_INPLAN.UOM,'KG',WD_INPLAN.CONFIRMQTY),2) from dual) END )) AS EX_CUST_CONFIRMWEIGHT
+                        ,round(SUM(CASE WHEN SO_ETC_SKU_ETC.FILTERKEY IS NOT NULL THEN (select trunc(FN_CONV_UOM(WD_INPLAN.STORERKEY,WD_INPLAN.SKU,WD_INPLAN.UOM,'KG',WD_INPLAN.CONFIRMQTY),2) from dual) END )) AS ETC_SKU_ETC_CONFIRMWEIGHT
+                        ,round(SUM(CASE WHEN SO_ETC_CUST_GUN.FILTERKEY IS NOT NULL THEN (select trunc(FN_CONV_UOM(WD_INPLAN.STORERKEY,WD_INPLAN.SKU,WD_INPLAN.UOM,'KG',WD_INPLAN.CONFIRMQTY),2) from dual) END )) AS ETC_CUST_GUN_CONFIRMWEIGHT
+                        ,round(SUM(CASE WHEN SO_ETC_CUST_ETC.FILTERKEY IS NOT NULL THEN (select trunc(FN_CONV_UOM(WD_INPLAN.STORERKEY,WD_INPLAN.SKU,WD_INPLAN.UOM,'KG',WD_INPLAN.CONFIRMQTY),2) from dual) END )) AS ETC_CUST_ETC_CONFIRMWEIGHT
+                        ,round(SUM(CASE WHEN SO_ETC_SKU_ICE.FILTERKEY IS NOT NULL THEN (select trunc(WD_INPLAN.CONFIRMQTY * DM_DOCUMENT_D.BUNMO / DM_DOCUMENT_D.BUNJA, 2) from dual) END )) AS ETC_SKU_ICE_CONFIRMWEIGHT
+                        ,round(SUM(CASE WHEN SO_ETC_PARTNER.FILTERKEY IS NOT NULL THEN (select trunc(FN_CONV_UOM(WD_INPLAN.STORERKEY,WD_INPLAN.SKU,WD_INPLAN.UOM,'KG',WD_INPLAN.CONFIRMQTY),2) from dual) END )) AS ETC_PARTNER_CONFIRMWEIGHT
+      		        FROM DM_DOCUMENT_D
+      		        JOIN DM_DOCUMENT_H
+                    ON     DM_DOCUMENT_D.DCCODE = DM_DOCUMENT_H.DCCODE
+                                        AND DM_DOCUMENT_D.DOCTYPE = DM_DOCUMENT_H.DOCTYPE
+                                        AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+                                        AND DM_DOCUMENT_D.DOCNO = DM_DOCUMENT_H.DOCNO
+      		                            AND    DM_DOCUMENT_H.DOCTYPE        = 'WD'
+      		                            AND    DM_DOCUMENT_H.WORKPROCESSCODE <![CDATA[<>]]> 'STO'
+      		                            AND    NVL(DM_DOCUMENT_H.IF_SEND_TYPE, 'SO')    <![CDATA[<>]]> 'STODC'
+      			    JOIN MS_CUST
+                    ON     MS_CUST.STORERKEY = DM_DOCUMENT_H.STORERKEY
+      					            AND    MS_CUST.CUSTKEY   = DM_DOCUMENT_H.TO_CUSTKEY
+      					            AND    MS_CUST.CUSTTYPE  = DM_DOCUMENT_H.TO_CUSTTYPE
+      		        JOIN WD_INPLAN
+                    ON     WD_INPLAN.DCCODE = DM_DOCUMENT_D.DCCODE
+                                    AND WD_INPLAN.DOCTYPE = DM_DOCUMENT_D.DOCTYPE
+                                    AND WD_INPLAN.SLIPDT = DM_DOCUMENT_D.DELIVERYDATE
+                                    AND WD_INPLAN.DOCNO = DM_DOCUMENT_D.DOCNO
+                                    AND WD_INPLAN.DOCLINE = DM_DOCUMENT_D.DOCLINE
+      		                        AND    WD_INPLAN.STORERKEY  = #{gStorerkey}
+      		                        AND    WD_INPLAN.DEL_YN     = 'N'
+                                    AND WD_INPLAN.SLIPDT LIKE #{yyyymm}||'%'
+      		                        AND    WD_INPLAN.ordertype not in  ('18','RP')
+      		         LEFT OUTER JOIN MS_REPORTKEY SO_ETC_SKU
+                         ON  SO_ETC_SKU.MASTERKEY = 'SO_ETC_SKU'
+                         AND SO_ETC_SKU.STORERKEY = #{gStorerkey}
+                         AND SO_ETC_SKU.YYYYMM    = #{yyyymm}
+                         AND SO_ETC_SKU.DCCODE    = DM_DOCUMENT_D.DCCODE
+                         AND SO_ETC_SKU.FILTERKEY = DM_DOCUMENT_D.SKU
+                         AND SO_ETC_SKU.DEL_YN    = 'N'
+      		         LEFT OUTER JOIN MS_REPORTKEY SO_ETC_SKU_ADD
+                         ON  SO_ETC_SKU_ADD.MASTERKEY = 'SO_EX_SKU_ADD'
+                         AND SO_ETC_SKU_ADD.STORERKEY = #{gStorerkey}
+                         AND SO_ETC_SKU_ADD.YYYYMM    = #{yyyymm}
+                         AND SO_ETC_SKU_ADD.DCCODE    = DM_DOCUMENT_D.DCCODE
+                         AND SO_ETC_SKU_ADD.FILTERKEY = DM_DOCUMENT_D.SKU
+                         AND SO_ETC_SKU_ADD.DEL_YN    = 'N'
+      		         LEFT OUTER JOIN MS_REPORTKEY SO_EX_SKU
+                         ON  SO_EX_SKU.MASTERKEY = 'SO_EX_SKU'
+                         AND SO_EX_SKU.STORERKEY = #{gStorerkey}
+                         AND SO_EX_SKU.YYYYMM    = #{yyyymm}
+                         AND SO_EX_SKU.DCCODE    = DM_DOCUMENT_D.DCCODE
+                         AND SO_EX_SKU.FILTERKEY = DM_DOCUMENT_D.SKU
+                         AND SO_EX_SKU.DEL_YN    = 'N'
+      		         LEFT OUTER JOIN MS_REPORTKEY SO_EX_CUST
+                         ON  SO_EX_CUST.MASTERKEY = 'SO_EX_CUST'
+                         AND SO_EX_CUST.STORERKEY = #{gStorerkey}
+                         AND SO_EX_CUST.YYYYMM    = #{yyyymm}
+                         AND SO_EX_CUST.DCCODE    = 'STD'
+        <!--2025-12-07 BILLTOCUSTKEY > CUSTKEY 변경 군납 데이터 보정 이유-->
+<!--                         AND SO_EX_CUST.FILTERKEY = NVL(MS_CUST.BILLTOCUSTKEY,DM_DOCUMENT_H.TO_CUSTKEY )-->
+                         AND SO_EX_CUST.FILTERKEY = DM_DOCUMENT_H.TO_CUSTKEY
+                         AND SO_EX_CUST.DEL_YN    = 'N'
+      		         LEFT OUTER JOIN MS_REPORTKEY SO_ETC_SKU_ETC
+                         ON  SO_ETC_SKU_ETC.MASTERKEY = 'SO_ETC_SKU_ETC'
+                         AND SO_ETC_SKU_ETC.STORERKEY = #{gStorerkey}
+                         AND SO_ETC_SKU_ETC.YYYYMM    = #{yyyymm}
+                         AND SO_EX_SKU.DCCODE    = DM_DOCUMENT_D.DCCODE
+                         AND SO_EX_SKU.FILTERKEY = DM_DOCUMENT_D.SKU
+                         AND SO_ETC_SKU_ETC.DEL_YN    = 'N'
+      		         LEFT OUTER JOIN MS_REPORTKEY SO_ETC_CUST_GUN
+                         ON  SO_ETC_CUST_GUN.MASTERKEY = 'SO_ETC_CUST_GUN'
+                         AND SO_ETC_CUST_GUN.STORERKEY = #{gStorerkey}
+                         AND SO_ETC_CUST_GUN.YYYYMM    = #{yyyymm}
+                         AND SO_ETC_CUST_GUN.DCCODE    = 'STD'
+        <!--2025-12-07 BILLTOCUSTKEY > CUSTKEY 변경 군납 데이터 보정 이유-->
+<!--                         AND SO_ETC_CUST_GUN.FILTERKEY = NVL(MS_CUST.BILLTOCUSTKEY,DM_DOCUMENT_H.TO_CUSTKEY )-->
+                         AND SO_ETC_CUST_GUN.FILTERKEY = DM_DOCUMENT_H.TO_CUSTKEY
+                         AND SO_ETC_CUST_GUN.DEL_YN    = 'N'
+      		         LEFT OUTER JOIN MS_REPORTKEY SO_ETC_CUST_ETC
+                         ON  SO_ETC_CUST_ETC.MASTERKEY = 'SO_ETC_CUST_ETC'
+                         AND SO_ETC_CUST_ETC.STORERKEY = #{gStorerkey}
+                         AND SO_ETC_CUST_ETC.YYYYMM    = #{yyyymm}
+                         AND SO_ETC_CUST_ETC.DCCODE    = 'STD'
+        <!--2025-12-07 BILLTOCUSTKEY > CUSTKEY 변경 군납 데이터 보정 이유-->
+<!--                         AND SO_ETC_CUST_ETC.FILTERKEY = NVL(MS_CUST.BILLTOCUSTKEY,DM_DOCUMENT_H.TO_CUSTKEY )-->
+                         AND SO_ETC_CUST_ETC.FILTERKEY = DM_DOCUMENT_H.TO_CUSTKEY
+                         AND SO_ETC_CUST_ETC.DEL_YN    = 'N'
+      		         LEFT OUTER JOIN MS_REPORTKEY SO_ETC_SKU_ICE
+                         ON  SO_ETC_SKU_ICE.MASTERKEY = 'SO_ETC_SKU_ICE'
+                         AND SO_ETC_SKU_ICE.STORERKEY = #{gStorerkey}
+                         AND SO_ETC_SKU_ICE.YYYYMM    = #{yyyymm}
+                         AND SO_ETC_SKU_ICE.DCCODE    = DM_DOCUMENT_D.DCCODE
+                         AND SO_ETC_SKU_ICE.FILTERKEY = DM_DOCUMENT_D.SKU
+                         AND SO_ETC_SKU_ICE.DEL_YN    = 'N'
+      		         LEFT OUTER JOIN MS_REPORTKEY SO_ETC_PARTNER
+                         ON  SO_ETC_PARTNER.MASTERKEY = 'SO_ETC_PARTNER'
+                         AND SO_ETC_PARTNER.STORERKEY = #{gStorerkey}
+                         AND SO_ETC_PARTNER.YYYYMM    = #{yyyymm}
+                         AND SO_ETC_PARTNER.DCCODE    = 'STD'
+                         AND SO_ETC_PARTNER.FILTERKEY = DM_DOCUMENT_H.FROM_CUSTKEY
+                         AND SO_ETC_PARTNER.DEL_YN    = 'N'
+      		        WHERE 1=1
+      		          AND    DM_DOCUMENT_D.STORERKEY      = #{gStorerkey}
+      		          AND    DM_DOCUMENT_D.DOCTYPE        = 'WD'
+                      AND DM_DOCUMENT_D.DELIVERYDATE LIKE #{yyyymm}||'%'
+      		          AND    DM_DOCUMENT_D.DEL_YN         = 'N'
+      		          AND    DM_DOCUMENT_D.CONFIRMQTY     > 0
+      		          AND    DM_DOCUMENT_D.STATUS         = '90'
+                      <if test='fixdccodeMulti != null and fixdccodeMulti !=""'>
+                      AND DM_DOCUMENT_D.DCCODE IN
+                       <foreach collection="fixdccodeMulti" item="code" open="(" close=")" separator=",">
+                         #{code}
+                       </foreach>
+                      </if>
+                        AND    EXISTS (
+                          SELECT 1
+                            FROM   MS_REPORTKEY
+                            WHERE  MS_REPORTKEY.MASTERKEY = 'SO_DC'
+                            AND    MS_REPORTKEY.STORERKEY = #{gStorerkey}
+                            AND    MS_REPORTKEY.YYYYMM    = 'STD'
+                            AND    MS_REPORTKEY.DEL_YN    = 'N'
+                            AND    MS_REPORTKEY.DCCODE=DM_DOCUMENT_D.DCCODE
+                            AND    MS_REPORTKEY.FILTERKEY=DM_DOCUMENT_D.CHANNEL
+                         )
+      		        GROUP BY WD_INPLAN.SLIPDT, DM_DOCUMENT_D.DCCODE
+      		                ,DM_DOCUMENT_D.CHANNEL ) T
+    </insert>
+
+    <!-- 동기화 입고 -->
+    <insert id="insertBatchDp">
+        INSERT INTO LOGISONE.IB_DC_FLOW_SUM(
+            FLOW_TYPE
+            , YYYYMMDD
+            , FROM_DCCODE
+            , TO_DCCODE
+            , STORAGETYPE
+            , FLOW_QTY
+            , EX_ITEM_RICE_QTY
+            , EX_ITEM_KIMCHI_QTY
+            , EX_QTY1
+            , EX_QTY2
+            , EX_CUST_QTY
+            , EXPT_CUST_QTY
+            , EX_ITEM_ICE_QTY
+            , EX_PO_CUST_QTY
+            , EXPT_ITEM_QTY
+            , ADDDATE
+            , EDITDATE
+            , ADDWHO
+            , EDITWHO
+        )
+        SELECT /* [ibDpWeightService.sqlx][ibDpWeightService.getDataHeaderlist][집계내역조회] */
+              #{flowType} AS FLOW_TYPE
+       	      ,T.YYYYMMDD
+       	      ,T.DCCODE AS FROM_DCCODE
+              ,T.DCCODE AS TO_DCCODE
+       	      ,T.CHANNEL AS STORAGETYPE
+              ,nvl(T.CONFIRMWEIGHT, 0) AS FLOW_QTY
+              ,0 AS EX_ITEM_RICE_QTY
+       	      ,nvl(T.ETC_CONFIRMWEIGHT, 0) AS EX_ITEM_KIMCHI_QTY
+              ,0 AS EX_QTY1
+              ,0 AS EX_QTY2
+              ,0 AS EX_CUST_QTY
+       	      ,nvl(T.EX_PARTNER_CONFIRMWEIGHT, 0) AS EXPT_CUST_QTY
+              ,0 AS EX_ITEM_ICE_QTY
+              ,0 AS EX_PO_CUST_QTY
+       	      ,nvl(T.EX_SKU_CONFIRMWEIGHT, 0) AS EXPT_ITEM_QTY
+              ,SYSDATE AS ADDDATE
+              ,SYSDATE AS EDITDATE
+              ,#{editwho} AS ADDWHO
+              ,#{editwho} AS EDITWHO
+       	FROM  ( SELECT /*+
+							LEADING( DM_DOCUMENT_H DM_DOCUMENT_D DP_INPLAN )
+							FULL(DM_DOCUMENT_D) FULL(DM_DOCUMENT_H) FULL(DP_INPLAN)
+							USE_HASH(DM_DOCUMENT_D) USE_HASH(DP_INPLAN)
+   				        */
+   				      DP_INPLAN.SLIPDT AS YYYYMMDD
+   				      ,DM_DOCUMENT_D.DCCODE
+   				      ,DM_DOCUMENT_D.CHANNEL
+   				      ,(SELECT FN_CODEDESCR(#{gStorerkey},'PUTAWAYTYPE',DM_DOCUMENT_D.CHANNEL) FROM DUAL) AS CHANNEL_NAME
+   				      ,round(SUM((select FN_CONV_UOM(DP_INPLAN.STORERKEY,DP_INPLAN.SKU,DP_INPLAN.UOM,'KG',DP_INPLAN.CONFIRMQTY) from dual))) AS CONFIRMWEIGHT
+   				      ,round(SUM(CASE WHEN DP_EX_SKU_ADD.FILTERKEY IS NOT NULL THEN (select trunc(FN_CONV_UOM(DP_INPLAN.STORERKEY,DP_INPLAN.SKU,DP_INPLAN.UOM,'KG',DP_INPLAN.CONFIRMQTY),2) from dual) END )) AS ETC_CONFIRMWEIGHT
+   				      ,round(SUM(CASE WHEN DP_EX_SKU.FILTERKEY IS NOT NULL THEN (select trunc(FN_CONV_UOM(DP_INPLAN.STORERKEY,DP_INPLAN.SKU,DP_INPLAN.UOM,'KG',DP_INPLAN.CONFIRMQTY),2) from dual) END )) AS EX_SKU_CONFIRMWEIGHT
+   				      ,round(SUM(CASE WHEN DP_EX_VENDOR.FILTERKEY IS NOT NULL THEN (select trunc(FN_CONV_UOM(DP_INPLAN.STORERKEY,DP_INPLAN.SKU,DP_INPLAN.UOM,'KG',DP_INPLAN.CONFIRMQTY),2) from dual) END )) AS EX_PARTNER_CONFIRMWEIGHT
+   				FROM DM_DOCUMENT_D
+   				JOIN DM_DOCUMENT_H
+                ON     DM_DOCUMENT_D.DCCODE = DM_DOCUMENT_H.DCCODE
+                    AND DM_DOCUMENT_D.DOCTYPE = DM_DOCUMENT_H.DOCTYPE
+                    AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+                    AND DM_DOCUMENT_D.DOCNO = DM_DOCUMENT_H.DOCNO
+                    AND    DM_DOCUMENT_H.DOCTYPE        = 'DP'
+   				JOIN DP_INPLAN
+                ON     DP_INPLAN.DCCODE = DM_DOCUMENT_D.DCCODE
+                    AND DP_INPLAN.DOCTYPE = DM_DOCUMENT_D.DOCTYPE
+                    AND DP_INPLAN.SLIPDT = DM_DOCUMENT_D.DELIVERYDATE
+                    AND DP_INPLAN.DOCNO = DM_DOCUMENT_D.DOCNO
+                    AND DP_INPLAN.DOCLINE = DM_DOCUMENT_D.DOCLINE
+                    AND    DP_INPLAN.STORERKEY  =  #{gStorerkey}
+                    AND    DP_INPLAN.DEL_YN     =  'N'
+                    AND    DP_INPLAN.SLIPDT LIKE #{yyyymm}||'%'
+   				LEFT OUTER JOIN MS_REPORTKEY DP_EX_SKU_ADD
+                ON  DP_EX_SKU_ADD.MASTERKEY = 'DP_EX_SKU_ADD'
+                     AND DP_EX_SKU_ADD.STORERKEY = #{gStorerkey}
+                     AND DP_EX_SKU_ADD.YYYYMM    = #{yyyymm}
+                     AND DP_EX_SKU_ADD.DCCODE    = DM_DOCUMENT_D.DCCODE
+                     AND DP_EX_SKU_ADD.FILTERKEY = DM_DOCUMENT_D.SKU
+                     AND DP_EX_SKU_ADD.DEL_YN    = 'N'
+   				  LEFT OUTER JOIN MS_REPORTKEY DP_EX_SKU
+                    ON  DP_EX_SKU.MASTERKEY = 'DP_EX_SKU'
+                     AND DP_EX_SKU.STORERKEY = #{gStorerkey}
+                     AND DP_EX_SKU.YYYYMM    = #{yyyymm}
+                     AND DP_EX_SKU.DCCODE    = DM_DOCUMENT_D.DCCODE
+                     AND DP_EX_SKU.FILTERKEY = DM_DOCUMENT_D.SKU
+                     AND DP_EX_SKU.DEL_YN    = 'N'
+   				  LEFT OUTER JOIN MS_REPORTKEY DP_EX_VENDOR
+                    ON  DP_EX_VENDOR.MASTERKEY = 'DP_EX_VENDOR'
+                     AND DP_EX_VENDOR.STORERKEY = #{gStorerkey}
+                     AND DP_EX_VENDOR.YYYYMM    = #{yyyymm}
+                     AND DP_EX_VENDOR.DCCODE    = 'STD'
+                     AND DP_EX_VENDOR.FILTERKEY = DM_DOCUMENT_H.FROM_CUSTKEY
+                     AND DP_EX_VENDOR.DEL_YN    = 'N'
+   				WHERE 1=1
+   				  AND    DM_DOCUMENT_D.STORERKEY      = #{gStorerkey}
+   				  AND    DM_DOCUMENT_D.DOCTYPE        = 'DP'
+                  AND DM_DOCUMENT_D.DELIVERYDATE LIKE #{yyyymm}||'%'
+   				  AND    DM_DOCUMENT_D.DEL_YN         = 'N'
+   				  AND    DM_DOCUMENT_D.CONFIRMQTY     > 0
+   				  AND    DM_DOCUMENT_D.STATUS         = '90'
+                  <if test='fixdccodeMulti != null and fixdccodeMulti !=""'>
+                  AND DM_DOCUMENT_D.DCCODE IN
+                   <foreach collection="fixdccodeMulti" item="code" open="(" close=")" separator=",">
+                     #{code}
+                   </foreach>
+                  </if>
+                AND    EXISTS (
+                  SELECT 1
+                    FROM   MS_REPORTKEY
+                    WHERE  MS_REPORTKEY.MASTERKEY = 'DP_DC'
+                    AND    MS_REPORTKEY.STORERKEY = #{gStorerkey}
+                    AND    MS_REPORTKEY.YYYYMM    = 'STD'
+                    AND    MS_REPORTKEY.DEL_YN    = 'N'
+                    AND    MS_REPORTKEY.DCCODE=DM_DOCUMENT_D.DCCODE
+                    AND    MS_REPORTKEY.FILTERKEY=DM_DOCUMENT_D.CHANNEL
+                 )
+   				GROUP BY DP_INPLAN.SLIPDT, DM_DOCUMENT_D.DCCODE
+   				        ,DM_DOCUMENT_D.CHANNEL) T
+    </insert>
+
+    <select id="getDccode" resultType="cjfw.wms.ib.dto.IbStoWeightResDto">
+        SELECT DCNAME AS DCNAME
+        FROM CM_DC
+        WHERE CM_DC.DCCODE = #{dccode}
+    </select>
+
+    <select id="getChannel" resultType="cjfw.wms.ib.dto.IbStoWeightResDto">
+        SELECT BASECODE AS FILTERKEY
+        FROM CM_CODE_STORER
+        WHERE CM_CODE_STORER.STORERKEY = #{storerkey}
+        AND CM_CODE_STORER.CODELIST  = 'PUTAWAYTYPE'
+        AND CM_CODE_STORER.BASECODE   = #{filterkey}
+    </select>
+
+    <select id="getSku" resultType="cjfw.wms.ib.dto.IbStoWeightResDto">
+        SELECT DESCRIPTION AS SKUNAME
+        FROM MS_SKU
+        WHERE MS_SKU.STORERKEY             = #{storerkey}
+        AND MS_SKU.SKU                   =  #{filterkey}
+<!--        AND MS_SKU.DEL_YN                =  'N'-->
+    </select>
+
+    <select id="getCust" resultType="cjfw.wms.ib.dto.IbStoWeightResDto">
+        SELECT MS_CUST.DESCRIPTION  AS CUSTNAME
+        FROM MS_CUST
+        WHERE MS_CUST.STORERKEY   =  #{storerkey}
+        AND MS_CUST.CUSTKEY = #{filterkey}
+        AND MS_CUST.CUSTTYPE = 'C'
+    </select>
+
+    <select id="getPartner" resultType="cjfw.wms.ib.dto.IbStoWeightResDto">
+        SELECT MS_CUST.DESCRIPTION  AS PARTNERNAME
+        FROM MS_CUST
+        WHERE MS_CUST.STORERKEY   =  #{storerkey}
+        AND MS_CUST.CUSTKEY = #{filterkey}
+        AND MS_CUST.CUSTTYPE = 'P'
+    </select>
+</mapper>

@@ -1,0 +1,1467 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+ * Copyright 2025. CJ OliveNetworks Co. all rights reserved.
+ *
+ * @author      : KimDongHan (liop0123@cj.net)
+ * @date        : 2025.08.21
+ * @description : 모니터링 > 물동 > 물동마감 진행 현황 SQL
+ * @issues      :
+-->
+
+<mapper namespace="kpCloseService">
+
+	<select id="getMasterList" resultType="cjfw.wms.kp.dto.KpCloseResDto">
+		WITH T_DAILY AS ( SELECT /*+  */ 
+		                         DCCODE
+		                       , COUNT(DISTINCT SKU) AS DAILY_ST 
+		                    FROM ST_STOCK 
+		                   WHERE 1=1
+						     AND ST_STOCK.STORERKEY = #{gStorerkey} 
+						     AND ST_STOCK.LOC       = 'DAILYCROSS'
+							<if test="dccode != null and dccode != ''">
+		                     AND ST_STOCK.DCCODE    = #{dccode}
+							</if>
+							 AND EXISTS ( SELECT 1
+		                                    FROM CM_LOT 
+		                                   WHERE CM_LOT.STORERKEY = ST_STOCK.STORERKEY
+		                                     AND CM_LOT.LOT       = ST_STOCK.LOT
+										<if test="searchtype == 0"><!-- 월별 -->
+		                                     <!--AND CM_LOT.LOTTABLE01 BETWEEN #{docdt} || '01' AND #{docdt} || '31'-->
+		                                     AND LEFT(CM_LOT.LOTTABLE01,6) = #{docdt}
+										</if>
+										<if test="searchtype == 1"><!-- 일별 -->
+		                                     <!--AND CM_LOT.LOTTABLE01 BETWEEN #{docdtFrom} AND #{docdtTo}-->
+		                                     AND CM_LOT.LOTTABLE01  <![CDATA[>=]]> #{docdtFrom}
+		                                     AND CM_LOT.LOTTABLE01  <![CDATA[<=]]> #{docdtTo}		                                     
+										</if>											 
+                                        )
+		                   GROUP BY DCCODE )
+		   , VENDOR_RT AS ( SELECT DCCODE
+		                         , COUNT(CASE WHEN STATUS = '90' THEN 1 END )              AS RT_VENDOR_COMP
+		                         , COUNT(CASE WHEN STATUS <![CDATA[<>]]> '90' THEN 1 END ) AS RT_VENDOR_NCOMP
+		                      FROM WD_RESERVE 
+		                     WHERE STORERKEY = #{gStorerkey}	
+						    
+						    <!-- START.다중센터 -->
+						    <choose>   
+						        <when test="fixdccodeMulti != null and fixdccodeMulti != ''">
+						         AND WD_RESERVE.DCCODE IN
+						         <foreach collection="fixdccodeMulti" item="code" open="(" close=")" separator=",">
+						           #{code}
+						         </foreach>
+						        </when>
+						    <otherwise>
+						       AND 1=2 /*full방지*/
+						    </otherwise>			    
+						    </choose>
+						    <!-- END.다중센터 --> 		
+							
+							<if test="searchtype == 0"><!-- 월별 -->
+		                       <!--AND RESERVEDT BETWEEN #{docdt} || '01' AND #{docdt} || '31'-->
+		                       AND LEFT(WD_RESERVE.RESERVEDT,6) = #{docdt}
+							</if>
+							<if test="searchtype == 1"><!-- 일별 -->
+		                       <!--AND RESERVEDT BETWEEN #{docdtFrom} AND #{docdtTo}-->
+                               AND WD_RESERVE.RESERVEDT  <![CDATA[>=]]> #{docdtFrom}
+                               AND WD_RESERVE.RESERVEDT  <![CDATA[<=]]> #{docdtTo}		  		                       
+							</if>
+							 GROUP BY DCCODE 
+                          )
+		   , WD_QUICK AS ( SELECT IF_WD_QUICK.DCCODE                                                              AS DCCODE
+		                        , IF_WD_QUICK.PLANT                                                               AS PLANT
+		                        , COUNT(CASE WHEN NVL(WD_INPLAN_ADJ.STATUS,'10') <![CDATA[<>]]> '10' THEN 1 END ) AS WD_QUICK_COMP
+		                        , COUNT(CASE WHEN NVL(WD_INPLAN_ADJ.STATUS,'10') =              '10' THEN 1 END ) AS WD_QUICK_NCOMP
+                             FROM IF_WD_QUICK
+                             LEFT OUTER JOIN WD_INPLAN_ADJ
+                               ON IF_WD_QUICK.DCCODE             = WD_INPLAN_ADJ.DCCODE
+                              AND IF_WD_QUICK.STORERKEY          = WD_INPLAN_ADJ.STORERKEY
+                              AND IF_WD_QUICK.SERIALKEY          = WD_INPLAN_ADJ.IF_SERIALKEY	
+                              AND IF_WD_QUICK.DOCNO              = WD_INPLAN_ADJ.DOCNO	
+                              AND IF_WD_QUICK.DOCLINE            = WD_INPLAN_ADJ.DOCLINE	
+                              AND IF_WD_QUICK.VSRNO              = WD_INPLAN_ADJ.VSRNO	
+                              AND IF_WD_QUICK.VOCNO              = WD_INPLAN_ADJ.VOCNO	
+                              AND IF_WD_QUICK.VOCSEQ             = WD_INPLAN_ADJ.VOCSEQ
+                              AND IF_WD_QUICK.STORERKEY          = #{gStorerkey}
+ 		                     JOIN DM_DOCUMENT_D
+		                       ON IF_WD_QUICK.DCCODE        =  DM_DOCUMENT_D.DCCODE
+		                      AND IF_WD_QUICK.DOCNO         =  DM_DOCUMENT_D.DOCNO
+		                      AND IF_WD_QUICK.DOCLINE       =  DM_DOCUMENT_D.DOCLINE
+		                      AND IF_WD_QUICK.DELIVERYDATE  =  DM_DOCUMENT_D.DELIVERYDATE    
+		                      AND DM_DOCUMENT_D.DOCTYPE     = 'WD'	 
+		                     JOIN DM_DOCUMENT_H
+		                       ON DM_DOCUMENT_D.DCCODE       = DM_DOCUMENT_H.DCCODE
+		                      AND DM_DOCUMENT_D.DOCTYPE      = DM_DOCUMENT_H.DOCTYPE
+		                      AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE 
+		                      AND DM_DOCUMENT_D.DOCNO        = DM_DOCUMENT_H.DOCNO   
+		                     JOIN MS_SKU
+		                       ON MS_SKU.STORERKEY = #{gStorerkey}
+		                      AND IF_WD_QUICK.SKU  = MS_SKU.SKU                              
+                              AND NVL(WD_INPLAN_ADJ.STATUS,'10') = '10'
+							
+						    <!-- START.다중센터 -->
+						    <choose>   
+						        <when test="fixdccodeMulti != null and fixdccodeMulti != ''">
+						         AND DM_DOCUMENT_D.DCCODE IN
+						         <foreach collection="fixdccodeMulti" item="code" open="(" close=")" separator=",">
+						           #{code}
+						         </foreach>
+						        </when>
+						    <otherwise>
+						       AND 1=2 /*full방지*/
+						    </otherwise>			    
+						    </choose>
+						    <!-- END.다중센터 --> 		
+							
+							<!--
+							<if test="searchtype == 0">
+		                       AND LEFT(TO_CHAR(IF_WD_QUICK.IF_DATE,'YYYYMMDD'),6) = #{docdt}
+							</if>
+							<if test="searchtype == 1">
+                               AND TO_CHAR(IF_WD_QUICK.IF_DATE,'YYYYMMDD') <![CDATA[>=]]> #{docdtFrom}
+                               AND TO_CHAR(IF_WD_QUICK.IF_DATE,'YYYYMMDD') <![CDATA[<=]]> #{docdtTo}	  		                       
+							</if>                               
+							-->
+							<if test="searchtype == 0"><!-- 월별 -->
+                              AND DM_DOCUMENT_D.DELIVERYDATE <![CDATA[>=]]> #{docdt}||'01' 
+							  AND DM_DOCUMENT_D.DELIVERYDATE <![CDATA[<]]>  TO_CHAR(ADD_MONTHS(TO_DATE(#{docdt}||'01', 'YYYYMMDD'), 1), 'YYYYMMDD')
+							</if>
+							<if test="searchtype == 1"><!-- 일별 -->
+                             AND DM_DOCUMENT_D.DELIVERYDATE <![CDATA[>=]]> #{docdtFrom}
+                             AND DM_DOCUMENT_D.DELIVERYDATE <![CDATA[<=]]> #{docdtTo}
+							</if>							
+                           GROUP BY IF_WD_QUICK.DCCODE
+                                  , IF_WD_QUICK.PLANT							 
+                          )
+			SELECT 
+				<if test="searchtype == 0"><!-- 월별 -->			
+			       #{docdt}                                                     AS DM_MONTH            /* 조회월 */
+			    </if>   
+				<if test="searchtype == 1"><!-- 일별 -->
+				   SUBSTR(#{docdtFrom},0,6)			                            AS DM_MONTH            /* 조회월 */
+		         , #{docdtFrom}                                                 AS DOCDT_FROM          /* 조회시작일 */
+		         , #{docdtTo}                                                   AS DOCDT_TO            /* 조회종료일*/
+			    </if>   
+                 , #{searchtype}			                                    AS SEARCHTYPE          /* 조회구분 */
+		         , DISP_LIST.DCCODE                                             AS DCCODE              /* 물류센터 */
+		         , FN_GETDCNAME(DISP_LIST.DCCODE)                               AS DCNAME              /* 물류센터명 */
+		         , DISP_LIST.PLANT                                              AS PLANT               /* 플랜트 */
+		         , NVL(DISP_LIST.DP_NSTO_COMP+DISP_LIST.DP_NSTO_NCOMP,0)        AS DP_NSTO_TOT         /* 구매입고 : 전체건 */
+		         , DISP_LIST.DP_NSTO_COMP                                       AS DP_NSTO_COMP        /* 구매입고 : 처리건 */
+		         , DISP_LIST.DP_NSTO_NCOMP                                      AS DP_NSTO_NCOMP       /* 구매입고 : 미처리건 */
+		         , 0                                                            AS DP_NSTO_NREAL       /* 구매입고 : 진오더 미전환 건 */
+		         , NVL(DISP_LIST.DP_STO_COMP+DISP_LIST.DP_STO_NCOMP,0)          AS DP_STO_TOT          /* 광역입고 : 전체건 */
+		         , DISP_LIST.DP_STO_COMP                                        AS DP_STO_COMP         /* 광역입고 : 처리건 */
+		         , DISP_LIST.DP_STO_NCOMP                                       AS DP_STO_NCOMP        /* 광역입고 : 미처리건 */
+		         , NVL(DISP_LIST.RT_COMP+DISP_LIST.RT_NCOMP,0)                  AS RT_TOT              /* 반품입고 : 전체건 */
+		         , DISP_LIST.RT_COMP                                            AS RT_COMP             /* 반품입고 : 처리건 */
+		         , DISP_LIST.RT_NCOMP                                           AS RT_NCOMP            /* 반품입고 : 미처리건 */
+		         , NVL(DISP_LIST.WD_NSTO_COMP+DISP_LIST.WD_NSTO_NCOMP,0)        AS WD_NSTO_TOT         /* 고객출고 : 전체건 */
+		         , DISP_LIST.WD_NSTO_COMP                                       AS WD_NSTO_COMP        /* 고객출고 : 처리건 */
+		         , DISP_LIST.WD_NSTO_NCOMP                                      AS WD_NSTO_NCOMP       /* 고객출고 : 미처리건 */
+		         , 0                                                            AS WD_NSTO_NREAL       /* 고객출고 : 진오더 미전환 건 */
+		         , NVL(DISP_LIST.WD_STO_COMP+DISP_LIST.WD_STO_NCOMP,0)          AS WD_STO_TOT          /* 광역출고 : 전체건 */
+		         , DISP_LIST.WD_STO_COMP                                        AS WD_STO_COMP         /* 광역출고 : 처리건 */
+		         , DISP_LIST.WD_STO_NCOMP                                       AS WD_STO_NCOMP        /* 광역출고 : 미처리건 */
+		         , NVL(DISP_LIST.RT_CUST_COMP+DISP_LIST.RT_CUST_NCOMP,0)        AS RT_STO_TOT          /* 협력사반품 : 전체건 */
+		         , DISP_LIST.RT_CUST_COMP                                       AS RT_CUST_COMP        /* 협력사반품 : 처리건 */
+		         , DISP_LIST.RT_CUST_NCOMP                                      AS RT_CUST_NCOMP       /* 협력사반품 : 미처리건 */
+		         , NVL(DISP_LIST.STO_NCOMP, 0)                                  AS STO_ST              /* 운송중재고 : 오더건수 */
+		         , NVL(T_DAILY.DAILY_ST, 0)                                     AS DAILY_ST            /* 일배재고 : SKU 수 */
+		         , DISP_LIST.AJ_DU_NCOMP                                        AS AJ_DU_NCOMP         /* 폐기예약 : 오더건수 */
+				 , DISP_LIST.AJ_DD_NCOMP                                        AS AJ_DD_NCOMP         /* 감모예약 : 오더건수 */
+				 , NVL(VENDOR_RT.RT_VENDOR_NCOMP, 0)                            AS RT_VENDOR_NCOMP     /* 반품예약 : 오더건수 */				 		         
+		         , DISP_LIST.AJ_DU_COMP                                         AS AJ_DU_COMP
+		         , DISP_LIST.AJ_DD_COMP                                         AS AJ_DD_COMP
+		         , NVL(VENDOR_RT.RT_VENDOR_COMP, 0)                             AS RT_VENDOR_COMP
+		         , NVL(WD_QUICK.WD_QUICK_COMP, 0)                               AS WD_QUICK_COMP
+		         , NVL(WD_QUICK.WD_QUICK_NCOMP, 0)                              AS WD_QUICK_NCOMP
+		         , (SELECT CASE WHEN COUNT(1) > 0 THEN 'Y' ELSE 'N' END
+		              FROM IB_CLOSE
+		             WHERE IB_CLOSE.DCCODE    = DISP_LIST.DCCODE
+		               AND IB_CLOSE.PLANT     = DISP_LIST.PLANT
+					<if test="searchtype == 0"><!-- 월별 -->
+	                   <!--AND IB_CLOSE.CLOSEDT   = #{docdt}-->
+	                   AND LEFT(IB_CLOSE.CLOSEDT,6) = #{docdt}
+					</if>
+					<if test="searchtype == 1"><!-- 일별 -->
+	                   <!--AND IB_CLOSE.CLOSEDT BETWEEN SUBSTR(#{docdtFrom},0,6) AND SUBSTR(#{docdtTo},0,6)-->
+                       AND IB_CLOSE.CLOSEDT  <![CDATA[>=]]> SUBSTR(#{docdtFrom},0,6) 
+                       AND IB_CLOSE.CLOSEDT  <![CDATA[<=]]> SUBSTR(#{docdtTo},0,6)  		                   
+					</if>		               
+					   AND IB_CLOSE.CLOSETYPE = 'MONTHCLOSE')                   AS CLOSEYN             /* 마감여부 */  
+		      FROM ( SELECT TARGET_LIST.DCCODE                                                                                                                                              AS DCCODE
+		                  , TARGET_LIST.PLANT                                                                                                                                               AS PLANT
+		                  , SUM(CASE WHEN DOCTYPE = 'DP' AND WORKPROCESSCODE  <![CDATA[<>]]>  'STO' AND STATUS = '90' THEN 1 ELSE 0 END)                                                    AS DP_NSTO_COMP
+		                  , SUM(CASE WHEN DOCTYPE = 'DP' AND WORKPROCESSCODE  <![CDATA[<>]]>  'STO' AND STATUS  <![CDATA[<>]]>  '90' THEN 1 ELSE  0 END)                                    AS DP_NSTO_NCOMP
+		                  , SUM(CASE WHEN DOCTYPE = 'DP' AND WORKPROCESSCODE = 'STO' AND STATUS = '90' THEN 1 ELSE 0 END)                                                                   AS DP_STO_COMP
+		                  , SUM(CASE WHEN DOCTYPE = 'DP' AND WORKPROCESSCODE = 'STO' AND STATUS  <![CDATA[<>]]>  '90' THEN 1 ELSE 0 END)                                                    AS DP_STO_NCOMP 
+		                  , SUM(CASE WHEN DOCTYPE = 'RT' AND STATUS = '90' THEN 1 ELSE 0 END)                                                                                               AS RT_COMP
+		                  , SUM(CASE WHEN DOCTYPE = 'RT' AND STATUS  <![CDATA[<>]]>  '90' THEN 1 ELSE 0 END)                                                                                AS RT_NCOMP
+		                  , SUM(CASE WHEN DOCTYPE = 'WD' AND WORKPROCESSCODE  <![CDATA[<>]]>  'STO' AND ORDERTYPE  <![CDATA[<>]]>  'RP' AND STATUS = '90' THEN 1 ELSE 0 END)                AS WD_NSTO_COMP
+		                  , SUM(CASE WHEN DOCTYPE = 'WD' AND WORKPROCESSCODE  <![CDATA[<>]]>  'STO' AND ORDERTYPE  <![CDATA[<>]]>  'RP' AND STATUS  <![CDATA[<>]]>  '90' THEN 1 ELSE 0 END) AS WD_NSTO_NCOMP
+		                  , SUM(CASE WHEN DOCTYPE = 'WD' AND WORKPROCESSCODE = 'STO' AND STATUS = '90' THEN 1 ELSE 0 END)                                                                   AS WD_STO_COMP
+		                  , SUM(CASE WHEN DOCTYPE = 'WD' AND WORKPROCESSCODE = 'STO' AND STATUS  <![CDATA[<>]]>  '90' THEN 1 ELSE 0 END)                                                    AS WD_STO_NCOMP
+		                  , SUM(CASE WHEN DOCTYPE = 'WD' AND ORDERTYPE = 'RP' AND STATUS = '90' THEN 1 ELSE 0 END)                                                                          AS RT_CUST_COMP   
+		                  , SUM(CASE WHEN DOCTYPE = 'WD' AND ORDERTYPE = 'RP' AND STATUS  <![CDATA[<>]]>  '90' THEN 1 ELSE 0 END)                                                           AS RT_CUST_NCOMP
+		                  , SUM(CASE WHEN DOCTYPE = 'AJ' AND ORDERTYPE LIKE 'DU%' AND STATUS = '90' THEN 1 ELSE 0 END)                                                                      AS AJ_DU_COMP
+		                  , SUM(CASE WHEN DOCTYPE = 'AJ' AND ORDERTYPE LIKE 'DU%' AND STATUS  <![CDATA[<>]]>  '90' THEN 1 ELSE 0 END)                                                       AS AJ_DU_NCOMP
+		                  , SUM(CASE WHEN DOCTYPE = 'AJ' AND ORDERTYPE LIKE 'DD%' AND STATUS = '90' THEN 1 ELSE 0 END)                                                                      AS AJ_DD_COMP
+		                  , SUM(CASE WHEN DOCTYPE = 'AJ' AND (ORDERTYPE LIKE 'DD%'  OR ORDERTYPE LIKE 'KITAJ%' ) AND STATUS  <![CDATA[<>]]>  '90' THEN 1 ELSE 0 END)                        AS AJ_DD_NCOMP
+		                  , COUNT(CASE WHEN STO_STATUS  <![CDATA[<]]> '90' THEN 1 END)                                                                                                      AS STO_NCOMP
+		               FROM ( SELECT /*+ FULL(DMD) */  
+                                     DMD.DCCODE
+		                           , DMD.STORERKEY
+		                           , DMD.DOCTYPE
+		                           , DMD.PLANT
+		                           , DMD.DOCNO
+		                           , DMD.DOCLINE
+		                           , DMD.STATUS
+		                           , DMD.ORDERTYPE
+		                           , DMD.WORKPROCESSCODE 
+		                           , CASE WHEN DMD.WORKPROCESSCODE ='STO' THEN ( SELECT   '30'
+		                                                                           FROM DM_DOCUMENT_D T
+		                                                                          WHERE T.DOCDT = DMD.DOCDT
+		                                                                            AND T.DOCNO = DMD.DOCNO
+		                                                                            AND T.DOCLINE = DMD.DOCLINE
+		                                                                            AND T.DCCODE != DMD.DCCODE
+                                                                                    AND T.DELIVERYDATE = DMD.DELIVERYDATE  
+		                                                                            AND T.CONFIRMQTY  <![CDATA[<>]]>  DMD.CONFIRMQTY
+		                                                                            AND ROWNUM = 1  ) END AS STO_STATUS
+		                        FROM DM_DOCUMENT_D DMD
+		                       WHERE 1=1
+								<if test="searchtype == 0"><!-- 월별 -->
+                                 AND DMD.DELIVERYDATE <![CDATA[>=]]> #{docdt}||'01' 
+								 AND DMD.DELIVERYDATE <![CDATA[<]]>  TO_CHAR(ADD_MONTHS(TO_DATE(#{docdt}||'01', 'YYYYMMDD'), 1), 'YYYYMMDD')
+								</if>
+								<if test="searchtype == 1"><!-- 일별 -->
+		                         <!--AND DMD.DELIVERYDATE BETWEEN #{docdtFrom} AND #{docdtTo}-->
+                                 AND DMD.DELIVERYDATE <![CDATA[>=]]> #{docdtFrom}
+								 AND DMD.DELIVERYDATE <![CDATA[<=]]> #{docdtTo}
+								</if>
+								 AND DMD.DEL_YN    = 'N'
+		                         AND DMD.STORERKEY = #{gStorerkey}
+								
+							    <!-- START.다중센터 -->
+							    <choose>   
+							        <when test="fixdccodeMulti != null and fixdccodeMulti != ''">
+							         AND DMD.DCCODE IN
+							         <foreach collection="fixdccodeMulti" item="code" open="(" close=")" separator=",">
+							           #{code}
+							         </foreach>
+							        </when>
+							    <otherwise>
+							       AND 1=2 /*full방지*/
+							    </otherwise>			    
+							    </choose>
+							    <!-- END.다중센터 --> 		
+								
+								
+                                 AND DMD.DOCTYPE IN ('DP', 'RT', 'WD', 'AJ')
+		                         AND DMD.PLANT NOT IN ('2120','2710','2720','2730','2740','2750','2760','2770','2780','2790') ) TARGET_LIST
+		               GROUP BY TARGET_LIST.DCCODE
+		                      , TARGET_LIST.PLANT ) DISP_LIST
+		      LEFT OUTER JOIN T_DAILY 
+		        ON DISP_LIST.DCCODE = T_DAILY.DCCODE  
+		  	   AND DISP_LIST.PLANT  = T_DAILY.DCCODE
+		      LEFT OUTER JOIN VENDOR_RT 
+		        ON DISP_LIST.DCCODE = VENDOR_RT.DCCODE
+		       AND DISP_LIST.PLANT  = VENDOR_RT.DCCODE
+		      LEFT OUTER JOIN WD_QUICK 
+		        ON DISP_LIST.DCCODE = WD_QUICK.DCCODE
+		       AND DISP_LIST.PLANT  = WD_QUICK.PLANT
+		     ORDER BY DISP_LIST.DCCODE
+		            , DISP_LIST.PLANT	
+	</select>
+	
+	<select id="getDetailList" resultType="cjfw.wms.kp.dto.KpCloseResDetailDto">
+		SELECT /* [KpCloseService.sqlx][KpCloseService.getDetailList][모니터링 > 물동 > 물동마감 진행 현황 상세 조회][KimDongHan][2025-08-22] */
+			   T.DCCODE                AS DCCODE         /* 00. 물류센터 */
+			 , T.DOCTYPE               AS DOCTYPE        /* 00. 문서유형 */
+			 , T.STORERKEY             AS STORERKEY      /* 00. 고객사코드 */
+			 , T.DOCDT                 AS DOCDT          /* 00. 문서일자 */
+			 , T.DOCTYPENM             AS DOCTYPENM      /* 01. 문서유형 */
+			 , T.DELIVERYDATE          AS DELIVERYDATE   /* 02. 납품요청일 */
+			 , T.DOCNO                 AS DOCNO          /* 03. 오더번호 */
+			 , T.CUSTKEY               AS CUSTKEY        /* 04. 업체코드 */
+			 , T.CUSTNAME              AS CUSTNAME       /* 05. 업체명 */
+			 , T.DOCLINE               AS DOCLINE        /* 06. 오더품목 */
+			 , T.ORDERTYPE             AS ORDERTYPE      /* 07. 오더유형 */
+			 , T.ORDERTYPENM           AS ORDERTYPENM    /* 07. 오더타입 */
+			 , T.STATUS                AS STATUS         /* 08. 진행상태 */
+			 , T.SKU                   AS SKU            /* 09. 상품코드 */
+			 , T.SKUNAME               AS SKUNAME        /* 10. 상품명칭 */
+			 , T.UOM                   AS UOM            /* 11. 단위 */
+			 , T.DP_ORDERQTY           AS DP_ORDERQTY    /* 12. 구매수량 */
+			 , T.DP_CONFIRMQTY         AS DP_CONFIRMQTY  /* 13. 입고수량 */
+			 , T.WD_ORDERQTY           AS WD_ORDERQTY    /* 14. 주문수량 */
+			 , T.WD_CONFIRMQTY         AS WD_CONFIRMQTY  /* 15. 출고수량 */
+			 , T.FROM_DCCODE           AS FROM_DCCODE    /* 16. FROM센터 */
+			 , T.FROM_LOC              AS FROM_LOC       /* 17. 저장위치 */
+			 , T.TO_DCCODE             AS TO_DCCODE      /* 18. TO센터 */
+			 , T.TO_LOC                AS TO_LOC         /* 19. TO저장위치 */
+			 , T.ADDWHO                AS ADDWHO         /* 20. 등록자 */
+			 , T.EDITWHO               AS EDITWHO        /* 21. 수정자 */		   
+			 , T.CUSTTYPE              AS CUSTTYPE       /* CUSTTYPE */  
+             , T.ADD_ID                AS ADD_ID         /* 등록자ID */
+		     , T.UPD_ID                AS UPD_ID         /* 수정자ID */					  
+			 , T.GUBUN                 AS GUBUN
+		  FROM ( 
+				<!-- 구매입고,광역입고 -->
+		         SELECT /*+ FULL(DM_DOCUMENT_D) */      
+						DM_DOCUMENT_D.DCCODE                                                                                                     AS DCCODE
+					  , DM_DOCUMENT_D.DOCTYPE                                                                                                    AS DOCTYPE
+					  , DM_DOCUMENT_D.STORERKEY                                                                                                  AS STORERKEY
+					  , DM_DOCUMENT_D.DOCDT                                                                                                      AS DOCDT
+					  , (SELECT FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY, 'DOCTYPE', DM_DOCUMENT_D.DOCTYPE) FROM DUAL)                               AS DOCTYPENM 
+					  , DM_DOCUMENT_D.DELIVERYDATE                                                                                               AS DELIVERYDATE
+					  , DM_DOCUMENT_D.DOCNO                                                                                                      AS DOCNO
+					  , CASE WHEN DM_DOCUMENT_D.DOCTYPE = 'WD'         THEN DM_DOCUMENT_H.TO_CUSTKEY               
+							 WHEN DM_DOCUMENT_D.DOCTYPE IN ('DP','RT') THEN DM_DOCUMENT_H.FROM_CUSTKEY  
+							 ELSE UNISTR('') END                                                                                                 AS CUSTKEY 
+					  , CASE WHEN DM_DOCUMENT_D.DOCTYPE = 'WD'         THEN DM_DOCUMENT_H.TO_CUSTNAME              
+							 WHEN DM_DOCUMENT_D.DOCTYPE IN ('DP','RT') THEN DM_DOCUMENT_H.FROM_CUSTNAME
+							 ELSE UNISTR('') END                                                                                                 AS CUSTNAME
+					  , CASE WHEN DM_DOCUMENT_D.DOCTYPE = 'WD'         THEN DM_DOCUMENT_H.TO_CUSTTYPE               
+							 WHEN DM_DOCUMENT_D.DOCTYPE IN ('DP','RT') THEN DM_DOCUMENT_H.FROM_CUSTTYPE  
+							 ELSE UNISTR('') END                                                                                                 AS CUSTTYPE 
+					  , DM_DOCUMENT_D.DOCLINE                                                                                                    AS DOCLINE
+					  , DM_DOCUMENT_D.ORDERTYPE                                                                                                  AS ORDERTYPE
+					  , (SELECT FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY, 'ORDERTYPE_' || DM_DOCUMENT_D.DOCTYPE, DM_DOCUMENT_D.ORDERTYPE) FROM DUAL) AS ORDERTYPENM
+					  , (SELECT FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY, 'STATUS_' || DM_DOCUMENT_D.DOCTYPE, DM_DOCUMENT_D.STATUS) FROM DUAL)       AS STATUS
+					  , DM_DOCUMENT_D.SKU                                                                                                        AS SKU
+					  , MS_SKU.DESCRIPTION                                                                                                       AS SKUNAME
+					  , DM_DOCUMENT_D.UOM                                                                                                        AS UOM
+					  , CASE WHEN DM_DOCUMENT_D.DOCTYPE IN('DP','RT') THEN DM_DOCUMENT_D.ORDERQTY+DM_DOCUMENT_D.ORDERADJUSTQTY ELSE 0 END        AS DP_ORDERQTY
+					  , CASE WHEN DM_DOCUMENT_D.DOCTYPE IN('DP','RT') THEN DM_DOCUMENT_D.CONFIRMQTY ELSE 0 END                                   AS DP_CONFIRMQTY
+					  , CASE WHEN DM_DOCUMENT_D.DOCTYPE IN('WD')      THEN DM_DOCUMENT_D.ORDERQTY+DM_DOCUMENT_D.ORDERADJUSTQTY ELSE 0 END        AS WD_ORDERQTY
+					  , CASE WHEN DM_DOCUMENT_D.DOCTYPE IN('WD')      THEN DM_DOCUMENT_D.CONFIRMQTY ELSE 0 END                                   AS WD_CONFIRMQTY
+					  , ''                                                                                                                       AS FROM_DCCODE
+					  , ''                                                                                                                       AS FROM_LOC
+					  , ''                                                                                                                       AS TO_DCCODE
+					  , ''                                                                                                                       AS TO_LOC
+					  , NVL(USER1.USER_NM,DM_DOCUMENT_D.ADDWHO)                                                                                  AS ADDWHO
+					  , NVL(USER2.USER_NM,DM_DOCUMENT_D.EDITWHO)                                                                                 AS EDITWHO
+		              , USER1.USER_ID                                                                                                            AS ADD_ID              /* 등록자ID */
+		              , USER2.USER_ID                                                                                                            AS UPD_ID              /* 수정자ID */					  
+					  , 'A'                                                                                                                      AS GUBUN
+				   FROM DM_DOCUMENT_D
+				   JOIN DM_DOCUMENT_H 
+					 ON DM_DOCUMENT_D.DCCODE       = DM_DOCUMENT_H.DCCODE
+					AND DM_DOCUMENT_D.DOCTYPE      = DM_DOCUMENT_H.DOCTYPE
+					AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+					AND DM_DOCUMENT_D.DOCNO        = DM_DOCUMENT_H.DOCNO
+				   JOIN MS_SKU
+					 ON MS_SKU.STORERKEY           = DM_DOCUMENT_D.STORERKEY
+					AND MS_SKU.SKU                 = DM_DOCUMENT_D.SKU
+				   LEFT OUTER JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = DM_DOCUMENT_D.ADDWHO   /*등록자명*/
+				   LEFT OUTER JOIN FRAMEONE_USER USER2 ON USER2.USER_ID = DM_DOCUMENT_D.EDITWHO  /*수정자명*/		            
+				  WHERE 1=1 
+				<if test="searchtype == 0"><!-- 월별 -->
+					AND DM_DOCUMENT_D.DELIVERYDATE <![CDATA[>=]]> #{docdt}||'01' 
+					AND DM_DOCUMENT_D.DELIVERYDATE <![CDATA[<]]> TO_CHAR(ADD_MONTHS(TO_DATE(#{docdt}||'01', 'YYYYMMDD'), 1), 'YYYYMMDD') 
+				</if>
+				<if test="searchtype == 1"><!-- 일별 -->
+					AND DM_DOCUMENT_D.DELIVERYDATE  <![CDATA[>=]]> #{docdtFrom}
+					AND DM_DOCUMENT_D.DELIVERYDATE  <![CDATA[<=]]> #{docdtTo}
+				</if>
+					AND DM_DOCUMENT_D.DEL_YN       = 'N'
+					AND DM_DOCUMENT_D.STORERKEY    = #{gStorerkey}
+				<if test="dccode != null and dccode != ''">
+					AND DM_DOCUMENT_D.DCCODE       = #{dccode}
+				</if>
+				<if test="plant != null and plant != ''">
+					AND DM_DOCUMENT_D.PLANT        = #{plant}
+				</if>
+		            AND DM_DOCUMENT_D.DOCTYPE      = 'DP'
+					AND DM_DOCUMENT_D.STATUS       <![CDATA[<>]]> '90' 
+				<!-- 반품입고 -->
+		          UNION ALL
+		         SELECT /*+ FULL(DM_DOCUMENT_D) */      
+						DM_DOCUMENT_D.DCCODE                                                                                                     AS DCCODE
+					  , DM_DOCUMENT_D.DOCTYPE                                                                                                    AS DOCTYPE
+					  , DM_DOCUMENT_D.STORERKEY                                                                                                  AS STORERKEY
+					  , DM_DOCUMENT_D.DOCDT                                                                                                      AS DOCDT
+					  , (SELECT FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY, 'DOCTYPE', DM_DOCUMENT_D.DOCTYPE) FROM DUAL)                               AS DOCTYPENM 
+					  , DM_DOCUMENT_D.DELIVERYDATE                                                                                               AS DELIVERYDATE
+					  , DM_DOCUMENT_D.DOCNO                                                                                                      AS DOCNO
+					  , CASE WHEN DM_DOCUMENT_D.DOCTYPE = 'WD'         THEN DM_DOCUMENT_H.TO_CUSTKEY               
+							 WHEN DM_DOCUMENT_D.DOCTYPE IN ('DP','RT') THEN DM_DOCUMENT_H.FROM_CUSTKEY  
+							 ELSE UNISTR('') END                                                                                                 AS CUSTKEY 
+					  , CASE WHEN DM_DOCUMENT_D.DOCTYPE = 'WD'         THEN DM_DOCUMENT_H.TO_CUSTNAME              
+							 WHEN DM_DOCUMENT_D.DOCTYPE IN ('DP','RT') THEN DM_DOCUMENT_H.FROM_CUSTNAME
+							 ELSE UNISTR('') END                                                                                                 AS CUSTNAME
+					  , CASE WHEN DM_DOCUMENT_D.DOCTYPE = 'WD'         THEN DM_DOCUMENT_H.TO_CUSTTYPE               
+							 WHEN DM_DOCUMENT_D.DOCTYPE IN ('DP','RT') THEN DM_DOCUMENT_H.FROM_CUSTTYPE  
+							 ELSE UNISTR('') END                                                                                                 AS CUSTTYPE 
+					  , DM_DOCUMENT_D.DOCLINE                                                                                                    AS DOCLINE
+					  , DM_DOCUMENT_D.ORDERTYPE                                                                                                  AS ORDERTYPE
+					  , (SELECT FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY, 'ORDERTYPE_' || DM_DOCUMENT_D.DOCTYPE, DM_DOCUMENT_D.ORDERTYPE) FROM DUAL) AS ORDERTYPENM
+					  , (SELECT FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY, 'STATUS_' || DM_DOCUMENT_D.DOCTYPE, DM_DOCUMENT_D.STATUS) FROM DUAL)       AS STATUS
+					  , DM_DOCUMENT_D.SKU                                                                                                        AS SKU
+					  , MS_SKU.DESCRIPTION                                                                                                       AS SKUNAME
+					  , DM_DOCUMENT_D.UOM                                                                                                        AS UOM
+					  , CASE WHEN DM_DOCUMENT_D.DOCTYPE IN('DP','RT') THEN DM_DOCUMENT_D.ORDERQTY+DM_DOCUMENT_D.ORDERADJUSTQTY ELSE 0 END        AS DP_ORDERQTY
+					  , CASE WHEN DM_DOCUMENT_D.DOCTYPE IN('DP','RT') THEN DM_DOCUMENT_D.CONFIRMQTY ELSE 0 END                                   AS DP_CONFIRMQTY
+					  , CASE WHEN DM_DOCUMENT_D.DOCTYPE IN('WD')      THEN DM_DOCUMENT_D.ORDERQTY+DM_DOCUMENT_D.ORDERADJUSTQTY ELSE 0 END        AS WD_ORDERQTY
+					  , CASE WHEN DM_DOCUMENT_D.DOCTYPE IN('WD')      THEN DM_DOCUMENT_D.CONFIRMQTY ELSE 0 END                                   AS WD_CONFIRMQTY
+					  , ''                                                                                                                       AS FROM_DCCODE
+					  , ''                                                                                                                       AS FROM_LOC
+					  , ''                                                                                                                       AS TO_DCCODE
+					  , ''                                                                                                                       AS TO_LOC
+					  , NVL(USER1.USER_NM,DM_DOCUMENT_D.ADDWHO)                                                                                  AS ADDWHO
+					  , NVL(USER2.USER_NM,DM_DOCUMENT_D.EDITWHO)                                                                                 AS EDITWHO
+		              , USER1.USER_ID                                                                                                            AS ADD_ID              /* 등록자ID */
+		              , USER2.USER_ID                                                                                                            AS UPD_ID              /* 수정자ID */					  
+					  , 'B'                                                                                                                      AS GUBUN
+				   FROM DM_DOCUMENT_D
+				   JOIN DM_DOCUMENT_H 
+					 ON DM_DOCUMENT_D.DCCODE       = DM_DOCUMENT_H.DCCODE
+					AND DM_DOCUMENT_D.DOCTYPE      = DM_DOCUMENT_H.DOCTYPE
+					AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+					AND DM_DOCUMENT_D.DOCNO        = DM_DOCUMENT_H.DOCNO
+				   JOIN MS_SKU
+					 ON MS_SKU.STORERKEY           = DM_DOCUMENT_D.STORERKEY
+					AND MS_SKU.SKU                 = DM_DOCUMENT_D.SKU
+				   LEFT OUTER JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = DM_DOCUMENT_D.ADDWHO   /*등록자명*/
+				   LEFT OUTER JOIN FRAMEONE_USER USER2 ON USER2.USER_ID = DM_DOCUMENT_D.EDITWHO  /*수정자명*/		            
+				  WHERE 1=1 
+				<if test="searchtype == 0"><!-- 월별 -->
+					AND DM_DOCUMENT_D.DELIVERYDATE <![CDATA[>=]]> #{docdt}||'01' 
+					AND DM_DOCUMENT_D.DELIVERYDATE <![CDATA[<]]> TO_CHAR(ADD_MONTHS(TO_DATE(#{docdt}||'01', 'YYYYMMDD'), 1), 'YYYYMMDD') 
+				</if>
+				<if test="searchtype == 1"><!-- 일별 -->
+					AND DM_DOCUMENT_D.DELIVERYDATE  <![CDATA[>=]]> #{docdtFrom}
+					AND DM_DOCUMENT_D.DELIVERYDATE  <![CDATA[<=]]> #{docdtTo}
+				</if>
+					AND DM_DOCUMENT_D.DEL_YN       = 'N'
+					AND DM_DOCUMENT_D.STORERKEY    = #{gStorerkey}
+				<if test="dccode != null and dccode != ''">
+					AND DM_DOCUMENT_D.DCCODE       = #{dccode}
+				</if>
+				<if test="plant != null and plant != ''">
+					AND DM_DOCUMENT_D.PLANT        = #{plant}
+				</if>
+		            AND DM_DOCUMENT_D.DOCTYPE      = 'RT'
+					AND DM_DOCUMENT_D.STATUS       <![CDATA[<>]]> '90' 
+				<!-- 출고정정 -->
+		          UNION ALL
+		         SELECT       
+						DM_DOCUMENT_D.DCCODE                                                                                                     AS DCCODE
+					  , DM_DOCUMENT_D.DOCTYPE                                                                                                    AS DOCTYPE
+					  , DM_DOCUMENT_D.STORERKEY                                                                                                  AS STORERKEY
+					  , DM_DOCUMENT_D.DOCDT                                                                                                      AS DOCDT
+					  , (SELECT FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY, 'DOCTYPE', DM_DOCUMENT_D.DOCTYPE) FROM DUAL)                               AS DOCTYPENM 
+					  , DM_DOCUMENT_D.DELIVERYDATE                                                                                               AS DELIVERYDATE
+					  , DM_DOCUMENT_D.DOCNO                                                                                                      AS DOCNO
+					  , CASE WHEN DM_DOCUMENT_D.DOCTYPE = 'WD'         THEN DM_DOCUMENT_H.TO_CUSTKEY               
+							 WHEN DM_DOCUMENT_D.DOCTYPE IN ('DP','RT') THEN DM_DOCUMENT_H.FROM_CUSTKEY  
+							 ELSE UNISTR('') END                                                                                                 AS CUSTKEY 
+					  , CASE WHEN DM_DOCUMENT_D.DOCTYPE = 'WD'         THEN DM_DOCUMENT_H.TO_CUSTNAME              
+							 WHEN DM_DOCUMENT_D.DOCTYPE IN ('DP','RT') THEN DM_DOCUMENT_H.FROM_CUSTNAME
+							 ELSE UNISTR('') END                                                                                                 AS CUSTNAME
+					  , CASE WHEN DM_DOCUMENT_D.DOCTYPE = 'WD'         THEN DM_DOCUMENT_H.TO_CUSTTYPE               
+							 WHEN DM_DOCUMENT_D.DOCTYPE IN ('DP','RT') THEN DM_DOCUMENT_H.FROM_CUSTTYPE  
+							 ELSE UNISTR('') END                                                                                                 AS CUSTTYPE 
+					  , DM_DOCUMENT_D.DOCLINE                                                                                                    AS DOCLINE
+					  , DM_DOCUMENT_D.ORDERTYPE                                                                                                  AS ORDERTYPE
+					  , (SELECT FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY, 'ORDERTYPE_' || DM_DOCUMENT_D.DOCTYPE, DM_DOCUMENT_D.ORDERTYPE) FROM DUAL) AS ORDERTYPENM
+					  , (SELECT FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY, 'STATUS_' || DM_DOCUMENT_D.DOCTYPE, DM_DOCUMENT_D.STATUS) FROM DUAL)       AS STATUS
+					  , DM_DOCUMENT_D.SKU                                                                                                        AS SKU
+					  , MS_SKU.DESCRIPTION                                                                                                       AS SKUNAME
+					  , DM_DOCUMENT_D.UOM                                                                                                        AS UOM
+					  , CASE WHEN DM_DOCUMENT_D.DOCTYPE IN('DP','RT') THEN DM_DOCUMENT_D.ORDERQTY+DM_DOCUMENT_D.ORDERADJUSTQTY ELSE 0 END        AS DP_ORDERQTY
+					  , CASE WHEN DM_DOCUMENT_D.DOCTYPE IN('DP','RT') THEN DM_DOCUMENT_D.CONFIRMQTY ELSE 0 END                                   AS DP_CONFIRMQTY
+					  , CASE WHEN DM_DOCUMENT_D.DOCTYPE IN('WD')      THEN DM_DOCUMENT_D.ORDERQTY+DM_DOCUMENT_D.ORDERADJUSTQTY ELSE 0 END        AS WD_ORDERQTY
+					  , CASE WHEN DM_DOCUMENT_D.DOCTYPE IN('WD')      THEN DM_DOCUMENT_D.CONFIRMQTY ELSE 0 END                                   AS WD_CONFIRMQTY
+					  , ''                                                                                                                       AS FROM_DCCODE
+					  , ''                                                                                                                       AS FROM_LOC
+					  , ''                                                                                                                       AS TO_DCCODE
+					  , ''                                                                                                                       AS TO_LOC
+					  , NVL(USER1.USER_NM,DM_DOCUMENT_D.ADDWHO)                                                                                  AS ADDWHO
+					  , NVL(USER2.USER_NM,DM_DOCUMENT_D.EDITWHO)                                                                                 AS EDITWHO
+		              , USER1.USER_ID                                                                                                            AS ADD_ID              /* 등록자ID */
+		              , USER2.USER_ID                                                                                                            AS UPD_ID              /* 수정자ID */					  
+					  , 'C'                                                                                                                      AS GUBUN
+                   FROM IF_WD_QUICK
+                   LEFT OUTER JOIN WD_INPLAN_ADJ
+	                 ON IF_WD_QUICK.DCCODE        = WD_INPLAN_ADJ.DCCODE
+                    AND IF_WD_QUICK.STORERKEY     = WD_INPLAN_ADJ.STORERKEY
+                    AND IF_WD_QUICK.SERIALKEY     = WD_INPLAN_ADJ.IF_SERIALKEY	
+                    AND IF_WD_QUICK.DOCNO         = WD_INPLAN_ADJ.DOCNO	
+                    AND IF_WD_QUICK.DOCLINE       = WD_INPLAN_ADJ.DOCLINE	
+                    AND IF_WD_QUICK.VSRNO         = WD_INPLAN_ADJ.VSRNO	
+                    AND IF_WD_QUICK.VOCNO         = WD_INPLAN_ADJ.VOCNO	
+                    AND IF_WD_QUICK.VOCSEQ        = WD_INPLAN_ADJ.VOCSEQ					  
+		           JOIN DM_DOCUMENT_D
+		             ON IF_WD_QUICK.DCCODE        =  DM_DOCUMENT_D.DCCODE
+		            AND IF_WD_QUICK.DOCNO         =  DM_DOCUMENT_D.DOCNO
+		            AND IF_WD_QUICK.DOCLINE       =  DM_DOCUMENT_D.DOCLINE
+		            AND IF_WD_QUICK.DELIVERYDATE  =  DM_DOCUMENT_D.DELIVERYDATE    
+		            AND DM_DOCUMENT_D.DOCTYPE     = 'WD'	 
+		           JOIN DM_DOCUMENT_H
+		             ON DM_DOCUMENT_D.DCCODE       = DM_DOCUMENT_H.DCCODE
+		            AND DM_DOCUMENT_D.DOCTYPE      = DM_DOCUMENT_H.DOCTYPE
+		            AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE 
+		           AND DM_DOCUMENT_D.DOCNO        = DM_DOCUMENT_H.DOCNO   
+				   JOIN MS_SKU
+					 ON MS_SKU.STORERKEY           = DM_DOCUMENT_D.STORERKEY
+					AND MS_SKU.SKU                 = DM_DOCUMENT_D.SKU
+				   LEFT OUTER JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = DM_DOCUMENT_D.ADDWHO   /*등록자명*/
+				   LEFT OUTER JOIN FRAMEONE_USER USER2 ON USER2.USER_ID = DM_DOCUMENT_D.EDITWHO  /*수정자명*/		            
+				  WHERE 1=1 
+				<if test="searchtype == 0"><!-- 월별 -->
+					AND DM_DOCUMENT_D.DELIVERYDATE <![CDATA[>=]]> #{docdt}||'01' 
+					AND DM_DOCUMENT_D.DELIVERYDATE <![CDATA[<]]> TO_CHAR(ADD_MONTHS(TO_DATE(#{docdt}||'01', 'YYYYMMDD'), 1), 'YYYYMMDD') 
+				</if>
+				<if test="searchtype == 1"><!-- 일별 -->
+					AND DM_DOCUMENT_D.DELIVERYDATE  <![CDATA[>=]]> #{docdtFrom}
+					AND DM_DOCUMENT_D.DELIVERYDATE  <![CDATA[<=]]> #{docdtTo}
+				</if>
+					AND DM_DOCUMENT_D.DEL_YN       = 'N'
+					AND DM_DOCUMENT_D.STORERKEY    = #{gStorerkey}
+				<if test="dccode != null and dccode != ''">
+					AND DM_DOCUMENT_D.DCCODE       = #{dccode}
+				</if>
+				<if test="plant != null and plant != ''">
+					AND DM_DOCUMENT_D.PLANT        = #{plant}
+				</if>
+		            AND NVL(WD_INPLAN_ADJ.STATUS,'10') = '10'
+				<!-- 고객출고,광역출고,협력사반품 -->
+		          UNION ALL
+		         SELECT /*+ FULL(DM_DOCUMENT_D) */      
+						DM_DOCUMENT_D.DCCODE                                                                                                     AS DCCODE
+					  , DM_DOCUMENT_D.DOCTYPE                                                                                                    AS DOCTYPE
+					  , DM_DOCUMENT_D.STORERKEY                                                                                                  AS STORERKEY
+					  , DM_DOCUMENT_D.DOCDT                                                                                                      AS DOCDT
+					  , (SELECT FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY, 'DOCTYPE', DM_DOCUMENT_D.DOCTYPE) FROM DUAL)                               AS DOCTYPENM 
+					  , DM_DOCUMENT_D.DELIVERYDATE                                                                                               AS DELIVERYDATE
+					  , DM_DOCUMENT_D.DOCNO                                                                                                      AS DOCNO
+					  , CASE WHEN DM_DOCUMENT_D.DOCTYPE = 'WD'         THEN DM_DOCUMENT_H.TO_CUSTKEY               
+							 WHEN DM_DOCUMENT_D.DOCTYPE IN ('DP','RT') THEN DM_DOCUMENT_H.FROM_CUSTKEY  
+							 ELSE UNISTR('') END                                                                                                 AS CUSTKEY 
+					  , CASE WHEN DM_DOCUMENT_D.DOCTYPE = 'WD'         THEN DM_DOCUMENT_H.TO_CUSTNAME              
+							 WHEN DM_DOCUMENT_D.DOCTYPE IN ('DP','RT') THEN DM_DOCUMENT_H.FROM_CUSTNAME
+							 ELSE UNISTR('') END                                                                                                 AS CUSTNAME
+					  , CASE WHEN DM_DOCUMENT_D.DOCTYPE = 'WD'         THEN DM_DOCUMENT_H.TO_CUSTTYPE               
+							 WHEN DM_DOCUMENT_D.DOCTYPE IN ('DP','RT') THEN DM_DOCUMENT_H.FROM_CUSTTYPE  
+							 ELSE UNISTR('') END                                                                                                 AS CUSTTYPE 
+					  , DM_DOCUMENT_D.DOCLINE                                                                                                    AS DOCLINE
+					  , DM_DOCUMENT_D.ORDERTYPE                                                                                                  AS ORDERTYPE
+					  , (SELECT FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY, 'ORDERTYPE_' || DM_DOCUMENT_D.DOCTYPE, DM_DOCUMENT_D.ORDERTYPE) FROM DUAL) AS ORDERTYPENM
+					  , (SELECT FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY, 'STATUS_' || DM_DOCUMENT_D.DOCTYPE, DM_DOCUMENT_D.STATUS) FROM DUAL)       AS STATUS
+					  , DM_DOCUMENT_D.SKU                                                                                                        AS SKU
+					  , MS_SKU.DESCRIPTION                                                                                                       AS SKUNAME
+					  , DM_DOCUMENT_D.UOM                                                                                                        AS UOM
+					  , CASE WHEN DM_DOCUMENT_D.DOCTYPE IN('DP','RT') THEN DM_DOCUMENT_D.ORDERQTY+DM_DOCUMENT_D.ORDERADJUSTQTY ELSE 0 END        AS DP_ORDERQTY
+					  , CASE WHEN DM_DOCUMENT_D.DOCTYPE IN('DP','RT') THEN DM_DOCUMENT_D.CONFIRMQTY ELSE 0 END                                   AS DP_CONFIRMQTY
+					  , CASE WHEN DM_DOCUMENT_D.DOCTYPE IN('WD')      THEN DM_DOCUMENT_D.ORDERQTY+DM_DOCUMENT_D.ORDERADJUSTQTY ELSE 0 END        AS WD_ORDERQTY
+					  , CASE WHEN DM_DOCUMENT_D.DOCTYPE IN('WD')      THEN DM_DOCUMENT_D.CONFIRMQTY ELSE 0 END                                   AS WD_CONFIRMQTY
+					  , ''                                                                                                                       AS FROM_DCCODE
+					  , ''                                                                                                                       AS FROM_LOC
+					  , ''                                                                                                                       AS TO_DCCODE
+					  , ''                                                                                                                       AS TO_LOC
+					  , NVL(USER1.USER_NM,DM_DOCUMENT_D.ADDWHO)                                                                                  AS ADDWHO
+					  , NVL(USER2.USER_NM,DM_DOCUMENT_D.EDITWHO)                                                                                 AS EDITWHO
+		              , USER1.USER_ID                                                                                                            AS ADD_ID              /* 등록자ID */
+		              , USER2.USER_ID                                                                                                            AS UPD_ID              /* 수정자ID */					  
+					  , 'D'                                                                                                                      AS GUBUN
+				   FROM DM_DOCUMENT_D
+				   JOIN DM_DOCUMENT_H 
+					 ON DM_DOCUMENT_D.DCCODE       = DM_DOCUMENT_H.DCCODE
+					AND DM_DOCUMENT_D.DOCTYPE      = DM_DOCUMENT_H.DOCTYPE
+					AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+					AND DM_DOCUMENT_D.DOCNO        = DM_DOCUMENT_H.DOCNO
+				   JOIN MS_SKU
+					 ON MS_SKU.STORERKEY           = DM_DOCUMENT_D.STORERKEY
+					AND MS_SKU.SKU                 = DM_DOCUMENT_D.SKU
+				   LEFT OUTER JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = DM_DOCUMENT_D.ADDWHO   /*등록자명*/
+				   LEFT OUTER JOIN FRAMEONE_USER USER2 ON USER2.USER_ID = DM_DOCUMENT_D.EDITWHO  /*수정자명*/		            
+				  WHERE 1=1 
+				<if test="searchtype == 0"><!-- 월별 -->
+					AND DM_DOCUMENT_D.DELIVERYDATE <![CDATA[>=]]> #{docdt}||'01' 
+					AND DM_DOCUMENT_D.DELIVERYDATE <![CDATA[<]]> TO_CHAR(ADD_MONTHS(TO_DATE(#{docdt}||'01', 'YYYYMMDD'), 1), 'YYYYMMDD') 
+				</if>
+				<if test="searchtype == 1"><!-- 일별 -->
+					AND DM_DOCUMENT_D.DELIVERYDATE  <![CDATA[>=]]> #{docdtFrom}
+					AND DM_DOCUMENT_D.DELIVERYDATE  <![CDATA[<=]]> #{docdtTo}
+				</if>
+					AND DM_DOCUMENT_D.DEL_YN       = 'N'
+					AND DM_DOCUMENT_D.STORERKEY    = #{gStorerkey}
+				<if test="dccode != null and dccode != ''">
+					AND DM_DOCUMENT_D.DCCODE       = #{dccode}
+				</if>
+				<if test="plant != null and plant != ''">
+					AND DM_DOCUMENT_D.PLANT        = #{plant}
+				</if>
+		            AND DM_DOCUMENT_D.DOCTYPE      = 'WD'
+					AND DM_DOCUMENT_D.STATUS       <![CDATA[<>]]> '90' 
+				<!-- 운송중재고 -->
+		          UNION ALL
+				 SELECT DCCODE
+					  , DOCTYPE
+					  , STORERKEY
+					  , DOCDT
+					  , DOCTYPENM 
+					  , DELIVERYDATE
+					  , DOCNO
+					  , CUSTKEY
+					  , CUSTNAME
+					  , CUSTTYPE
+					  , DOCLINE
+					  , ORDERTYPE
+					  , ORDERTYPENM
+					  , STATUS
+					  , SKU
+					  , SKUNAME
+					  , UOM
+					  , DP_ORDERQTY
+					  , DP_CONFIRMQTY
+					  , WD_ORDERQTY
+					  , WD_CONFIRMQTY
+					  , FROM_DCCODE
+					  , FROM_LOC
+					  , TO_DCCODE
+					  , TO_LOC
+					  , ADDWHO
+					  , EDITWHO
+                      , ADD_ID
+                      , UPD_ID
+					  , 'E' AS GUBUN
+				   FROM ( SELECT /*+ FULL(DM_DOCUMENT_D) */      
+								 DM_DOCUMENT_D.DCCODE                                                                                                     AS DCCODE
+							   , DM_DOCUMENT_D.DOCTYPE                                                                                                    AS DOCTYPE
+							   , DM_DOCUMENT_D.STORERKEY                                                                                                  AS STORERKEY
+							   , DM_DOCUMENT_D.DOCDT                                                                                                      AS DOCDT
+							   , (SELECT FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY, 'DOCTYPE', DM_DOCUMENT_D.DOCTYPE) FROM DUAL)                               AS DOCTYPENM 
+							   , DM_DOCUMENT_D.DELIVERYDATE                                                                                               AS DELIVERYDATE
+							   , DM_DOCUMENT_D.DOCNO                                                                                                      AS DOCNO
+							   , CASE WHEN DM_DOCUMENT_D.DOCTYPE = 'WD'         THEN DM_DOCUMENT_H.TO_CUSTKEY               
+									  WHEN DM_DOCUMENT_D.DOCTYPE IN ('DP','RT') THEN DM_DOCUMENT_H.FROM_CUSTKEY  
+									  ELSE UNISTR('') END                                                                                                 AS CUSTKEY 
+							   , CASE WHEN DM_DOCUMENT_D.DOCTYPE = 'WD'         THEN DM_DOCUMENT_H.TO_CUSTNAME              
+									  WHEN DM_DOCUMENT_D.DOCTYPE IN ('DP','RT') THEN DM_DOCUMENT_H.FROM_CUSTNAME
+									  ELSE UNISTR('') END                                                                                                 AS CUSTNAME
+							   , CASE WHEN DM_DOCUMENT_D.DOCTYPE = 'WD'         THEN DM_DOCUMENT_H.TO_CUSTTYPE               
+									  WHEN DM_DOCUMENT_D.DOCTYPE IN ('DP','RT') THEN DM_DOCUMENT_H.FROM_CUSTTYPE  
+									  ELSE UNISTR('') END                                                                                                 AS CUSTTYPE 
+							   , DM_DOCUMENT_D.DOCLINE                                                                                                    AS DOCLINE
+							   , DM_DOCUMENT_D.ORDERTYPE                                                                                                  AS ORDERTYPE
+							   , (SELECT FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY, 'ORDERTYPE_' || DM_DOCUMENT_D.DOCTYPE, DM_DOCUMENT_D.ORDERTYPE) FROM DUAL) AS ORDERTYPENM
+							   , (SELECT FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY, 'STATUS_' || DM_DOCUMENT_D.DOCTYPE, DM_DOCUMENT_D.STATUS) FROM DUAL)       AS STATUS
+							   , DM_DOCUMENT_D.SKU                                                                                                        AS SKU
+							   , MS_SKU.DESCRIPTION                                                                                                       AS SKUNAME
+							   , DM_DOCUMENT_D.UOM                                                                                                        AS UOM
+							   , CASE WHEN DM_DOCUMENT_D.DOCTYPE IN('DP','RT') THEN DM_DOCUMENT_D.ORDERQTY+DM_DOCUMENT_D.ORDERADJUSTQTY ELSE 0 END        AS DP_ORDERQTY
+							   , CASE WHEN DM_DOCUMENT_D.DOCTYPE IN('DP','RT') THEN DM_DOCUMENT_D.CONFIRMQTY ELSE 0 END                                   AS DP_CONFIRMQTY
+							   , CASE WHEN DM_DOCUMENT_D.DOCTYPE IN('WD')      THEN DM_DOCUMENT_D.ORDERQTY+DM_DOCUMENT_D.ORDERADJUSTQTY ELSE 0 END        AS WD_ORDERQTY
+							   , CASE WHEN DM_DOCUMENT_D.DOCTYPE IN('WD')      THEN DM_DOCUMENT_D.CONFIRMQTY ELSE 0 END                                   AS WD_CONFIRMQTY
+							   , ''                                                                                                                       AS FROM_DCCODE
+							   , ''                                                                                                                       AS FROM_LOC
+							   , ''                                                                                                                       AS TO_DCCODE
+							   , ''                                                                                                                       AS TO_LOC
+							   , NVL(USER1.USER_NM,DM_DOCUMENT_D.ADDWHO)                                                                                  AS ADDWHO
+							   , NVL(USER2.USER_NM,DM_DOCUMENT_D.EDITWHO)                                                                                 AS EDITWHO
+		                       , USER1.USER_ID                                                                                                            AS ADD_ID              /* 등록자ID */
+		                       , USER2.USER_ID                                                                                                            AS UPD_ID              /* 수정자ID */					  
+							   , CASE WHEN DM_DOCUMENT_D.WORKPROCESSCODE ='STO' THEN ( SELECT '30'
+																						 FROM DM_DOCUMENT_D T
+																					    WHERE T.DOCDT = DM_DOCUMENT_D.DOCDT
+																						  AND T.DOCNO = DM_DOCUMENT_D.DOCNO
+																						  AND T.DOCLINE = DM_DOCUMENT_D.DOCLINE
+																						  AND T.DCCODE != DM_DOCUMENT_D.DCCODE
+																						  AND T.DELIVERYDATE = DM_DOCUMENT_D.DELIVERYDATE  
+																						  AND T.CONFIRMQTY  <![CDATA[<>]]>  DM_DOCUMENT_D.CONFIRMQTY
+																						  AND ROWNUM = 1  ) END AS STO_STATUS  
+						    FROM DM_DOCUMENT_D
+						    JOIN DM_DOCUMENT_H 
+							  ON DM_DOCUMENT_D.DCCODE       = DM_DOCUMENT_H.DCCODE
+							 AND DM_DOCUMENT_D.DOCTYPE      = DM_DOCUMENT_H.DOCTYPE
+							 AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+							 AND DM_DOCUMENT_D.DOCNO        = DM_DOCUMENT_H.DOCNO
+						    JOIN MS_SKU
+							  ON MS_SKU.STORERKEY           = DM_DOCUMENT_D.STORERKEY
+							 AND MS_SKU.SKU                 = DM_DOCUMENT_D.SKU
+						    LEFT OUTER JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = DM_DOCUMENT_D.ADDWHO   /*등록자명*/
+						    LEFT OUTER JOIN FRAMEONE_USER USER2 ON USER2.USER_ID = DM_DOCUMENT_D.EDITWHO  /*수정자명*/		            
+						   WHERE 1=1 
+						<if test="searchtype == 0"><!-- 월별 -->
+							 AND DM_DOCUMENT_D.DELIVERYDATE <![CDATA[>=]]> #{docdt}||'01' 
+							 AND DM_DOCUMENT_D.DELIVERYDATE <![CDATA[<]]> TO_CHAR(ADD_MONTHS(TO_DATE(#{docdt}||'01', 'YYYYMMDD'), 1), 'YYYYMMDD') 
+						</if>
+						<if test="searchtype == 1"><!-- 일별 -->
+							 AND DM_DOCUMENT_D.DELIVERYDATE  <![CDATA[>=]]> #{docdtFrom}
+							 AND DM_DOCUMENT_D.DELIVERYDATE  <![CDATA[<=]]> #{docdtTo}
+						</if>
+							 AND DM_DOCUMENT_D.DEL_YN       = 'N'
+							 AND DM_DOCUMENT_D.STORERKEY    = #{gStorerkey}
+						<if test="dccode != null and dccode != ''">
+							 AND DM_DOCUMENT_D.DCCODE       = #{dccode}
+						</if>
+						<if test="plant != null and plant != ''">
+							 AND DM_DOCUMENT_D.PLANT        = #{plant}
+						</if>
+							 AND DM_DOCUMENT_D.DOCTYPE     IN ('DP','RT','WD','AJ')
+							 AND DM_DOCUMENT_D.WORKPROCESSCODE ='STO'
+					    )
+				    WHERE STO_STATUS <![CDATA[<]]> '90'
+				<!-- //////////////////////////////////////////////////////////// 일배재고 안하기로 함 -->
+				<!-- 폐기예약 -->
+		          UNION ALL
+		         SELECT /*+ FULL(DM_DOCUMENT_D) */      
+						DM_DOCUMENT_D.DCCODE                                                                                                     AS DCCODE
+					  , DM_DOCUMENT_D.DOCTYPE                                                                                                    AS DOCTYPE
+					  , DM_DOCUMENT_D.STORERKEY                                                                                                  AS STORERKEY
+					  , DM_DOCUMENT_D.DOCDT                                                                                                      AS DOCDT
+					  , (SELECT FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY, 'DOCTYPE', DM_DOCUMENT_D.DOCTYPE) FROM DUAL)                               AS DOCTYPENM 
+					  , DM_DOCUMENT_D.DELIVERYDATE                                                                                               AS DELIVERYDATE
+					  , DM_DOCUMENT_D.DOCNO                                                                                                      AS DOCNO
+					  , CASE WHEN DM_DOCUMENT_D.DOCTYPE = 'WD'         THEN DM_DOCUMENT_H.TO_CUSTKEY               
+							 WHEN DM_DOCUMENT_D.DOCTYPE IN ('DP','RT') THEN DM_DOCUMENT_H.FROM_CUSTKEY  
+							 ELSE UNISTR('') END                                                                                                 AS CUSTKEY 
+					  , CASE WHEN DM_DOCUMENT_D.DOCTYPE = 'WD'         THEN DM_DOCUMENT_H.TO_CUSTNAME              
+							 WHEN DM_DOCUMENT_D.DOCTYPE IN ('DP','RT') THEN DM_DOCUMENT_H.FROM_CUSTNAME
+							 ELSE UNISTR('') END                                                                                                 AS CUSTNAME
+					  , CASE WHEN DM_DOCUMENT_D.DOCTYPE = 'WD'         THEN DM_DOCUMENT_H.TO_CUSTTYPE               
+							 WHEN DM_DOCUMENT_D.DOCTYPE IN ('DP','RT') THEN DM_DOCUMENT_H.FROM_CUSTTYPE  
+							 ELSE UNISTR('') END                                                                                                 AS CUSTTYPE 
+					  , DM_DOCUMENT_D.DOCLINE                                                                                                    AS DOCLINE
+					  , DM_DOCUMENT_D.ORDERTYPE                                                                                                  AS ORDERTYPE
+					  , (SELECT FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY, 'ORDERTYPE_' || DM_DOCUMENT_D.DOCTYPE, DM_DOCUMENT_D.ORDERTYPE) FROM DUAL) AS ORDERTYPENM
+					  , (SELECT FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY, 'STATUS_' || DM_DOCUMENT_D.DOCTYPE, DM_DOCUMENT_D.STATUS) FROM DUAL)       AS STATUS
+					  , DM_DOCUMENT_D.SKU                                                                                                        AS SKU
+					  , MS_SKU.DESCRIPTION                                                                                                       AS SKUNAME
+					  , DM_DOCUMENT_D.UOM                                                                                                        AS UOM
+					  , CASE WHEN DM_DOCUMENT_D.DOCTYPE IN('DP','RT') THEN DM_DOCUMENT_D.ORDERQTY+DM_DOCUMENT_D.ORDERADJUSTQTY ELSE 0 END        AS DP_ORDERQTY
+					  , CASE WHEN DM_DOCUMENT_D.DOCTYPE IN('DP','RT') THEN DM_DOCUMENT_D.CONFIRMQTY ELSE 0 END                                   AS DP_CONFIRMQTY
+					  , CASE WHEN DM_DOCUMENT_D.DOCTYPE IN('WD')      THEN DM_DOCUMENT_D.ORDERQTY+DM_DOCUMENT_D.ORDERADJUSTQTY ELSE 0 END        AS WD_ORDERQTY
+					  , CASE WHEN DM_DOCUMENT_D.DOCTYPE IN('WD')      THEN DM_DOCUMENT_D.CONFIRMQTY ELSE 0 END                                   AS WD_CONFIRMQTY
+					  , ''                                                                                                                       AS FROM_DCCODE
+					  , ''                                                                                                                       AS FROM_LOC
+					  , ''                                                                                                                       AS TO_DCCODE
+					  , ''                                                                                                                       AS TO_LOC
+					  , NVL(USER1.USER_NM,DM_DOCUMENT_D.ADDWHO)                                                                                  AS ADDWHO
+					  , NVL(USER2.USER_NM,DM_DOCUMENT_D.EDITWHO)                                                                                 AS EDITWHO
+		              , USER1.USER_ID                                                                                                            AS ADD_ID              /* 등록자ID */
+		              , USER2.USER_ID                                                                                                            AS UPD_ID              /* 수정자ID */					  
+					  , 'F'                                                                                                                      AS GUBUN
+				   FROM DM_DOCUMENT_D
+				   JOIN DM_DOCUMENT_H 
+					 ON DM_DOCUMENT_D.DCCODE       = DM_DOCUMENT_H.DCCODE
+					AND DM_DOCUMENT_D.DOCTYPE      = DM_DOCUMENT_H.DOCTYPE
+					AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+					AND DM_DOCUMENT_D.DOCNO        = DM_DOCUMENT_H.DOCNO
+				   JOIN MS_SKU
+					 ON MS_SKU.STORERKEY           = DM_DOCUMENT_D.STORERKEY
+					AND MS_SKU.SKU                 = DM_DOCUMENT_D.SKU
+				   LEFT OUTER JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = DM_DOCUMENT_D.ADDWHO   /*등록자명*/
+				   LEFT OUTER JOIN FRAMEONE_USER USER2 ON USER2.USER_ID = DM_DOCUMENT_D.EDITWHO  /*수정자명*/		            
+				  WHERE 1=1 
+				<if test="searchtype == 0"><!-- 월별 -->
+					AND DM_DOCUMENT_D.DELIVERYDATE <![CDATA[>=]]> #{docdt}||'01' 
+					AND DM_DOCUMENT_D.DELIVERYDATE <![CDATA[<]]> TO_CHAR(ADD_MONTHS(TO_DATE(#{docdt}||'01', 'YYYYMMDD'), 1), 'YYYYMMDD') 
+				</if>
+				<if test="searchtype == 1"><!-- 일별 -->
+					AND DM_DOCUMENT_D.DELIVERYDATE  <![CDATA[>=]]> #{docdtFrom}
+					AND DM_DOCUMENT_D.DELIVERYDATE  <![CDATA[<=]]> #{docdtTo}
+				</if>
+					AND DM_DOCUMENT_D.DEL_YN       = 'N'
+					AND DM_DOCUMENT_D.STORERKEY    = #{gStorerkey}
+				<if test="dccode != null and dccode != ''">
+					AND DM_DOCUMENT_D.DCCODE       = #{dccode}
+				</if>
+				<if test="plant != null and plant != ''">
+					AND DM_DOCUMENT_D.PLANT        = #{plant}
+				</if>
+		            AND DM_DOCUMENT_D.DOCTYPE      = 'AJ'
+		            AND DM_DOCUMENT_D.ORDERTYPE LIKE 'DU%' 
+		            AND DM_DOCUMENT_D.STATUS = '90'              
+				<!-- 감모예약 -->
+		          UNION ALL
+		         SELECT /*+ FULL(DM_DOCUMENT_D) */      
+						DM_DOCUMENT_D.DCCODE                                                                                                     AS DCCODE
+					  , DM_DOCUMENT_D.DOCTYPE                                                                                                    AS DOCTYPE
+					  , DM_DOCUMENT_D.STORERKEY                                                                                                  AS STORERKEY
+					  , DM_DOCUMENT_D.DOCDT                                                                                                      AS DOCDT
+					  , (SELECT FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY, 'DOCTYPE', DM_DOCUMENT_D.DOCTYPE) FROM DUAL)                               AS DOCTYPENM 
+					  , DM_DOCUMENT_D.DELIVERYDATE                                                                                               AS DELIVERYDATE
+					  , DM_DOCUMENT_D.DOCNO                                                                                                      AS DOCNO
+					  , CASE WHEN DM_DOCUMENT_D.DOCTYPE = 'WD'         THEN DM_DOCUMENT_H.TO_CUSTKEY               
+							 WHEN DM_DOCUMENT_D.DOCTYPE IN ('DP','RT') THEN DM_DOCUMENT_H.FROM_CUSTKEY  
+							 ELSE UNISTR('') END                                                                                                 AS CUSTKEY 
+					  , CASE WHEN DM_DOCUMENT_D.DOCTYPE = 'WD'         THEN DM_DOCUMENT_H.TO_CUSTNAME              
+							 WHEN DM_DOCUMENT_D.DOCTYPE IN ('DP','RT') THEN DM_DOCUMENT_H.FROM_CUSTNAME
+							 ELSE UNISTR('') END                                                                                                 AS CUSTNAME
+					  , CASE WHEN DM_DOCUMENT_D.DOCTYPE = 'WD'         THEN DM_DOCUMENT_H.TO_CUSTTYPE               
+							 WHEN DM_DOCUMENT_D.DOCTYPE IN ('DP','RT') THEN DM_DOCUMENT_H.FROM_CUSTTYPE  
+							 ELSE UNISTR('') END                                                                                                 AS CUSTTYPE 
+					  , DM_DOCUMENT_D.DOCLINE                                                                                                    AS DOCLINE
+					  , DM_DOCUMENT_D.ORDERTYPE                                                                                                  AS ORDERTYPE
+					  , (SELECT FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY, 'ORDERTYPE_' || DM_DOCUMENT_D.DOCTYPE, DM_DOCUMENT_D.ORDERTYPE) FROM DUAL) AS ORDERTYPENM
+					  , (SELECT FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY, 'STATUS_' || DM_DOCUMENT_D.DOCTYPE, DM_DOCUMENT_D.STATUS) FROM DUAL)       AS STATUS
+					  , DM_DOCUMENT_D.SKU                                                                                                        AS SKU
+					  , MS_SKU.DESCRIPTION                                                                                                       AS SKUNAME
+					  , DM_DOCUMENT_D.UOM                                                                                                        AS UOM
+					  , CASE WHEN DM_DOCUMENT_D.DOCTYPE IN('DP','RT') THEN DM_DOCUMENT_D.ORDERQTY+DM_DOCUMENT_D.ORDERADJUSTQTY ELSE 0 END        AS DP_ORDERQTY
+					  , CASE WHEN DM_DOCUMENT_D.DOCTYPE IN('DP','RT') THEN DM_DOCUMENT_D.CONFIRMQTY ELSE 0 END                                   AS DP_CONFIRMQTY
+					  , CASE WHEN DM_DOCUMENT_D.DOCTYPE IN('WD')      THEN DM_DOCUMENT_D.ORDERQTY+DM_DOCUMENT_D.ORDERADJUSTQTY ELSE 0 END        AS WD_ORDERQTY
+					  , CASE WHEN DM_DOCUMENT_D.DOCTYPE IN('WD')      THEN DM_DOCUMENT_D.CONFIRMQTY ELSE 0 END                                   AS WD_CONFIRMQTY
+					  , ''                                                                                                                       AS FROM_DCCODE
+					  , ''                                                                                                                       AS FROM_LOC
+					  , ''                                                                                                                       AS TO_DCCODE
+					  , ''                                                                                                                       AS TO_LOC
+					  , NVL(USER1.USER_NM,DM_DOCUMENT_D.ADDWHO)                                                                                  AS ADDWHO
+					  , NVL(USER2.USER_NM,DM_DOCUMENT_D.EDITWHO)                                                                                 AS EDITWHO
+		              , USER1.USER_ID                                                                                                            AS ADD_ID              /* 등록자ID */
+		              , USER2.USER_ID                                                                                                            AS UPD_ID              /* 수정자ID */					  
+					  , 'G'                                                                                                                      AS GUBUN
+				   FROM DM_DOCUMENT_D
+				   JOIN DM_DOCUMENT_H 
+					 ON DM_DOCUMENT_D.DCCODE       = DM_DOCUMENT_H.DCCODE
+					AND DM_DOCUMENT_D.DOCTYPE      = DM_DOCUMENT_H.DOCTYPE
+					AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+					AND DM_DOCUMENT_D.DOCNO        = DM_DOCUMENT_H.DOCNO
+				   JOIN MS_SKU
+					 ON MS_SKU.STORERKEY           = DM_DOCUMENT_D.STORERKEY
+					AND MS_SKU.SKU                 = DM_DOCUMENT_D.SKU
+				   LEFT OUTER JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = DM_DOCUMENT_D.ADDWHO   /*등록자명*/
+				   LEFT OUTER JOIN FRAMEONE_USER USER2 ON USER2.USER_ID = DM_DOCUMENT_D.EDITWHO  /*수정자명*/		            
+				  WHERE 1=1 
+				<if test="searchtype == 0"><!-- 월별 -->
+					AND DM_DOCUMENT_D.DELIVERYDATE <![CDATA[>=]]> #{docdt}||'01' 
+					AND DM_DOCUMENT_D.DELIVERYDATE <![CDATA[<]]> TO_CHAR(ADD_MONTHS(TO_DATE(#{docdt}||'01', 'YYYYMMDD'), 1), 'YYYYMMDD') 
+				</if>
+				<if test="searchtype == 1"><!-- 일별 -->
+					AND DM_DOCUMENT_D.DELIVERYDATE  <![CDATA[>=]]> #{docdtFrom}
+					AND DM_DOCUMENT_D.DELIVERYDATE  <![CDATA[<=]]> #{docdtTo}
+				</if>
+					AND DM_DOCUMENT_D.DEL_YN       = 'N'
+					AND DM_DOCUMENT_D.STORERKEY    = #{gStorerkey}
+				<if test="dccode != null and dccode != ''">
+					AND DM_DOCUMENT_D.DCCODE       = #{dccode}
+				</if>
+				<if test="plant != null and plant != ''">
+					AND DM_DOCUMENT_D.PLANT        = #{plant}
+				</if>
+		            AND DM_DOCUMENT_D.DOCTYPE      = 'AJ'
+		            AND (DM_DOCUMENT_D.ORDERTYPE LIKE 'DD%'  OR DM_DOCUMENT_D.ORDERTYPE LIKE 'KITAJ%' )
+		            AND DM_DOCUMENT_D.STATUS       <![CDATA[<>]]> '90'
+				<!-- 반품예약 -->
+				<if test="reserveYn == 'Y'.toString()">
+				  UNION ALL
+				 SELECT WD_RESERVE.DCCODE                                                                                               AS DCCODE
+					  , WD_RESERVE.DOCTYPE                                                                                              AS DOCTYPE
+					  , WD_RESERVE.STORERKEY                                                                                            AS STORERKEY
+					  , WD_RESERVE.DOCDT                                                                                                AS DOCDT
+					  , (SELECT FN_CODEDESCR(WD_RESERVE.STORERKEY, 'DOCTYPE', WD_RESERVE.DOCTYPE) FROM DUAL)                            AS DOCTYPENM 
+					  , WD_RESERVE.RESERVEDT                                                                                            AS DELIVERYDATE
+					  , WD_RESERVE.DOCNO                                                                                                AS DOCNO
+					  , UNISTR('')                                                                                                      AS CUSTKEY 
+					  , UNISTR('')    													  	                                            AS CUSTNAME
+					  , UNISTR('')    													  	                                            AS CUSTTYPE
+					  , WD_RESERVE.DOCLINE                                                                                              AS DOCLINE
+					  , WD_RESERVE.ORDERTYPE                                                                                            AS ORDERTYPE
+					  , (SELECT FN_CODEDESCR(WD_RESERVE.STORERKEY, 'ORDERTYPE_' || WD_RESERVE.DOCTYPE, WD_RESERVE.ORDERTYPE) FROM DUAL) AS ORDERTYPENM
+					  , (SELECT FN_CODEDESCR(WD_RESERVE.STORERKEY, 'STATUS_' || WD_RESERVE.DOCTYPE, WD_RESERVE.STATUS) FROM DUAL)       AS STATUS
+					  , WD_RESERVE.SKU                                                                                                  AS SKU
+					  , MS_SKU.DESCRIPTION                                                                                              AS SKUNAME
+					  , WD_RESERVE.UOM                                                                                                  AS UOM
+					  , 0   																	                                        AS DP_ORDERQTY
+					  , 0   																	                                        AS DP_CONFIRMQTY
+					  , WD_RESERVE.ORDERQTY     											                                            AS WD_ORDERQTY
+					  , WD_RESERVE.CONFIRMQTY   											                                            AS WD_CONFIRMQTY
+					  , ''                                                                                                              AS FROM_DCCODE
+					  , ''                                                                                                              AS FROM_LOC
+					  , ''                                                                                                              AS TO_DCCODE
+					  , ''                                                                                                              AS TO_LOC
+					  , USER1.USER_NM                                                                                                   AS ADDWHO
+					  , USER2.USER_NM                                                                                                   AS EDITWHO
+		              , USER1.USER_ID                                                                                                   AS ADD_ID              /* 등록자ID */
+		              , USER2.USER_ID                                                                                                   AS UPD_ID              /* 수정자ID */					  
+					  , 'H'                                                                                                             AS GUBUN
+				   FROM WD_RESERVE  
+				   JOIN MS_SKU
+					 ON MS_SKU.STORERKEY           = WD_RESERVE.STORERKEY
+					AND MS_SKU.SKU                 = WD_RESERVE.SKU
+				   LEFT OUTER JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = WD_RESERVE.ADDWHO   /*등록자명*/
+				   LEFT OUTER JOIN FRAMEONE_USER USER2 ON USER2.USER_ID = WD_RESERVE.EDITWHO  /*수정자명*/		            
+				   WHERE  1=1
+				<if test="searchtype == 0"><!-- 월별 -->
+					<!--AND WD_RESERVE.RESERVEDT BETWEEN #{docdt} || '01' AND #{docdt} || '31'-->
+					AND LEFT(WD_RESERVE.RESERVEDT,6) = #{docdt}
+				</if>
+				<if test="searchtype == 1"><!-- 일별 -->
+					<!--AND WD_RESERVE.RESERVEDT BETWEEN #{docdtFrom} AND #{docdtTo}-->
+					AND WD_RESERVE.RESERVEDT  <![CDATA[>=]]> #{docdtFrom}
+					AND WD_RESERVE.RESERVEDT  <![CDATA[<=]]> #{docdtTo}		            
+				</if>
+					AND WD_RESERVE.STORERKEY    = #{gStorerkey}
+				<if test="dccode != null and dccode != ''">
+					AND WD_RESERVE.DCCODE       = #{dccode}
+				</if>
+					AND WD_RESERVE.STATUS       <![CDATA[<>]]> '90' 
+				</if>	
+			   ) T
+		 ORDER BY T.GUBUN
+		        , T.DELIVERYDATE
+				, T.DOCNO
+				, T.DOCLINE		
+	</select>
+	
+	<select id="getDetailList_backup_20251216" resultType="cjfw.wms.kp.dto.KpCloseResDetailDto">
+		SELECT /* [KpCloseService.sqlx][KpCloseService.getDetailList][모니터링 > 물동 > 물동마감 진행 현황 상세 조회][KimDongHan][2025-08-22] */
+				       T.DCCODE                AS DCCODE         /* 00. 물류센터 */
+				     , T.DOCTYPE               AS DOCTYPE        /* 00. 문서유형 */
+				     , T.STORERKEY             AS STORERKEY      /* 00. 고객사코드 */
+				     , T.DOCDT                 AS DOCDT          /* 00. 문서일자 */
+				     , T.DOCTYPENM             AS DOCTYPENM      /* 01. 문서유형 */
+				     , T.DELIVERYDATE          AS DELIVERYDATE   /* 02. 납품요청일 */
+				     , T.DOCNO                 AS DOCNO          /* 03. 오더번호 */
+				     , T.CUSTKEY               AS CUSTKEY        /* 04. 업체코드 */
+				     , T.CUSTNAME              AS CUSTNAME       /* 05. 업체명 */
+				     , T.DOCLINE               AS DOCLINE        /* 06. 오더품목 */
+				     , T.ORDERTYPE             AS ORDERTYPE      /* 07. 오더유형 */
+				     , T.ORDERTYPENM           AS ORDERTYPENM    /* 07. 오더타입 */
+				     , T.STATUS                AS STATUS         /* 08. 진행상태 */
+				     , T.SKU                   AS SKU            /* 09. 상품코드 */
+				     , T.SKUNAME               AS SKUNAME        /* 10. 상품명칭 */
+				     , T.UOM                   AS UOM            /* 11. 단위 */
+				     , T.DP_ORDERQTY           AS DP_ORDERQTY    /* 12. 구매수량 */
+				     , T.DP_CONFIRMQTY         AS DP_CONFIRMQTY  /* 13. 입고수량 */
+				     , T.WD_ORDERQTY           AS WD_ORDERQTY    /* 14. 주문수량 */
+				     , T.WD_CONFIRMQTY         AS WD_CONFIRMQTY  /* 15. 출고수량 */
+				     , T.FROM_DCCODE           AS FROM_DCCODE    /* 16. FROM센터 */
+				     , T.FROM_LOC              AS FROM_LOC       /* 17. 저장위치 */
+				     , T.TO_DCCODE             AS TO_DCCODE      /* 18. TO센터 */
+				     , T.TO_LOC                AS TO_LOC         /* 19. TO저장위치 */
+				     , T.ADDWHO                AS ADDWHO         /* 20. 등록자 */
+				     , T.EDITWHO               AS EDITWHO        /* 21. 수정자 */		   
+				     , T.CUSTTYPE              AS CUSTTYPE       /* CUSTTYPE */  
+				  FROM ( SELECT /*+ FULL(DM_DOCUMENT_D) */      
+		                        DM_DOCUMENT_D.DCCODE                                                                                                     AS DCCODE
+				              , DM_DOCUMENT_D.DOCTYPE                                                                                                    AS DOCTYPE
+				              , DM_DOCUMENT_D.STORERKEY                                                                                                  AS STORERKEY
+				              , DM_DOCUMENT_D.DOCDT                                                                                                      AS DOCDT
+				              , (SELECT FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY, 'DOCTYPE', DM_DOCUMENT_D.DOCTYPE) FROM DUAL)                               AS DOCTYPENM 
+				              , DM_DOCUMENT_D.DELIVERYDATE                                                                                               AS DELIVERYDATE
+				              , DM_DOCUMENT_D.DOCNO                                                                                                      AS DOCNO
+				              , CASE WHEN DM_DOCUMENT_D.DOCTYPE = 'WD'         THEN DM_DOCUMENT_H.TO_CUSTKEY               
+				                     WHEN DM_DOCUMENT_D.DOCTYPE IN ('DP','RT') THEN DM_DOCUMENT_H.FROM_CUSTKEY  
+				                     ELSE UNISTR('') END                                                                                                 AS CUSTKEY 
+				              , CASE WHEN DM_DOCUMENT_D.DOCTYPE = 'WD'         THEN DM_DOCUMENT_H.TO_CUSTNAME              
+				                     WHEN DM_DOCUMENT_D.DOCTYPE IN ('DP','RT') THEN DM_DOCUMENT_H.FROM_CUSTNAME
+				                     ELSE UNISTR('') END                                                                                                 AS CUSTNAME
+				              , CASE WHEN DM_DOCUMENT_D.DOCTYPE = 'WD'         THEN DM_DOCUMENT_H.TO_CUSTTYPE               
+				                     WHEN DM_DOCUMENT_D.DOCTYPE IN ('DP','RT') THEN DM_DOCUMENT_H.FROM_CUSTTYPE  
+				                     ELSE UNISTR('') END                                                                                                 AS CUSTTYPE 
+				              , DM_DOCUMENT_D.DOCLINE                                                                                                    AS DOCLINE
+				              , DM_DOCUMENT_D.ORDERTYPE                                                                                                  AS ORDERTYPE
+				              , (SELECT FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY, 'ORDERTYPE_' || DM_DOCUMENT_D.DOCTYPE, DM_DOCUMENT_D.ORDERTYPE) FROM DUAL) AS ORDERTYPENM
+				              , (SELECT FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY, 'STATUS_' || DM_DOCUMENT_D.DOCTYPE, DM_DOCUMENT_D.STATUS) FROM DUAL)       AS STATUS
+				              , DM_DOCUMENT_D.SKU                                                                                                        AS SKU
+				              , MS_SKU.DESCRIPTION                                                                                                       AS SKUNAME
+				              , DM_DOCUMENT_D.UOM                                                                                                        AS UOM
+				              , CASE WHEN DM_DOCUMENT_D.DOCTYPE IN('DP','RT') THEN DM_DOCUMENT_D.ORDERQTY+DM_DOCUMENT_D.ORDERADJUSTQTY ELSE 0 END        AS DP_ORDERQTY
+				              , CASE WHEN DM_DOCUMENT_D.DOCTYPE IN('DP','RT') THEN DM_DOCUMENT_D.CONFIRMQTY ELSE 0 END                                   AS DP_CONFIRMQTY
+				              , CASE WHEN DM_DOCUMENT_D.DOCTYPE IN('WD')      THEN DM_DOCUMENT_D.ORDERQTY+DM_DOCUMENT_D.ORDERADJUSTQTY ELSE 0 END        AS WD_ORDERQTY
+				              , CASE WHEN DM_DOCUMENT_D.DOCTYPE IN('WD')      THEN DM_DOCUMENT_D.CONFIRMQTY ELSE 0 END                                   AS WD_CONFIRMQTY
+				              , ''                                                                                                                       AS FROM_DCCODE
+				              , ''                                                                                                                       AS FROM_LOC
+				              , ''                                                                                                                       AS TO_DCCODE
+				              , ''                                                                                                                       AS TO_LOC
+				              , USER1.USER_NM                                                                                                            AS ADDWHO
+				              , USER2.USER_NM                                                                                                            AS EDITWHO
+				           FROM DM_DOCUMENT_D
+				           JOIN DM_DOCUMENT_H 
+						     ON DM_DOCUMENT_D.DCCODE       = DM_DOCUMENT_H.DCCODE
+				            AND DM_DOCUMENT_D.DOCTYPE      = DM_DOCUMENT_H.DOCTYPE
+				            AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+				            AND DM_DOCUMENT_D.DOCNO        = DM_DOCUMENT_H.DOCNO
+				           JOIN MS_SKU
+				             ON MS_SKU.STORERKEY           = DM_DOCUMENT_D.STORERKEY
+				            AND MS_SKU.SKU                 = DM_DOCUMENT_D.SKU
+		                   LEFT OUTER JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = DM_DOCUMENT_D.ADDWHO   /*등록자명*/
+		                   LEFT OUTER JOIN FRAMEONE_USER USER2 ON USER2.USER_ID = DM_DOCUMENT_D.EDITWHO  /*수정자명*/		            
+				          WHERE 1=1 
+						<if test="searchtype == 0"><!-- 월별 -->
+		                    AND DM_DOCUMENT_D.DELIVERYDATE <![CDATA[>=]]> #{docdt}||'01' 
+							AND DM_DOCUMENT_D.DELIVERYDATE <![CDATA[<]]> TO_CHAR(ADD_MONTHS(TO_DATE(#{docdt}||'01', 'YYYYMMDD'), 1), 'YYYYMMDD') --■ DBA 추가  
+						</if>
+						<if test="searchtype == 1"><!-- 일별 -->
+				            AND DM_DOCUMENT_D.DELIVERYDATE  <![CDATA[>=]]> #{docdtFrom}
+				            AND DM_DOCUMENT_D.DELIVERYDATE  <![CDATA[<=]]> #{docdtTo}
+						</if>
+		                    AND DM_DOCUMENT_D.DOCTYPE     IN ('DP','RT','WD','AJ')
+				            AND DM_DOCUMENT_D.DEL_YN       = 'N'
+				            AND DM_DOCUMENT_D.STORERKEY    = #{gStorerkey}
+						<if test="dccode != null and dccode != ''">
+				            AND DM_DOCUMENT_D.DCCODE       = #{dccode}
+						</if>
+						<if test="plant != null and plant != ''">
+				            AND DM_DOCUMENT_D.PLANT        = #{plant}
+						</if>
+				            AND DM_DOCUMENT_D.STATUS       <![CDATA[<>]]> '90' 
+				          UNION ALL
+				         SELECT WD_RESERVE.DCCODE                                                                                               AS DCCODE
+				              , WD_RESERVE.DOCTYPE                                                                                              AS DOCTYPE
+				              , WD_RESERVE.STORERKEY                                                                                            AS STORERKEY
+				              , WD_RESERVE.DOCDT                                                                                                AS DOCDT
+				              , (SELECT FN_CODEDESCR(WD_RESERVE.STORERKEY, 'DOCTYPE', WD_RESERVE.DOCTYPE) FROM DUAL)                            AS DOCTYPENM 
+				              , WD_RESERVE.RESERVEDT                                                                                            AS DELIVERYDATE
+				              , WD_RESERVE.DOCNO                                                                                                AS DOCNO
+				              , UNISTR('')                                                                                                      AS CUSTKEY 
+				              , UNISTR('')    													  	                                            AS CUSTNAME
+				              , UNISTR('')    													  	                                            AS CUSTTYPE
+				              , WD_RESERVE.DOCLINE                                                                                              AS DOCLINE
+				              , WD_RESERVE.ORDERTYPE                                                                                            AS ORDERTYPE
+				              , (SELECT FN_CODEDESCR(WD_RESERVE.STORERKEY, 'ORDERTYPE_' || WD_RESERVE.DOCTYPE, WD_RESERVE.ORDERTYPE) FROM DUAL) AS ORDERTYPENM
+				              , (SELECT FN_CODEDESCR(WD_RESERVE.STORERKEY, 'STATUS_' || WD_RESERVE.DOCTYPE, WD_RESERVE.STATUS) FROM DUAL)       AS STATUS
+				              , WD_RESERVE.SKU                                                                                                  AS SKU
+				              , MS_SKU.DESCRIPTION                                                                                              AS SKUNAME
+				              , WD_RESERVE.UOM                                                                                                  AS UOM
+				              , 0   																	                                        AS DP_ORDERQTY
+				              , 0   																	                                        AS DP_CONFIRMQTY
+				              , WD_RESERVE.ORDERQTY     											                                            AS WD_ORDERQTY
+				              , WD_RESERVE.CONFIRMQTY   											                                            AS WD_CONFIRMQTY
+				              , ''                                                                                                              AS FROM_DCCODE
+				              , ''                                                                                                              AS FROM_LOC
+				              , ''                                                                                                              AS TO_DCCODE
+				              , ''                                                                                                              AS TO_LOC
+				              , USER1.USER_NM                                                                                                   AS ADDWHO
+				              , USER2.USER_NM                                                                                                   AS EDITWHO
+				           FROM WD_RESERVE  
+				           JOIN MS_SKU
+				             ON MS_SKU.STORERKEY           = WD_RESERVE.STORERKEY
+				            AND MS_SKU.SKU                 = WD_RESERVE.SKU
+		                   LEFT OUTER JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = WD_RESERVE.ADDWHO   /*등록자명*/
+		                   LEFT OUTER JOIN FRAMEONE_USER USER2 ON USER2.USER_ID = WD_RESERVE.EDITWHO  /*수정자명*/		            
+				           WHERE  1=1
+						<if test="searchtype == 0"><!-- 월별 -->
+				            <!--AND WD_RESERVE.RESERVEDT BETWEEN #{docdt} || '01' AND #{docdt} || '31'-->
+				            AND LEFT(WD_RESERVE.RESERVEDT,6) = #{docdt}
+						</if>
+						<if test="searchtype == 1"><!-- 일별 -->
+				            <!--AND WD_RESERVE.RESERVEDT BETWEEN #{docdtFrom} AND #{docdtTo}-->
+				            AND WD_RESERVE.RESERVEDT  <![CDATA[>=]]> #{docdtFrom}
+				            AND WD_RESERVE.RESERVEDT  <![CDATA[<=]]> #{docdtTo}		            
+						</if>
+				            AND WD_RESERVE.STORERKEY    = #{gStorerkey}
+						<if test="dccode != null and dccode != ''">
+				            AND WD_RESERVE.DCCODE       = #{dccode}
+						</if>
+				            AND WD_RESERVE.STATUS       <![CDATA[<>]]> '90' 
+				       ) T
+				 ORDER BY T.DELIVERYDATE
+				        , T.DOCNO
+				        , T.DOCLINE	
+	</select>	
+
+    <select id="getMasterList_backup" resultType="cjfw.wms.kp.dto.KpCloseResDto">
+		/* [KpCloseService.sqlx][KpCloseService.getMasterList][지표/모니터링 > 마감지표 > 마감진행 현황 조회][KimDongHan][2025-08-22] */
+		/* AS-IS 쿼리에 logisone 스키마명 제거해서 변환 */
+		WITH T_DAILY AS ( SELECT DCCODE
+		                       , COUNT(DISTINCT SKU) AS DAILY_ST 
+		                    FROM ST_STOCK 
+		                   WHERE ST_STOCK.STORERKEY = #{gStorerkey}
+		                     AND ST_STOCK.LOC       = 'DAILYCROSS'
+							<if test="dccode != null and dccode != ''">
+		                     AND ST_STOCK.DCCODE    = #{dccode}
+							</if>
+		                     AND EXISTS ( SELECT 1
+		                                    FROM CM_LOT 
+		                                   WHERE CM_LOT.STORERKEY = ST_STOCK.STORERKEY
+		                                     AND CM_LOT.LOT       = ST_STOCK.LOT
+										<if test="searchtype == 0"><!-- 월별 -->
+		                                     <!--AND CM_LOT.LOTTABLE01 BETWEEN #{docdt} || '01' AND #{docdt} || '31'-->
+		                                     AND LEFT(CM_LOT.LOTTABLE01,6) = #{docdt}
+										</if>
+										<if test="searchtype == 1"><!-- 일별 -->
+		                                     <!--AND CM_LOT.LOTTABLE01 BETWEEN #{docdtFrom} AND #{docdtTo}-->
+		                                     AND CM_LOT.LOTTABLE01  <![CDATA[>=]]> #{docdtFrom}
+		                                     AND CM_LOT.LOTTABLE01  <![CDATA[<=]]> #{docdtTo}		                                     
+										</if>
+		                                )
+		                   GROUP BY DCCODE )
+		   , VENDOR_RT AS ( SELECT DCCODE
+		                         , COUNT(CASE WHEN STATUS = '90' THEN 1 END )              AS RT_VENDOR_COMP
+		                         , COUNT(CASE WHEN STATUS <![CDATA[<>]]> '90' THEN 1 END ) AS RT_VENDOR_NCOMP
+		                      FROM WD_RESERVE 
+		                     WHERE 1=1
+							<if test="dccode != null and dccode != ''">
+		                     AND WD_RESERVE.DCCODE    = #{dccode}
+							</if>		                     
+							<if test="searchtype == 0"><!-- 월별 -->
+		                       <!--AND RESERVEDT BETWEEN #{docdt} || '01' AND #{docdt} || '31'-->
+		                       AND LEFT(WD_RESERVE.RESERVEDT,6) = #{docdt}
+							</if>
+							<if test="searchtype == 1"><!-- 일별 -->
+		                       <!--AND RESERVEDT BETWEEN #{docdtFrom} AND #{docdtTo}-->
+                               AND WD_RESERVE.RESERVEDT  <![CDATA[>=]]> #{docdtFrom}
+                               AND WD_RESERVE.RESERVEDT  <![CDATA[<=]]> #{docdtTo}		  		                       
+							</if>
+		                     GROUP BY DCCODE )
+			SELECT 
+				<if test="searchtype == 0"><!-- 월별 -->			
+			       #{docdt}                                                     AS DM_MONTH            /* 조회월 */
+			    </if>   
+				<if test="searchtype == 1"><!-- 일별 -->
+				   SUBSTR(#{docdtFrom},0,6)			                            AS DM_MONTH            /* 조회월 */
+		         , #{docdtFrom}                                                 AS DOCDT_FROM          /* 조회시작일 */
+		         , #{docdtTo}                                                   AS DOCDT_TO            /* 조회종료일*/
+			    </if>   
+		         , #{searchtype}			                                    AS SEARCHTYPE          /* 조회구분 */
+		         , DISP_LIST.DCCODE                                             AS DCCODE              /* 물류센터 */
+		         , FN_GETDCNAME(DISP_LIST.DCCODE)                               AS DCNAME              /* 물류센터명 */
+		         , DISP_LIST.PLANT                                              AS PLANT               /* 플랜트 */
+		         , NVL(DISP_LIST.DP_NSTO_COMP+DISP_LIST.DP_NSTO_NCOMP,0)        AS DP_NSTO_TOT         /* 구매입고 : 전체건 */
+		         , DISP_LIST.DP_NSTO_COMP                                       AS DP_NSTO_COMP        /* 구매입고 : 처리건 */
+		         , DISP_LIST.DP_NSTO_NCOMP                                      AS DP_NSTO_NCOMP       /* 구매입고 : 미처리건 */
+		         , 0                                                            AS DP_NSTO_NREAL       /* 구매입고 : 진오더 미전환 건 */
+		         , NVL(DISP_LIST.DP_STO_COMP+DISP_LIST.DP_STO_NCOMP,0)          AS DP_STO_TOT          /* 광역입고 : 전체건 */
+		         , DISP_LIST.DP_STO_COMP                                        AS DP_STO_COMP         /* 광역입고 : 처리건 */
+		         , DISP_LIST.DP_STO_NCOMP                                       AS DP_STO_NCOMP        /* 광역입고 : 미처리건 */
+		         , NVL(DISP_LIST.RT_COMP+DISP_LIST.RT_NCOMP,0)                  AS RT_TOT              /* 반품입고 : 전체건 */
+		         , DISP_LIST.RT_COMP                                            AS RT_COMP             /* 반품입고 : 처리건 */
+		         , DISP_LIST.RT_NCOMP                                           AS RT_NCOMP            /* 반품입고 : 미처리건 */
+		         , NVL(DISP_LIST.WD_NSTO_COMP+DISP_LIST.WD_NSTO_NCOMP,0)        AS WD_NSTO_TOT         /* 고객출고 : 전체건 */
+		         , DISP_LIST.WD_NSTO_COMP                                       AS WD_NSTO_COMP        /* 고객출고 : 처리건 */
+		         , DISP_LIST.WD_NSTO_NCOMP                                      AS WD_NSTO_NCOMP       /* 고객출고 : 미처리건 */
+		         , 0                                                            AS WD_NSTO_NREAL       /* 고객출고 : 진오더 미전환 건 */
+		         , NVL(DISP_LIST.WD_STO_COMP+DISP_LIST.WD_STO_NCOMP,0)          AS WD_STO_TOT          /* 광역출고 : 전체건 */
+		         , DISP_LIST.WD_STO_COMP                                        AS WD_STO_COMP         /* 광역출고 : 처리건 */
+		         , DISP_LIST.WD_STO_NCOMP                                       AS WD_STO_NCOMP        /* 광역출고 : 미처리건 */
+		         , NVL(DISP_LIST.RT_CUST_COMP+DISP_LIST.RT_CUST_NCOMP,0)        AS RT_STO_TOT          /* 협력사반품 : 전체건 */
+		         , DISP_LIST.RT_CUST_COMP                                       AS RT_CUST_COMP        /* 협력사반품 : 처리건 */
+		         , DISP_LIST.RT_CUST_NCOMP                                      AS RT_CUST_NCOMP       /* 협력사반품 : 미처리건 */
+		         , NVL(DISP_LIST.STO_NCOMP, 0)                                  AS STO_ST              /* 운송중재고 : 오더건수 */
+		         , NVL(T_DAILY.DAILY_ST, 0)                                     AS DAILY_ST            /* 일배재고 : SKU 수 */
+		         , DISP_LIST.AJ_DU_NCOMP                                        AS AJ_DU_NCOMP         /* 폐기예약 : 오더건수 */
+				 , DISP_LIST.AJ_DD_NCOMP                                        AS AJ_DD_NCOMP         /* 감모예약 : 오더건수 */
+				 , NVL(VENDOR_RT.RT_VENDOR_NCOMP, 0)                            AS RT_VENDOR_NCOMP     /* 반품예약 : 오더건수 */				 		         
+		         , DISP_LIST.AJ_DU_COMP                                         AS AJ_DU_COMP
+		         , DISP_LIST.AJ_DD_COMP                                         AS AJ_DD_COMP
+		         , NVL(VENDOR_RT.RT_VENDOR_COMP, 0)                             AS RT_VENDOR_COMP
+		         , (SELECT CASE WHEN COUNT(1) > 0 THEN 'Y' ELSE 'N' END
+		              FROM IB_CLOSE
+		             WHERE IB_CLOSE.DCCODE    = DISP_LIST.DCCODE
+		               AND IB_CLOSE.PLANT     = DISP_LIST.PLANT
+					<if test="searchtype == 0"><!-- 월별 -->
+	                   <!--AND IB_CLOSE.CLOSEDT   = #{docdt}-->
+	                   AND LEFT(IB_CLOSE.CLOSEDT,6) = #{docdt}
+					</if>
+					<if test="searchtype == 1"><!-- 일별 -->
+	                   <!--AND IB_CLOSE.CLOSEDT BETWEEN SUBSTR(#{docdtFrom},0,6) AND SUBSTR(#{docdtTo},0,6)-->
+                       AND IB_CLOSE.CLOSEDT  <![CDATA[>=]]> SUBSTR(#{docdtFrom},0,6) 
+                       AND IB_CLOSE.CLOSEDT  <![CDATA[<=]]> SUBSTR(#{docdtTo},0,6)  		                   
+	                   
+					</if>		               
+		               AND IB_CLOSE.CLOSETYPE = 'MONTHCLOSE')                   AS CLOSEYN             /* 마감여부 */  
+		      FROM ( SELECT TARGET_LIST.DCCODE                                                                                                                                        AS DCCODE
+		                  , TARGET_LIST.PLANT                                                                                                                                         AS PLANT
+		                  , SUM(CASE WHEN DOCTYPE = 'DP' AND WORKPROCESSCODE <![CDATA[<>]]> 'STO' AND STATUS = '90' THEN 1 ELSE 0 END)                                                AS DP_NSTO_COMP
+		                  , SUM(CASE WHEN DOCTYPE = 'DP' AND WORKPROCESSCODE <![CDATA[<>]]> 'STO' AND STATUS <![CDATA[<>]]> '90' THEN 1 ELSE  0 END)                                  AS DP_NSTO_NCOMP
+		                  , SUM(CASE WHEN DOCTYPE = 'DP' AND WORKPROCESSCODE = 'STO' AND STATUS = '90' THEN 1 ELSE 0 END)                                                             AS DP_STO_COMP
+		                  , SUM(CASE WHEN DOCTYPE = 'DP' AND WORKPROCESSCODE = 'STO' AND STATUS <![CDATA[<>]]> '90' THEN 1 ELSE 0 END)                                                AS DP_STO_NCOMP 
+		                  , SUM(CASE WHEN DOCTYPE = 'RT' AND STATUS = '90' THEN 1 ELSE 0 END)                                                                                         AS RT_COMP
+		                  , SUM(CASE WHEN DOCTYPE = 'RT' AND STATUS <![CDATA[<>]]> '90' THEN 1 ELSE 0 END)                                                                            AS RT_NCOMP
+		                  , SUM(CASE WHEN DOCTYPE = 'WD' AND WORKPROCESSCODE <![CDATA[<>]]> 'STO' AND ORDERTYPE <![CDATA[<>]]> 'RP' AND STATUS = '90' THEN 1 ELSE 0 END)              AS WD_NSTO_COMP
+		                  , SUM(CASE WHEN DOCTYPE = 'WD' AND WORKPROCESSCODE <![CDATA[<>]]> 'STO' AND ORDERTYPE <![CDATA[<>]]> 'RP' AND STATUS <![CDATA[<>]]> '90' THEN 1 ELSE 0 END) AS WD_NSTO_NCOMP
+		                  , SUM(CASE WHEN DOCTYPE = 'WD' AND WORKPROCESSCODE = 'STO' AND STATUS = '90' THEN 1 ELSE 0 END)                                                             AS WD_STO_COMP
+		                  , SUM(CASE WHEN DOCTYPE = 'WD' AND WORKPROCESSCODE = 'STO' AND STATUS <![CDATA[<>]]> '90' THEN 1 ELSE 0 END)                                                AS WD_STO_NCOMP
+		                  , SUM(CASE WHEN DOCTYPE = 'WD' AND ORDERTYPE = 'RP' AND STATUS = '90' THEN 1 ELSE 0 END)                                                                    AS RT_CUST_COMP   
+		                  , SUM(CASE WHEN DOCTYPE = 'WD' AND ORDERTYPE = 'RP' AND STATUS <![CDATA[<>]]> '90' THEN 1 ELSE 0 END)                                                       AS RT_CUST_NCOMP
+		                  , SUM(CASE WHEN DOCTYPE = 'AJ' AND ORDERTYPE LIKE 'DU%' AND STATUS = '90' THEN 1 ELSE 0 END)                                                                AS AJ_DU_COMP
+		                  , SUM(CASE WHEN DOCTYPE = 'AJ' AND ORDERTYPE LIKE 'DU%' AND STATUS <![CDATA[<>]]> '90' THEN 1 ELSE 0 END)                                                   AS AJ_DU_NCOMP
+		                  , SUM(CASE WHEN DOCTYPE = 'AJ' AND ORDERTYPE LIKE 'DD%' AND STATUS = '90' THEN 1 ELSE 0 END)                                                                AS AJ_DD_COMP
+		                  , SUM(CASE WHEN DOCTYPE = 'AJ' AND (ORDERTYPE LIKE 'DD%'  OR ORDERTYPE LIKE 'KITAJ%' ) AND STATUS <![CDATA[<>]]> '90' THEN 1 ELSE 0 END)                    AS AJ_DD_NCOMP
+		                  , COUNT(CASE WHEN STO_STATUS <![CDATA[<]]>'90' THEN 1 END)                                                                                                  AS STO_NCOMP
+		               FROM ( SELECT DMD.DCCODE
+		                           , DMD.STORERKEY
+		                           , DMD.DOCTYPE
+		                           , DMD.PLANT
+		                           , DMD.DOCNO
+		                           , DMD.DOCLINE
+		                           , DMD.STATUS
+		                           , DMD.ORDERTYPE
+		                           , DMD.WORKPROCESSCODE
+		                           , CASE WHEN DMD.WORKPROCESSCODE ='STO' THEN ( SELECT '30'
+		                                                                           FROM DM_DOCUMENT_D T
+		                                                                          WHERE T.DOCDT = DMD.DOCDT
+		                                                                            AND T.DOCNO = DMD.DOCNO
+		                                                                            AND T.DOCLINE = DMD.DOCLINE
+		                                                                            AND T.DCCODE != DMD.DCCODE
+		                                                                            AND T.CONFIRMQTY <![CDATA[<>]]> DMD.CONFIRMQTY
+		                                                                            AND ROWNUM = 1  ) END AS STO_STATUS
+		                        FROM DM_DOCUMENT_D DMD
+		                       WHERE 1=1
+								<if test="searchtype == 0"><!-- 월별 -->
+		                         <!--AND DMD.DELIVERYDATE BETWEEN #{docdt} || '01' AND #{docdt} || '31'-->
+		                         AND LEFT(DMD.DELIVERYDATE,6) = #{docdt}
+								</if>
+								<if test="searchtype == 1"><!-- 일별 -->
+		                         <!--AND DMD.DELIVERYDATE BETWEEN #{docdtFrom} AND #{docdtTo}-->
+                                 AND DMD.DELIVERYDATE  <![CDATA[>=]]> #{docdtFrom}
+                                 AND DMD.DELIVERYDATE  <![CDATA[<=]]> #{docdtTo}			                         
+								</if>
+		                         AND DMD.DEL_YN    = 'N'
+		                         AND DMD.STORERKEY = #{gStorerkey}
+								<if test="dccode != null and dccode != ''">
+		                         AND DMD.DCCODE    = #{dccode}
+								</if>
+		                         AND DMD.DOCTYPE IN ('DP', 'RT', 'WD', 'AJ')
+		                         AND DMD.PLANT NOT IN ('2120','2710','2720','2730','2740','2750','2760','2770','2780','2790') ) TARGET_LIST
+		               GROUP BY TARGET_LIST.DCCODE
+		                      , TARGET_LIST.PLANT ) DISP_LIST
+		      LEFT OUTER JOIN T_DAILY 
+		        ON DISP_LIST.DCCODE = T_DAILY.DCCODE  
+		  	   AND DISP_LIST.PLANT  = T_DAILY.DCCODE
+		      LEFT OUTER JOIN VENDOR_RT 
+		        ON DISP_LIST.DCCODE = VENDOR_RT.DCCODE
+		       AND DISP_LIST.PLANT  = VENDOR_RT.DCCODE
+		     ORDER BY DISP_LIST.DCCODE
+		            , DISP_LIST.PLANT     
+    </select>
+
+    <select id="getDetailList_backup" resultType="cjfw.wms.kp.dto.KpCloseResDetailDto">
+		SELECT /* [KpCloseService.sqlx][KpCloseService.getDetailList][모니터링 > 물동 > 물동마감 진행 현황 상세 조회][KimDongHan][2025-08-22] */
+		       T.DCCODE                AS DCCODE         /* 00. 물류센터 */
+		     , T.DOCTYPE               AS DOCTYPE        /* 00. 문서유형 */
+		     , T.STORERKEY             AS STORERKEY      /* 00. 고객사코드 */
+		     , T.DOCDT                 AS DOCDT          /* 00. 문서일자 */
+		     , T.DOCTYPENM             AS DOCTYPENM      /* 01. 문서유형 */
+		     , T.DELIVERYDATE          AS DELIVERYDATE   /* 02. 납품요청일 */
+		     , T.DOCNO                 AS DOCNO          /* 03. 오더번호 */
+		     , T.CUSTKEY               AS CUSTKEY        /* 04. 업체코드 */
+		     , T.CUSTNAME              AS CUSTNAME       /* 05. 업체명 */
+		     , T.DOCLINE               AS DOCLINE        /* 06. 오더품목 */
+		     , T.ORDERTYPE             AS ORDERTYPE      /* 07. 오더유형 */
+		     , T.ORDERTYPENM           AS ORDERTYPENM    /* 07. 오더타입 */
+		     , T.STATUS                AS STATUS         /* 08. 진행상태 */
+		     , T.SKU                   AS SKU            /* 09. 상품코드 */
+		     , T.SKUNAME               AS SKUNAME        /* 10. 상품명칭 */
+		     , T.UOM                   AS UOM            /* 11. 단위 */
+		     , T.DP_ORDERQTY           AS DP_ORDERQTY    /* 12. 구매수량 */
+		     , T.DP_CONFIRMQTY         AS DP_CONFIRMQTY  /* 13. 입고수량 */
+		     , T.WD_ORDERQTY           AS WD_ORDERQTY    /* 14. 주문수량 */
+		     , T.WD_CONFIRMQTY         AS WD_CONFIRMQTY  /* 15. 출고수량 */
+		     , T.FROM_DCCODE           AS FROM_DCCODE    /* 16. FROM센터 */
+		     , T.FROM_LOC              AS FROM_LOC       /* 17. 저장위치 */
+		     , T.TO_DCCODE             AS TO_DCCODE      /* 18. TO센터 */
+		     , T.TO_LOC                AS TO_LOC         /* 19. TO저장위치 */
+		     , T.ADDWHO                AS ADDWHO         /* 20. 등록자 */
+		     , T.EDITWHO               AS EDITWHO        /* 21. 수정자 */		   
+		     , T.CUSTTYPE              AS CUSTTYPE       /* CUSTTYPE */  
+		  FROM ( SELECT DM_DOCUMENT_D.DCCODE                                                                                                     AS DCCODE
+		              , DM_DOCUMENT_D.DOCTYPE                                                                                                    AS DOCTYPE
+		              , DM_DOCUMENT_D.STORERKEY                                                                                                  AS STORERKEY
+		              , DM_DOCUMENT_D.DOCDT                                                                                                      AS DOCDT
+		              , (SELECT FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY, 'DOCTYPE', DM_DOCUMENT_D.DOCTYPE) FROM DUAL)                               AS DOCTYPENM 
+		              , DM_DOCUMENT_D.DELIVERYDATE                                                                                               AS DELIVERYDATE
+		              , DM_DOCUMENT_D.DOCNO                                                                                                      AS DOCNO
+		              , CASE WHEN DM_DOCUMENT_D.DOCTYPE = 'WD'         THEN DM_DOCUMENT_H.TO_CUSTKEY               
+		                     WHEN DM_DOCUMENT_D.DOCTYPE IN ('DP','RT') THEN DM_DOCUMENT_H.FROM_CUSTKEY  
+		                     ELSE UNISTR('') END                                                                                                 AS CUSTKEY 
+		              , CASE WHEN DM_DOCUMENT_D.DOCTYPE = 'WD'         THEN DM_DOCUMENT_H.TO_CUSTNAME              
+		                     WHEN DM_DOCUMENT_D.DOCTYPE IN ('DP','RT') THEN DM_DOCUMENT_H.FROM_CUSTNAME
+		                     ELSE UNISTR('') END                                                                                                 AS CUSTNAME
+		              , CASE WHEN DM_DOCUMENT_D.DOCTYPE = 'WD'         THEN DM_DOCUMENT_H.TO_CUSTTYPE               
+		                     WHEN DM_DOCUMENT_D.DOCTYPE IN ('DP','RT') THEN DM_DOCUMENT_H.FROM_CUSTTYPE  
+		                     ELSE UNISTR('') END                                                                                                 AS CUSTTYPE 
+		              , DM_DOCUMENT_D.DOCLINE                                                                                                    AS DOCLINE
+		              , DM_DOCUMENT_D.ORDERTYPE                                                                                                  AS ORDERTYPE
+		              , (SELECT FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY, 'ORDERTYPE_' || DM_DOCUMENT_D.DOCTYPE, DM_DOCUMENT_D.ORDERTYPE) FROM DUAL) AS ORDERTYPENM
+		              , (SELECT FN_CODEDESCR(DM_DOCUMENT_D.STORERKEY, 'STATUS_' || DM_DOCUMENT_D.DOCTYPE, DM_DOCUMENT_D.STATUS) FROM DUAL)       AS STATUS
+		              , DM_DOCUMENT_D.SKU                                                                                                        AS SKU
+		              , MS_SKU.DESCRIPTION                                                                                                       AS SKUNAME
+		              , DM_DOCUMENT_D.UOM                                                                                                        AS UOM
+		              , CASE WHEN DM_DOCUMENT_D.DOCTYPE IN('DP','RT') THEN DM_DOCUMENT_D.ORDERQTY+DM_DOCUMENT_D.ORDERADJUSTQTY ELSE 0 END        AS DP_ORDERQTY
+		              , CASE WHEN DM_DOCUMENT_D.DOCTYPE IN('DP','RT') THEN DM_DOCUMENT_D.CONFIRMQTY ELSE 0 END                                   AS DP_CONFIRMQTY
+		              , CASE WHEN DM_DOCUMENT_D.DOCTYPE IN('WD')      THEN DM_DOCUMENT_D.ORDERQTY+DM_DOCUMENT_D.ORDERADJUSTQTY ELSE 0 END        AS WD_ORDERQTY
+		              , CASE WHEN DM_DOCUMENT_D.DOCTYPE IN('WD')      THEN DM_DOCUMENT_D.CONFIRMQTY ELSE 0 END                                   AS WD_CONFIRMQTY
+		              , ''                                                                                                                       AS FROM_DCCODE
+		              , ''                                                                                                                       AS FROM_LOC
+		              , ''                                                                                                                       AS TO_DCCODE
+		              , ''                                                                                                                       AS TO_LOC
+		              , USER1.USER_NM                                                                                                            AS ADDWHO
+		              , USER2.USER_NM                                                                                                            AS EDITWHO
+		           FROM DM_DOCUMENT_D
+		           JOIN DM_DOCUMENT_H 
+				     ON DM_DOCUMENT_D.DCCODE       = DM_DOCUMENT_H.DCCODE
+		            AND DM_DOCUMENT_D.DOCTYPE      = DM_DOCUMENT_H.DOCTYPE
+		            AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+		            AND DM_DOCUMENT_D.DOCNO        = DM_DOCUMENT_H.DOCNO
+		           JOIN MS_SKU
+		             ON MS_SKU.STORERKEY           = DM_DOCUMENT_D.STORERKEY
+		            AND MS_SKU.SKU                 = DM_DOCUMENT_D.SKU
+                   LEFT OUTER JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = DM_DOCUMENT_D.ADDWHO   /*등록자명*/
+                   LEFT OUTER JOIN FRAMEONE_USER USER2 ON USER2.USER_ID = DM_DOCUMENT_D.EDITWHO  /*수정자명*/		            
+		          WHERE 1=1
+				<if test="searchtype == 0"><!-- 월별 -->
+		            <!--AND DM_DOCUMENT_D.DELIVERYDATE BETWEEN #{docdt} || '01' AND #{docdt} || '31'-->
+		            AND LEFT(DM_DOCUMENT_D.DELIVERYDATE,6) = #{docdt}
+				</if>
+				<if test="searchtype == 1"><!-- 일별 -->
+		            <!--AND DM_DOCUMENT_D.DELIVERYDATE BETWEEN #{docdtFrom} AND #{docdtTo}-->
+		            AND DM_DOCUMENT_D.DELIVERYDATE  <![CDATA[>=]]> #{docdtFrom}
+		            AND DM_DOCUMENT_D.DELIVERYDATE  <![CDATA[<=]]> #{docdtTo}
+				</if>
+		            AND DM_DOCUMENT_D.DOCTYPE     IN ('DP','RT','WD','AJ')
+		            AND DM_DOCUMENT_D.DEL_YN       = 'N'
+		            AND DM_DOCUMENT_D.STORERKEY    = #{gStorerkey}
+				<if test="dccode != null and dccode != ''">
+		            AND DM_DOCUMENT_D.DCCODE       = #{dccode}
+				</if>
+				<if test="plant != null and plant != ''">
+		            AND DM_DOCUMENT_D.PLANT        = #{plant}
+				</if>
+		            AND DM_DOCUMENT_D.STATUS       <![CDATA[<>]]> '90' 
+		          UNION ALL
+		         SELECT WD_RESERVE.DCCODE                                                                                               AS DCCODE
+		              , WD_RESERVE.DOCTYPE                                                                                              AS DOCTYPE
+		              , WD_RESERVE.STORERKEY                                                                                            AS STORERKEY
+		              , WD_RESERVE.DOCDT                                                                                                AS DOCDT
+		              , (SELECT FN_CODEDESCR(WD_RESERVE.STORERKEY, 'DOCTYPE', WD_RESERVE.DOCTYPE) FROM DUAL)                            AS DOCTYPENM 
+		              , WD_RESERVE.RESERVEDT                                                                                            AS DELIVERYDATE
+		              , WD_RESERVE.DOCNO                                                                                                AS DOCNO
+		              , UNISTR('')                                                                                                      AS CUSTKEY 
+		              , UNISTR('')    													  	                                            AS CUSTNAME
+		              , UNISTR('')    													  	                                            AS CUSTTYPE
+		              , WD_RESERVE.DOCLINE                                                                                              AS DOCLINE
+		              , WD_RESERVE.ORDERTYPE                                                                                            AS ORDERTYPE
+		              , (SELECT FN_CODEDESCR(WD_RESERVE.STORERKEY, 'ORDERTYPE_' || WD_RESERVE.DOCTYPE, WD_RESERVE.ORDERTYPE) FROM DUAL) AS ORDERTYPENM
+		              , (SELECT FN_CODEDESCR(WD_RESERVE.STORERKEY, 'STATUS_' || WD_RESERVE.DOCTYPE, WD_RESERVE.STATUS) FROM DUAL)       AS STATUS
+		              , WD_RESERVE.SKU                                                                                                  AS SKU
+		              , MS_SKU.DESCRIPTION                                                                                              AS SKUNAME
+		              , WD_RESERVE.UOM                                                                                                  AS UOM
+		              , 0   																	                                        AS DP_ORDERQTY
+		              , 0   																	                                        AS DP_CONFIRMQTY
+		              , WD_RESERVE.ORDERQTY     											                                            AS WD_ORDERQTY
+		              , WD_RESERVE.CONFIRMQTY   											                                            AS WD_CONFIRMQTY
+		              , ''                                                                                                              AS FROM_DCCODE
+		              , ''                                                                                                              AS FROM_LOC
+		              , ''                                                                                                              AS TO_DCCODE
+		              , ''                                                                                                              AS TO_LOC
+		              , USER1.USER_NM                                                                                                   AS ADDWHO
+		              , USER2.USER_NM                                                                                                   AS EDITWHO
+		           FROM WD_RESERVE  
+		           JOIN MS_SKU
+		             ON MS_SKU.STORERKEY           = WD_RESERVE.STORERKEY
+		            AND MS_SKU.SKU                 = WD_RESERVE.SKU
+                   LEFT OUTER JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = WD_RESERVE.ADDWHO   /*등록자명*/
+                   LEFT OUTER JOIN FRAMEONE_USER USER2 ON USER2.USER_ID = WD_RESERVE.EDITWHO  /*수정자명*/		            
+		           WHERE  1=1
+				<if test="searchtype == 0"><!-- 월별 -->
+		            <!--AND WD_RESERVE.RESERVEDT BETWEEN #{docdt} || '01' AND #{docdt} || '31'-->
+		            AND LEFT(WD_RESERVE.RESERVEDT,6) = #{docdt}
+				</if>
+				<if test="searchtype == 1"><!-- 일별 -->
+		            <!--AND WD_RESERVE.RESERVEDT BETWEEN #{docdtFrom} AND #{docdtTo}-->
+		            AND WD_RESERVE.RESERVEDT  <![CDATA[>=]]> #{docdtFrom}
+		            AND WD_RESERVE.RESERVEDT  <![CDATA[<=]]> #{docdtTo}		            
+				</if>
+		            AND WD_RESERVE.STORERKEY    = #{gStorerkey}
+				<if test="dccode != null and dccode != ''">
+		            AND WD_RESERVE.DCCODE       = #{dccode}
+				</if>
+		            AND WD_RESERVE.STATUS       <![CDATA[<>]]> '90' 
+		       ) T
+		 ORDER BY T.DELIVERYDATE
+		        , T.DOCNO
+		        , T.DOCLINE
+    </select>
+    
+    
+	<insert id="insertIbClose">
+		INSERT /* [KpCloseService.sqlx][KpCloseService.insertIbClose][모니터링 > 물동 > 물동마감 진행 현황 마감등록][KimDongHan][2025-08-29] */	
+		  INTO IB_CLOSE
+		     ( SERIALKEY
+		     , CLOSEDT
+		     , DCCODE
+		     , DOCTYPE
+		     , CLOSETYPE
+		     , CLOSEKEY
+		     , STORERKEY
+		     , PLANT
+		     , ADDWHO
+		     , EDITWHO)
+		SELECT SEQ_IB_CLOSE.NEXTVAL
+		     , #{docdt}
+		     , DM_D.DCCODE
+		     , 'STD'
+		     , 'MONTHCLOSE'
+		     , 'MONTHCLOSE'
+		     , DM_D.STORERKEY
+		     , DM_D.PLANT
+		     , #{gUserId}
+		     , #{gUserId}
+		  FROM ( SELECT DM_DOCUMENT_D.STORERKEY
+		              , DM_DOCUMENT_D.DCCODE
+		              , DM_DOCUMENT_D.PLANT
+		           FROM DM_DOCUMENT_D
+		          <!--WHERE DM_DOCUMENT_D.DELIVERYDATE BETWEEN #{docdt} || '01' AND #{docdt} || '31'-->
+		          WHERE 1=1
+		            AND DM_DOCUMENT_D.DELIVERYDATE  <![CDATA[>=]]> #{docdt}||'01'
+		            AND DM_DOCUMENT_D.DELIVERYDATE  <![CDATA[<=]]> #{docdt}||'31'				          
+		            AND DM_DOCUMENT_D.STORERKEY    = #{gStorerkey}
+		            AND DM_DOCUMENT_D.DCCODE       = #{dccode}
+		            AND DM_DOCUMENT_D.PLANT        = #{plant}
+		            AND DM_DOCUMENT_D.DEL_YN       = 'N'
+		            AND ROWNUM = 1 ) DM_D        
+	</insert>
+	
+	<insert id="insertDailyInoutClose">
+		INSERT /* [KpCloseService.sqlx][KpCloseService.insertDailyInoutClose][모니터링 > 물동 > 물동마감 진행 현황 자동등록][KimDongHan][2025-08-29] */
+		  INTO ST_DAILYINOUTCLOSE 
+		     ( SERIALKEY
+		     , DCCODE
+		     , STORERKEY
+		     , INOUTDT
+		     , STATUS
+		     , DEL_YN
+		     , TRAFFICCOP
+		     , ARCHIVECOP
+		     , ADDDATE
+		     , EDITDATE
+		     , ADDWHO
+		     , EDITWHO )
+		  WITH TARGET_PLT AS (SELECT DISTINCT DM_DOCUMENT_D.DCCODE
+		                                    , DM_DOCUMENT_D.PLANT
+		                        FROM DM_DOCUMENT_D
+		                       WHERE DM_DOCUMENT_D.STORERKEY     = #{gStorerkey}
+		                         AND DM_DOCUMENT_D.DEL_YN        = 'N'
+		                         AND DM_DOCUMENT_D.DOCTYPE      IN ('DP','RT','WD')
+		                         AND DM_DOCUMENT_D.PLANT NOT    IN ('2120','2710','2720','2730','2740','2750','2760','2770','2780','2790')
+		                         AND DM_DOCUMENT_D.DCCODE        = #{dccode}
+		                         <!---AND DM_DOCUMENT_D.DELIVERYDATE >= #{docdt}||'01'
+		                         AND DM_DOCUMENT_D.DELIVERYDATE <![CDATA[<=]]> #{docdt}||'31'-->
+		                         AND DM_DOCUMENT_D.DELIVERYDATE  <![CDATA[>=]]> #{docdt}||'01'
+		                         AND DM_DOCUMENT_D.DELIVERYDATE  <![CDATA[<=]]> #{docdt}||'31'			                         
+		                         )
+		     , TARGET_YN AS ( SELECT COUNT(1) AS CNT
+		                        FROM TARGET_PLT 
+		                       WHERE NOT EXISTS ( SELECT 'X'
+		                                            FROM IB_CLOSE 
+		                                           WHERE IB_CLOSE.CLOSEDT    = #{docdt}
+		                                             AND IB_CLOSE.DCCODE     = TARGET_PLT.DCCODE
+		                                             AND IB_CLOSE.CLOSETYPE  = 'MONTHCLOSE'
+		                                             AND IB_CLOSE.DOCTYPE    = 'STD'
+		                                             AND IB_CLOSE.CLOSEKEY   = 'MONTHCLOSE'
+		                                             AND IB_CLOSE.PLANT      = TARGET_PLT.PLANT
+		                                             AND IB_CLOSE.DEL_YN     = 'N') )
+		SELECT SEQ_ST_DAILYINOUTCLOSE.NEXTVAL
+		     , #{dccode} 
+		     , #{gStorerkey}
+		     , TO_CHAR(LAST_DAY(TO_DATE(#{docdt},'YYYYMM')),'YYYYMMDD')
+		     , '90'
+		     , 'N'
+		     , NULL
+		     , NULL
+		     , SYSDATE
+		     , SYSDATE
+		     , #{gUserId}
+		     , #{gUserId}
+		  FROM TARGET_YN
+		 WHERE TARGET_YN.CNT = 0 	
+	</insert>
+
+</mapper>

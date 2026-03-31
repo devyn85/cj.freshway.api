@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="tmDispatchDownloadService">
+
+
+
+	<select id="getDispatchListForDownload" resultType="TmDispatchListDownloadDto" parameterType="TmManualDispatchDownloadReqDto">
+        /* [TmDispatchDownloadService.sqlx][getDispatchListForDownload][배차목록 조회(다운로드/좌표갱신용)][System][2025.11.27] */
+        <![CDATA[
+		        SELECT
+			      TM_INPLAN.DCCODE AS dcCode
+			    , FN_DESCR_DC(TM_INPLAN.DCCODE) AS dcName
+			    , TM_INPLAN.DELIVERYDT  as deliveryDate
+			    , FN_DESCR_CODE('FW00', 'TM_DELIVERYTYPE', TM_INPLAN.TM_DELIVERYTYPE) AS deliveryType
+			    , MS_DLV_DISTRICTGROUP.DLVGROUP_NM AS areaGroupName
+			    , MS_DLV_DISTRICT.DLVDISTRICT_NM AS areaName
+			    , TM_INPLAN.HJDONG_CD AS dongCode
+			    , TM_INPLAN.ZIPCODE as zipCode
+			    , CASE WHEN EXISTS (
+			        SELECT 1
+			        FROM RT_CLAIMINFO
+			        WHERE RT_CLAIMINFO.DCCODE    = TM_INPLAN.DCCODE
+			          AND RT_CLAIMINFO.MNGPLC_ID = TM_INPLAN.CUSTKEY
+			          AND RT_CLAIMINFO.DEL_YN    = 'N'
+			          AND RT_CLAIMINFO.SOURCEDT  BETWEEN TO_CHAR(TO_DATE(TM_INPLAN.DELIVERYDT, 'YYYYMMDD') - 60, 'YYYYMMDD') AND TM_INPLAN.DELIVERYDT
+			      ) THEN 'Y' ELSE 'N' END AS claimYn
+			    , TM_INPLAN.DEFDELIVERYGROUP AS popName
+			    , TM_INPLAN.TRUTHCUSTKEY
+			    , FN_DESCR_CUST(TM_INPLAN.STORERKEY, TM_INPLAN.TRUTHCUSTKEY) AS custName
+			    , TM_INPLAN.CUSTKEY
+			    , FN_DESCR_CUST(TM_INPLAN.STORERKEY, TM_INPLAN.CUSTKEY) AS  fromCustName
+			    , TM_INPLAN.SLIPNO
+			    , FN_DESCR_CODE('FW00', 'CUSHRC', MS_CUST.CUSTSTRATEGY3) AS closeRoute
+			    , TM_INPLAN.DEFCARNO AS carNo
+			    , TM_INPLAN.PRIORITY AS turn
+			    , CM_DRIVER.DRIVERNAME
+			    , DAMO.DEC(CM_DRIVER.PHONE1) AS driverPhone
+			    , FN_DESCR_CODE('FW00', 'CONTRACTTYPE', CM_CAR.CONTRACTTYPE) AS contractType
+			    , TM_INPLAN.WEIGHT AS totalWeight
+			    , TM_INPLAN.CUBE AS totalCube
+			    , CASE WHEN TM_INPLAN.FACEINSPECT_YN = 'Y' THEN 'Y' ELSE '' END AS faceCheckYn
+			    , CASE WHEN TM_INPLAN.FROM_DELIVERYREQDT IS NULL AND TM_INPLAN.DELIVERYREQDT IS NULL THEN ''
+			           ELSE TO_CHAR(TM_INPLAN.FROM_DELIVERYREQDT, 'HH24:MI') || ' ~ ' || TO_CHAR(TM_INPLAN.DELIVERYREQDT, 'HH24:MI')
+			           END AS OTD
+			    , CASE WHEN NVL(TM_INPLAN.DISTANT_YN, 'N') = 'Y'
+			             OR NVL(TM_INPLAN.DLV_WAIT_YN, 'N') = 'Y'
+			             OR NVL(TM_INPLAN.KIDS_CL_YN, 'N') = 'Y'
+			             OR NVL(TM_INPLAN.LNG_DISTANT_YN, 'N') = 'Y'
+			             OR NVL(TM_INPLAN.UNLOAD_LVL_CD, '00') != '00'
+			             THEN 'Y' ELSE '' END AS specialConditionYn
+			    , FN_CODEDESCR('STD', 'CRM_DLV_KEYTYPE', MS_CUSTDLVINFO.KEYTYPE2) AS keyYn
+			    , MS_CUSTDLVINFO.KEYDETAIL
+			    , ( SELECT CASE WHEN MS_CUSTDLVINFO.ADDRESS1 IS NULL
+                    THEN MS_CUSTDLVINFO.ADDRESS3 || ' ' || MS_CUSTDLVINFO.ADDRESS4
+                    ELSE MS_CUSTDLVINFO.ADDRESS1 || ' ' || MS_CUSTDLVINFO.ADDRESS2
+                    END
+				        FROM MS_CUSTDLVINFO
+				        WHERE MS_CUSTDLVINFO.STORERKEY  = TM_INPLAN.STORERKEY
+				          AND MS_CUSTDLVINFO.CUSTTYPE   = TM_INPLAN.CUSTTYPE
+				          AND MS_CUSTDLVINFO.DLVCUSTKEY = TM_INPLAN.CUSTKEY
+      			) AS address
+		FROM TM_INPLAN
+		
+		LEFT JOIN MS_DLV_DISTRICT
+		    ON  MS_DLV_DISTRICT.DCCODE         = TM_INPLAN.DCCODE
+		    AND MS_DLV_DISTRICT.DLVDISTRICT_ID = TM_INPLAN.DEFDISTRICTCODE
+		    AND TM_INPLAN.DELIVERYDT           BETWEEN MS_DLV_DISTRICT.FROMDATE AND MS_DLV_DISTRICT.TODATE
+		LEFT JOIN MS_DLV_DISTRICTGROUP
+		    ON  MS_DLV_DISTRICTGROUP.DCCODE      = TM_INPLAN.DCCODE
+		    AND MS_DLV_DISTRICTGROUP.DLVGROUP_ID = TM_INPLAN.DEFDISTRICTGROUP
+		    AND TM_INPLAN.DELIVERYDT    BETWEEN MS_DLV_DISTRICTGROUP.FROMDATE AND MS_DLV_DISTRICTGROUP.TODATE
+		
+		LEFT JOIN MS_CUSTDLVINFO
+		    ON  MS_CUSTDLVINFO.STORERKEY  = TM_INPLAN.STORERKEY
+		    AND MS_CUSTDLVINFO.CUSTTYPE   = TM_INPLAN.CUSTTYPE
+		    AND MS_CUSTDLVINFO.DLVCUSTKEY = TM_INPLAN.TRUTHCUSTKEY
+		LEFT JOIN MS_CUST
+		    ON  MS_CUST.STORERKEY = MS_CUSTDLVINFO.STORERKEY
+		    AND MS_CUST.CUSTTYPE  = MS_CUSTDLVINFO.CUSTTYPE
+		    AND MS_CUST.CUSTKEY   = MS_CUSTDLVINFO.DLVCUSTKEY
+
+		LEFT JOIN CM_CAR
+		    ON  CM_CAR.CARNO = TM_INPLAN.DEFCARNO
+		LEFT JOIN CM_DRIVER
+		    ON CM_DRIVER.DRIVERID = CM_CAR.DRIVER1
+		
+		WHERE TM_INPLAN.DCCODE          = #{gDccode}
+		  AND TM_INPLAN.DOCTYPE         = 'WD'  
+		  AND TM_INPLAN.TM_DELIVERYTYPE = #{deliveryTypeCode}
+		  AND TM_INPLAN.DELIVERYDT      = #{deliveryDate}
+		  AND TM_INPLAN.SLIPDT          = #{deliveryDate}
+		ORDER BY
+		      TM_INPLAN.TRUTHCUSTKEY
+		    , TM_INPLAN.CUSTKEY
+		    , TM_INPLAN.SLIPNO
+        ]]>
+    </select>
+
+    <update id="updateCustPointIsNull">
+        /* [TmDispatchDownloadService.sqlx][updateCustPointIsNull][거래처 좌표 업데이트][System][2025.11.27] */
+        UPDATE MS_CUSTDLVINFO
+        SET    LATITUDE  = #{latitude}
+             , LONGITUDE = #{longitude}
+        WHERE STORERKEY = #{storerkey}
+          AND CUSTTYPE  = #{custType}
+          AND (DLVCUSTKEY     = #{dlvcustkey}
+           OR  TRUTHCUSTKEY   = #{dlvcustkey})
+    </update>
+
+</mapper>

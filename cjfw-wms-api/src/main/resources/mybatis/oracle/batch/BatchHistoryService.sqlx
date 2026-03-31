@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="batchHistoryService">
+	<!-- 배치 Job 이력 조회 -->
+	<select id="getBatchJobHistList" resultType="BatchHistoryResDto">
+        SELECT JOB_GUBUN                  AS jobGubun
+             , JOB_EXECUTION_ID           AS jobExecutionId
+             , JOB_INSTANCE_ID            AS jobInstanceId
+             , JOB_NAME                   AS jobName
+             , JOB_DESC                   AS jobDesc
+             , START_TIME                 AS startTime
+             , END_TIME                   AS endTime
+             , STATUS                     AS resultStatus
+             , EXIT_MESSAGE               AS resultMessage
+             , RUN_TIME                   AS runTime
+             , ERROR_STATUS               AS errorStatus
+          FROM (
+        SELECT C.JOB_GUBUN
+             , A.JOB_EXECUTION_ID
+             , A.JOB_INSTANCE_ID
+             , B.JOB_NAME
+             , C.JOB_DESC
+             , TO_CHAR(A.START_TIME, 'YYYY-MM-DD HH24:MI:SS')                   AS START_TIME
+             , TO_CHAR(A.END_TIME, 'YYYY-MM-DD HH24:MI:SS')                     AS END_TIME
+             , A.STATUS
+             , A.EXIT_MESSAGE
+             , ROUND(  EXTRACT(SECOND FROM (END_TIME - START_TIME)) +
+                       EXTRACT(MINUTE FROM (END_TIME - START_TIME)) * 60 +
+                       EXTRACT(HOUR FROM (END_TIME - START_TIME)) * 3600 +
+                       EXTRACT(DAY FROM (END_TIME - START_TIME)) * 86400 )      AS RUN_TIME
+             , CASE
+                 WHEN A.STATUS NOT IN ('FAILED', 'COMPLETED') THEN ''
+                 WHEN D.MIN_RESULT_CODE IS NULL THEN ''
+                 WHEN D.MIN_RESULT_CODE  <![CDATA[<]]> 0 THEN 'FAILED'
+                 ELSE 'COMPLETED'
+               END AS ERROR_STATUS
+             , A.CREATE_TIME
+          FROM BATCH_JOB_EXECUTION A
+          LEFT OUTER JOIN BATCH_JOB_INSTANCE B
+               ON A.JOB_INSTANCE_ID = B.JOB_INSTANCE_ID
+          LEFT OUTER JOIN BATCH_H C
+               ON B.JOB_NAME = C.JOB_NAME
+          LEFT OUTER JOIN (
+              SELECT  JOB_EXECUTION_ID,
+                      MIN(RESULT_CODE) AS MIN_RESULT_CODE
+              FROM MG_BATCH_LOG
+              GROUP BY JOB_EXECUTION_ID
+          ) D
+            ON D.JOB_EXECUTION_ID = A.JOB_EXECUTION_ID
+         WHERE 1=1
+        <if test='execStartDt != null and execStartDt != ""'>
+            AND TO_CHAR(A.CREATE_TIME, 'YYYYMMDD') <![CDATA[>=]]> #{execStartDt}
+        </if>
+		<if test='execEndDt != null and execEndDt != ""'>
+		    AND TO_CHAR(A.CREATE_TIME, 'YYYYMMDD') <![CDATA[<=]]> #{execEndDt}
+		</if>
+        <if test='jobName != null and jobName != ""'>
+            AND B.JOB_NAME LIKE '%' || #{jobName} || '%'
+        </if>
+        <if test='jobExecutionId != null and jobExecutionId != ""'>
+            AND A.JOB_EXECUTION_ID LIKE '%' || #{jobExecutionId} || '%'
+        </if>
+        <if test='jobInstanceId != null and jobInstanceId != ""'>
+            AND A.JOB_INSTANCE_ID LIKE '%' || #{jobInstanceId} || '%'
+        </if>
+        <if test='stepResult != null and stepResult != ""'>
+            AND C.JOB_GUBUN = #{stepResult}
+        </if>
+        <if test='jobResult != null and jobResult != ""'>
+            AND A.STATUS = #{jobResult}
+        </if>
+        )
+        WHERE 1=1
+        <if test='errorStatus != null and errorStatus != ""'>
+            AND ERROR_STATUS = #{errorStatus}
+        </if>
+        ORDER BY CREATE_TIME DESC
+    </select>
+
+    <!-- 배치 Step 이력 조회 -->
+    <select id="getBatchParamHistList" resultType="BatchHistoryResDto">
+        SELECT A.PARAMETER_NAME             AS paramName
+             , A.PARAMETER_TYPE             AS paramType
+             , A.PARAMETER_VALUE            AS paramValue
+          FROM BATCH_JOB_EXECUTION_PARAMS A
+         WHERE A.JOB_EXECUTION_ID = #{jobExecutionId}
+    </select>
+
+    <!-- 배치 Step 이력 조회 -->
+    <select id="getBatchStepHistList" resultType="BatchHistoryResDto">
+        SELECT A.STEP_EXECUTION_ID          AS stepExecutionId
+             , A.STEP_NAME                  AS stepName
+             , TO_CHAR(A.START_TIME, 'YYYY-MM-DD HH24:MI:SS')                   AS startTime
+             , TO_CHAR(A.END_TIME, 'YYYY-MM-DD HH24:MI:SS')                     AS endTime
+             , A.STATUS                     AS resultStatus
+             , A.COMMIT_COUNT               AS commitCount
+             , A.READ_COUNT                 AS readCount
+             , A.FILTER_COUNT               AS filterCount
+             , A.WRITE_COUNT                AS writeCount
+             , A.ROLLBACK_COUNT             AS rollbackCount
+             , A.EXIT_CODE                  AS resultStatus
+             , A.EXIT_MESSAGE               AS resultMessage
+             , ROUND(  EXTRACT(SECOND FROM (END_TIME - START_TIME)) +
+                       EXTRACT(MINUTE FROM (END_TIME - START_TIME)) * 60 +
+                       EXTRACT(HOUR FROM (END_TIME - START_TIME)) * 3600 +
+                       EXTRACT(DAY FROM (END_TIME - START_TIME)) * 86400 )      AS runTime
+          FROM BATCH_STEP_EXECUTION A
+         WHERE A.JOB_EXECUTION_ID = #{jobExecutionId}
+    </select>
+
+
+    <!-- 배치 Job 상세내역 조회 -->
+    <select id="getBatchJobDetailHistList" resultType="BatchHistoryResDto">
+        SELECT JOB_EXECUTION_ID     AS jobExecutionId
+             , JOB_EXECUTION_SEQ    AS jobExecutionSeq
+             , JOB_NAME             AS jobName
+             , JOB_DIV              AS jobDiv
+             , NODE_LEVEL           AS nodeLevel
+             , JOB_STATUS           AS jobStatus
+             , COMMAND              AS command
+             , LINE_NO              AS lineNo
+             , RESULT_CODE          AS resultCode
+             , RESULT_MSG           AS resultMsg
+             , TO_CHAR(ADD_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS.FF3')         AS addTimestamp
+          FROM MG_BATCH_LOG
+         WHERE JOB_EXECUTION_ID = #{jobExecutionId}
+    </select>
+</mapper>

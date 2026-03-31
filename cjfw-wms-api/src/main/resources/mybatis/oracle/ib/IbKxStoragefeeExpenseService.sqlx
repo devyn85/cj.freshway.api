@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ibKxStoragefeeExpenseService">
+	<select id="getMasterList" resultType="ibKxStoragefeeExpenseResDto">
+        /* [ibKxStoragefeeExpenseService.sqlx][ibKxStoragefeeExpenseService.getDataHeaderlist][KX 보관료 마감현황 조회][jangjaehyun][20251105] */
+        SELECT
+             '0'                                      AS CHECKYN,
+             KX_STORAGEFEE_MONTH.CLOSE_YN             AS CLOSEYN,
+             KX_STORAGEFEE_MONTH.SERIALKEY            AS SERIALKEY,
+             KX_STORAGEFEE_MONTH.ZMONTH               AS ZMONTH,
+             KX_STORAGEFEE_MONTH.DCCODE               AS DCCODE,
+             KX_STORAGEFEE_MONTH.DCNAME               AS DCNAME,
+             KX_STORAGEFEE_MONTH.ZCAT                 AS ZCAT,
+             FN_CODEDESCR('FW00', 'KX_STORAGEFEE_MONTH_ZCAT', KX_STORAGEFEE_MONTH.ZCAT) AS ZCAT2,
+             KX_STORAGEFEE_MONTH.SKU                  AS SKU,
+             KX_STORAGEFEE_MONTH.SKUNAME              AS SKUNAME,
+             KX_STORAGEFEE_MONTH.ZWRBTR_OUT           AS ZWRBTR_OUT,
+             KX_STORAGEFEE_MONTH.ZWRBTR_IN            AS ZWRBTR_IN,
+             KX_STORAGEFEE_MONTH.UOM                  AS UOM,
+             KX_STORAGEFEE_MONTH.QTY                  AS QTY,
+             KX_STORAGEFEE_MONTH.ZINVOICE             AS ZINVOICE,
+             KX_STORAGEFEE_MONTH.STATUS               AS STATUS,
+             FN_CODEDESCR('FW00', 'STATUS_EXPENSE_KX', KX_STORAGEFEE_MONTH.STATUS) AS STATUS2,
+             (SELECT FN_CODEDESCR('FW00', 'STATUS_EXPENSE_IF', KX_STORAGEFEE_MONTH.IF_STATUS) FROM DUAL) AS IF_STATUS,
+             KX_STORAGEFEE_EXPENSE.STATUS             AS EXPENSE_STATUS,
+             FN_CODEDESCR('FW00', 'STATUS_EXPENSE_KX', KX_STORAGEFEE_EXPENSE.STATUS) AS EXPENSE_STATUS2,
+             KX_STORAGEFEE_MONTH.ADDDATE              AS ADDDATE,
+             KX_STORAGEFEE_MONTH.ADDWHO               AS ADDWHO,
+             KX_STORAGEFEE_MONTH.EDITDATE             AS EDITDATE,
+             KX_STORAGEFEE_MONTH.EDITWHO              AS EDITWHO,
+             USER1.USER_NM                            AS ADDWHO_NM,  /*등록자명*/
+			 USER2.USER_NM                            AS EDITWHO_NM  /*수정자명*/
+        FROM KX_STORAGEFEE_MONTH
+        LEFT OUTER JOIN KX_STORAGEFEE_EXPENSE
+            ON KX_STORAGEFEE_MONTH.ZINVOICE = KX_STORAGEFEE_EXPENSE.SERIALKEY
+           AND KX_STORAGEFEE_MONTH.ZMONTH = KX_STORAGEFEE_EXPENSE.ZMONTH
+        LEFT JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = KX_STORAGEFEE_MONTH.ADDWHO  /*등록자명*/
+        LEFT JOIN FRAMEONE_USER USER2 ON USER2.USER_ID = KX_STORAGEFEE_MONTH.EDITWHO  /*수정자명*/
+        WHERE 1=1
+          AND KX_STORAGEFEE_MONTH.DCCODE = #{gDccode}
+          AND KX_STORAGEFEE_MONTH.ZMONTH = #{zmonth}        
+        <if test="multiSku != null and multiSku != ''">
+            AND KX_STORAGEFEE_MONTH.SKU IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+                                     FROM (SELECT #{multiSku} AS VAL FROM DUAL) A
+                                     CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)                
+        </if>
+        ORDER BY KX_STORAGEFEE_MONTH.ZMONTH, KX_STORAGEFEE_MONTH.ZCAT, KX_STORAGEFEE_MONTH.SKU
+    </select>
+    
+    <select id="checkExist" resultType="ibKxStoragefeeExpenseResDto">
+        SELECT /* [ibKxStoragefeeExpenseService.sqlx][ibKxStoragefeeExpenseService.checkExist][마감 Check][jangjaehyun][20251105] */
+               COUNT(1) AS CHECK_CNT
+          FROM KX_STORAGEFEE_MONTH
+         WHERE DCCODE = #{dcCode}
+           AND SKU = #{sku}
+           AND ZCAT = #{zcat}
+           AND CLOSE_YN = 'Y'
+    </select>
+    
+    <insert id="saveKxStorageExpense">
+        /* [ibKxStoragefeeExpenseService.sqlx][ibKxStoragefeeExpenseService.saveKxStorageExpense][재무마감등록][jangjaehyun][20251105] */
+        DECLARE
+        	v_serialkey NUMBER;
+        BEGIN        	
+    		v_serialkey := SEQ_KX_STORAGEFEE_EXPENSE.NEXTVAL;
+    		
+    		<!-- 3.보관료계산 _ WAT 상태인것들 INSERT-->
+            INSERT INTO KX_STORAGEFEE_EXPENSE(
+                 SERIALKEY, ZMONTH, DCCODE, DCNAME, ZWRBTR_OUT,
+                 ZWRBTR_IN, WMWST1, UOM, QTY, BTEXT,
+                 DEL_YN, ADDWHO, EDITWHO, ADDDATE, EDITDATE )
+            SELECT
+                 v_serialkey,
+                 ZMONTH,
+                 DCCODE,
+                 FN_DESCR_DC(DCCODE) AS DCNAME,
+                 ZWRBTR_OUT,
+                 ZWRBTR_IN,
+                 (ZWRBTR_IN) * 0.1,
+                 UOM,
+                 QTY,
+                 'CJL 서울우유 아이스크림 보관료',
+                 'N',
+                 'SYSTEM' AS ADDWHO,
+                 'SYSTEM' AS EDITWHO,
+                 SYSDATE AS ADDDATE,
+                 SYSDATE AS EDITDATE
+            FROM (
+                SELECT
+                     KX_STORAGEFEE.DCCODE AS DCCODE,
+                     SUBSTR(KX_STORAGEFEE.STOCKDATE, 0, 6) AS ZMONTH,
+                     KX_STORAGEFEE.UOM AS UOM,
+                     SUM(KX_STORAGEFEE.QTY) AS QTY,
+                     SUM(KX_STORAGEFEE.PRICE_PLT) AS ZWRBTR_OUT,
+                     SUM(KX_STORAGEFEE.INVOICE_PLT) AS ZWRBTR_IN
+                FROM KX_STORAGEFEE
+                LEFT OUTER JOIN KX_STORAGEFEE_MONTH
+                  ON KX_STORAGEFEE.DCCODE = KX_STORAGEFEE_MONTH.DCCODE
+                 AND TO_CHAR(TO_DATE(KX_STORAGEFEE.STOCKDATE, 'YYYYMMDD'), 'YYYYMM') = KX_STORAGEFEE_MONTH.ZMONTH
+                 AND KX_STORAGEFEE.SKU = KX_STORAGEFEE_MONTH.SKU
+                WHERE 1=1
+                  AND SUBSTR(KX_STORAGEFEE.STOCKDATE, 0, 6) = #{zmonth}
+                  AND NVL(KX_STORAGEFEE_MONTH.STATUS, 'WAT') IN ('WAT', 'ENT')
+                GROUP BY KX_STORAGEFEE.DCCODE,
+                         KX_STORAGEFEE.UOM,
+                         SUBSTR(KX_STORAGEFEE.STOCKDATE, 0, 6)
+            );
+			
+			<!-- 4.마감여부 수정 -->
+            UPDATE KX_STORAGEFEE_MONTH
+               SET STATUS   = 'CAL',
+                   ZINVOICE = v_serialkey
+             WHERE NVL(KX_STORAGEFEE_MONTH.STATUS, 'WAT') IN ('WAT', 'ENT')
+               AND ZMONTH = #{zmonth};
+        END;
+    </insert>
+
+    <update id="cancelKxStorageExpense" parameterType="IbKxStoragefeeExpenseReqDto">
+        /* [ibKxStoragefeeExpenseService.sqlx][ibKxStoragefeeExpenseService.cancelKxStorageExpense][재무마감등록][jangjaehyun][20251105] */
+        BEGIN
+        	<!-- 1.보관료 송장계산한것 DEL -->
+            UPDATE KX_STORAGEFEE_EXPENSE
+               SET DEL_YN = 'Y'
+             WHERE NVL(STATUS, 'WAT') IN ('WAT', 'ENT')
+               AND SERIALKEY = #{zinvoice};
+
+	        <!-- 4.마감여부 수정 -->
+            UPDATE KX_STORAGEFEE_MONTH
+               SET STATUS   = 'ENT',
+                   ZINVOICE = NULL
+             WHERE NVL(STATUS, 'WAT') IN ('CAL')
+               AND ZINVOICE = #{zinvoice};
+        END;
+    </update>    
+	 
+</mapper>

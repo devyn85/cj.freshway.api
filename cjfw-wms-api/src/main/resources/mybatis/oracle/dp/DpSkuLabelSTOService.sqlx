@@ -1,0 +1,299 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+  PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+  "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="dpSkuLabelSTOService">
+
+    <select id="getMasterList" resultType="cjfw.wms.dp.dto.DpSkuLabelSTOResDto">
+        SELECT /* [dpSkuLabelSTOService.sqlx][dpSkuLabelSTOService.getMasterList][입고라벨출력(광역)] */              
+                 '0'                                                                                        AS CHECKYN            /* 체크여부 */
+                 , FROM_DM_DOCUMENT_H.DCCODE                                                                AS FROM_DCCODE        /* 출발센터코드 */
+                 , FROM_DM_DOCUMENT_H.ORGANIZE                                                              AS FROM_ORGANIZE      /* 출발조직 */
+                 , WD_INPLAN.SLIPDT                                                                         AS SLIPDT             /* 입고예정일 */
+                 , FROM_DM_DOCUMENT_H.DOCDT                                                                 AS DOCDT              /* 문서일자 */
+                 , FROM_DM_DOCUMENT_H.DOCNO                                                                 AS DOCNO              /* 문서번호 */
+                 , FN_CODEDESCR(FROM_DM_DOCUMENT_H.STORERKEY, 'ORDERTYPE_WD', FROM_DM_DOCUMENT_H.ORDERTYPE) AS ORDERTYPE          /* 주문유형 */
+                 , FN_GETDCNAME(FROM_DM_DOCUMENT_H.DCCODE)                                                  AS FROM_DCNAME        /* 출발센터명 */
+                 , FROM_DM_DOCUMENT_H.FROM_CUSTKEY                                                          AS FROM_CUSTKEY       /* 출발거래처코드 */
+                 , FN_DESCR_ORGANIZE(FROM_DM_DOCUMENT_H.DCCODE, FROM_DM_DOCUMENT_H.FROM_CUSTKEY)            AS FROM_CUSTNAME      /* 출발거래처명 */
+                 , TO_DM_DOCUMENT_H.DCCODE                                                                  AS TO_DCCODE          /* 도착센터코드 */
+                 , FN_GETDCNAME(TO_DM_DOCUMENT_H.DCCODE)                                                    AS TO_DCNAME          /* 도착센터명 */
+                 , TO_DM_DOCUMENT_H.ORGANIZE                                                                AS TO_ORGANIZE        /* 도착조직 */
+                 , TO_DM_DOCUMENT_H.TO_CUSTKEY                                                              AS TO_CUSTKEY         /* 도착거래처코드 */
+                 , FN_DESCR_ORGANIZE(TO_DM_DOCUMENT_H.DCCODE, TO_DM_DOCUMENT_H.TO_CUSTKEY)                  AS TO_CUSTNAME        /* 도착거래처명 */
+                 , FN_CODEDESCR(FROM_DM_DOCUMENT_H.STORERKEY, 'STATUS_WD', FROM_DM_DOCUMENT_H.STATUS)       AS STATUS             /* 상태 */
+                 , FROM_DM_DOCUMENT_H.DCCODE                                                                AS DCCODE             /* 센터코드 */
+                 , FROM_DM_DOCUMENT_H.STORERKEY                                                             AS STORERKEY          /* 화주코드 */
+                 , FROM_DM_DOCUMENT_H.DOCTYPE                                                               AS DOCTYPE            /* 문서유형 */
+                 , TM_INPLAN.CARNO                                                                          AS CARNO              /* 차량번호 */
+                 , TO_CHAR(TM_INPLAN.DCDEPARTUREDT, 'MM/DD HH24:MI')                                        AS DCDEPARTUREDT      /* 출발예정일시 */
+        FROM   DM_DOCUMENT_H FROM_DM_DOCUMENT_H   
+        JOIN   DM_DOCUMENT_H TO_DM_DOCUMENT_H
+               ON TO_DM_DOCUMENT_H.DOCTYPE     = 'DP'
+               <if test="toCustkey != null and toCustkey != ''">
+               	AND TO_DM_DOCUMENT_H.TO_CUSTKEY  LIKE #{toCustkey}
+               </if>         
+               AND TO_DM_DOCUMENT_H.DEL_YN      = 'N'                 
+               AND TO_DM_DOCUMENT_H.DOCDT       = FROM_DM_DOCUMENT_H.DOCDT                
+               AND TO_DM_DOCUMENT_H.DOCNO       = FROM_DM_DOCUMENT_H.DOCNO                  
+               AND TO_DM_DOCUMENT_H.STORERKEY   = FROM_DM_DOCUMENT_H.STORERKEY                  
+        JOIN   DM_DOCUMENT_D         
+               ON DM_DOCUMENT_D.DCCODE       = FROM_DM_DOCUMENT_H.DCCODE
+								AND DM_DOCUMENT_D.DOCTYPE      = FROM_DM_DOCUMENT_H.DOCTYPE
+								AND DM_DOCUMENT_D.DELIVERYDATE = FROM_DM_DOCUMENT_H.DELIVERYDATE 
+								AND DM_DOCUMENT_D.DOCNO        = FROM_DM_DOCUMENT_H.DOCNO    
+        JOIN   WD_INPLAN
+               ON WD_INPLAN.DCCODE    = DM_DOCUMENT_D.DCCODE
+								AND WD_INPLAN.DOCTYPE   = DM_DOCUMENT_D.DOCTYPE    
+								AND WD_INPLAN.SLIPDT    = DM_DOCUMENT_D.DELIVERYDATE 
+								AND WD_INPLAN.DOCNO     = DM_DOCUMENT_D.DOCNO
+								AND WD_INPLAN.DOCLINE   = DM_DOCUMENT_D.DOCLINE       
+               AND WD_INPLAN.DEL_YN             = 'N'
+               <if test="fromSlipdt != null and fromSlipdt != ''">
+               	AND WD_INPLAN.SLIPDT             <![CDATA[>=]]> #{fromSlipdt}
+               </if>
+               <if test="toSlipdt != null and toSlipdt != ''">
+               	AND WD_INPLAN.SLIPDT             <![CDATA[<=]]> #{toSlipdt}
+               </if>
+        JOIN   MS_SKU                
+               ON MS_SKU.STORERKEY              = DM_DOCUMENT_D.STORERKEY                
+               AND MS_SKU.SKU                    = DM_DOCUMENT_D.SKU                   
+               AND MS_SKU.DEL_YN                 = 'N'
+        <!-- 상품 다중선택 -->
+        <if test="sku != null and sku != ''">
+               AND MS_SKU.SKU IN (
+                   SELECT TRIM(REGEXP_SUBSTR(#{sku}, '[^,]+', 1, LEVEL)) AS VAL 
+                   FROM DUAL
+                   CONNECT BY LEVEL <![CDATA[<=]]> REGEXP_COUNT(#{sku}, '[^,]+')
+               )
+        </if> 
+        LEFT OUTER JOIN TM_INPLAN
+               ON TM_INPLAN.DCCODE  = FROM_DM_DOCUMENT_H.DCCODE
+							AND TM_INPLAN.DOCTYPE = FROM_DM_DOCUMENT_H.DOCTYPE
+							AND TM_INPLAN.SLIPDT  = FROM_DM_DOCUMENT_H.DELIVERYDATE
+							AND TM_INPLAN.DOCNO   = FROM_DM_DOCUMENT_H.DOCNO   
+               AND TM_INPLAN.DOCTYPE            = 'WD'
+               AND TM_INPLAN.DEL_YN             = 'N'
+        WHERE  1=1
+               AND FROM_DM_DOCUMENT_H.DOCTYPE = 'WD'
+               AND FROM_DM_DOCUMENT_H.DEL_YN  = 'N'
+               AND FROM_DM_DOCUMENT_H.WORKPROCESSCODE = 'STO'
+               AND FROM_DM_DOCUMENT_H.IF_SEND_TYPE    = 'STODC'
+        <!-- 배송그룹 공통조회 조건 -->
+        <if test="gMultiCourier != null and gMultiCourier != ''">
+               AND FROM_DM_DOCUMENT_H.COURIER = #{gMultiCourier}
+        </if>
+        <if test="fromDocdt != null and fromDocdt != ''">
+               AND FROM_DM_DOCUMENT_H.DOCDT <![CDATA[>=]]> #{fromDocdt}
+        </if>
+        <if test="toDocdt != null and toDocdt != ''">
+               AND FROM_DM_DOCUMENT_H.DOCDT <![CDATA[<=]]> #{toDocdt}
+        </if>
+        <if test="fromDeliverydt != null and fromDeliverydt != ''">
+               AND FROM_DM_DOCUMENT_H.DELIVERYDATE <![CDATA[>=]]> #{fromDeliverydt}
+        </if>
+        <if test="toDeliverydt != null and toDeliverydt != ''">
+               AND FROM_DM_DOCUMENT_H.DELIVERYDATE <![CDATA[<=]]> #{toDeliverydt}
+        </if>  
+        <if test="fromCustkey != null and fromCustkey != ''">
+               AND FROM_DM_DOCUMENT_H.FROM_CUSTKEY LIKE #{fromCustkey}
+        </if>
+        <!-- 문서번호 다중선택 -->
+        <if test="docno != null and docno != ''">
+               AND FROM_DM_DOCUMENT_H.DOCNO IN (
+                   SELECT TRIM(REGEXP_SUBSTR(#{docno}, '[^,]+', 1, LEVEL)) AS VAL 
+                   FROM DUAL
+                   CONNECT BY LEVEL <![CDATA[<=]]> REGEXP_COUNT(#{docno}, '[^,]+')
+               )
+        </if>        
+        GROUP BY FROM_DM_DOCUMENT_H.DCCODE
+               , FROM_DM_DOCUMENT_H.STORERKEY
+               , FROM_DM_DOCUMENT_H.ORGANIZE
+               , WD_INPLAN.SLIPDT
+               , FROM_DM_DOCUMENT_H.DOCDT
+               , FROM_DM_DOCUMENT_H.DOCNO
+               , FROM_DM_DOCUMENT_H.ORDERTYPE
+               , TO_DM_DOCUMENT_H.DCCODE
+               , TO_DM_DOCUMENT_H.ORGANIZE
+               , FROM_DM_DOCUMENT_H.STATUS
+               , FROM_DM_DOCUMENT_H.DOCTYPE
+               , TM_INPLAN.CARNO
+               , TM_INPLAN.DCDEPARTUREDT
+               , FROM_DM_DOCUMENT_H.FROM_CUSTKEY
+               , TO_DM_DOCUMENT_H.TO_CUSTKEY         
+        ORDER BY FROM_DM_DOCUMENT_H.DCCODE
+               , FROM_DM_DOCUMENT_H.STORERKEY
+               , WD_INPLAN.SLIPDT
+               , FROM_DM_DOCUMENT_H.DOCDT
+               , FROM_DM_DOCUMENT_H.DOCNO
+               , FROM_DM_DOCUMENT_H.DOCTYPE
+               , FROM_DM_DOCUMENT_H.ORDERTYPE
+               , TM_INPLAN.CARNO
+    </select>
+
+    <select id="getDetailList" resultType="cjfw.wms.dp.dto.DpSkuLabelSTOResDetailDto">
+        WITH T_ST_STOCK AS ( /* 현재고로 있는 상품 유통기한 */
+            SELECT ST_STOCK.SKU           AS SKU
+                   , MIN(CM_LOT.LOTTABLE01) AS LOTTABLE01
+            FROM   ST_STOCK
+            JOIN   CM_LOT
+                   ON ST_STOCK.STORERKEY = CM_LOT.STORERKEY
+                   AND ST_STOCK.LOT      = CM_LOT.LOT
+                   AND CM_LOT.DEL_YN     = 'N'
+            WHERE  ST_STOCK.DCCODE       = #{dccode}
+                   AND ST_STOCK.STORERKEY = #{storerkey}
+            GROUP BY ST_STOCK.SKU
+        ) 
+        SELECT /* [dpSkuLabelSTOService.sqlx][dpSkuLabelSTOService.getDetailList][입고라벨출력(광역) 상세] */
+               '0'                                                                      AS CHECKYN
+               , WD_TASK.DCCODE                                                           AS DCCODE
+               , WD_TASK.STORERKEY                                                        AS STORERKEY
+               , WD_TASK.ORGANIZE                                                         AS ORGANIZE
+               , WD_TASK.AREA                                                             AS AREA
+               , WD_TASK.DOCDT                                                            AS DOCDT
+               , WD_TASK.DOCNO                                                            AS DOCNO
+               , WD_TASK.DOCLINE                                                          AS DOCLINE
+               , WD_TASK.SKU                                                              AS SKU
+               , MAX(MS_SKU.DESCRIPTION)                                                  AS SKUNAME		          
+               , CM_LOT.LOTTABLE01                                                        AS LOTTABLE01
+                , NVL(CASE WHEN MS_SKU.DURATIONTYPE = '1' AND REGEXP_LIKE(CM_LOT.LOTTABLE01, '^[0-9]{8}$')
+                THEN TO_CHAR(TO_DATE(CM_LOT.LOTTABLE01,'YYYYMMDD') - (MS_SKU.DURATION - 1), 'YYYYMMDD')
+                ELSE CM_LOT.LOTTABLE01
+                END,'STD') AS LOT_MANUFACTURE                    /** 제조 */
+                , NVL(CASE WHEN MS_SKU.DURATIONTYPE != '1' AND REGEXP_LIKE(CM_LOT.LOTTABLE01, '^[0-9]{8}$')
+                THEN TO_CHAR(TO_DATE(CM_LOT.LOTTABLE01,'YYYYMMDD') + (MS_SKU.DURATION - 1), 'YYYYMMDD')
+                ELSE CM_LOT.LOTTABLE01
+                END,'STD') AS LOT_EXPIRE                         /** 유통 */
+               , SUM(FN_UOMCAL(WD_TASK.BUNMO, WD_TASK.BUNJA, WD_TASK.PROCESSQTY))         AS PROCESSQTY
+               , SUM(FN_UOMCAL(WD_TASK.BUNMO, WD_TASK.BUNJA, WD_TASK.WORKQTY))            AS WORKQTY
+               , SUM(FN_UOMCAL(WD_TASK.BUNMO, WD_TASK.BUNJA, WD_TASK.INSPECTQTY))         AS INSPECTQTY
+               , SUM(FN_UOMCAL(WD_TASK.BUNMO, WD_TASK.BUNJA, WD_TASK.CONFIRMQTY))         AS CONFIRMQTY
+               , WD_TASK.UOM                                                              AS UOM
+               , FN_CODEDESCR(WD_TASK.STORERKEY, 'STORAGETYPE', MAX(MS_SKU.STORAGETYPE))  AS STORAGETYPEDESCR
+               , WD_TASK.SLIPDT                                                           AS SLIPDT
+               , WD_TASK.SLIPNO                                                           AS SLIPNO
+               , WD_TASK.SLIPLINE                                                         AS SLIPLINE
+               , WD_TASK.SLIPDT                                                           AS DP_SLIPDT
+               , WD_TASK.SLIPNO                                                           AS DP_SLIPNO
+               , WD_TASK.SLIPLINE                                                         AS DP_SLIPLINE
+               , MIN(DM_DOCUMENT_D.STATUS)                                                AS STATUS
+               , FN_CODEDESCR(WD_TASK.STORERKEY, 'STATUS_WD', MIN(DM_DOCUMENT_D.STATUS))  AS STATUSNAME
+               , MAX(DM_DOCUMENT_H.FROM_CUSTNAME)                                         AS CUSTNAME
+               , '0'                                                                      AS PRINTYN
+               <!-- , MAX(MS_SKU.QTYPERBOX)                                                    AS QTYPERBOX -->
+               , DECODE(MAX(MS_SKU.STORERKEY),'CJFW',MAX(EAUOM.BUNMO )* MAX(BOXUOM.BUNJA) / MAX(EAUOM.BUNJA ) / MAX(BOXUOM.BUNMO)
+                                                      ,MAX(MS_SKU.QTYPERBOX))               AS QTYPERBOX
+               , DECODE(MAX(MS_SKU.STORERKEY),'CJFW',UNISTR('')
+                                                      ,CASE WHEN MAX(MS_SKU.BASEUOM) NOT IN ('KG','BOX') AND MAX(MS_SKU.QTYPERBOX) <![CDATA[<]]> 999 THEN MAX(MS_SKU.QTYPERBOX)||MAX(MS_SKU.BASEUOM)||'/BOX'
+                                                            ELSE UNISTR('')
+                                                       END)                                 AS LBL_QTYPERBOX
+               , WD_TASK.LOT                                                              AS LOT
+               , FN_LOTDURATION(WD_TASK.STORERKEY                     
+                               ,MAX(MS_SKU.DURATIONTYPE)
+                               ,MAX(MS_SKU.DURATION)
+                               ,CM_LOT.LOTTABLE01
+                               ,'N')||'/'||MAX(MS_SKU.DURATION)                           AS DURATION_TERM
+               , ''                                                                       AS TO_LOC
+               , DECODE(fn_descr_code(MAX(MS_SKU.STORERKEY),'COUNTRY',MAX(MS_SKU.COUNTRYOFORIGIN)) ,'NOT FOUND','','('||fn_descr_code(MAX(MS_SKU.STORERKEY),'COUNTRY',MAX(MS_SKU.COUNTRYOFORIGIN))||')' ) as LBL_PLACEOFORIGIN
+               , WD_TASK.SKU                                                              AS LBL_SKU
+               , FN_FORMAT_MASK(FN_STRTONUM(WD_TASK.SLIPDT),'####/##/##')                 AS LBL_SLIPDT
+               , FN_CONV_SKUBCRNAME(MIN(MS_SKU.DESCRIPTION),1)                            AS LBL_SKUNAME1
+               , FN_CONV_SKUBCRNAME(MIN(MS_SKU.DESCRIPTION),2)                            AS LBL_SKUNAME2
+               , MAX(DM_DOCUMENT_H.FROM_CUSTKEY)                                          AS LBL_CUSTKEY
+               , FN_CONV_SKUBCRNAME(MAX(DM_DOCUMENT_H.FROM_CUSTNAME),1)                   AS LBL_CUSTNAME
+               , 'B'||WD_TASK.SKU||'-'||CM_LOT.LOTTABLE01||'B'                            AS LBL_BARCODE
+               , FN_FORMAT_MASK(FN_STRTONUM(CM_LOT.LOTTABLE01),'####/##/##')              AS LBL_LOTTABLE01
+               , 'B'||WD_TASK.SKU||'-'||CM_LOT.LOTTABLE01||'B'                            AS LBL_BARCODETEXT
+               , '('||FN_CODEDESCR(WD_TASK.STORERKEY, 'STORAGETYPE', MAX(MS_SKU.STORAGETYPE))||') ['||MAX(MS_SKUDCSET.LOC)||']'              AS LBL_TITLE
+               , CASE WHEN FN_CONV_UOM (WD_TASK.STORERKEY
+                                        ,WD_TASK.SKU
+                                        ,WD_TASK.UOM
+                                        ,'BOX'
+                                        ,SUM(FN_UOMCAL(WD_TASK.BUNMO, WD_TASK.BUNJA, WD_TASK.PROCESSQTY))) = 0 THEN 4
+                      ELSE CEIL(FN_CONV_UOM (WD_TASK.STORERKEY
+                                            ,WD_TASK.SKU
+                                            ,WD_TASK.UOM
+                                            ,'BOX'
+                                            ,SUM(FN_UOMCAL(WD_TASK.BUNMO, WD_TASK.BUNJA, WD_TASK.PROCESSQTY)))) END  AS PRINTEDQTY
+               , MAX(MS_SKU.DURATIONTYPE)                                                 AS DURATIONTYPE
+               , MAX(MS_SKU.DURATION)                                                     AS DURATION
+               , FN_GETSTOCKLASTLOT(WD_TASK.DCCODE, WD_TASK.STORERKEY, WD_TASK.SKU )     AS LASTLOTTABLE01
+               , MAX(DM_DOCUMENT_D.CHANNEL)                                               AS CHANNEL
+               , (SELECT T_ST_STOCK.LOTTABLE01                   
+                  FROM   T_ST_STOCK
+                  WHERE  T_ST_STOCK.SKU = WD_TASK.SKU)                                  AS STOCK_LOTTABLE01
+        FROM   WD_TASK
+        JOIN   MS_SKU
+               ON MS_SKU.STORERKEY = WD_TASK.STORERKEY
+               AND MS_SKU.SKU       = WD_TASK.SKU
+               AND MS_SKU.DEL_YN     = 'N'  
+        <!-- 상품 다중선택 -->
+        <if test="sku != null and sku != ''">
+               AND MS_SKU.SKU IN (
+                   SELECT TRIM(REGEXP_SUBSTR(#{sku}, '[^,]+', 1, LEVEL)) AS VAL 
+                   FROM DUAL
+                   CONNECT BY LEVEL <![CDATA[<=]]> REGEXP_COUNT(#{sku}, '[^,]+')
+               )
+        </if>   
+        LEFT OUTER JOIN MS_UOM BOXUOM
+               ON WD_TASK.STORERKEY        = BOXUOM.STORERKEY
+               AND WD_TASK.UOM              = BOXUOM.BASEUOM
+               AND WD_TASK.SKU              = BOXUOM.SKU
+               AND BOXUOM.UOM               = 'BOX'
+               AND (WD_TASK.UOM             = 'BOX' 
+                    OR BOXUOM.BUNJA         <![CDATA[<>]]> BOXUOM.BUNMO )
+        LEFT OUTER JOIN MS_UOM EAUOM
+               ON WD_TASK.STORERKEY        = EAUOM.STORERKEY
+               AND WD_TASK.SKU              = EAUOM.SKU
+               AND WD_TASK.UOM              = EAUOM.BASEUOM
+               AND EAUOM.UOM                = 'EA'
+        JOIN   CM_LOT
+               ON CM_LOT.STORERKEY = WD_TASK.STORERKEY
+               AND CM_LOT.LOT       = WD_TASK.LOT 
+        JOIN   DM_DOCUMENT_D          
+               ON DM_DOCUMENT_D.DCCODE             = WD_TASK.DCCODE                   
+               AND DM_DOCUMENT_D.STORERKEY          = WD_TASK.STORERKEY             
+               AND DM_DOCUMENT_D.ORGANIZE           = WD_TASK.ORGANIZE                   
+               AND DM_DOCUMENT_D.AREA               = WD_TASK.AREA           
+               AND DM_DOCUMENT_D.DELIVERYDATE              = WD_TASK.SLIPDT
+               AND DM_DOCUMENT_D.DOCNO              = WD_TASK.DOCNO                         
+               AND DM_DOCUMENT_D.DOCLINE            = WD_TASK.DOCLINE                       
+        JOIN   DM_DOCUMENT_H          
+               ON DM_DOCUMENT_D.DCCODE       = DM_DOCUMENT_H.DCCODE
+                AND DM_DOCUMENT_D.DOCTYPE      = DM_DOCUMENT_H.DOCTYPE
+                AND DM_DOCUMENT_D.DELIVERYDATE = DM_DOCUMENT_H.DELIVERYDATE
+                AND DM_DOCUMENT_D.DOCNO        = DM_DOCUMENT_H.DOCNO
+        JOIN   MS_SKUDCSET       
+               ON MS_SKUDCSET.STORERKEY            = WD_TASK.STORERKEY       
+               AND MS_SKUDCSET.DCCODE               = WD_TASK.DCCODE       
+               AND MS_SKUDCSET.SKU                  = WD_TASK.SKU    
+        WHERE  WD_TASK.DCCODE       = #{dccode}
+               AND WD_TASK.STORERKEY = #{storerkey}
+               AND WD_TASK.DOCDT     = #{docdt}
+               AND WD_TASK.DOCNO     = #{docno}
+        GROUP BY WD_TASK.DCCODE
+               , WD_TASK.STORERKEY
+               , WD_TASK.ORGANIZE
+               , WD_TASK.AREA
+               , WD_TASK.DOCDT
+               , WD_TASK.DOCNO
+               , WD_TASK.DOCLINE
+               , WD_TASK.SKU
+               , CM_LOT.LOTTABLE01
+                , NVL(CASE WHEN MS_SKU.DURATIONTYPE = '1' AND REGEXP_LIKE(CM_LOT.LOTTABLE01, '^[0-9]{8}$')
+                THEN TO_CHAR(TO_DATE(CM_LOT.LOTTABLE01,'YYYYMMDD') - (MS_SKU.DURATION - 1), 'YYYYMMDD')
+                ELSE CM_LOT.LOTTABLE01
+                END,'STD')
+                , NVL(CASE WHEN MS_SKU.DURATIONTYPE != '1' AND REGEXP_LIKE(CM_LOT.LOTTABLE01, '^[0-9]{8}$')
+                THEN TO_CHAR(TO_DATE(CM_LOT.LOTTABLE01,'YYYYMMDD') + (MS_SKU.DURATION - 1), 'YYYYMMDD')
+                ELSE CM_LOT.LOTTABLE01
+                END,'STD')
+               , WD_TASK.UOM
+               , WD_TASK.SLIPDT
+               , WD_TASK.SLIPNO
+               , WD_TASK.SLIPLINE
+               , WD_TASK.LOT
+        ORDER BY WD_TASK.DOCLINE
+               , WD_TASK.SKU 
+    </select>
+</mapper>

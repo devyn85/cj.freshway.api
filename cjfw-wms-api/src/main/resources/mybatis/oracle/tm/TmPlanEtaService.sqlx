@@ -1,0 +1,579 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="tmPlanEtaService">
+	
+	<select id="getOrdersGroupByDestinationAndTruthCustkey" resultType="TmSetDispatchTruthCustResDto">
+		WITH BASE_CODE AS ( /* [TmPlanEtaService.sqlx][getOrdersGroupByDestinationAndTruthCustkey][착지 기준 배송 + 반품 검색 조건 주문목록 조회][2025.11.05] */
+		  SELECT 
+		      TM_INPLAN.TRUTHCUSTKEY
+		    , TM_INPLAN.CUSTTYPE
+		    , TM_INPLAN.STORERKEY
+		    , TM_INPLAN.DCCODE
+		  FROM TM_INPLAN
+		  WHERE 1=1
+            AND TM_INPLAN.DCCODE = #{dccode}
+            AND TM_INPLAN.SLIPDT BETWEEN TO_CHAR(TRUNC(ADD_MONTHS(TO_DATE(#{deliveryDate}, 'YYYYMMDD'), -1), 'MM'), 'YYYYMMDD') -- 전월 1일부터
+                                                                            AND #{deliveryDate} -- 배송일자까지 (반폼주문 처리 기간 고려하면서 인덱스 고려)
+             AND (
+                <choose>
+                  <when test="truthCustkeyChunks != null and !truthCustkeyChunks.isEmpty()">
+                    <foreach collection="truthCustkeyChunks" item="chunk" separator=" OR ">
+                      TM_INPLAN.TRUTHCUSTKEY IN
+                      <foreach collection="chunk" item="id" open="(" separator="," close=")">
+                        #{id}
+                      </foreach>
+                    </foreach>
+                  </when>
+                  <otherwise>1=0</otherwise>
+                </choose>
+             )
+		  GROUP BY 		
+		  	  TM_INPLAN.TRUTHCUSTKEY
+			, TM_INPLAN.CUSTTYPE
+			, TM_INPLAN.STORERKEY
+		    , TM_INPLAN.DCCODE
+		)
+		, TM_INPLAN_DELIVERY AS (
+		  SELECT
+		      TM_INPLAN.TRUTHCUSTKEY
+		    , TM_INPLAN.TM_DELIVERYTYPE
+		    , TM_INPLAN.DEFCARNO
+		    , TM_INPLAN.CARNO
+		    , TM_INPLAN.DEFDELIVERYGROUP
+		    , TM_INPLAN.DELIVERYGROUP
+		    , TM_INPLAN.POPNO
+		    , SUM(TM_INPLAN.WEIGHT)           AS WEIGHT
+		    , TRUNC(SUM(TM_INPLAN.CUBE) / 1000, 5) AS CUBE -- mm³ → cm³
+		    , MAX(TM_INPLAN.DELIVERYREQDT)    AS DELIVERYREQDT
+		    , SUM(TM_INPLAN.ORDERQTY)         AS ORDERQTY
+            , TO_CHAR(MAX(TM_INPLAN.FROM_DELIVERYREQDT), 'HH24MI') AS REQDLVTIME2_FROM
+            , TO_CHAR(MAX(TM_INPLAN.DELIVERYREQDT), 'HH24MI') AS REQDLVTIME2_TO
+            , MAX(TM_INPLAN.FROM_DELIVERYREQDT)   AS FROM_DELIVERYREQDT
+		  FROM TM_INPLAN
+		  INNER JOIN BASE_CODE
+              ON  TM_INPLAN.TRUTHCUSTKEY = BASE_CODE.TRUTHCUSTKEY
+              AND TM_INPLAN.CUSTTYPE     = BASE_CODE.CUSTTYPE
+              AND TM_INPLAN.STORERKEY    = BASE_CODE.STORERKEY
+		  WHERE  TM_INPLAN.DCCODE  = #{dccode}
+              AND    TM_INPLAN.DELIVERYDT  = #{deliveryDate}
+              AND    TM_INPLAN.TM_DELIVERYTYPE = '1'
+              GROUP BY TM_INPLAN.TRUTHCUSTKEY, TM_INPLAN.TM_DELIVERYTYPE
+                        , TM_INPLAN.DEFCARNO
+                        , TM_INPLAN.CARNO
+                        , TM_INPLAN.DEFDELIVERYGROUP
+                        , TM_INPLAN.DELIVERYGROUP
+                        , TM_INPLAN.POPNO
+		)
+		, TM_INPLAN_RETURN AS (
+		  SELECT
+		      TM_INPLAN.TRUTHCUSTKEY
+		    , TM_INPLAN.TM_DELIVERYTYPE
+		    , TM_INPLAN.DEFCARNO
+		    , TM_INPLAN.CARNO
+		    , TM_INPLAN.DEFDELIVERYGROUP
+		    , TM_INPLAN.DELIVERYGROUP
+		    , TM_INPLAN.POPNO
+		    , SUM(TM_INPLAN.WEIGHT)           AS WEIGHT
+		    , TRUNC(SUM(TM_INPLAN.CUBE) / 1000, 5) AS CUBE -- mm³ → cm³
+		    , MAX(TM_INPLAN.DELIVERYREQDT)    AS DELIVERYREQDT
+		    , SUM(TM_INPLAN.ORDERQTY)         AS ORDERQTY
+            , TO_CHAR(MAX(TM_INPLAN.FROM_DELIVERYREQDT), 'HH24MI') AS REQDLVTIME2_FROM
+            , TO_CHAR(MAX(TM_INPLAN.DELIVERYREQDT), 'HH24MI') AS REQDLVTIME2_TO
+            , MAX(TM_INPLAN.FROM_DELIVERYREQDT)   AS FROM_DELIVERYREQDT
+		  FROM TM_INPLAN
+		  INNER JOIN BASE_CODE
+              ON  TM_INPLAN.TRUTHCUSTKEY = BASE_CODE.TRUTHCUSTKEY
+              AND TM_INPLAN.CUSTTYPE     = BASE_CODE.CUSTTYPE
+              AND TM_INPLAN.STORERKEY    = BASE_CODE.STORERKEY
+		  WHERE  TM_INPLAN.DCCODE       = #{dccode}
+            AND TM_INPLAN.DELIVERYDT    = ${deliveryDate}
+		    AND TM_INPLAN.SLIPDT BETWEEN TO_CHAR(TRUNC(ADD_MONTHS(TO_DATE(#{deliveryDate}, 'YYYYMMDD'), -1), 'MM'), 'YYYYMMDD') -- 전월 1일부터
+                                                                          AND #{deliveryDate} -- 배송일자까지
+		    AND TM_INPLAN.TM_DELIVERYTYPE = '2'
+		  GROUP BY TM_INPLAN.TRUTHCUSTKEY, TM_INPLAN.TM_DELIVERYTYPE, TM_INPLAN.CUSTTYPE, TM_INPLAN.STORERKEY
+                        , TM_INPLAN.DEFCARNO
+                        , TM_INPLAN.CARNO
+                        , TM_INPLAN.DEFDELIVERYGROUP
+                        , TM_INPLAN.DELIVERYGROUP
+                        , TM_INPLAN.POPNO
+		)
+		, DEDICATED_CARS AS (
+			SELECT
+		         MS_CUSTXCAR.STORERKEY 					AS STORERKEY			/* 회사코드 */
+		        ,MS_CUSTXCAR.DCCODE 					AS DCCODE				/* 센터코드 */
+		        ,MS_CUSTXCAR.CUSTCARTYPE 				AS CUSTCARTYPE			/* 거래처차량유형 */
+		        ,MS_CUSTXCAR.CUSTKEY 					AS CUSTKEY				/* 거래처코드 */
+		        ,LISTAGG(MS_CUSTXCAR.CARNO, ',') WITHIN GROUP (ORDER BY MS_CUSTXCAR.CARNO) AS CARNO_LIST
+	        -- PK: CUSTKEY, CUSTCARTYPE, DCCODE, CARNO
+		    FROM MS_CUSTXCAR
+		    JOIN CM_CAR ON CM_CAR.CARNO = MS_CUSTXCAR.CARNO
+		    WHERE 1=1
+		        AND MS_CUSTXCAR.STORERKEY = 'FW00'
+	            AND MS_CUSTXCAR.DCCODE = #{dccode}
+	            AND #{deliveryDate} BETWEEN MS_CUSTXCAR.FROMDATE AND MS_CUSTXCAR.TODATE
+	            AND MS_CUSTXCAR.APPLY_YN = 'Y'
+	            AND MS_CUSTXCAR.CUSTCARTYPE = '10'
+	        GROUP BY MS_CUSTXCAR.STORERKEY
+	        		,MS_CUSTXCAR.DCCODE
+	        		,MS_CUSTXCAR.CUSTKEY
+	        		,MS_CUSTXCAR.CUSTCARTYPE
+		)
+		, BLOCKED_CARS AS (
+			SELECT
+		         MS_CUSTXCAR.STORERKEY 					AS STORERKEY			/* 회사코드 */
+		        ,MS_CUSTXCAR.DCCODE 					AS DCCODE				/* 센터코드 */
+		        ,MS_CUSTXCAR.CUSTCARTYPE 				AS CUSTCARTYPE			/* 거래처차량유형 */
+		        ,MS_CUSTXCAR.CUSTKEY 					AS CUSTKEY				/* 거래처코드 */
+		        ,LISTAGG(MS_CUSTXCAR.CARNO, ',') WITHIN GROUP (ORDER BY MS_CUSTXCAR.CARNO) AS CARNO_LIST
+	        -- PK: CUSTKEY, CUSTCARTYPE, DCCODE, CARNO
+		    FROM MS_CUSTXCAR
+		    JOIN CM_CAR ON CM_CAR.CARNO = MS_CUSTXCAR.CARNO
+		    WHERE 1=1
+		        AND MS_CUSTXCAR.STORERKEY = 'FW00'
+	            AND MS_CUSTXCAR.DCCODE = #{dccode}
+	            AND #{deliveryDate} BETWEEN MS_CUSTXCAR.FROMDATE AND MS_CUSTXCAR.TODATE
+	            AND MS_CUSTXCAR.APPLY_YN = 'Y'
+	            AND MS_CUSTXCAR.CUSTCARTYPE = '99'
+	        GROUP BY MS_CUSTXCAR.STORERKEY
+	        		,MS_CUSTXCAR.DCCODE
+	        		,MS_CUSTXCAR.CUSTKEY
+	        		,MS_CUSTXCAR.CUSTCARTYPE
+		)
+		, ALL_DELIVERY AS (
+		 SELECT
+		    BASE_CODE.TRUTHCUSTKEY
+		  , BASE_CODE.CUSTTYPE
+		  , BASE_CODE.STORERKEY
+		  , BASE_CODE.DCCODE
+		  , TM_INPLAN_DELIVERY.WEIGHT          AS DELIVERY_WEIGHT
+		  , TM_INPLAN_DELIVERY.CUBE            AS DELIVERY_CUBE
+		  , TM_INPLAN_DELIVERY.DELIVERYREQDT   AS DELIVERY_DELIVERYREQDT
+		  , TM_INPLAN_DELIVERY.ORDERQTY        AS DELIVERY_ORDERQTY
+          , TM_INPLAN_DELIVERY.DEFCARNO        AS DELIVERY_DEFCARNO
+          , TM_INPLAN_DELIVERY.CARNO           AS DELIVERY_CARNO
+          , TM_INPLAN_DELIVERY.DEFDELIVERYGROUP AS DELIVERY_DEFPOP
+          , TM_INPLAN_DELIVERY.DELIVERYGROUP   AS DELIVERY_POP
+          , TM_INPLAN_DELIVERY.POPNO           AS DELIVERY_BASEPOP
+		  , TM_INPLAN_RETURN.WEIGHT            AS RETURN_WEIGHT
+		  , TM_INPLAN_RETURN.CUBE              AS RETURN_CUBE
+		  , TM_INPLAN_RETURN.DELIVERYREQDT     AS RETURN_DELIVERYREQDT
+		  , TM_INPLAN_RETURN.ORDERQTY          AS RETURN_ORDERQTY
+          , TM_INPLAN_RETURN.DEFCARNO          AS RETURN_DEFCARNO
+          , TM_INPLAN_RETURN.CARNO             AS RETURN_CARNO
+          , TM_INPLAN_RETURN.DEFDELIVERYGROUP  AS RETURN_DEFPOP
+          , TM_INPLAN_RETURN.DELIVERYGROUP     AS RETURN_POP
+          , TM_INPLAN_RETURN.POPNO             AS RETURN_BASEPOP
+		  , LEAST(NVL(TM_INPLAN_DELIVERY.TM_DELIVERYTYPE, '999999999'), NVL(TM_INPLAN_RETURN.TM_DELIVERYTYPE, '999999999')) AS TM_DELIVERYTYPE
+          , NVL(TM_INPLAN_DELIVERY.REQDLVTIME2_FROM, TM_INPLAN_RETURN.REQDLVTIME2_FROM) AS REQDLVTIME2_FROM
+          , NVL(TM_INPLAN_DELIVERY.REQDLVTIME2_TO, TM_INPLAN_RETURN.REQDLVTIME2_TO) AS REQDLVTIME2_TO
+          , NVL(TM_INPLAN_DELIVERY.FROM_DELIVERYREQDT, TM_INPLAN_RETURN.FROM_DELIVERYREQDT) AS FROM_DELIVERYREQDT
+		FROM BASE_CODE
+		LEFT OUTER JOIN TM_INPLAN_DELIVERY
+		ON TM_INPLAN_DELIVERY.TRUTHCUSTKEY = BASE_CODE.TRUTHCUSTKEY
+		LEFT OUTER JOIN TM_INPLAN_RETURN
+		ON TM_INPLAN_RETURN.TRUTHCUSTKEY = BASE_CODE.TRUTHCUSTKEY
+		)
+		, CLAIM_INFO AS (
+		   SELECT DISTINCT RT_CLAIMINFO.MNGPLC_ID, RT_CLAIMINFO.STORERKEY
+		   FROM  RT_CLAIMINFO
+		   INNER JOIN BASE_CODE
+		      ON BASE_CODE.TRUTHCUSTKEY = RT_CLAIMINFO.MNGPLC_ID
+		   WHERE 1 = 1
+		   AND RT_CLAIMINFO.MNGPLC_ID IS NOT NULL
+		   AND RT_CLAIMINFO.SOURCEDT BETWEEN TO_CHAR(TO_DATE(#{deliveryDate}, 'YYYYMMDD') - 60, 'YYYYMMDD') AND #{deliveryDate}
+		)
+		, RETURN_ORDERS AS (
+		   SELECT TM_INPLAN.TRUTHCUSTKEY, TM_INPLAN.CUSTTYPE, TM_INPLAN.STORERKEY
+		   FROM TM_INPLAN
+		   WHERE TM_INPLAN.DCCODE = #{dccode}
+		     AND TM_INPLAN.SLIPDT BETWEEN TO_CHAR(TO_DATE(#{deliveryDate}, 'YYYYMMDD') - 60, 'YYYYMMDD') AND #{deliveryDate}
+		     AND TM_INPLAN.DELIVERYDT BETWEEN TO_CHAR(TO_DATE(#{deliveryDate}, 'YYYYMMDD') - 60, 'YYYYMMDD') AND #{deliveryDate}
+		     AND TM_INPLAN.TM_DELIVERYTYPE = '2'
+		   GROUP BY TM_INPLAN.TRUTHCUSTKEY, TM_INPLAN.CUSTTYPE, TM_INPLAN.STORERKEY
+		)
+        <![CDATA[
+        , BASE_CUST AS (
+            SELECT ALL_DELIVERY.TRUTHCUSTKEY
+                , ALL_DELIVERY.CUSTTYPE
+                , ALL_DELIVERY.STORERKEY
+                , CASE WHEN ALL_DELIVERY.TM_DELIVERYTYPE = '2'
+                       THEN ALL_DELIVERY.RETURN_WEIGHT
+                       ELSE ALL_DELIVERY.DELIVERY_WEIGHT END AS WEIGHT
+                , CASE WHEN ALL_DELIVERY.TM_DELIVERYTYPE = '2'
+                       THEN ALL_DELIVERY.RETURN_CUBE
+                       ELSE ALL_DELIVERY.DELIVERY_CUBE END AS CUBE
+                , CASE WHEN ALL_DELIVERY.TM_DELIVERYTYPE = '2'
+                       THEN ALL_DELIVERY.RETURN_DELIVERYREQDT
+                       ELSE ALL_DELIVERY.DELIVERY_DELIVERYREQDT END AS DELIVERYREQDT
+                , CASE WHEN ALL_DELIVERY.TM_DELIVERYTYPE = '2'
+                       THEN ALL_DELIVERY.RETURN_ORDERQTY
+                       ELSE ALL_DELIVERY.DELIVERY_ORDERQTY END AS ORDERQTY
+                , MS_CUSTDLVINFO.ADDRESS1 AS ADDRESS
+                , MS_CUSTDLVINFO.LATITUDE
+                , MS_CUSTDLVINFO.LONGITUDE
+                , FN_DESCR_CUST(MS_CUSTDLVINFO.STORERKEY, MS_CUSTDLVINFO.CUSTKEY) AS CUST_NAME
+                , MS_CUSTDLVINFO.FACEINSPECT
+                , MS_CUSTDLVINFO.KIDS_CL_YN
+                , MS_CUSTDLVINFO.DLV_WAIT_YN
+                , MS_CUSTDLVINFO.DISTANT_YN
+                , MS_CUSTDLVINFO.LNG_DISTANT_YN
+                , CASE WHEN MS_CUSTDLVINFO.UNLOAD_LVL_CD = '00' THEN 'N'
+                       WHEN MS_CUSTDLVINFO.UNLOAD_LVL_CD IS NULL THEN 'N'
+                       ELSE 'Y' END AS UNLOAD_LVL_YN
+                , FN_CODEDESCR('STD', 'CRM_DLV_KEYTYPE', MS_CUSTDLVINFO.KEYTYPE2) AS PASSWORD_TYPE
+                , MS_CUSTDLVINFO.KEYTYPE2 AS PASSWORD_TYPE_CD
+                , NVL(MS_CUSTDLVINFO.AVG_WORK_TIME, 10) AS WORK_TIME
+                , ALL_DELIVERY.TM_DELIVERYTYPE
+                , CASE WHEN ALL_DELIVERY.TM_DELIVERYTYPE = '2'
+                       THEN ALL_DELIVERY.RETURN_DEFCARNO
+                       ELSE ALL_DELIVERY.DELIVERY_DEFCARNO
+                  END AS DEFCARNO
+                , CASE WHEN ALL_DELIVERY.TM_DELIVERYTYPE = '2'
+                       THEN ALL_DELIVERY.RETURN_CARNO
+                       ELSE ALL_DELIVERY.DELIVERY_CARNO
+                  END AS CARNO
+                , CASE WHEN ALL_DELIVERY.TM_DELIVERYTYPE = '2'
+                       THEN ALL_DELIVERY.RETURN_DEFPOP
+                       ELSE ALL_DELIVERY.DELIVERY_DEFPOP
+                  END AS DEFPOP
+                , CASE WHEN ALL_DELIVERY.TM_DELIVERYTYPE = '2'
+                       THEN ALL_DELIVERY.RETURN_POP
+                       ELSE ALL_DELIVERY.DELIVERY_POP
+                  END AS POP
+                , CASE WHEN ALL_DELIVERY.TM_DELIVERYTYPE = '2'
+                       THEN ALL_DELIVERY.RETURN_BASEPOP
+                       ELSE ALL_DELIVERY.DELIVERY_BASEPOP
+                  END AS BASEPOP
+                , CASE WHEN ALL_DELIVERY.REQDLVTIME2_FROM IS NOT NULL AND T2.DATA1 IS NULL AND T3.DATA1 IS NULL THEN
+                            REPLACE(ALL_DELIVERY.REQDLVTIME2_FROM, ':', '') -- 배송요구시간2차 시작만 있을 경우
+                       WHEN ALL_DELIVERY.REQDLVTIME2_FROM IS NULL AND T2.DATA1 IS NOT NULL AND T3.DATA1 IS NULL THEN T2.DATA1
+                -- 배송가능시간
+                       WHEN ALL_DELIVERY.REQDLVTIME2_FROM IS NULL AND T2.DATA1 IS NULL AND T3.DATA1 IS NOT NULL THEN T3.DATA1
+                -- 건물 개방 시간
+                       WHEN ALL_DELIVERY.REQDLVTIME2_FROM IS NOT NULL AND T2.DATA1 IS NOT NULL AND T3.DATA1 IS NULL THEN
+                -- 배송요구시간2차 시작과 배송가능시간
+                  CASE WHEN T2.DATA1 = '2300' THEN REPLACE(ALL_DELIVERY.REQDLVTIME2_FROM, ':', '') ELSE
+                       GREATEST(REPLACE(ALL_DELIVERY.REQDLVTIME2_FROM, ':', ''), T2.DATA1) END
+                       WHEN ALL_DELIVERY.REQDLVTIME2_FROM IS NOT NULL AND T2.DATA1 IS NULL AND T3.DATA1 IS NOT NULL THEN
+                -- 배송요구시간2차 시작과 건물 개방 시간
+                  CASE WHEN T3.DATA1 = '2300' THEN REPLACE(ALL_DELIVERY.REQDLVTIME2_FROM, ':', '') ELSE
+                       GREATEST(REPLACE(ALL_DELIVERY.REQDLVTIME2_FROM, ':', ''), T3.DATA1) END
+                       WHEN ALL_DELIVERY.REQDLVTIME2_FROM IS NULL AND T2.DATA1 IS NOT NULL AND T3.DATA1 IS NOT NULL THEN
+                -- 배송가능시간과 건물 개방 시간
+                  CASE WHEN T2.DATA1 = '2300' AND T3.DATA1 = '2300' THEN T2.DATA1
+                       WHEN T2.DATA1 = '2300' AND T3.DATA1 <> '2300' THEN T3.DATA1
+                       WHEN T2.DATA1<> '2300' AND T3.DATA1 = '2300' THEN T2.DATA1
+                       ELSE GREATEST(T2.DATA1, T3.DATA1) END
+                       WHEN ALL_DELIVERY.REQDLVTIME2_FROM IS NOT NULL AND T2.DATA1 IS NOT NULL AND T3.DATA1 IS NOT NULL THEN
+                -- 배송요구시간2차 시작과 배송가능시간과 건물 개방 시간 다 있을 경우
+                  CASE WHEN T2.DATA1 = '2300' AND T3.DATA1 = '2300' THEN REPLACE(ALL_DELIVERY.REQDLVTIME2_FROM, ':', '')
+                       WHEN REPLACE(ALL_DELIVERY.REQDLVTIME2_FROM, ':', '') BETWEEN '2300' AND '2359' AND T2.DATA1 = '2300' AND T3.DATA1 <> '2300'
+                       THEN T3.DATA1
+                       WHEN REPLACE(ALL_DELIVERY.REQDLVTIME2_FROM, ':', '') BETWEEN '2300' AND '2359' AND T2.DATA1 <> '2300' AND T3.DATA1 = '2300' THEN T2.DATA1
+                       WHEN REPLACE(ALL_DELIVERY.REQDLVTIME2_FROM, ':', '') < '2300' AND T2.DATA1 <> '2300' AND T3.DATA1 = '2300' THEN GREATEST(REPLACE(ALL_DELIVERY.REQDLVTIME2_FROM, ':', ''), T3.DATA1)
+                       WHEN REPLACE(ALL_DELIVERY.REQDLVTIME2_FROM, ':', '') < '2300' AND T2.DATA1 = '2300' AND T3.DATA1 <> '2300' THEN GREATEST(REPLACE(ALL_DELIVERY.REQDLVTIME2_FROM, ':', ''), T2.DATA1)
+                       WHEN REPLACE(ALL_DELIVERY.REQDLVTIME2_FROM, ':', '') < '2300' AND T2.DATA1 <> '2300' AND T3.DATA1 <> '2300' THEN GREATEST(REPLACE(ALL_DELIVERY.REQDLVTIME2_FROM, ':', ''), T2.DATA1, T3.DATA1)
+                       END
+                  END
+                  AS OTD_TIME_FROM
+                , ALL_DELIVERY.REQDLVTIME2_FROM
+                , ALL_DELIVERY.REQDLVTIME2_TO
+                , MS_CUSTDLVINFO.CUSTKEY
+                , ALL_DELIVERY.FROM_DELIVERYREQDT
+            FROM ALL_DELIVERY
+            LEFT OUTER JOIN MS_CUSTDLVINFO
+            ON  ALL_DELIVERY.STORERKEY    = MS_CUSTDLVINFO .STORERKEY
+            AND ALL_DELIVERY.CUSTTYPE     = MS_CUSTDLVINFO.CUSTTYPE
+            AND ALL_DELIVERY.TRUTHCUSTKEY = MS_CUSTDLVINFO.DLVCUSTKEY
+            LEFT JOIN CM_CODE T2
+            ON T2.CODELIST = 'CRM_DLV_BUILDINGOPENTIME'
+            AND T2.BASECODE = MS_CUSTDLVINFO.DELIVERYAVAILABLETIME
+            AND T2.STORERKEY = 'STD'
+            LEFT JOIN CM_CODE T3
+            ON T3.CODELIST = 'CRM_DLV_BUILDINGOPENTIME'
+            AND T3.BASECODE = MS_CUSTDLVINFO.BUILDINGOPENTIME
+            AND T3.STORERKEY = 'STD'
+        )
+		SELECT
+		         BASE_CUST.TRUTHCUSTKEY
+		       , BASE_CUST.CUSTTYPE
+		       , BASE_CUST.STORERKEY
+		       , BASE_CUST.WEIGHT
+		       , BASE_CUST.CUBE
+		       , BASE_CUST.DELIVERYREQDT
+		       , BASE_CUST.ORDERQTY
+		       , BASE_CUST.ADDRESS
+		       , BASE_CUST.LATITUDE
+		       , BASE_CUST.LONGITUDE
+               , BASE_CUST.CUST_NAME
+		       , BASE_CUST.FACEINSPECT
+		       , BASE_CUST.KIDS_CL_YN
+		       , BASE_CUST.DLV_WAIT_YN
+		       , BASE_CUST.DISTANT_YN
+		       , BASE_CUST.LNG_DISTANT_YN
+		       , BASE_CUST.UNLOAD_LVL_YN
+               , BASE_CUST.PASSWORD_TYPE
+               , BASE_CUST.PASSWORD_TYPE_CD
+		       , CASE WHEN CLAIM_INFO.MNGPLC_ID IS NOT NULL THEN 'Y' ELSE 'N' END   AS CLAIM_YN
+		       , BASE_CUST.WORK_TIME
+		       , BASE_CUST.TM_DELIVERYTYPE
+		       -- OTD(배송요구시간 시작)
+               , CASE WHEN VALIDATE_CONVERSION(BASE_CUST.OTD_TIME_FROM AS NUMBER) = 0 THEN ''
+                      ELSE NVL2(BASE_CUST.OTD_TIME_FROM,
+                      -- 1. 시간부 처리 ('24' -> '00', 그 외 유지)
+                           REGEXP_REPLACE(SUBSTR(LPAD(REPLACE(BASE_CUST.OTD_TIME_FROM, ':', ''), 4, '0'), 1, 2), '^24', '00')
+                           || ':' ||
+                        -- 2. 분부 처리 (60 이상 -> '59', 그 외 유지)
+                           CASE WHEN TO_NUMBER(SUBSTR(LPAD(REPLACE(BASE_CUST.OTD_TIME_FROM, ':', ''), 4, '0'), 3, 2)) > 59 THEN '59'
+                                ELSE SUBSTR(LPAD(REPLACE(BASE_CUST.OTD_TIME_FROM, ':', ''), 4, '0'), 3, 2)
+                           END,
+                      '')
+                END AS OTD_TIME_FROM
+               -- OTD(배송요구시간 종료)
+              , CASE WHEN REPLACE(BASE_CUST.OTD_TIME_FROM, ':', '') > REPLACE(BASE_CUST.REQDLVTIME2_TO, ':', '') AND TO_CHAR(BASE_CUST.FROM_DELIVERYREQDT, 'YYYYMMDD') = #{deliveryDate}
+                     THEN
+                           CASE WHEN VALIDATE_CONVERSION(BASE_CUST.OTD_TIME_FROM AS NUMBER) = 0 THEN ''
+                                ELSE NVL2(BASE_CUST.OTD_TIME_FROM,
+                                -- 1. 시간부 처리 ('24' -> '00', 그 외 유지)
+                                     REGEXP_REPLACE(SUBSTR(LPAD(REPLACE(BASE_CUST.OTD_TIME_FROM, ':', ''), 4, '0'), 1, 2), '^24', '00')
+                                     || ':' ||
+                           -- 2. 분부 처리 (60 이상 -> '59', 그 외 유지)
+                           CASE WHEN TO_NUMBER(SUBSTR(LPAD(REPLACE(BASE_CUST.OTD_TIME_FROM, ':', ''), 4, '0'), 3, 2)) > 59 THEN '59'
+                                ELSE SUBSTR(LPAD(REPLACE(BASE_CUST.OTD_TIME_FROM, ':', ''), 4, '0'), 3, 2)
+                           END,
+                      '')
+                     END
+                     ELSE
+                           CASE WHEN VALIDATE_CONVERSION(REPLACE(BASE_CUST.REQDLVTIME2_TO, ':') AS NUMBER) = 0 THEN ''
+                                ELSE NVL2(BASE_CUST.REQDLVTIME2_TO,
+                                -- 1. 시간부 처리 ('24' -> '00', 그 외 유지)
+                                     REGEXP_REPLACE(SUBSTR(LPAD(REPLACE(BASE_CUST.REQDLVTIME2_TO, ':', ''), 4, '0'), 1, 2), '^24', '00')
+                                     || ':' ||
+                                -- 2. 분부 처리 (60 이상 -> '59', 그 외 유지)
+                           CASE WHEN TO_NUMBER(SUBSTR(LPAD(REPLACE(BASE_CUST.REQDLVTIME2_TO, ':', ''), 4, '0'), 3, 2)) > 59 THEN '59'
+                                ELSE SUBSTR(LPAD(REPLACE(BASE_CUST.REQDLVTIME2_TO, ':', ''), 4, '0'), 3, 2)
+                           END, '')
+                     END
+                 END AS OTD_TIME_TO
+               , NVL2(BASE_CUST.REQDLVTIME2_FROM,
+                      -- 1. 시간부 처리 ('24' -> '00', 그 외 유지)
+                      REGEXP_REPLACE(SUBSTR(LPAD(REPLACE(BASE_CUST.REQDLVTIME2_FROM, ':', ''), 4, '0'), 1, 2), '^24', '00')
+                      || ':' ||
+                      -- 2. 분부 처리 (60 이상 -> '59', 그 외 유지)
+                      CASE WHEN TO_NUMBER(SUBSTR(LPAD(REPLACE(BASE_CUST.REQDLVTIME2_FROM, ':', ''), 4, '0'), 3, 2)) > 59 THEN '59'
+                           ELSE SUBSTR(LPAD(REPLACE(BASE_CUST.REQDLVTIME2_FROM, ':', ''), 4, '0'), 3, 2)
+                      END,
+                      '') AS REQDLVTIME1_FROM
+               -- OTD(배송요구시간 종료)
+               , NVL2(BASE_CUST.REQDLVTIME2_TO,
+                      -- 1. 시간부 처리 ('24' -> '00', 그 외 유지)
+                      REGEXP_REPLACE(SUBSTR(LPAD(REPLACE(BASE_CUST.REQDLVTIME2_TO, ':', ''), 4, '0'), 1, 2), '^24', '00')
+                      || ':' ||
+                      -- 2. 분부 처리 (60 이상 -> '59', 그 외 유지)
+                      CASE WHEN TO_NUMBER(SUBSTR(LPAD(REPLACE(BASE_CUST.REQDLVTIME2_TO, ':', ''), 4, '0'), 3, 2)) > 59 THEN '59'
+                           ELSE SUBSTR(LPAD(REPLACE(BASE_CUST.REQDLVTIME2_TO, ':', ''), 4, '0'), 3, 2)
+                      END,
+                      '') AS REQDLVTIME1_TO
+               , BASE_CUST.DEFCARNO
+               , BASE_CUST.CARNO
+               , BASE_CUST.DEFPOP
+               , BASE_CUST.POP
+               , BASE_CUST.BASEPOP
+               , DEDICATED_CARS.CARNO_LIST										 	 AS DEDICATED_CARNO_LIST
+               , DEDICATED_CARS.CUSTCARTYPE											 AS DEDICATED_CUST_CAR_TYPE
+               , BLOCKED_CARS.CARNO_LIST										 	 AS BLOCKED_CARNO_LIST
+               , BLOCKED_CARS.CUSTCARTYPE											 AS BLOCKED_CUST_CAR_TYPE
+               , NVL2(RETURN_ORDERS.TRUTHCUSTKEY, 'Y', 'N')                          AS RETURN_YN
+		FROM BASE_CUST
+		LEFT OUTER JOIN CLAIM_INFO
+		ON  BASE_CUST.TRUTHCUSTKEY = CLAIM_INFO.MNGPLC_ID
+		AND BASE_CUST.STORERKEY   = CLAIM_INFO.STORERKEY
+        LEFT OUTER JOIN DEDICATED_CARS
+        	ON DEDICATED_CARS.CUSTKEY 		= BASE_CUST.TRUTHCUSTKEY
+        LEFT OUTER JOIN BLOCKED_CARS
+        	ON BLOCKED_CARS.CUSTKEY 		= BASE_CUST.TRUTHCUSTKEY
+        LEFT OUTER JOIN RETURN_ORDERS
+        	ON  RETURN_ORDERS.TRUTHCUSTKEY = BASE_CUST.TRUTHCUSTKEY
+        	AND RETURN_ORDERS.CUSTTYPE     = BASE_CUST.CUSTTYPE
+        	AND RETURN_ORDERS.STORERKEY    = BASE_CUST.STORERKEY
+        ]]>
+	</select>
+	
+	<select id="getOutGroupTemporaryVehicleInfo" resultType="TmVehicleInfoDto">
+		SELECT 
+		   CAR_CONTRACTTYPE.BASECODE         AS CONTRACTTYPE
+		  ,CAR_CONTRACTTYPE.CONVDESCR        AS CONTRACTTYPE_NM
+		  ,MS_OUT_GROUP.OUT_GROUP_CD         AS OUT_GROUP_CD
+		  ,CARGROUP.BASEDESCR                AS OUT_GROUP_NM
+		  ,'1'                               AS CARCAPACITY
+		  ,MS_OUT_GROUP.MAX_WEIGHT           AS MAX_WEIGHT
+		  ,MS_OUT_GROUP.MAX_WEIGHT           AS MIN_WEIGHT
+		  ,MS_OUT_GROUP.MAX_CBM              AS MAX_CBM
+		  ,MS_OUT_GROUP.MAX_LOAD_QTY         AS MAX_LANDING
+		  ,MS_OUT_GROUP.MAX_LOAD_QTY         AS MIN_LANDING
+		  ,CM_DC.LATITUDE                    AS CAR_LATITUDE     -- 차고지 좌표
+			,CM_DC.LONGITUDE                   AS CAR_LONGITUDE    -- 차고지 좌표
+		  ,'0'                               AS OPT_PLT -- 추후 조달 고려
+		  ,CASE
+		   WHEN MS_OUT_GROUP.OUT_TIME = '24:00' THEN
+		         TO_DATE(#{deliveryDate}, 'YYYYMMDD') + 1
+		   ELSE
+               CASE WHEN TO_CHAR(TO_DATE(#{deliveryDate} || MS_OUT_GROUP.OUT_TIME || ':00', 'YYYYMMDDHH24:MI:SS'), 'HH24MISS') > TO_CHAR(TO_DATE(#{deliveryDate} || MS_OUT_GROUP.OUT_TIME || ':00', 'YYYYMMDDHH24:MI:SS')+ INTERVAL '10' HOUR, 'HH24MISS')
+                    THEN TO_DATE(#{deliveryDate} || MS_OUT_GROUP.OUT_TIME || ':00', 'YYYYMMDDHH24:MI:SS') - 1
+                    ELSE TO_DATE(#{deliveryDate} || MS_OUT_GROUP.OUT_TIME || ':00', 'YYYYMMDDHH24:MI:SS') END
+		   END AS DRIVING_FROMDATE
+		  ,CASE
+		   WHEN MS_OUT_GROUP.OUT_TIME = '24:00' THEN
+		         TO_DATE(#{deliveryDate}, 'YYYYMMDD') + 1
+		   ELSE
+               CASE WHEN TO_CHAR(TO_DATE(#{deliveryDate} || MS_OUT_GROUP.OUT_TIME || ':00', 'YYYYMMDDHH24:MI:SS'), 'HH24MISS') > TO_CHAR(TO_DATE(#{deliveryDate} || MS_OUT_GROUP.OUT_TIME || ':00', 'YYYYMMDDHH24:MI:SS')+ INTERVAL '10' HOUR, 'HH24MISS')
+                    THEN TO_DATE(#{deliveryDate} || MS_OUT_GROUP.OUT_TIME || ':00', 'YYYYMMDDHH24:MI:SS') - 1
+                    ELSE TO_DATE(#{deliveryDate} || MS_OUT_GROUP.OUT_TIME || ':00', 'YYYYMMDDHH24:MI:SS') END
+		   END + INTERVAL '10' HOUR AS DRIVING_TODATE
+		  ,CM_DC.LATITUDE                    AS LATITUDE
+		  ,CM_DC.LONGITUDE                   AS LONGITUDE
+		FROM MS_OUT_GROUP
+		LEFT OUTER JOIN CM_CODE CAR_CONTRACTTYPE
+		       ON CAR_CONTRACTTYPE.CODELIST = 'CONTRACTTYPE'
+		      AND CAR_CONTRACTTYPE.BASECODE = 'TEMPORARY'
+		      AND CAR_CONTRACTTYPE.STORERKEY = 'FW00'
+		LEFT OUTER JOIN CM_CODE CARGROUP
+		      ON CARGROUP.CODELIST = 'CARGROUP'
+		     AND CARGROUP.BASECODE = MS_OUT_GROUP.OUT_GROUP_CD
+		     AND CARGROUP.STORERKEY = 'FW00'
+		LEFT OUTER JOIN CM_DC
+		      ON CM_DC.DCCODE     = #{dccode}
+		WHERE MS_OUT_GROUP.DCCODE = #{dccode}
+		  AND MS_OUT_GROUP.USE_YN = 'Y'
+		UNION ALL
+        	SELECT TM_INPLAN.CONTRACTTYPE                                            AS CONTRACTTYPE
+        		  ,FN_CODEDESCR('STD', 'CONTRACTTYPE', TM_INPLAN.CONTRACTTYPE)       AS CONTRACTTYPE_NM
+        		  ,TM_INPLAN.OUT_GROUP_CD                                             AS OUT_GROUP_CD
+        		  ,NULL                                                               AS OUT_GROUP_NM
+        		  ,NULL                                                               AS CARCAPACITY
+        		  ,MS_OUT_GROUP.MAX_WEIGHT                                            AS MAX_WEIGHT
+        		  ,MS_OUT_GROUP.MAX_WEIGHT                                            AS MIN_WEIGHT
+        		  ,MS_OUT_GROUP.MAX_CBM                                               AS MAX_CBM
+        		  ,MS_OUT_GROUP.MAX_LOAD_QTY                                          AS MAX_LANDING
+        		  ,MS_OUT_GROUP.MAX_LOAD_QTY                                          AS MIN_LANDING
+        		  ,CM_DC.LATITUDE                                                     AS CAR_LATITUDE
+        		  ,CM_DC.LONGITUDE                                                    AS CAR_LONGITUDE
+        		  ,'0'                                                                AS OPT_PLT
+        		  ,CASE
+        			WHEN SUBSTR(NVL(MS_OUT_GROUP.OUT_TIME, '00:00'), 1, 2) = '24'
+        			THEN TO_DATE(#{deliveryDate} || ' ' || '00:00:00', 'YYYYMMDD HH24:MI:SS')
+        			ELSE
+        				CASE WHEN NVL(MS_OUT_GROUP.OUT_TIME, '00:00') > '14:00' THEN TO_DATE(#{deliveryDate} || ' ' || NVL(MS_OUT_GROUP.OUT_TIME, '00:00') || ':00', 'YYYYMMDD HH24:MI:SS') - INTERVAL '1' DAY
+        																		ELSE TO_DATE(#{deliveryDate} || ' ' || NVL(MS_OUT_GROUP.OUT_TIME, '00:00') || ':00', 'YYYYMMDD HH24:MI:SS') END
+        			END                                                               AS DRIVING_FROMDATE
+        		  ,CASE
+        			WHEN SUBSTR(NVL(MS_OUT_GROUP.OUT_TIME, '00:00'), 1, 2) = '24' OR MS_OUT_GROUP.OUT_TIME = '00:00'
+        			THEN TO_DATE(#{deliveryDate} || ' ' || '23:59:00', 'YYYYMMDD HH24:MI:SS')
+        			ELSE
+        				CASE WHEN NVL(MS_OUT_GROUP.OUT_TIME, '00:00') > '14:00' THEN TO_DATE(#{deliveryDate} || ' ' || NVL(MS_OUT_GROUP.OUT_TIME, '00:00') || ':00', 'YYYYMMDD HH24:MI:SS') - INTERVAL '1' DAY
+        																		ELSE TO_DATE(#{deliveryDate} || ' ' || NVL(MS_OUT_GROUP.OUT_TIME, '00:00') || ':00', 'YYYYMMDD HH24:MI:SS') END
+        			END  + INTERVAL '10' HOUR                                         AS DRIVING_TODATE
+        		  ,CM_DC.LATITUDE                                                     AS LATITUDE
+        		  ,CM_DC.LONGITUDE                                                    AS LONGITUDE
+        	  FROM TM_INPLAN
+        	  LEFT OUTER JOIN MS_OUT_GROUP
+        			ON MS_OUT_GROUP.DCCODE       = TM_INPLAN.DCCODE
+        		   AND MS_OUT_GROUP.OUT_GROUP_CD = TM_INPLAN.OUT_GROUP_CD
+        	  LEFT OUTER JOIN CM_DC
+        			ON TM_INPLAN.DCCODE = CM_DC.DCCODE
+        	 WHERE TM_INPLAN.DCCODE       = #{dccode}
+        	   AND TM_INPLAN.DELIVERYDT   = #{deliveryDate}
+        	   AND TM_INPLAN.CONTRACTTYPE = 'TEMPORARY'
+	</select>
+	
+	
+	<select id="getCenterVehicleByCarno" resultType="TmVehicleInfoDto">
+	    SELECT /* [TmPlanEtaService.sqlx][getCenterVehicleByCarno][센터 차량 검색 조건 조회][2025.10.24] */
+		      MS_CAR_ENTRY_INFO.DCCODE
+            , FN_DESCR_DC(MS_CAR_ENTRY_INFO.DCCODE)                            AS DCCNAME
+		    , CM_CAR.CONTRACTTYPE
+            , FN_CODEDESCR('FW00', 'CONTRACTTYPE', CM_CAR.CONTRACTTYPE)        AS CONTRACTTYPE_NM
+            , MS_CAR_ENTRY_INFO.OUT_GROUP_CD
+            , FN_CODEDESCR('FW00', 'CARGROUP', MS_CAR_ENTRY_INFO.OUT_GROUP_CD) AS OUT_GROUP_NM
+		    , MS_CAR_ENTRY_INFO.DOCKNO
+		    , MS_CAR_ENTRY_INFO.CARNO
+		    , MS_CARRIER.CARRIERKEY
+		    , MS_CARRIER.DESCRIPTION
+		    , MS_CAR_ENTRY_INFO.POPNO
+		    , CM_CAR.DEF_DISTRICTCODE
+		    , CM_CAR.OTHER03                                   AS MINLANDING
+		    , REGEXP_REPLACE(CM_CAR.CARCAPACITY, '[가-힣]', '') AS CARCAPACITY
+		    , CM_CAR.MAXLANDING                                AS MAXLANDING
+		    , CM_CAR.OPT_LOAD_WEIGHT                           AS MINWEIGHT
+		    , CM_CAR.MAXWEIGHT                                 AS MAXWEIGHT
+		    , CM_CAR.MINCUBE                                   AS MINCUBE
+		    , NVL(CM_CAR.CAR_WIDTH, 0) * NVL(CM_CAR.CAR_LENGTH, 0) * NVL(CM_CAR.VEHICLE_HEIGHT, 0) AS MAXCUBE
+		    , CM_CAR.OPT_PLT                                   AS OPT_PLT
+		    , CM_CAR.REUSE_YN                                  AS REUSE_YN
+		    , CM_CAR.DELIVERY_YN                               AS DELIVERY_YN
+		    , CM_CAR.RETURN_YN                                 AS RETURN_YN
+		    , CM_CAR.PROC_SAMEDAY_YN                           AS PROC_SAMEDAY_YN
+		    , CM_CAR.OWN_CAR_YN                                AS OWN_CAR_YN
+		    , CM_CAR.FROM_DCCODE                               AS FROM_DCCODE
+		    , CASE WHEN CM_TC_DC.TCCODE IS NOT NULL THEN NVL(CM_TC_DC.LATITUDE, CM_DC.LATITUDE)
+		       	   ELSE CM_DC.LATITUDE END                     AS LATITUDE
+			, CASE WHEN CM_TC_DC.TCCODE IS NOT NULL THEN NVL(CM_TC_DC.LONGITUDE, CM_DC.LONGITUDE)
+			       ELSE CM_DC.LONGITUDE END                    AS LONGITUDE
+		    , CM_TC_DC.TCCODE                                  AS TC_DCCODE        -- TC센터 출발지
+		    , CM_CAR.LATITUDE                                  AS CAR_LATITUDE     -- 차고지 좌표
+		    , CM_CAR.LONGITUDE                                 AS CAR_LONGITUDE    -- 차고지 좌표
+	        , CM_CAR.CARTYPE                                   AS CAR_TYPE
+	    	, CM_CAR.CARCATEGORY                               AS CAR_CATEGORY
+		    , NVL(NVL(MS_CAR_ENTRY_INFO.TC_DCCODE, CM_CAR.FROM_DCCODE), MS_CAR_ENTRY_INFO.DCCODE) AS START_DCCODE
+		    , CASE WHEN TM_DRIVER_ATTEND.ATTEND_CD IS NULL THEN 'Y'
+		           ELSE 'N' END                                AS ASDELIVERY_YN -- 운행가능여부(차량설정 팝업 - 변경가능, 근태코드 참조 필요)
+            , MS_OUT_GROUP.IN_TIME                             AS IN_TIME -- 입차시간
+            , MS_OUT_GROUP.OUT_TIME                            AS OUT_TIME -- 출차시간
+		    , TM_PLAN_CAR.DRIVING_FROMDATE                     AS DRIVING_FROMDATE
+		    , TM_PLAN_CAR.DRIVING_TODATE                       AS DRIVING_TODATE
+            , TM_PLAN_CAR.PRIORITY_YN						   AS PRIORITY_YN
+            , #{deliveryDate} || NVL(CM_DRIVER.WORK_FROMHOUR, '0000') AS WORK_FROMHOUR -- 근무시간(from/to) 컬럼 추가 요청
+            , #{deliveryDate} || NVL(CM_DRIVER.WORK_TOHOUR, '0000')   AS WORK_TOHOUR
+            , CM_DRIVER.WORK_FROMHOUR                                 AS ORIGIN_WORK_FROMHOUR
+            , CM_DRIVER.WORK_TOHOUR                                   AS ORIGIN_WORK_TOHOUR
+		    , CM_DRIVER.DRIVERNAME
+            , DAMO.DEC(CM_CAR.PHONE1)                                 AS PHONE1
+		FROM MS_CAR_ENTRY_INFO
+		LEFT JOIN CM_CAR
+		      ON CM_CAR.CARNO = MS_CAR_ENTRY_INFO.CARNO
+		LEFT JOIN MS_CARRIER
+		      ON MS_CARRIER.CARRIERKEY = CM_CAR.CARAGENTKEY
+            AND MS_CARRIER.CARRIERTYPE  = 'SUBC' -- 추가
+            AND MS_CARRIER.STORERKEY    = 'FW00' -- 추가
+		LEFT JOIN TM_DRIVER_ATTEND
+		      ON TM_DRIVER_ATTEND.BASEDT = #{deliveryDate} -- 검색조건 : 배송일자
+		     AND TM_DRIVER_ATTEND.DCCODE = MS_CAR_ENTRY_INFO.DCCODE
+		     AND TM_DRIVER_ATTEND.CARNO = MS_CAR_ENTRY_INFO.CARNO
+		     AND TM_DRIVER_ATTEND.ATTEND_CD != '10'
+		LEFT JOIN MS_OUT_GROUP
+		      ON MS_OUT_GROUP.DCCODE = MS_CAR_ENTRY_INFO.DCCODE
+		     AND MS_OUT_GROUP.OUT_GROUP_CD = MS_CAR_ENTRY_INFO.OUT_GROUP_CD
+		     AND MS_OUT_GROUP.USE_YN = 'Y'
+		LEFT JOIN CM_DRIVER
+		      ON CM_DRIVER.DRIVERID = CM_CAR.DRIVER1
+		     AND CM_DRIVER.DEL_YN = 'N'
+        LEFT OUTER JOIN CM_TC CM_TC_DC
+            ON MS_CAR_ENTRY_INFO.TC_DCCODE = CM_TC_DC.TCCODE
+            AND CM_TC_DC.USE_YN = 'Y'
+	    LEFT OUTER JOIN CM_DC
+	        ON MS_CAR_ENTRY_INFO.DCCODE = CM_DC.DCCODE
+	    LEFT OUTER JOIN TM_PLAN_CAR
+	    	ON TM_PLAN_CAR.DCCODE          = MS_CAR_ENTRY_INFO.DCCODE
+	       AND TM_PLAN_CAR.DELIVERYDT      = #{deliveryDate}
+	       AND TM_PLAN_CAR.TM_DELIVERYTYPE = '1'
+	       AND TM_PLAN_CAR.CARNO           = MS_CAR_ENTRY_INFO.CARNO
+		WHERE MS_CAR_ENTRY_INFO.DCCODE = #{dccode}
+		  AND CM_CAR.DEL_YN = 'N'
+		  AND TM_PLAN_CAR.DELIVERY_YN  = 'Y'
+		  AND MS_CAR_ENTRY_INFO.CARNO IN   
+		  	<foreach collection="vehicles" item="v" open="(" separator="," close=")">
+    			#{v.carno}
+  			</foreach>
+	</select>
+
+</mapper>

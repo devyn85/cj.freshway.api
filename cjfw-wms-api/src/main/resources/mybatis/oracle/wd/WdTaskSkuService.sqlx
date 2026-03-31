@@ -1,0 +1,302 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="wdTaskSkuService">
+
+
+	<select id="getMasterList" resultType="WdTaskSkuResDto">
+        WITH T_RESULT AS ( /* [WdTaskSkuService.sqlx][getTab1MasterList][피킹작업지시(상품별)-조회생성 목록 조회][공두경][2025.09.29] */
+                SELECT WD_TASK.DCCODE       		                                   	AS DCCODE         /* 센터코드 */
+                      ,WD_TASK.STORERKEY    		                                   	AS STORERKEY      /* 고객사 */
+                      ,WD_TASK.TASKDT    		                                       	AS TASKDT         /* 고객사 */
+                      ,''                                                              	AS DOCDT       	  /* 출고일자 */
+                      ,''                   		                                   	AS SLIPDT         /* 전표일자 */
+                      ,''               		                                       	AS CUSTKEY
+                      ,''                                                              	AS CUSTNAME
+                      ,NVL(MS_PICKBATCHGROUP.PLANT       ,DM_DOCUMENT_D.PLANT) 			AS PLANT
+                      ,NVL(MS_PICKBATCHGROUP.STORAGETYPE ,MS_SKU.STORAGETYPE) 			AS STORAGETYPE
+                      ,NVL(MS_PICKBATCHGROUP.DISTANCETYPE,MS_CUSTDLVINFO.DISTANCETYPE) 	AS DISTANCETYPE
+                      ,MS_PICKBATCHGROUP.BATCHGROUP  									AS CREATEKEY
+                      ,MAX(MS_PICKBATCHGROUP.DESCRIPTION)        						AS CREATEDESCR 
+                      ,MS_PICKBATCHGROUP.BATCHGROUP   	                                AS WAVEKEY        /* SY_PROCESSTEMP_WD.용 생성 배치키 */
+                      ,COUNT(WD_TASK.TASKKEY)       	                                AS TASKCOUNT      /* 작업지시건수 */
+                      ,SUM(WD_TASK.PROCESSQTY)      	                                AS OPENQTY        /* 수량|예정량 */
+                      ,SUM(WD_TASK.PROCESSQTY)      	                                AS PROCESSQTY     /* 수량|할당량 */
+                      ,SUM(WD_TASK.WORKQTY   )      	                                AS WORKQTY        /* 수량|작업량 */
+                      ,SUM(WD_TASK.INSPECTQTY)      	                                AS INSPECTQTY     /* 수량|검수량 */
+                      ,SUM(WD_TASK.CONFIRMQTY)      	                                AS CONFIRMQTY     /* 수량|확정량 */
+                FROM   WD_TASK
+                JOIN   DM_DOCUMENT_H
+                ON     DM_DOCUMENT_H.DCCODE            = WD_TASK.DCCODE
+                AND    DM_DOCUMENT_H.STORERKEY         = WD_TASK.STORERKEY
+                AND    DM_DOCUMENT_H.ORGANIZE          = WD_TASK.ORGANIZE
+                AND    DM_DOCUMENT_H.DOCTYPE           = 'WD'
+                AND    DM_DOCUMENT_H.DELIVERYDATE      = WD_TASK.SLIPDT
+                AND    DM_DOCUMENT_H.DOCNO             = WD_TASK.DOCNO
+                AND    DM_DOCUMENT_H.DEL_YN        = 'N'
+                JOIN   DM_DOCUMENT_D
+                ON     DM_DOCUMENT_D.DOCTYPE       = 'WD'
+                AND    DM_DOCUMENT_D.DCCODE        = WD_TASK.DCCODE
+                AND    DM_DOCUMENT_D.STORERKEY     = WD_TASK.STORERKEY
+                AND    DM_DOCUMENT_D.DELIVERYDATE  = WD_TASK.SLIPDT
+                AND    DM_DOCUMENT_D.DOCNO         = WD_TASK.DOCNO
+                AND    DM_DOCUMENT_D.DOCLINE       = WD_TASK.DOCLINE
+                AND    DM_DOCUMENT_D.DEL_YN        = 'N'
+                JOIN   MS_SKU
+                ON     MS_SKU.STORERKEY            = WD_TASK.STORERKEY
+                AND    MS_SKU.SKU                  = WD_TASK.SKU
+                <if test="skugroup != null and skugroup != ''">	AND MS_SKU.SKUGROUP 	LIKE	 #{skugroup} || '%'		</if>
+                JOIN   MS_PLANT
+                ON     MS_PLANT.PLANT              = DM_DOCUMENT_D.PLANT
+                JOIN   MS_CUSTDLVINFO
+                ON     MS_CUSTDLVINFO.STORERKEY      = DM_DOCUMENT_H.STORERKEY
+                AND    MS_CUSTDLVINFO.CUSTTYPE       = DM_DOCUMENT_H.TO_CUSTTYPE
+                AND    MS_CUSTDLVINFO.DLVCUSTKEY    = DM_DOCUMENT_H.TO_CUSTKEY
+                LEFT JOIN   MS_PICKBATCHGROUP
+                ON     WD_TASK.DCCODE              = MS_PICKBATCHGROUP.DCCODE
+                AND    DM_DOCUMENT_D.PLANT         = MS_PICKBATCHGROUP.PLANT 
+                AND    MS_SKU.STORAGETYPE          = MS_PICKBATCHGROUP.STORAGETYPE
+                AND    MS_CUSTDLVINFO.DISTANCETYPE = MS_PICKBATCHGROUP.DISTANCETYPE
+                WHERE  WD_TASK.DCCODE  		= #{fixdccode}
+         		AND    WD_TASK.STORERKEY	= #{gStorerkey} 
+                <if test="taskdt != null and taskdt != ''">		AND WD_TASK.TASKDT =	#{taskdt}		</if>
+                <!-- 상품코드 -->
+                <if test="chkYn == 'N'.toString()"> 
+					<if test="sku != null and sku != '' ">
+						<if test="skuMulti != null and skuMulti.size() > 0">
+							<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+								<foreach collection="skuMulti" item="item">
+									OR MS_SKU.SKU IN
+									<foreach collection="item" item="code" open="(" close=")" separator=",">
+										#{code} 	 
+						      		</foreach>
+						    	</foreach>
+						  	</trim>			                                    
+				    	</if>
+			        </if>
+                </if>
+		  		<if test="chkYn == 'Y'.toString()"> 
+					<if test="sku != null and sku != '' ">
+						<if test="skuMulti != null and skuMulti.size() > 0">
+							<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+								<foreach collection="skuMulti" item="item">
+									OR MS_SKU.SKU NOT IN
+									<foreach collection="item" item="code" open="(" close=")" separator=",">
+										#{code} 	 
+						      		</foreach>
+						    	</foreach>
+						  	</trim>			                                    
+				    	</if>
+			        </if>
+		  		</if>
+                AND    WD_TASK.DEL_YN            = 'N'
+                AND    WD_TASK.TASKTYPE   = 'AL'
+                AND    WD_TASK.TASKSYSTEM IS NULL
+				AND    WD_TASK.PICK_BATCH_NO IS NULL
+				AND    WD_TASK.PICK_NO IS NULL
+                AND    WD_TASK.STATUS <![CDATA[<]]> '90'     
+                AND    WD_TASK.PROCESSQTY <![CDATA[>]]> WD_TASK.WORKQTY  
+	            <!-- START.권한센터 -->
+			    AND EXISTS (SELECT 1
+		                      FROM CM_USER_AUTHORITY 
+		                     WHERE CM_USER_AUTHORITY.DCCODE    = WD_TASK.DCCODE       
+		                       AND CM_USER_AUTHORITY.STORERKEY = WD_TASK.STORERKEY    
+		                       AND CM_USER_AUTHORITY.ORGANIZE  = WD_TASK.ORGANIZE     
+		                       AND CM_USER_AUTHORITY.AREA      = WD_TASK.AREA         
+		                       AND CM_USER_AUTHORITY.STORERKEY = #{gStorerkey}
+		                       AND CM_USER_AUTHORITY.USERID    = #{gUserId}
+		                       AND CM_USER_AUTHORITY.DCCODE    = #{fixdccode}
+		                       AND CM_USER_AUTHORITY.AREA      = #{gArea}   
+					           <!-- 창고.다중검색 -->
+					           <if test='gOrganizeMulti != null and gOrganizeMulti.length > 0'>
+						           AND CM_USER_AUTHORITY.ORGANIZE IN
+						           <foreach collection="gOrganizeMulti" item="code" open="(" close=")" separator=",">
+						             #{code}
+						           </foreach>
+					           </if>                       
+		                   )
+			    <!-- END.권한센터	-->
+                GROUP BY  WD_TASK.DCCODE    
+                         ,WD_TASK.STORERKEY 
+                         ,WD_TASK.TASKDT
+                         ,MS_PICKBATCHGROUP.PLANT        
+                         ,MS_PICKBATCHGROUP.STORAGETYPE  
+                         ,MS_PICKBATCHGROUP.DISTANCETYPE 
+                         ,MS_PICKBATCHGROUP.BATCHGROUP  
+                         ,DM_DOCUMENT_D.PLANT
+                         ,MS_SKU.STORAGETYPE
+                         ,MS_CUSTDLVINFO.DISTANCETYPE
+            )
+            SELECT T_RESULT.TASKDT                                    AS TASKDT        /* 작업지시일자 */
+                  ,'['||T_RESULT.PLANT||']'||DECODE(TRIM(NVL(PLANT1.DESCRIPTION,'')),'',T_RESULT.PLANT,TRIM(NVL(PLANT1.DESCRIPTION,'')))						AS PLANTDESC		/*플랜트*/
+                  ,NVL(CD1.BASEDESCR,CD1.BASECODE) 					  AS STORAGETYPEDESC	/*저장조건*/
+                  ,T_RESULT.DISTANCETYPE                              AS DISTANCETYPE  /* 원거리유형*/	
+                  ,T_RESULT.CREATEKEY                                 AS CREATEKEY     /* 생성키 */
+                  ,T_RESULT.CREATEDESCR                               AS CREATEDESCR   /* 생성키명 */
+                  ,T_RESULT.TASKCOUNT                                 AS TASKCOUNT     /* 지시건수 */
+                  ,T_RESULT.PROCESSQTY                                AS PROCESSQTY    /* 진행예정량 */
+                  ,T_RESULT.DCCODE                                    AS DCCODE        /* 센터코드 */
+                  ,T_RESULT.STORERKEY                                 AS STORERKEY     /* 고객사 */
+                  ,''                                                 AS DOCDT         /* 출고일자 */
+                  ,''                                                 AS TASKSYSTEM    /* 작업시스템 */
+                  ,''                                                 AS TASKTYPE      /* 작업유형 */
+                  ,T_RESULT.WAVEKEY                                   AS WAVEKEY   
+                  ,''                                                 AS SLIPDT        /* 전표일자 */
+                  ,''                                                 AS SLIPNO        /* 전표번호 */
+                  ,''                                                 AS CUSTKEY       /* 거래처코드 */
+                  ,''                                                 AS CUSTNAME      /* 거래처명 */
+                  ,T_RESULT.PLANT                                     AS PLANT
+                  ,T_RESULT.STORAGETYPE                               AS STORAGETYPE
+                  ,T_RESULT.OPENQTY                                   AS OPENQTY       /* 수량|예정량 */
+                  ,T_RESULT.WORKQTY                                   AS WORKQTY       /* 수량|작업량 */
+                  ,T_RESULT.INSPECTQTY                                AS INSPECTQTY    /* 수량|검수량 */
+                  ,T_RESULT.CONFIRMQTY                                AS CONFIRMQTY    /* 수량|확정량 */
+                  ,T_RESULT.PLANT                                     AS OTHER01       /* SY_PROCESSTEMP_WD용 */
+                  ,T_RESULT.STORAGETYPE                               AS OTHER02       /* SY_PROCESSTEMP_WD용 */
+                  ,T_RESULT.DISTANCETYPE                              AS OTHER03       /* SY_PROCESSTEMP_WD용 */
+                  ,''                                                 AS OTHER04       /* SY_PROCESSTEMP_WD용 */
+                  ,''                                                 AS OTHER05       /* SY_PROCESSTEMP_WD용 */
+            FROM  T_RESULT
+            LEFT JOIN CM_CODE_STORER CD1 ON (CD1.STORERKEY = T_RESULT.STORERKEY	AND CD1.CODELIST = 'STORAGETYPE' 	AND CD1.BASECODE  = T_RESULT.STORAGETYPE)
+            LEFT JOIN MS_PLANT PLANT1 	  ON PLANT1.PLANT = T_RESULT.PLANT
+            ORDER BY  T_RESULT.DCCODE    
+                     ,T_RESULT.STORERKEY 
+                     ,T_RESULT.DOCDT
+                     ,T_RESULT.WAVEKEY 
+                     ,T_RESULT.CREATEKEY
+                     ,T_RESULT.CREATEDESCR
+    </select>
+    
+    <select id="getDetailList" resultType="WdTaskSkuResDetailDto">
+	   SELECT /* [WdTaskSkuService.sqlx][getDetailList][피킹작업지시(상품별)-조회생성 상세 조회][공두경][2025.09.29] */
+       		   #{storerkey}												AS STORERKEY			/* 고객사 */
+        	  ,#{dccode}												AS DCCODE				/* 센터코드 */
+        	  ,#{taskdt}												AS TASKDT				/* 피킹일자 */
+        	  ,#{wavekey}												AS WAVEKEY				/* */
+        	  ,#{plant}													AS OTHER01				/* SY_PROCESSTEMP_WD용 */
+        	  ,#{storagetype}											AS OTHER02				/* SY_PROCESSTEMP_WD용 */
+        	  ,#{distancetype}											AS OTHER03				/* SY_PROCESSTEMP_WD용 */
+              ,WD_TASK.SKU												AS  SKU                 /* 상품코드 */
+              ,FN_DESCR_SKU(WD_TASK.STORERKEY,WD_TASK.SKU)      		AS  SKUNAME 			/* 상품명칭 */
+              ,WD_TASK.UOM                      						AS  UOM                 /* 주문단위 */
+              ,SUM(WD_TASK.PROCESSQTY )         						AS  OPENQTY             /* 수량|예정량 */
+              ,SUM(WD_TASK.PROCESSQTY )         						AS  PROCESSQTY          /* 수량|할당량 */
+              ,SUM(WD_TASK.WORKQTY    )         						AS  WORKQTY             /* 수량|작업량 */
+              ,SUM(WD_TASK.INSPECTQTY )         						AS  INSPECTQTY          /* 수량|검수량 */
+              ,SUM(WD_TASK.CONFIRMQTY )         						AS  CONFIRMQTY          /* 수량|확정량 */
+              ,SUM(DECODE(DM_DOCUMENT_D.OMS_FLAG,'N',1,0)) AS OMS_FLAG	/**OMS미마감건수*/
+        FROM   WD_TASK
+        JOIN   CM_USER_AUTHORITY_DCXSTORER
+        ON     CM_USER_AUTHORITY_DCXSTORER.USERID       = #{gUserId}  
+        AND    CM_USER_AUTHORITY_DCXSTORER.DCCODE       = WD_TASK.DCCODE    
+        AND    CM_USER_AUTHORITY_DCXSTORER.STORERKEY    = WD_TASK.STORERKEY 
+        JOIN   MS_SKU
+        ON     MS_SKU.STORERKEY                         = WD_TASK.STORERKEY
+        AND    MS_SKU.SKU                               = WD_TASK.SKU
+        JOIN   DM_DOCUMENT_H
+        ON     DM_DOCUMENT_H.DCCODE                     = WD_TASK.DCCODE
+        AND    DM_DOCUMENT_H.STORERKEY                  = WD_TASK.STORERKEY
+        AND    DM_DOCUMENT_H.ORGANIZE                   = WD_TASK.ORGANIZE
+        AND    DM_DOCUMENT_H.DOCTYPE                    = 'WD'
+        AND    DM_DOCUMENT_H.DELIVERYDATE               = WD_TASK.SLIPDT
+        AND    DM_DOCUMENT_H.DOCNO                      = WD_TASK.DOCNO
+        JOIN   DM_DOCUMENT_D
+        ON     DM_DOCUMENT_D.DOCTYPE       = 'WD'
+        AND    DM_DOCUMENT_D.DCCODE        = WD_TASK.DCCODE
+        AND    DM_DOCUMENT_D.STORERKEY     = WD_TASK.STORERKEY
+        AND    DM_DOCUMENT_D.DELIVERYDATE  = WD_TASK.SLIPDT
+        AND    DM_DOCUMENT_D.DOCNO         = WD_TASK.DOCNO
+        AND    DM_DOCUMENT_D.DOCLINE       = WD_TASK.DOCLINE
+        AND    DM_DOCUMENT_D.PLANT         = #{plant}
+        AND    DM_DOCUMENT_D.DEL_YN        = 'N'
+        JOIN   MS_SKU
+        ON     MS_SKU.STORERKEY            = WD_TASK.STORERKEY
+        AND    MS_SKU.SKU                  = WD_TASK.SKU
+        AND    MS_SKU.STORAGETYPE          = #{storagetype}
+        <if test="skugroup != null and skugroup != ''">	AND MS_SKU.SKUGROUP 	LIKE	 #{skugroup} || '%'		</if>
+        JOIN   MS_PLANT
+        ON     MS_PLANT.PLANT              = DM_DOCUMENT_D.PLANT
+        JOIN   MS_CUSTDLVINFO
+        ON     MS_CUSTDLVINFO.STORERKEY    = DM_DOCUMENT_H.STORERKEY
+        AND    MS_CUSTDLVINFO.CUSTTYPE     = DM_DOCUMENT_H.TO_CUSTTYPE
+        AND    MS_CUSTDLVINFO.DLVCUSTKEY   = DM_DOCUMENT_H.TO_CUSTKEY
+        AND    MS_CUSTDLVINFO.DISTANCETYPE = #{distancetype}
+        LEFT JOIN CM_CODE_STORER CD1 ON (CD1.STORERKEY = DM_DOCUMENT_H.STORERKEY	AND CD1.CODELIST = 'ORDERTYPE_WD' 	AND CD1.BASECODE  = DM_DOCUMENT_H.ORDERTYPE)
+        WHERE  WD_TASK.DCCODE     = #{dccode}
+        AND    WD_TASK.STORERKEY  = #{storerkey}
+        AND    WD_TASK.TASKDT     = #{taskdt}
+        <!-- 상품코드 -->
+        <if test="chkYn == 'N'.toString()"> 
+			<if test="sku != null and sku != '' ">
+				<if test="skuMulti != null and skuMulti.size() > 0">
+					<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+						<foreach collection="skuMulti" item="item">
+							OR MS_SKU.SKU IN
+							<foreach collection="item" item="code" open="(" close=")" separator=",">
+								#{code} 	 
+				      		</foreach>
+				    	</foreach>
+				  	</trim>			                                    
+		    	</if>
+	        </if>
+        </if>
+  		<if test="chkYn == 'Y'.toString()"> 
+  			<if test="sku != null and sku != '' ">
+				<if test="skuMulti != null and skuMulti.size() > 0">
+					<trim prefix="AND (" suffix=")" prefixOverrides="OR">
+						<foreach collection="skuMulti" item="item">
+							OR MS_SKU.SKU NOT IN
+							<foreach collection="item" item="code" open="(" close=")" separator=",">
+								#{code} 	 
+				      		</foreach>
+				    	</foreach>
+				  	</trim>			                                    
+		    	</if>
+	        </if>
+  		</if>
+        AND    WD_TASK.DEL_YN     = 'N'
+		AND    WD_TASK.TASKTYPE   = 'AL'
+		AND    WD_TASK.PICK_BATCH_NO IS NULL
+		AND    WD_TASK.PICK_NO IS NULL
+		AND    WD_TASK.STATUS <![CDATA[<]]> '90'     
+		AND    WD_TASK.TASKTYPE       = 'AL'
+		AND    WD_TASK.PROCESSQTY <![CDATA[>]]> WD_TASK.WORKQTY 
+		GROUP BY WD_TASK.STORERKEY
+				,WD_TASK.SKU
+                ,WD_TASK.UOM                       
+        ORDER BY WD_TASK.SKU
+                ,WD_TASK.UOM     
+    </select>
+    
+    <!-- 엑셀업로드 정보을(를) 등록 -->
+    <insert id="insertTempExcel" parameterType="java.util.List" >
+        INSERT /* [WdTaskSkuService.sqlx][insertTempExcel][엑셀데이터임시 Tabele 등록][sss][2025.05.23] */
+          INTO SY_PROCESSTEMP_WD (PROCESSTYPE,PROCESSCREATOR,SPID,ADDWHO,EDITWHO,PROCESSFLAG
+                                  /**/
+                                 ,DCCODE
+                                 ,STORERKEY
+                                 ,ORGANIZE
+                                 ,TASKDT
+                                 ,OTHER01
+                                 ,OTHER02
+                                 ,OTHER03
+                                 ,WAVEKEY
+                                 ,SKU
+                                )
+        <foreach collection="list" item="item" separator="UNION ALL">
+            SELECT
+                #{item.processtype},#{item.gUserId},#{item.gSpid},#{item.gUserId},#{item.gUserId},'N'
+                /**/
+                ,#{item.dccode}          /*1.센터코드-grid*/
+                ,#{item.storerkey}       /*2.고객사코드-grid*/
+                ,#{item.organize}        /*3.창고코드-grid*/                
+                ,#{item.taskdt}          /*4.지시일자-grid*/
+                ,#{item.other01}         /*5.플랜트-grid*/
+                ,#{item.other02}         /*6.저장조건-grid*/
+                ,#{item.other03}         /*7.원거리유형-grid*/
+                ,#{item.wavekey}         /*16.분류키-grid*/
+                ,#{item.sku}             /*18.sku-grid*/
+           FROM DUAL
+        </foreach>
+    </insert>
+    
+</mapper>

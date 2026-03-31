@@ -1,0 +1,251 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="msPurchaseCustPopup">
+	<!-- 수발주팝업 목록 조회 -->
+	<select id="getPurchaseCustList" parameterType="cjfw.wms.ms.dto.MsPurchaseCustPopupReqDto" resultType="cjfw.wms.ms.dto.MsPurchaseCustPopupResDto">
+		SELECT /* [msPurchaseCustPopupService.sqlx][getPurchaseCustList][수발주팝업 목록 조회][YeoSeungCheol][2025.07.30] */
+			MS_PURCHASECUST.SERIALKEY                     	AS SERIALKEY       /* 데이터번호 */
+          	,MS_PURCHASECUST.DCCODE                        	AS DCCODE          /* 실공급센터 */
+          	,MS_PURCHASECUST.STORERKEY                     	AS STORERKEY       /* 고객사 */
+          	,MS_PURCHASECUST.CUSTTYPE                      	AS CUSTTYPE        /* 거래처유형 */
+          	,MS_PURCHASECUST.SKU                            AS SKU             /* 상품코드 */
+          	,MS_SKU.DESCRIPTION                             AS DESCRIPTION     /* 상품명 */
+          	,MS_PURCHASECUST.UOM                            AS UOM             /* 단위 */
+          	,MS_PURCHASECUST.PLANT                          AS PLANT           /* 플랜트코드 */
+          	,'['||MS_PURCHASECUST.PLANT||']' || (SELECT FN_DESCR_PLANT(MS_PURCHASECUST.PLANT) FROM DUAL)
+                                                         	AS PLANT_DESCR     /* 플랜트 */
+          	,MS_PURCHASECUST.FROMDATE                       AS FROM_DATE       /* 시작일자 */
+          	,MS_PURCHASECUST.TODATE                         AS TO_DATE
+          	,MS_PURCHASECUST.CHANNEL                        AS CHANNEL  <!-- 저장유무 -->
+          	,MS_PURCHASECUST.BUYERKEY                       AS BUYERKEY
+          	,MS_PURCHASECUST.ROUTE                          AS ROUTE           /* 경유지 */
+          	,MS_PURCHASECUST.CUSTKEY                        AS CUST_KEY        /* 구매처 */
+          	,MS_PURCHASEMST.BUYERKEY                        AS BUYER_KEY       
+          	,NVL(MS_PURCHASEMST.ROUTEORGANIZE, MS_PURCHASECUST.ROUTEORGANIZE)
+                                                         	AS ROUTE_ORGANIZE  /* 경유지조직 */
+		FROM MS_PURCHASECUST
+      		JOIN 	MS_SKU 
+        	ON		MS_PURCHASECUST.STORERKEY	= MS_SKU.STORERKEY
+       		AND 	MS_PURCHASECUST.SKU       	= MS_SKU.SKU
+      	LEFT JOIN MS_PURCHASEMST
+        	ON MS_PURCHASECUST.DCCODE     		= MS_PURCHASEMST.DCCODE
+       		AND MS_PURCHASECUST.STORERKEY  		= MS_PURCHASEMST.STORERKEY
+       		AND MS_PURCHASECUST.CUSTTYPE   		= MS_PURCHASEMST.CUSTTYPE
+       		AND MS_PURCHASECUST.SKU        		= MS_PURCHASEMST.SKU
+     		WHERE MS_PURCHASECUST.STORERKEY 	= #{gStorerkey}
+       	<if test="serialKey != null and serialKey != ''">
+  			AND MS_PURCHASECUST.SERIALKEY IN (
+      			SELECT
+      				TRIM(REGEXP_SUBSTR(A.VAL, '[^,]+', 1, LEVEL))
+        		FROM
+        			(SELECT #{serialKey} AS VAL FROM DUAL) A
+        			
+       			CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0
+  			)
+		</if>
+       		
+	</select>
+
+	<!-- 수발주팝업 MS_PURCHASECUST MERGE -->
+	<update id="updatePurchaseCust" parameterType="cjfw.wms.ms.entity.MsPurchaseCustPopupEntity">
+    	/* [msPurchaseCustPopupService.sqlx][updatePurchaseCust][수발주팝업 MS_PURCHASECUST MERGE][YeoSeungCheol][2025.07.30] */
+    	MERGE INTO MS_PURCHASECUST
+    		USING DUAL
+				ON (
+				     MS_PURCHASECUST.SERIALKEY 	= #{serialKey}
+				 AND MS_PURCHASECUST.DCCODE     = #{dcCode}
+				 AND MS_PURCHASECUST.STORERKEY  = #{gStorerkey}
+				 AND MS_PURCHASECUST.SKU        = #{sku}
+				)
+    			WHEN MATCHED THEN
+      				UPDATE SET
+						FROMDATE       	= #{fromDate}
+						,CUSTKEY        = #{custKey}
+						,ROUTE          = #{route}
+						,ROUTEORGANIZE  = #{routeOrganize}
+						,EDITDATE       = SYSDATE
+    			WHEN NOT MATCHED THEN
+				    INSERT (
+				       	SERIALKEY
+				       	,DCCODE
+				       	,STORERKEY
+				       	,FROMDATE
+				       	,SKU
+				       	,CHANNEL
+				       	,PLANT
+				       	,CUSTKEY
+				       	,ROUTE
+				       	,ROUTEORGANIZE
+				       	,ADDWHO
+				       	,ADDDATE
+				       	,EDITDATE
+				       
+				    ) VALUES (
+				       	#{serialKey}
+				       	,#{dcCode}
+				       	,#{gStorerkey}
+				       	,#{fromDate}
+				       	,#{sku}
+				       	,'1'
+				       	,#{plant}
+				       	,#{custKey}
+				       	,#{route}
+				       	,#{routeOrganize}
+				       	,#{addWho}
+				       	,SYSDATE
+				       	,SYSDATE
+					)
+	</update>
+	
+	<!-- 수발주팝업 MS_PURCHASECUST INSERT (TR_INSERT) -->
+	<insert id="insertPurchaseCust" parameterType="cjfw.wms.ms.entity.MsPurchaseCustPopupEntity" statementType="CALLABLE">
+	<![CDATA[
+    	/* [msPurchaseCustPopupService.sqlx][msPurchaseCustPopupService.insertPurchaseCustByTrInsert][수발주팝업 MS_PURCHASECUST 등록(TR_INSERT)][YeoSeungCheol][2025.12.18] */
+        DECLARE
+            V_AFTER_CUST    MS_PURCHASECUST%rowtype;
+            O_SUCCESS   NUMBER         :=  1;      /* 성공여부(1이면 성공) */
+            O_ERRCODE   NUMBER         :=  0;      /* 오류 코드 */
+            O_ERRMSG    VARCHAR2(4000) := '';      /* 오류 메세지 */
+            SQL_ERROR 	EXCEPTION;
+        BEGIN
+            BEGIN
+	            /* MS_PURCHASECUST TR_INSERT */
+	            V_AFTER_CUST.SERIALKEY      := null;
+	            V_AFTER_CUST.DCCODE         := #{dcCode};
+	            V_AFTER_CUST.STORERKEY      := #{gStorerkey};
+	            V_AFTER_CUST.CUSTTYPE       := 'D';
+	            V_AFTER_CUST.SKU            := #{sku};
+	            V_AFTER_CUST.PLANT          := #{plant};
+	            V_AFTER_CUST.CHANNEL        := '1';
+	            V_AFTER_CUST.FROMDATE       := #{fromDate};
+	            V_AFTER_CUST.CUSTKEY        := #{custKey};
+	            V_AFTER_CUST.ROUTE          := #{route};
+	            V_AFTER_CUST.ROUTEORGANIZE  := #{routeOrganize};
+	            V_AFTER_CUST.UOM            := #{uom};
+	            V_AFTER_CUST.BUYERKEY       := #{buyerKey};
+	
+	            V_AFTER_CUST.ADDWHO         := #{gUserId};
+	            V_AFTER_CUST.EDITWHO        := #{gUserId};
+	
+	            TRMS_PURCHASECUST.TR_INSERT(
+	                    V_AFTER_CUST
+	                ,   O_SUCCESS
+	                ,   O_ERRCODE
+	                ,   O_ERRMSG
+	            );
+	            
+	            IF O_ERRCODE = -20001 THEN
+	                	RAISE_APPLICATION_ERROR (-20001, NVL(O_ERRMSG, SQLERRM));
+	                ELSIF O_ERRCODE != 0 THEN
+					    RAISE SQL_ERROR;
+		            END IF;
+			        
+			        EXCEPTION WHEN OTHERS THEN
+			        	O_ERRCODE := SQLCODE;
+						O_ERRMSG := NVL(O_ERRMSG, SQLERRM);
+            END;
+
+            #{success, mode=OUT, jdbcType=INTEGER, javaType=int}    :=  O_SUCCESS;
+            #{errCode, mode=OUT, jdbcType=INTEGER, javaType=int}    :=  O_ERRCODE;
+            #{errMsg, mode=OUT, jdbcType=VARCHAR, javaType=String}  :=  O_ERRMSG;
+
+        END;
+    ]]>
+	</insert>
+	
+	
+	<!-- 수발주팝업 MS_PURCHASEMST MERGE -->
+  	<update id="updatePurchaseMst" parameterType="cjfw.wms.ms.entity.MsPurchaseCustPopupEntity">
+    /* [msPurchaseCustPopupService.sqlx][updatePurchaseMst][수발주팝업 MS_PURCHASEMST MERGE][YeoSeungCheol][2025.07.30] */
+    	MERGE INTO MS_PURCHASEMST M
+            USING  ( SELECT  'STO'						AS PURCHASETYPE
+            				,REFERENCE05				AS REFERENCE05
+                            ,#{route}					AS ROUTE
+                            ,#{routeOrganize}			AS ROUTEORGANIZE
+                            ,BUYERKEY					AS BUYERKEY
+                            ,MINORDERQTY				AS MINORDERQTY
+                            ,COEFFICIENTSAFETY			AS COEFFICIENTSAFETY
+                            ,LEADTIME					AS LEADTIME
+                            ,PURINTERVAL				AS PURINTERVAL
+                            ,REFERENCE01				AS REFERENCE01
+                            ,REFERENCE02				AS REFERENCE02
+                            ,REFERENCE04				AS REFERENCE04
+                            ,#{gUserId}					AS ADDWHO
+                            ,SYSDATE					AS ADDDATE
+                            ,#{gUserId}					AS EDITWHO
+                            ,SYSDATE					AS EDITDATE
+                            ,DCCODE						AS DCCODE
+                            ,#{gStorerkey}				AS STORERKEY
+                            ,#{sku}						AS SKU
+                            ,'D'						AS CUSTTYPE
+                            ,#{serialKey}				AS SERIALKEY
+                       FROM  MS_PURCHASECUST
+                      WHERE 1=1
+                        AND SERIALKEY = #{serialKey} ) C
+                 
+            ON ( M.DCCODE 	 = C.DCCODE
+            AND  M.STORERKEY = C.STORERKEY
+            AND  M.CUSTTYPE  = C.CUSTTYPE
+            AND  M.SKU       = C.SKU )
+                    
+     		WHEN MATCHED THEN
+            	UPDATE SET   M.PURCHASETYPE		   = C.PURCHASETYPE
+            				,M.REFERENCE05         = C.REFERENCE05
+                        	,M.ROUTE               = C.ROUTE
+                        	,M.ROUTEORGANIZE       = C.ROUTEORGANIZE
+                       	 	,M.BUYERKEY            = C.BUYERKEY
+                        	,M.MINORDERQTY         = C.MINORDERQTY
+                        	,M.COEFFICIENTSAFETY   = C.COEFFICIENTSAFETY
+                        	,M.LEADTIME            = C.LEADTIME
+                        	,M.PURINTERVAL         = C.PURINTERVAL
+                        	,M.REFERENCE01         = C.REFERENCE01
+                        	,M.REFERENCE02         = C.REFERENCE02
+                        	,M.REFERENCE04         = C.REFERENCE04
+                        	,M.EDITWHO             = C.EDITWHO
+                        	,M.EDITDATE            = C.EDITDATE
+                       
+			WHEN NOT MATCHED THEN
+            	INSERT ( M.PURCHASETYPE
+            			,M.REFERENCE05
+                    	,M.ROUTE
+                    	,M.ROUTEORGANIZE
+                    	,M.BUYERKEY
+                    	,M.MINORDERQTY                                
+                     	,M.COEFFICIENTSAFETY
+                    	,M.LEADTIME         
+                    	,M.PURINTERVAL      
+                    	,M.REFERENCE01      
+                    	,M.REFERENCE02      
+                    	,M.REFERENCE04      
+                    	,M.ADDWHO           
+                    	,M.ADDDATE          
+                    	,M.EDITWHO          
+                    	,M.EDITDATE         
+                    	,M.SERIALKEY
+                    	,M.DCCODE
+                    	,M.STORERKEY
+                    	,M.CUSTTYPE
+                    	,M.SKU )
+            	VALUES ( C.PURCHASETYPE
+            			,C.REFERENCE05
+                    	,C.ROUTE
+                    	,C.ROUTEORGANIZE
+                    	,C.BUYERKEY
+                    	,C.MINORDERQTY
+                    	,C.COEFFICIENTSAFETY
+                    	,C.LEADTIME
+                    	,C.PURINTERVAL
+                    	,C.REFERENCE01
+                    	,C.REFERENCE02
+                    	,C.REFERENCE04
+                    	,C.ADDWHO
+                    	,C.ADDDATE
+                    	,C.EDITWHO
+                    	,C.EDITDATE
+                    	,SEQ_MS_PURCHASEMST.NEXTVAL
+                    	,C.DCCODE
+                    	,C.STORERKEY
+                    	,C.CUSTTYPE
+                    	,C.SKU )  
+	</update>
+</mapper>

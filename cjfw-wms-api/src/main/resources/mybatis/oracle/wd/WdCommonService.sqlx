@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+  PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+  "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="wdCommonService">
+
+    <!-- 물류센터 조회	-->       
+    <select id="getCenterList" resultType="cjfw.wms.wd.dto.WdQuickRequestCenterResDto">
+		SELECT /* [WdQuickRequestService.sqlx][WdQuickRequestService.getCenterList][물류센터 조회][sss][20250717] */
+		       A.CODE          /* 센터코드 */
+		     , A.NAME          /* 센터명 */
+		     , A.ADDRESS1      /* 기본주소 */
+		     , A.ADDRESS2      /* 상세주소 */
+		     , A.ADDRESS1 || ' ' || A.ADDRESS2 AS ADDRESS /* 주소 (결합) */
+		     , A.PHONE1        /* 전화번호1 */
+		     , A.PHONE2        /* 전화번호2 */
+		     , A.EMPNAME1      /* 관리 사원명1 */
+		     , A.EMPNAME2      /* 관리 사원명2 */
+		     , A.EMPPHONE1     /* 관리 사원 전화번호1 */
+		     , A.EMPPHONE2     /* 관리 사원 전화번호2 */
+		     , A.REAL_DC_YN
+		  FROM (
+	        	SELECT CM_DC.DCCODE                         AS CODE      /* 센터코드 */
+		             , '['||CM_DC.DCCODE||']'||CM_DC.DCNAME AS NAME      /* 센터명 */
+		             , CASE WHEN CD41.DATA3 IS NOT NULL THEN 
+		                    LOGISONESVC.FN_ADDRESS_INFO('ADDR1', DAMO.DEC(CD41.DATA3), '', '') 
+		               ELSE CM_DC.ADDRESS1                       
+		               END                                  AS ADDRESS1  /* 기본주소 */
+		             , CASE WHEN CD41.DATA3 IS NOT NULL THEN 
+		                    LOGISONESVC.FN_ADDRESS_INFO('ADDR2', DAMO.DEC(CD41.DATA3), '', '') 
+		               ELSE CM_DC.ADDRESS2                       /* FIXED: ADDRESS2 유지 */
+		               END                                  AS ADDRESS2  /* 상세주소 */              
+		             , NVL(CD41.DATA2,DAMO.DEC(CM_DC.PHONE1)) AS PHONE1    /* 전화번호1 */
+		             , DAMO.DEC(CM_DC.PHONE2)               AS PHONE2    /* 전화번호2 */
+		             , NVL(CD41.DATA4,CM_DC.EMPNAME1)       AS EMPNAME1  /* 관리 사원명1 */
+		             , CM_DC.EMPNAME2                       AS EMPNAME2  /* 관리 사원명2 */
+		             , NVL(CD41.DATA2,DAMO.DEC(CM_DC.EMPPHONE1)) AS EMPPHONE1 /* 관리 사원 전화번호1 */
+		             , DAMO.DEC(CM_DC.EMPPHONE2)                 AS EMPPHONE2 /* 관리 사원 전화번호2 */
+		             , CM_DC.REAL_DC_YN
+		             , CM_DC.DEL_YN                                      /* 삭제 여부 (필터링용) */
+		             , CM_DC.DCCODE                         AS SORT_KEY  /* 정렬용 */
+		          FROM CM_DC
+		          LEFT JOIN CM_CODE_STORER CD41 
+		            ON (CD41.STORERKEY = #{gStorerkey}
+		           AND CD41.CODELIST   = 'QUICK_ORDERER'    
+		           AND CD41.BASECODE   = CM_DC.DCCODE)     /* 퀵주문 - 센터기준기준 */         
+		       ) A
+		 WHERE A.DEL_YN = 'N'
+		 ORDER BY A.SORT_KEY
+    </select>    
+
+    <!-- 
+        퀵주문접수 사용자 정보 을(를) 조회 
+          ->정식오픈하기 전에는 테스트 아이디로 고정해서 조회하도록 함 (2025.07.17)
+          ->정산 실적을 조회할때는 List로 조회
+    -->
+    <select id="selectQuickUserIdList" resultType="cjfw.wms.wd.dto.WdQuickMonCloseResDto">
+        SELECT /* [WdQuickRequestService.selectQuickUserIdList][퀵주문접수 사용자 정보 을(를) 조회][sss][20250717] */
+               DISTINCT CASE WHEN 'N' = #{testYn} THEN 
+                   CM_CODE.BASEDESCR 
+               ELSE
+                   '10000_test' /*개발용*/
+               END AS QUICK_USERID    
+          FROM CM_CODE
+         WHERE CM_CODE.CODELIST LIKE 'QUICK_ORDERER'
+         <if test="quickUserId != null and quickUserId != ''"> 
+             AND CM_CODE.BASEDESCR = #{quickUserId} 
+         </if>         
+         GROUP BY CM_CODE.BASEDESCR         
+         
+    </select>    
+    
+    <select id="selectQuickCenterList" resultType="cjfw.wms.wd.dto.WdQuickRequestResDto">
+         SELECT /* [WdQuickRequestService.selectQuickCenterList][센터리스트 을(를) 조회][sss][20250717] */
+                BASECODE                  AS DCCODE
+               ,'['||BASECODE||']'||DATA1 AS DCNAME
+               ,BASEDESCR AS QUICK_USERID
+           FROM CM_CODE
+          WHERE CM_CODE.CODELIST = 'QUICK_ORDERER'
+            AND BASECODE IN (SELECT DCCODE
+                               FROM CM_DC
+                            )       
+         
+    </select>        
+
+</mapper>

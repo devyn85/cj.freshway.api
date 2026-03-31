@@ -1,0 +1,497 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="msCenterStoService">
+	<!-- 센터이체마스터 정보 조회(목록) -->
+	<select id="getMasterList" resultType="MsCenterStoResDto">
+        SELECT  /* [msCenterStoService.sqlx][msCenterStoService.getMasterList][센터이체마스터 조회(목록)][JeongHyeongCheol][20250805] */
+        		 MAX(MDSP.SERIALKEY)																	AS SERIALKEY			/* 데이터번호 */
+	        	,MDSP.DC_CLOSETYPE																		AS DC_CLOSETYPE			/* 센터마감유형 */
+	        	,TO_NUMBER(MDSP.FROM_PRIORITY)								    						AS FROM_PRIORITY		/* 공급우선순위 */
+	        	,MAX(CASE WHEN TO_DCCODE = '2600' THEN FROM_DCCODE END) 								AS FROM_DCCODE_2600		/* 공급센터(이천) */
+	        	,MAX(CASE WHEN TO_DCCODE = '2600' THEN MDSP.SERIALKEY END) 								AS FROM_DCCODE_2600_SK
+	        	,MAX(CASE WHEN MDSP.TO_DCCODE = '2600' THEN CD1.DCNAME END) 							AS FROM_DCCODE_2600_NM
+    			,MAX(CASE WHEN TO_DCCODE = '2620' THEN FROM_DCCODE END) 								AS FROM_DCCODE_2620		/* 공급센터(수원) */
+    			,MAX(CASE WHEN TO_DCCODE = '2620' THEN MDSP.SERIALKEY END) 								AS FROM_DCCODE_2620_SK
+    			,MAX(CASE WHEN MDSP.TO_DCCODE = '2620' THEN CD2.DCNAME END) 							AS FROM_DCCODE_2620_NM
+    			,MAX(CASE WHEN TO_DCCODE = '2630' THEN FROM_DCCODE END) 								AS FROM_DCCODE_2630		/* 공급센터(수원2) */
+    			,MAX(CASE WHEN TO_DCCODE = '2630' THEN MDSP.SERIALKEY END) 								AS FROM_DCCODE_2630_SK
+    			,MAX(CASE WHEN MDSP.TO_DCCODE = '2630' THEN CD3.DCNAME END) 							AS FROM_DCCODE_2630_NM
+    			,MAX(CASE WHEN TO_DCCODE = '2650' THEN FROM_DCCODE END) 								AS FROM_DCCODE_2650		/* 공급센터(동탄) */
+    			,MAX(CASE WHEN TO_DCCODE = '2650' THEN MDSP.SERIALKEY END) 								AS FROM_DCCODE_2650_SK
+    			,MAX(CASE WHEN MDSP.TO_DCCODE = '2650' THEN CD4.DCNAME END) 							AS FROM_DCCODE_2650_NM
+    			,MAX(CASE WHEN TO_DCCODE = '2660' THEN FROM_DCCODE END) 								AS FROM_DCCODE_2660		/* 공급센터(동탄2) */
+    			,MAX(CASE WHEN TO_DCCODE = '2660' THEN MDSP.SERIALKEY END) 								AS FROM_DCCODE_2660_SK
+    			,MAX(CASE WHEN MDSP.TO_DCCODE = '2660' THEN CD5.DCNAME END) 							AS FROM_DCCODE_2660_NM
+    			,MAX(CASE WHEN TO_DCCODE = '2230' THEN FROM_DCCODE END) 								AS FROM_DCCODE_2230		/* 공급센터(장성) */
+    			,MAX(CASE WHEN TO_DCCODE = '2230' THEN MDSP.SERIALKEY END) 								AS FROM_DCCODE_2230_SK
+    			,MAX(CASE WHEN MDSP.TO_DCCODE = '2230' THEN CD6.DCNAME END) 							AS FROM_DCCODE_2230_NM
+    			,MAX(CASE WHEN TO_DCCODE = '2260' THEN FROM_DCCODE END) 								AS FROM_DCCODE_2260		/* 공급센터(양산) */
+    			,MAX(CASE WHEN TO_DCCODE = '2260' THEN MDSP.SERIALKEY END) 								AS FROM_DCCODE_2260_SK
+    			,MAX(CASE WHEN MDSP.TO_DCCODE = '2260' THEN CD7.DCNAME END) 							AS FROM_DCCODE_2260_NM
+	      FROM   MS_DC_STO_PRIORITY MDSP
+	 
+	/* 2026-03-19 KSH 삭제된 마감유형은 표시 안함 FWNEXTWMS-8307 양준영 */     
+	----------------------------------------------------------------------------------------------------
+    INNER JOIN   CM_CODE CC
+            ON   CODELIST = 'DAILY_DEADLINE_STO'
+           AND   CC.STORERKEY = 'FW00'
+           AND   CC.BASECODE  = MDSP.DC_CLOSETYPE
+           AND   NVL(CC.DEL_YN,'N') = 'N'
+	----------------------------------------------------------------------------------------------------
+	      
+	 LEFT JOIN	 CM_DC CD1
+			ON 	 MDSP.FROM_DCCODE = CD1.DCCODE
+		   AND   MDSP.TO_DCCODE = '2600'
+	 LEFT JOIN 	 CM_DC CD2
+			ON 	 MDSP.FROM_DCCODE = CD2.DCCODE 
+		   AND   MDSP.TO_DCCODE = '2620'
+	 LEFT JOIN 	 CM_DC CD3
+			ON 	 MDSP.FROM_DCCODE = CD3.DCCODE 
+		   AND   MDSP.TO_DCCODE = '2630'
+	 LEFT JOIN 	 CM_DC CD4
+			ON 	 MDSP.FROM_DCCODE = CD4.DCCODE 
+		   AND   MDSP.TO_DCCODE = '2650'
+	 LEFT JOIN 	 CM_DC CD5
+			ON 	 MDSP.FROM_DCCODE = CD5.DCCODE 
+		   AND   MDSP.TO_DCCODE = '2660'
+	 LEFT JOIN 	 CM_DC CD6
+			ON 	 MDSP.FROM_DCCODE = CD6.DCCODE 
+		   AND   MDSP.TO_DCCODE = '2230'
+	 LEFT JOIN 	 CM_DC CD7
+			ON 	 MDSP.FROM_DCCODE = CD7.DCCODE
+		   AND   MDSP.TO_DCCODE = '2260'
+	  GROUP BY   DC_CLOSETYPE,
+		    	 FROM_PRIORITY
+	  ORDER BY   DC_CLOSETYPE,
+		    	 FROM_PRIORITY
+    </select>
+    
+    <!-- 센터이체마스터 MERGE -->
+    <update id="saveMasterList">
+    	BEGIN
+            MERGE INTO MS_DC_STO_PRIORITY MDSP
+                  USING (
+                  		SELECT
+                  			 #{serialkey} 		AS SERIALKEY
+                  			,#{toDccode} 		AS TO_DCCODE
+				            ,#{fromDccode} 		AS FROM_DCCODE
+				            ,#{dcClosetype} 	AS DC_CLOSETYPE
+				            ,#{fromPriority} 	AS FROM_PRIORITY
+				            ,#{gUserId} 		AS USERID
+				            ,(SELECT MAX(TO_PRIORITY) 
+				              FROM   MS_DC_STO_PRIORITY S
+				              WHERE  S.TO_DCCODE 	= #{toDccode}
+				              AND 	 S.DC_CLOSETYPE = #{dcClosetype}
+				            ) 					AS TO_PRIORITY
+				        FROM DUAL
+				    ) S ON (MDSP.SERIALKEY = S.SERIALKEY)
+                  		
+
+             WHEN MATCHED THEN
+                UPDATE SET MDSP.TO_DCCODE		= S.TO_DCCODE
+                		  ,MDSP.FROM_DCCODE		= S.FROM_DCCODE
+                		  ,MDSP.DC_CLOSETYPE	= S.DC_CLOSETYPE
+                		  ,MDSP.TO_PRIORITY		= S.TO_PRIORITY
+                		  ,MDSP.FROM_PRIORITY	= S.FROM_PRIORITY
+                          ,MDSP.EDITWHO      	= S.USERID
+                          ,MDSP.EDITDATE		= SYSDATE
+
+             WHEN NOT MATCHED THEN
+                 INSERT
+	    			(MDSP.SERIALKEY
+	    			,MDSP.TO_DCCODE
+	    			,MDSP.FROM_DCCODE
+	    			,MDSP.DC_CLOSETYPE
+	    			,MDSP.TO_PRIORITY
+	    			,MDSP.FROM_PRIORITY
+	    			,MDSP.ADDWHO
+	    			,MDSP.EDITWHO)
+    			VALUES
+	    			((SELECT NVL(MAX(SERIALKEY),0) + 1 FROM MS_DC_STO_PRIORITY)
+	    			,S.TO_DCCODE
+	    			,S.FROM_DCCODE
+	    			,S.DC_CLOSETYPE
+	    			,S.TO_PRIORITY
+	    			,S.FROM_PRIORITY
+	    			,S.USERID
+	    			,S.USERID);
+		END;
+    </update>
+    
+    <!-- 전체 행 UPDATE 실행 (우선순위 재정렬) -->
+    <update id="updatePriority">
+	    UPDATE MS_DC_STO_PRIORITY T1
+		   SET T1.FROM_PRIORITY = (
+		        SELECT RN
+		          FROM (
+		            SELECT SERIALKEY,
+		                   -- 2026-03-10 KSH 저장시 선순위 변경 오류 수정 FWNEXTWMS-7974
+		                   -- ROW_NUMBER() OVER (PARTITION BY TO_DCCODE, DC_CLOSETYPE ORDER BY FROM_PRIORITY) AS RN
+		                   ROW_NUMBER() OVER (PARTITION BY TO_DCCODE, DC_CLOSETYPE ORDER BY TO_NUMBER(FROM_PRIORITY)) AS RN
+		              FROM MS_DC_STO_PRIORITY
+		             WHERE TO_DCCODE 	= #{toDccode} 
+		               AND DC_CLOSETYPE = #{dcClosetype}
+		          ) T2
+		         WHERE T2.SERIALKEY = T1.SERIALKEY
+		   	   )
+		   	  ,T1.EDITWHO 	= #{gUserId}
+		   	  ,T1.EDITDATE	= SYSDATE
+		 WHERE T1.TO_DCCODE 	= #{toDccode} 
+		   AND T1.DC_CLOSETYPE 	= #{dcClosetype}
+	</update>
+    
+    <!-- 센터이체마스터 DELETE -->
+    <delete id="deleteMasterList">
+     	DELETE /* [msCenterStoService.sqlx][msCenterStoService.deleteMasterList][센터이체마스터 삭제] */ 
+     		FROM MS_DC_STO_PRIORITY
+     	WHERE 1=1
+     	  AND SERIALKEY = #{serialkey}
+     </delete>
+
+
+	
+	<!-- 피킹유형 자동 설정 조회(목록) -->
+	<select id="getPickList" resultType="MsCenterStoPickResDto">
+        SELECT  /* [msCenterStoService.sqlx][msCenterStoService.getPickList][피킹유형 자동 설정 조회(목록)][JeongHyeongCheol][20250805] */
+        	DISTINCT
+	        	 SERIALKEY														AS SERIALKEY		/* 데이터번호 */ 
+	        	,DCCODE															AS DCCODE			/* 센터코드 */		
+				,DC_CLOSETYPE													AS DC_CLOSETYPE		/* 센터마감유형 */
+	        	,GROUP_TYPE														AS GROUP_TYPE		/* 그룹유형 */
+	        	,PICKED_TYPE													AS PICKED_TYPE		/* 피킹유형 */
+	        	,APPLY_YN														AS APPLY_YN			/* 적용여부 */	        	
+	      FROM   MS_PICK_TYPE_GROUP
+	      WHERE  1 = 1
+	        <!-- AND DCCODE = #{gDccode} -->
+	  ORDER BY   DC_CLOSETYPE
+    </select>
+    
+
+    <!-- 피킹유형 조회(목록) -->
+	<select id="getPickTypeList" resultType="MsCenterStoPickResDto">
+        SELECT  /* [msCenterStoService.sqlx][msCenterStoService.getPickTypeList][피킹유형 조회(목록)][JeongHyeongCheol][20250805] */
+	        DISTINCT
+	        	 MS_PICKBATCHGROUP.DISTANCETYPE															AS PICKED_TYPE		/* 피킹유형 */
+				,MS_PICKBATCHGROUP.DCCODE																AS DCCODE			/* 센터코드 */
+	      FROM   MS_PICKBATCHGROUP
+    </select>
+    
+    <!-- 피킹유형 조회(목록) validation -->
+	<select id="validatePickList" resultType="MsCenterStoPickResDto">
+		SELECT  /* [msCenterStoService.sqlx][msCenterStoService.validatePickList][피킹유형 제외 조회(목록) 유효성검사][JeongHyeongCheol][20250805] */
+	  		(SELECT COUNT(1)
+				FROM   MS_PICK_TYPE_GROUP
+				WHERE  MS_PICK_TYPE_GROUP.DCCODE 		= #{dccode}
+				AND    MS_PICK_TYPE_GROUP.DC_CLOSETYPE 	= #{dcClosetype} 
+				AND    MS_PICK_TYPE_GROUP.GROUP_TYPE 	= #{groupType} 
+				AND    MS_PICK_TYPE_GROUP.PICKED_TYPE IN (SELECT TRIM(REGEXP_SUBSTR(VAL,'[^,]+',1,LEVEL)) AS VAL
+													FROM (SELECT #{pickedType} AS VAL FROM DUAL) A
+													CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0)
+				<if test='serialkey != null and serialkey != ""'>
+					<![CDATA[
+						AND    MS_PICK_TYPE_GROUP.SERIALKEY 	<> #{serialkey}
+					]]>
+				</if>
+			 ) AS PICK_LIST_CHK
+		FROM   DUAL
+    </select>
+       
+	<!-- 피킹유형 자동 설정 MERGE -->
+    <update id="savePickList">
+    	BEGIN
+            MERGE INTO MS_PICK_TYPE_GROUP
+                  USING DUAL ON (SERIALKEY  		= #{serialkey})
+
+             WHEN MATCHED THEN
+                UPDATE SET DCCODE				= #{dccode}
+                		  ,DC_CLOSETYPE 		= #{dcClosetype}
+                		  ,GROUP_TYPE   		= #{groupType}
+                		  ,PICKED_TYPE  		= #{pickedType}
+                          ,APPLY_YN     		= #{applyYn}
+                          ,EDITWHO      		= #{gUserId}
+						  ,EDITDATE				= SYSDATE
+             WHEN NOT MATCHED THEN
+                 INSERT
+	    			(SERIALKEY
+	    			,DCCODE
+	    			,DC_CLOSETYPE
+	    			,GROUP_TYPE
+	    			,PICKED_TYPE
+	    			,APPLY_YN
+	    			,ADDWHO
+	    			,EDITWHO)
+    			VALUES
+	    			((SELECT NVL(MAX(SERIALKEY),0) + 1 FROM MS_PICK_TYPE_GROUP)
+	    			,#{dccode}
+	    			,#{dcClosetype}
+	    			,#{groupType}
+	    			,#{pickedType}
+	    			,#{applyYn}
+	    			,#{gUserId}
+	    			,#{gUserId});
+		END;
+    </update>
+    
+	<!-- 센터 제외 조회(목록) -->
+	<select id="getClosetypeDcList" resultType="MsCenterStoClosetypeResDto">
+		SELECT  /* [msCenterStoService.sqlx][msCenterStoService.getClosetypeDcList][상품,센터 제외 조회(목록)][JeongHyeongCheol][20250805] */
+	    	DISTINCT
+	        	 SERIALKEY													AS SERIALKEY		/* 데이터번호 */ 		
+				,DCCODE														AS DCCODE			/* 센터코드 */
+				,DC_CLOSETYPE												AS DC_CLOSETYPE		/* 센터마감유형 */
+	        	,APPLY_YN													AS APPLY_YN			/* 적용여부 */	        	
+		  FROM	 MS_CLOSETYPE_DC_EXCPT
+	  ORDER BY   DCCODE
+    </select>
+    
+    
+    <!-- 상품 제외 조회(목록) -->
+	<select id="getClosetypeSkuList" resultType="MsCenterStoClosetypeResDto">
+		SELECT  /* [msCenterStoService.sqlx][msCenterStoService.getClosetypeSkuList][상품,센터 제외 조회(목록)][JeongHyeongCheol][20250805] */
+	        DISTINCT
+	        	 MS_CLOSETYPE_SKU_EXCPT.SERIALKEY													AS SERIALKEY		/* 데이터번호 */
+	        	,MS_CLOSETYPE_SKU_EXCPT.DCCODE														AS DCCODE			/* 센터코드 */ 		
+				,MS_CLOSETYPE_SKU_EXCPT.DC_CLOSETYPE												AS DC_CLOSETYPE		/* 센터마감유형 */
+	        	,MS_CLOSETYPE_SKU_EXCPT.SKU															AS SKU				/* 그룹유형 */
+	        	,MS_SKU.DESCRIPTION																	AS SKU_NAME			/* 그룹유형 */
+	        	,MS_CLOSETYPE_SKU_EXCPT.APPLY_YN													AS APPLY_YN			/* 적용여부 */	        	
+		  FROM	 MS_CLOSETYPE_SKU_EXCPT
+	 LEFT JOIN	 MS_SKU
+		    ON	 MS_CLOSETYPE_SKU_EXCPT.SKU = MS_SKU.SKU
+	  ORDER BY   MS_CLOSETYPE_SKU_EXCPT.DCCODE
+    </select>
+    
+    <!-- 센터 제외 조회(목록) validation -->
+	<select id="validateClosetypeDcList" resultType="MsCenterStoClosetypeResDto">
+		SELECT  /* [msCenterStoService.sqlx][msCenterStoService.validateClosetypeDcList][상품,센터 제외 조회(목록) 유효성검사][JeongHyeongCheol][20250805] */
+	  		(SELECT COUNT(1)
+				FROM   MS_CLOSETYPE_DC_EXCPT
+				WHERE  MS_CLOSETYPE_DC_EXCPT.DCCODE 		= #{dccode}
+				AND    MS_CLOSETYPE_DC_EXCPT.DC_CLOSETYPE 	= #{dcClosetype}
+				<if test='serialkey != null and serialkey != ""'>
+					<![CDATA[
+						AND    MS_CLOSETYPE_DC_EXCPT.SERIALKEY 	<> #{serialkey}
+					]]>
+				</if>
+				) AS CLOSETYPE_DC_CHK
+		FROM   DUAL
+    </select>
+    
+    <!-- 상품 제외 조회(목록) validation -->
+	<select id="validateClosetypeSkuList" resultType="MsCenterStoClosetypeResDto">
+		SELECT  /* [msCenterStoService.sqlx][msCenterStoService.validateClosetypeSkuList][상품,센터 제외 조회(목록) 유효성검사][JeongHyeongCheol][20250805] */
+	  		(SELECT COUNT(1)
+				FROM   MS_CLOSETYPE_SKU_EXCPT
+				WHERE  MS_CLOSETYPE_SKU_EXCPT.DCCODE 		= #{dccode}
+				AND    MS_CLOSETYPE_SKU_EXCPT.DC_CLOSETYPE 	= #{dcClosetype}
+				AND    MS_CLOSETYPE_SKU_EXCPT.SKU 			= #{sku}
+				<if test='serialkey != null and serialkey != ""'>
+					<![CDATA[
+						AND    MS_CLOSETYPE_SKU_EXCPT.SERIALKEY 	<> #{serialkey}
+					]]>
+				</if>
+				) AS CLOSETYPE_SKU_CHK
+		FROM   DUAL
+    </select>
+    
+    <!-- 센터 제외 MERGE -->
+    <update id="saveClosetypeDcList">
+    	BEGIN
+            MERGE INTO MS_CLOSETYPE_DC_EXCPT
+                  USING DUAL ON (SERIALKEY  		= #{serialkey})
+
+
+             WHEN MATCHED THEN
+                UPDATE SET DCCODE		= #{dccode}
+                		  ,DC_CLOSETYPE = #{dcClosetype}
+                          ,APPLY_YN     = #{applyYn}
+                          ,EDITWHO      = #{gUserId}
+						  ,EDITDATE		= SYSDATE
+						  
+             WHEN NOT MATCHED THEN
+                 INSERT
+	    			(SERIALKEY
+	    			,DCCODE
+	    			,DC_CLOSETYPE
+	    			,APPLY_YN
+	    			,ADDWHO
+	    			,EDITWHO)
+    			VALUES
+	    			((SELECT NVL(MAX(SERIALKEY),0) + 1 FROM MS_CLOSETYPE_DC_EXCPT)
+	    			,#{dccode}
+	    			,#{dcClosetype}
+	    			,#{applyYn}
+	    			,#{gUserId}
+	    			,#{gUserId});
+		END;
+    </update>
+
+	<!-- 상품 제외 MERGE -->
+    <update id="saveClosetypeSkuList">
+    	BEGIN
+            MERGE INTO MS_CLOSETYPE_SKU_EXCPT
+                  USING DUAL ON (SERIALKEY  		= #{serialkey})
+
+             WHEN MATCHED THEN
+                UPDATE SET DCCODE				= #{dccode}
+                          ,DC_CLOSETYPE     	= #{dcClosetype}
+                          ,SKU     				= #{sku}
+                          ,APPLY_YN     		= #{applyYn}                          
+                          ,EDITWHO     			= #{gUserId}
+                          ,EDITDATE				= SYSDATE
+
+             WHEN NOT MATCHED THEN
+                 INSERT
+	    			(SERIALKEY
+	    			,DCCODE
+	    			,DC_CLOSETYPE
+	    			,SKU
+	    			,APPLY_YN
+	    			,ADDWHO
+	    			,EDITWHO)
+    			VALUES
+	    			((SELECT NVL(MAX(SERIALKEY),0) + 1 FROM MS_CLOSETYPE_SKU_EXCPT)
+	    			,#{dccode}
+	    			,#{dcClosetype}
+	    			,#{sku}
+	    			,#{applyYn}
+	    			,#{gUserId}
+	    			,#{gUserId});
+		END;
+    </update>
+    
+    <!-- 상품 제외 excelupload validation -->
+	<select id="validateClosetypeSkuExcelList" resultType="MsCenterStoClosetypeExcelResDto">
+		WITH  /* [msCenterStoService.sqlx][msCenterStoService.validateClosetypeSkuExcelList][상품 제외 excelupload 유효성검사][JeongHyeongCheol][20250805] */
+	  			V AS (
+			        <foreach collection="list" item="item" separator="UNION ALL">
+				        SELECT
+				             #{item.sku}								AS SKU
+							,#{item.dccode}								AS DCCODE
+							,#{item.dcClosetype}						AS DC_CLOSETYPE						
+							,#{item.applyYn}							AS APPLY_YN	
+							
+				            ,ROW_NUMBER() OVER(ORDER BY 1) AS RN 
+				        FROM DUAL
+			        </foreach>
+			    )
+			    
+			    SELECT 
+			         V.SKU 							AS SKU
+			        ,V.DCCODE						AS DCCODE
+					,V.DC_CLOSETYPE					AS DC_CLOSETYPE
+					,V.APPLY_YN						AS APPLY_YN
+			        
+			        ,CASE 
+			        	WHEN T1.BASECODE IS NOT NULL 
+			        	THEN 'Y' ELSE 'N' 
+			         END 								AS DC_CLOSETYPE_CHK
+			        ,CASE 
+			        	WHEN T2.SKU IS NOT NULL 
+			        	THEN 'Y' ELSE 'N' 
+			         END 								AS SKU_CHK
+					,CASE 					
+			        	WHEN T3.DCCODE IS NOT NULL 
+			        	THEN 'Y' ELSE 'N' 
+			         END 								AS DCCODE_CHK
+					,CASE 
+			        	WHEN T4.DCCODE IS NOT NULL 
+			        	THEN 'Y' ELSE 'N' 
+			         END 								AS UPDATE_YN
+			        
+			    FROM V
+			    
+			    LEFT JOIN CM_CODE T1 
+			    	   ON T1.CODELIST 		= 'DAILY_DEADLINE_STO'
+			          AND T1.BASECODE 		= V.DC_CLOSETYPE
+			    
+				LEFT JOIN MS_SKU T2 
+			    	   ON T2.STORERKEY 		= 'FW00'
+			          AND T2.SKU 			= V.SKU			
+			    
+				LEFT JOIN CM_DC T3 
+			    	   ON T3.DEL_YN ='N'
+					  AND (T3.REAL_DC_YN <![CDATA[<>]]> 'N' OR T3.REAL_DC_YN IS NULL)
+					  AND T3.DCCODE 	= V.DCCODE
+	
+				LEFT JOIN MS_CLOSETYPE_SKU_EXCPT T4 
+			    	   ON T4.DCCODE 		= V.DCCODE
+			          AND T4.SKU 			= V.SKU
+					  AND T4.DC_CLOSETYPE 	= V.DC_CLOSETYPE
+					  
+			    ORDER BY V.RN 
+    </select>
+
+	<!-- 상품 제외 excelupload MERGE -->
+    <update id="saveClosetypeSkuExcelList">
+    	BEGIN
+            MERGE INTO MS_CLOSETYPE_SKU_EXCPT
+                  USING DUAL ON (DCCODE			= #{dccode}
+                  			AND  DC_CLOSETYPE   = #{dcClosetype}
+                  			AND  SKU     		= #{sku})
+
+             WHEN MATCHED THEN
+                UPDATE SET APPLY_YN     		= #{applyYn}                          
+                          ,EDITWHO     			= #{gUserId}
+                          ,EDITDATE				= SYSDATE
+
+             WHEN NOT MATCHED THEN
+                 INSERT
+	    			(SERIALKEY
+	    			,DCCODE
+	    			,DC_CLOSETYPE
+	    			,SKU
+	    			,APPLY_YN
+	    			,ADDWHO
+	    			,EDITWHO)
+    			VALUES
+	    			((SELECT NVL(MAX(SERIALKEY),0) + 1 FROM MS_CLOSETYPE_SKU_EXCPT)
+	    			,#{dccode}
+	    			,#{dcClosetype}
+	    			,#{sku}
+	    			,#{applyYn}
+	    			,#{gUserId}
+	    			,#{gUserId});
+		END;
+    </update>
+	
+	<!-- 우선 순위 설정 조회(목록) -->
+	<select id="getPriorityList" resultType="MsCenterStoPriorityResDto">
+		SELECT  /* [msCenterStoService.sqlx][msCenterStoService.getPriorityList][우선 순위 설정 조회(목록)][JeongHyeongCheol][20250805] */
+	        DISTINCT
+	        	 TO_DCCODE															AS DCCODE			/* 센터코드 */ 		
+				,DC_CLOSETYPE														AS DC_CLOSETYPE		/* 센터마감유형 */
+	        	,TO_PRIORITY														AS TO_PRIORITY		/* 수급우선순위 */
+	        	,TO_DCCODE_PRIORITY_APPLY_YN										AS TO_DCCODE_PRIORITY_APPLY_YN		/* 수급센터우선순위적용여부 */
+		  FROM	 MS_DC_STO_PRIORITY	 
+	  ORDER BY   DC_CLOSETYPE, TO_PRIORITY
+    </select>
+    
+    <!-- 상품 제외 조회(목록) validation -->
+	<select id="validatePriorityList" resultType="MsCenterStoPriorityResDto">
+		SELECT  /* [msCenterStoService.sqlx][msCenterStoService.validatePriorityList][상품,센터 제외 조회(목록) 유효성검사][JeongHyeongCheol][20250805] */
+	  		(SELECT COUNT(1)
+				FROM   MS_DC_STO_PRIORITY
+				WHERE  MS_DC_STO_PRIORITY.DC_CLOSETYPE 		= #{dcClosetype}
+				AND    MS_DC_STO_PRIORITY.TO_PRIORITY 		= #{sku}
+				<if test='serialkey != null and serialkey != ""'>
+					<![CDATA[
+						AND    MS_DC_STO_PRIORITY.SERIALKEY 	<> #{serialkey}
+					]]>
+				</if>
+			) AS PRIORITY_CHK
+		FROM   DUAL
+    </select>
+    
+    <!-- 우선 순위 설정 UPDATE -->
+    <update id="updatePriorityList">
+        UPDATE MS_DC_STO_PRIORITY 
+           SET     TO_PRIORITY  				= #{toPriority}
+        		  ,TO_DCCODE_PRIORITY_APPLY_YN  = #{toDccodePriorityApplyYn}
+                  ,EDITWHO      				= #{gUserId}
+                  ,EDITDATE						= SYSDATE
+    	WHERE TO_DCCODE  		= #{dccode}
+          AND DC_CLOSETYPE  	= #{dcClosetype}
+    </update>
+	
+</mapper>

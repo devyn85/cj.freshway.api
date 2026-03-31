@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="msCustBrand">
+    <!-- 본점별 브랜드마스터 조회 -->
+    <select id="getMasterList" parameterType="cjfw.wms.ms.dto.MsCustBrandReqDto" resultType="cjfw.wms.ms.dto.MsCustBrandResDto">
+        SELECT /* [msCustBrandService.getMasterList][본점별 브랜드마스터 조회][YeoSeungCheol][2025.07.10] */
+              '0'                                            AS CHECKYN
+            , MS_CUST_BRAND.SERIALKEY                        AS SERIALKEY
+            , MS_CUST.CUSTKEY                                AS CUSTKEY         /* 본점코드        */
+            , MS_CUST.DESCRIPTION                            AS CUSTNAME        /* 본점명         */
+            , MS_CUST.CUSTTYPE                               AS CUSTTYPE        /* 거래처유형       */
+            , MS_CUST_BRAND.BRANDCODE                        AS BRANDCODE       /* 브랜드코드        */
+            , MS_CUST_BRAND.BRANDNAME                        AS BRANDNAME       /* 브랜드명         */
+            , MS_CUST_BRAND.REFERENCE01                      AS REFERENCE01     /* FC브랜드코드      */
+            , MS_CUST_BRAND.REFERENCE02                      AS REFERENCE02     /* FC브랜드명       */
+            , COALESCE(USER1.USER_NM, MS_CUST_BRAND.ADDWHO)  AS ADDWHO          /* 등록자          */
+            , MS_CUST_BRAND.ADDDATE                          AS ADDDATE         /* 등록일시         */
+            , COALESCE(USER2.USER_NM, MS_CUST_BRAND.EDITWHO) AS EDITWHO         /* 수정자          */
+            , MS_CUST_BRAND.EDITDATE                         AS EDITDATE        /* 수정일시         */
+        FROM  MS_CUST 
+   LEFT JOIN MS_CUST_BRAND
+          ON MS_CUST.STORERKEY    = MS_CUST_BRAND.STORERKEY
+         AND MS_CUST.CUSTKEY      = MS_CUST_BRAND.CUSTKEY
+         AND MS_CUST.CUSTTYPE     = MS_CUST_BRAND.CUSTTYPE
+   LEFT JOIN FRAMEONE_USER USER1 ON USER1.USER_ID = MS_CUST_BRAND.ADDWHO   /* 등록자명 */
+   LEFT JOIN FRAMEONE_USER USER2 ON USER2.USER_ID = MS_CUST_BRAND.EDITWHO  /* 수정자명 */
+       WHERE MS_CUST.STORERKEY    = #{gStorerkey}
+         AND MS_CUST.CUSTGROUP    = 'C01'
+         AND MS_CUST.CUSTTYPE LIKE 'C'
+         AND EXISTS (
+                      SELECT 1
+                        FROM LOGISONE.MS_SKUCHAIN_CUST
+                       WHERE MS_SKUCHAIN_CUST.STORERKEY = #{gStorerkey}
+                         AND MS_SKUCHAIN_CUST.CUSTKEY   = MS_CUST.CUSTKEY
+                    )
+            <if test="custKey != null and custKey != ''">
+        AND MS_CUST.CUSTKEY IN (
+                                SELECT TRIM(REGEXP_SUBSTR(A.VAL, '[^,]+', 1, LEVEL)) AS VAL
+                                  FROM (
+                                        SELECT #{custKey} AS VAL
+                                          FROM DUAL
+                                        ) A
+                                CONNECT BY INSTR(A.VAL, ',', 1, LEVEL - 1) > 0
+                              )
+            </if>
+    </select>
+
+    <!-- 본점별브랜드 엑셀 유효성 검사 -->
+    <select id="validateExcelList" parameterType="cjfw.wms.ms.dto.MsCustBrandReqDto" resultType="cjfw.wms.ms.dto.MsCustBrandExcelResDto">
+        SELECT  /* [msCustBrandService.sqlx][msCustBrand.validateExcelList][본점별브랜드 엑셀 유효성검사] */
+               #{custKey}               AS custKey
+             , #{brandName}             AS brandName
+             , (SELECT CASE WHEN COUNT(1) > 0 THEN 'Y' ELSE 'N' END
+                  FROM MS_CUST
+                 WHERE STORERKEY = #{gStorerkey}
+                   AND CUSTTYPE  = 'C'
+                   AND CUSTKEY   = #{custKey})  AS custKeyChk
+            , (CASE WHEN #{brandName} IS NOT NULL AND LENGTH(TRIM(#{brandName})) > 0 THEN 'Y' ELSE 'N' END) AS brandNameChk
+            , (SELECT CASE WHEN COUNT(1) > 0 THEN 'Y' ELSE 'N' END
+                 FROM MS_CUST_BRAND B
+                WHERE B.STORERKEY = #{gStorerkey}
+                  AND B.CUSTKEY   = #{custKey}
+                  AND B.CUSTTYPE  = 'C'
+                  AND REPLACE(B.BRANDNAME,' ','') = REPLACE(#{brandName},' ','')) AS updateYn
+        FROM DUAL
+    </select>
+
+    <!-- 본점별브랜드 엑셀 저장(MERGE by CUSTKEY+BRANDNAME) -->
+    <update id="saveExcelList" parameterType="cjfw.wms.ms.dto.MsCustBrandReqDto">
+        BEGIN
+            MERGE INTO MS_CUST_BRAND T
+            USING (
+                SELECT #{gStorerkey} AS STORERKEY,
+                       #{custKey}    AS CUSTKEY,
+                       'C'           AS CUSTTYPE,
+                       REPLACE(#{brandName}, ' ', '') AS BRANDNAME,
+                       #{reference02} AS REFERENCE02,
+                       #{gUserId}    AS USERID
+                FROM DUAL
+            ) S
+            ON (T.STORERKEY = S.STORERKEY AND T.CUSTKEY = S.CUSTKEY AND T.CUSTTYPE = S.CUSTTYPE)
+            WHEN MATCHED THEN
+                UPDATE SET T.BRANDNAME   = S.BRANDNAME,
+                           T.REFERENCE02 = S.REFERENCE02,
+                           T.EDITWHO     = S.USERID,
+                           T.EDITDATE    = SYSDATE
+            WHEN NOT MATCHED THEN
+                INSERT (SERIALKEY, STORERKEY, CUSTKEY, CUSTTYPE, BRANDNAME, REFERENCE02, ADDWHO, EDITWHO)
+                VALUES (SEQ_MS_CUST_BRAND.nextval, S.STORERKEY, S.CUSTKEY, S.CUSTTYPE, S.BRANDNAME, S.REFERENCE02, S.USERID, S.USERID);
+        END;
+    </update>
+    
+    <!-- 본점별 브랜드 MERGE (저장/수정) -->
+    <update id="saveMasterList" parameterType="cjfw.wms.ms.dto.MsCustBrandReqDto">
+        <![CDATA[ /* [msCustBrandService.sqlx][saveMasterList][본점별 브랜드 MERGE][YeoSeungCheol][2025.07.23] */
+            MERGE INTO 
+                        MS_CUST_BRAND MCB /* 본점별 브랜드 마스터 */
+                 USING (SELECT #{custKey}                       AS CUSTKEY
+                             , NVL(#{custType}, 'C')            AS CUSTTYPE     /* 본점코드 */
+                             , NVL(#{custName}, '')             AS CUSTNAME     /* 본점명 */
+                             , REPLACE(#{brandName}, ' ', '')   AS BRANDNAME    /* 브랜드명 */
+                             , #{reference02}                   AS REFERENCE02  /* 기타정보02 */
+                             , #{reference03}                   AS REFERENCE03  /* 기타정보03 */
+                             , NVL(#{gStorerkey},'FW00')        AS STORERKEY    /* 회사코드 */
+                          FROM DUAL
+                       ) SMCB  /* 저장 정보 */
+                   ON ( MCB.CUSTKEY   = SMCB.CUSTKEY
+                  AND MCB.CUSTTYPE  = SMCB.CUSTTYPE
+                  AND MCB.STORERKEY = SMCB.STORERKEY )
+             WHEN MATCHED THEN
+                UPDATE SET MCB.BRANDNAME      = SMCB.BRANDNAME
+                          ,MCB.BRANDCODE      = NVL((SELECT MAX(CB.BRANDCODE) AS BCODE 
+                                                   FROM MS_CUST_BRAND CB 
+                                                  WHERE CB.BRANDNAME = REPLACE(#{brandName}, ' ', '')
+                                                    AND CB.DEL_YN    = 'N'), SEQ_MS_CUST_BRAND.NEXTVAL)
+                          ,MCB.REFERENCE02    = SMCB.REFERENCE02
+                          ,MCB.EDITDATE       = SYSDATE
+                          ,MCB.EDITWHO        = #{gUserId}
+             WHEN NOT MATCHED THEN
+                INSERT
+                    ( SERIALKEY
+                     , STORERKEY
+                     , CUSTKEY
+                     , CUSTNAME
+                     , CUSTTYPE
+                     , BRANDNAME
+                     , BRANDCODE
+                     , REFERENCE01
+                     , REFERENCE02
+                     , REFERENCE03
+                     , ADDWHO
+                     , ADDDATE
+                     , EDITWHO
+                     , EDITDATE
+                     )
+                VALUES
+                    ( SEQ_MS_CUST_BRAND.NEXTVAL
+                     , SMCB.STORERKEY
+                     , SMCB.CUSTKEY
+                     , SMCB.CUSTNAME
+                     , SMCB.CUSTTYPE
+                     , SMCB.BRANDNAME
+                     , NVL((SELECT MAX(CB.BRANDCODE) AS BCODE 
+                              FROM MS_CUST_BRAND CB 
+                             WHERE CB.BRANDNAME = REPLACE(#{brandName}, ' ', '')
+                               AND CB.DEL_YN    = 'N'), SEQ_MS_CUST_BRAND.NEXTVAL)
+                     , NVL((SELECT MAX(CB.REFERENCE01) AS BCODE 
+                              FROM MS_CUST_BRAND CB 
+                             WHERE CB.REFERENCE02 = REPLACE(#{reference02}, ' ', '')
+                               AND CB.DEL_YN = 'N'), SEQ_MS_CUST_BRAND.NEXTVAL)
+                     , SMCB.REFERENCE02
+                     , SMCB.REFERENCE03
+                     , #{gUserId}
+                     , SYSDATE
+                     , #{gUserId}
+                     , SYSDATE
+                    )
+        ]]>
+    </update>
+    
+</mapper>
